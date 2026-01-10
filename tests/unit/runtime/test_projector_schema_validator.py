@@ -1255,3 +1255,228 @@ class TestGetTableColumns:
             await validator._get_table_columns(
                 "test_table", correlation_id=str(uuid4())
             )
+
+
+# =============================================================================
+# DEEP VALIDATION TESTS
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestValidateSchemaDeep:
+    """Test validate_schema_deeply method."""
+
+    def test_validate_schema_deeply_returns_empty_for_valid_schema(
+        self,
+        mock_pool: MagicMock,
+        sample_schema: ModelProjectorSchema,
+    ) -> None:
+        """Test validate_schema_deeply returns empty list for valid schema.
+
+        Expected behavior:
+        - Returns empty list when schema is valid
+        - No warnings for well-formed schemas
+        """
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        warnings = validator.validate_schema_deeply(sample_schema)
+
+        assert warnings == []
+
+    def test_validate_schema_deeply_warns_nullable_primary_key(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test validate_schema_deeply warns when primary key is nullable.
+
+        Expected behavior:
+        - Returns warning for nullable primary key
+        - Warning message mentions the column name
+        """
+        # Create schema with nullable primary key (this bypasses model validation
+        # by using object.__setattr__ after creation)
+        schema = ModelProjectorSchema(
+            table_name="test_nullable_pk",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+            ],
+            indexes=[],
+            schema_version="1.0.0",
+        )
+        # Modify column to be nullable primary key for testing deep validation
+        # Note: This tests the validator's ability to catch issues that might
+        # come from externally constructed schemas (e.g., from dict)
+        schema.columns[0] = ModelProjectorColumn(
+            name="id", column_type="uuid", nullable=True, primary_key=True
+        )
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        warnings = validator.validate_schema_deeply(schema)
+
+        assert len(warnings) >= 1
+        assert any("nullable" in w.lower() and "id" in w for w in warnings)
+
+    def test_validate_schema_deeply_warns_large_varchar_length(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test validate_schema_deeply warns for very large varchar lengths.
+
+        Expected behavior:
+        - Returns warning for varchar length > 10000
+        - Suggests using TEXT type instead
+        """
+        schema = ModelProjectorSchema(
+            table_name="test_large_varchar",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+                ModelProjectorColumn(
+                    name="huge_content",
+                    column_type="varchar",
+                    length=50000,  # Very large
+                    nullable=True,
+                ),
+            ],
+            indexes=[],
+            schema_version="1.0.0",
+        )
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        warnings = validator.validate_schema_deeply(schema)
+
+        assert len(warnings) >= 1
+        assert any("huge_content" in w and "TEXT" in w for w in warnings)
+
+    def test_validate_schema_deeply_warns_index_naming_convention(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test validate_schema_deeply warns for non-standard index names.
+
+        Expected behavior:
+        - Returns warning for indexes not starting with 'idx_'
+        """
+        schema = ModelProjectorSchema(
+            table_name="test_index_naming",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+                ModelProjectorColumn(
+                    name="name", column_type="varchar", length=100, nullable=False
+                ),
+            ],
+            indexes=[
+                ModelProjectorIndex(
+                    name="bad_index_name",  # Does not start with idx_
+                    columns=["name"],
+                ),
+            ],
+            schema_version="1.0.0",
+        )
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        warnings = validator.validate_schema_deeply(schema)
+
+        assert len(warnings) >= 1
+        assert any("bad_index_name" in w and "idx_" in w for w in warnings)
+
+    def test_validate_schema_deeply_passes_with_proper_idx_prefix(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test validate_schema_deeply passes for properly named indexes.
+
+        Expected behavior:
+        - No warning for indexes starting with 'idx_'
+        """
+        schema = ModelProjectorSchema(
+            table_name="test_good_index",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+                ModelProjectorColumn(
+                    name="name", column_type="varchar", length=100, nullable=False
+                ),
+            ],
+            indexes=[
+                ModelProjectorIndex(
+                    name="idx_proper_name",  # Proper naming
+                    columns=["name"],
+                ),
+            ],
+            schema_version="1.0.0",
+        )
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        warnings = validator.validate_schema_deeply(schema)
+
+        # No warnings about index naming
+        assert not any("idx_" in w for w in warnings)
+
+    def test_validate_schema_deeply_multiple_warnings(
+        self,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Test validate_schema_deeply returns multiple warnings for multiple issues.
+
+        Expected behavior:
+        - Returns all applicable warnings
+        - Each issue generates its own warning
+        """
+        schema = ModelProjectorSchema(
+            table_name="test_multiple_issues",
+            columns=[
+                ModelProjectorColumn(
+                    name="id", column_type="uuid", nullable=False, primary_key=True
+                ),
+                ModelProjectorColumn(
+                    name="huge_field",
+                    column_type="varchar",
+                    length=20000,  # Too large
+                    nullable=True,
+                ),
+            ],
+            indexes=[
+                ModelProjectorIndex(
+                    name="no_prefix",  # Missing idx_ prefix
+                    columns=["huge_field"],
+                ),
+            ],
+            schema_version="1.0.0",
+        )
+
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+        warnings = validator.validate_schema_deeply(schema)
+
+        # Should have at least 2 warnings: large varchar and index naming
+        assert len(warnings) >= 2
+        # Verify both types of warnings are present
+        has_varchar_warning = any("huge_field" in w and "TEXT" in w for w in warnings)
+        has_naming_warning = any("no_prefix" in w and "idx_" in w for w in warnings)
+        assert has_varchar_warning
+        assert has_naming_warning
+
+    def test_validate_schema_deeply_is_synchronous(
+        self,
+        mock_pool: MagicMock,
+        sample_schema: ModelProjectorSchema,
+    ) -> None:
+        """Test validate_schema_deeply is synchronous (not async).
+
+        Expected behavior:
+        - Method can be called directly without await
+        - Does not require database connection
+        """
+        validator = ProjectorSchemaValidator(db_pool=mock_pool)
+
+        # Should work without await - this validates it's synchronous
+        result = validator.validate_schema_deeply(sample_schema)
+
+        assert isinstance(result, list)
+        # Pool should NOT have been accessed
+        assert not mock_pool.acquire.called

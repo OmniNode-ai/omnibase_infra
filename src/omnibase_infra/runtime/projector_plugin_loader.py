@@ -474,23 +474,31 @@ class ProjectorPluginLoader:
     def _find_contract_files(self, base_path: Path) -> list[Path]:
         """Find all projector contract files under a base path.
 
+        Uses specific glob patterns (e.g., "*_projector.yaml") to directly
+        discover contract files, avoiding post-filtering overhead. Patterns
+        are already specific enough that additional name validation is
+        redundant after rglob matching.
+
         Args:
             base_path: Directory to scan recursively.
 
         Returns:
-            List of paths to projector contract files.
+            List of paths to projector contract files, deduplicated.
         """
         if base_path.is_file():
             if self._is_projector_contract(base_path.name):
                 return [base_path]
             return []
 
-        contract_files: list[Path] = []
+        # Use a set to deduplicate files matched by multiple patterns
+        # (e.g., symlinks or overlapping patterns)
+        discovered: set[Path] = set()
         for pattern in PROJECTOR_CONTRACT_PATTERNS:
-            contract_files.extend(base_path.rglob(pattern))
+            # rglob with specific patterns like "*_projector.yaml" already
+            # filters to matching files - no need for redundant name filtering
+            discovered.update(base_path.rglob(pattern))
 
-        # Filter to ensure exact pattern match (case-sensitive)
-        return [f for f in contract_files if self._is_projector_contract(f.name)]
+        return list(discovered)
 
     def _log_discovery_results(
         self,
@@ -827,7 +835,48 @@ class ProjectorPluginLoader:
                         "Absolute glob patterns are not allowed without explicit base_paths",
                         error_code=EnumCoreErrorCode.VALIDATION_FAILED,
                     )
-                matched_files = list(Path("/").glob(pattern.lstrip("/")))
+
+                # Security: Validate absolute pattern is under an allowed base path
+                # to prevent DoS via filesystem-wide glob scanning
+                pattern_resolved = pattern_path.resolve()
+                allowed_base = None
+                for base in self._base_paths:
+                    try:
+                        base_resolved = base.resolve()
+                        # Check if pattern starts within this base (for glob patterns,
+                        # check the non-glob prefix)
+                        pattern_prefix = pattern_resolved
+                        # Find the first glob component to get the concrete prefix
+                        pattern_parts = pattern_path.parts
+                        concrete_parts: list[str] = []
+                        for part in pattern_parts:
+                            if "*" in part or "?" in part or "[" in part:
+                                break
+                            concrete_parts.append(part)
+                        if concrete_parts:
+                            pattern_prefix = Path(*concrete_parts).resolve()
+
+                        if str(pattern_prefix).startswith(str(base_resolved)):
+                            allowed_base = base_resolved
+                            break
+                    except (ValueError, OSError):
+                        continue
+
+                if allowed_base is None:
+                    raise ModelOnexError(
+                        f"Absolute pattern '{pattern}' not under allowed base_paths",
+                        error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+                    )
+
+                # Glob from the allowed base, using relative pattern portion
+                try:
+                    relative_pattern = str(pattern_path.relative_to(allowed_base))
+                except ValueError:
+                    # Pattern doesn't start exactly at base, glob from base
+                    # with the full pattern (already validated to be under base)
+                    relative_pattern = pattern.lstrip("/")
+
+                matched_files = list(allowed_base.glob(relative_pattern))
             else:
                 matched_files = list(cwd.glob(pattern))
 

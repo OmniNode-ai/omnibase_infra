@@ -95,6 +95,12 @@ class ModelProjectorColumn(BaseModel):
         le=65535,
     )
 
+    description: str | None = Field(
+        default=None,
+        description="Optional human-readable description for SQL COMMENT",
+        max_length=1024,
+    )
+
     model_config = {
         "extra": "forbid",
         "frozen": True,
@@ -150,13 +156,39 @@ class ModelProjectorColumn(BaseModel):
             raise ValueError("default value must not contain line breaks")
         return v
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        """Validate description for SQL safety.
+
+        Prevents SQL injection by rejecting line breaks in description values.
+        Descriptions are used in SQL COMMENT statements.
+
+        Args:
+            v: Description value to validate.
+
+        Returns:
+            Validated description value.
+
+        Raises:
+            ValueError: If the description contains line breaks.
+        """
+        if v is None:
+            return v
+        if "\n" in v or "\r" in v:
+            raise ValueError("description must not contain line breaks")
+        return v
+
     def to_sql_definition(self) -> str:
         """Generate SQL column definition for CREATE TABLE statement.
 
-        Uses quoted identifiers to prevent SQL injection.
+        Uses quoted identifiers to prevent SQL injection. If a description
+        is provided, appends an inline SQL comment.
 
         Returns:
             SQL column definition string (e.g., '"entity_id" UUID NOT NULL').
+            If description is set, includes inline comment:
+            '"entity_id" UUID NOT NULL  -- Unique identifier'
 
         Example:
             >>> column = ModelProjectorColumn(
@@ -166,6 +198,14 @@ class ModelProjectorColumn(BaseModel):
             ... )
             >>> column.to_sql_definition()
             '"entity_id" UUID NOT NULL'
+
+            >>> column_with_desc = ModelProjectorColumn(
+            ...     name="name",
+            ...     column_type="varchar",
+            ...     description="Display name for the entity",
+            ... )
+            >>> column_with_desc.to_sql_definition()
+            '"name" VARCHAR(255)  -- Display name for the entity'
         """
         # Map column_type to PostgreSQL type with length
         type_map: dict[str, str] = {
@@ -192,7 +232,13 @@ class ModelProjectorColumn(BaseModel):
             # Note: default is trusted SQL expression from contract.yaml
             parts.append(f"DEFAULT {self.default}")
 
-        return " ".join(parts)
+        definition = " ".join(parts)
+
+        # Add inline comment if description is provided
+        if self.description:
+            definition = f"{definition}  -- {self.description}"
+
+        return definition
 
 
 __all__ = ["ModelProjectorColumn"]

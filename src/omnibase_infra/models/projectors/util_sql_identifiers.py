@@ -75,8 +75,30 @@ def validate_identifier(name: str, context: str = "identifier") -> str:
     return name
 
 
+def escape_sql_string(value: str) -> str:
+    """Escape a string for use in SQL string literals.
+
+    Escapes single quotes by doubling them for safe use in SQL
+    string contexts (e.g., COMMENT ON statements).
+
+    Args:
+        value: String value to escape.
+
+    Returns:
+        Escaped string suitable for SQL string literal.
+
+    Example:
+        >>> escape_sql_string("User's name")
+        "User''s name"
+        >>> escape_sql_string("normal text")
+        "normal text"
+    """
+    return value.replace("'", "''")
+
+
 __all__ = [
     "IDENT_PATTERN",
+    "escape_sql_string",
     "is_valid_identifier",
     "quote_identifier",
     "validate_identifier",

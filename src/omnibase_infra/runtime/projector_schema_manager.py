@@ -169,6 +169,28 @@ class ProjectorSchemaValidator:
         """
         self._pool = db_pool
 
+    def _get_correlation_id(self, correlation_id: str | None, method_name: str) -> str:
+        """Get or generate a correlation ID string.
+
+        If the provided correlation_id is None, logs a warning about potential
+        distributed tracing issues and generates a new UUID.
+
+        Args:
+            correlation_id: Optional correlation ID string.
+            method_name: Name of the calling method for logging context.
+
+        Returns:
+            The provided correlation ID or a newly generated UUID string.
+        """
+        if correlation_id is None:
+            logger.warning(
+                "Missing correlation_id in %s - generating new UUID. "
+                "This may break distributed tracing chains.",
+                method_name,
+            )
+            return str(uuid4())
+        return correlation_id
+
     async def ensure_schema_exists(
         self,
         schema: ModelProjectorSchema,
@@ -201,13 +223,7 @@ class ProjectorSchemaValidator:
             ... except ProjectorSchemaError as e:
             ...     print(f"Migration needed: {e}")
         """
-        if correlation_id is None:
-            logger.warning(
-                "Missing correlation_id in %s - generating new UUID. "
-                "This may break distributed tracing chains.",
-                "ensure_schema_exists",
-            )
-        corr_id = correlation_id or str(uuid4())
+        corr_id = self._get_correlation_id(correlation_id, "ensure_schema_exists")
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="ensure_schema_exists",
@@ -259,6 +275,112 @@ class ProjectorSchemaValidator:
             },
         )
 
+    def validate_schema_deeply(
+        self,
+        schema: ModelProjectorSchema,
+    ) -> list[str]:
+        """Perform deep validation of schema (column types, indexes, constraints).
+
+        Provides additional validation beyond basic Pydantic model validation.
+        Checks for:
+        - Column types are valid PostgreSQL types
+        - Index columns reference existing table columns
+        - Primary key columns are not nullable
+        - Varchar columns have reasonable lengths
+        - Index names follow naming convention
+
+        This method is synchronous as it only validates the schema model
+        without making database calls. Use ensure_schema_exists() for
+        database-level validation.
+
+        Args:
+            schema: Projector schema to validate deeply.
+
+        Returns:
+            List of validation warnings (empty if all valid).
+            Warnings are informational - they don't block migration generation
+            but may indicate potential issues.
+
+        Example:
+            >>> warnings = validator.validate_schema_deeply(schema)
+            >>> if warnings:
+            ...     for warning in warnings:
+            ...         print(f"Warning: {warning}")
+            ... else:
+            ...     print("Schema passes deep validation")
+        """
+        warnings: list[str] = []
+
+        # Validate column types are valid PostgreSQL types
+        # Note: ModelProjectorColumn already uses Literal for column_type,
+        # so this is a redundant safety check. The valid types match those
+        # defined in _POSTGRES_TYPE_MAP.
+        valid_types = {
+            "uuid",
+            "varchar",
+            "text",
+            "jsonb",
+            "timestamp",
+            "timestamptz",
+            "integer",
+            "bigint",
+            "boolean",
+        }
+        for col in schema.columns:
+            # column_type is already constrained by Literal, but we check anyway
+            # for defense-in-depth (e.g., if model is constructed via dict)
+            col_type = col.column_type.lower()
+            if col_type not in valid_types:
+                warnings.append(
+                    f"Column '{col.name}' has potentially unsupported type: "
+                    f"{col.column_type}"
+                )
+
+        # Validate index columns exist in the table
+        # Note: This is also validated by ModelProjectorSchema.validate_index_columns_exist
+        # but we include it here for completeness when validating external schemas.
+        column_names = {col.name for col in schema.columns}
+        for idx in schema.indexes:
+            for idx_col in idx.columns:
+                if idx_col not in column_names:
+                    warnings.append(
+                        f"Index '{idx.name}' references non-existent column: {idx_col}"
+                    )
+
+        # Validate varchar columns have reasonable length
+        for col in schema.columns:
+            if col.column_type == "varchar":
+                if col.length is not None and col.length > 10000:
+                    warnings.append(
+                        f"Column '{col.name}' has very large varchar length "
+                        f"({col.length}). Consider using TEXT type instead."
+                    )
+
+        # Validate primary key columns are not nullable
+        for col in schema.columns:
+            if col.primary_key and col.nullable:
+                warnings.append(
+                    f"Primary key column '{col.name}' is marked as nullable. "
+                    "Primary key columns should be NOT NULL."
+                )
+
+        # Validate index names follow naming convention
+        for idx in schema.indexes:
+            if not idx.name.startswith("idx_"):
+                warnings.append(
+                    f"Index '{idx.name}' does not follow 'idx_' naming convention"
+                )
+
+        logger.debug(
+            "Deep schema validation completed",
+            extra={
+                "table_name": schema.table_name,
+                "warning_count": len(warnings),
+            },
+        )
+
+        return warnings
+
     async def generate_migration(
         self,
         schema: ModelProjectorSchema,
@@ -287,13 +409,7 @@ class ProjectorSchemaValidator:
             -- Generated by ProjectorSchemaValidator
             ...
         """
-        if correlation_id is None:
-            logger.warning(
-                "Missing correlation_id in %s - generating new UUID. "
-                "This may break distributed tracing chains.",
-                "generate_migration",
-            )
-        corr_id = correlation_id or str(uuid4())
+        corr_id = self._get_correlation_id(correlation_id, "generate_migration")
 
         logger.debug(
             "Generating migration SQL",
@@ -330,13 +446,7 @@ class ProjectorSchemaValidator:
             InfraTimeoutError: If query times out.
             RuntimeHostError: For other database errors.
         """
-        if correlation_id is None:
-            logger.warning(
-                "Missing correlation_id in %s - generating new UUID. "
-                "This may break distributed tracing chains.",
-                "table_exists",
-            )
-        corr_id = correlation_id or str(uuid4())
+        corr_id = self._get_correlation_id(correlation_id, "table_exists")
         effective_schema = schema_name or "public"
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
@@ -401,13 +511,7 @@ class ProjectorSchemaValidator:
             InfraTimeoutError: If query times out.
             RuntimeHostError: For other database errors.
         """
-        if correlation_id is None:
-            logger.warning(
-                "Missing correlation_id in %s - generating new UUID. "
-                "This may break distributed tracing chains.",
-                "_get_table_columns",
-            )
-        corr_id = correlation_id or str(uuid4())
+        corr_id = self._get_correlation_id(correlation_id, "_get_table_columns")
         effective_schema = schema_name or "public"
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
