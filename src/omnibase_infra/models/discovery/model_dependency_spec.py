@@ -29,6 +29,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from omnibase_infra.enums import EnumRegistrationState
+
 
 class ModelDependencySpec(BaseModel):
     """Dependency specification - declares what is needed, not who provides it.
@@ -126,8 +128,8 @@ class ModelDependencySpec(BaseModel):
             description="Filter by contract type",
         )
     )
-    state: str = Field(
-        default="ACTIVE",
+    state: EnumRegistrationState = Field(
+        default=EnumRegistrationState.ACTIVE,
         description="Filter by registration state",
     )
 

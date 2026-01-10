@@ -36,14 +36,18 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.discovery.model_dependency_spec import ModelDependencySpec
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
 from omnibase_infra.services.service_node_selector import ServiceNodeSelector
 
 if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
+
     from omnibase_infra.projectors.projection_reader_registration import (
         ProjectionReaderRegistration,
     )
@@ -106,6 +110,7 @@ class ServiceCapabilityQuery:
         self,
         projection_reader: ProjectionReaderRegistration,
         node_selector: ServiceNodeSelector | None = None,
+        container: ModelONEXContainer | None = None,
     ) -> None:
         """Initialize the capability query service.
 
@@ -114,6 +119,8 @@ class ServiceCapabilityQuery:
                 Must be initialized with an asyncpg connection pool.
             node_selector: Optional node selector for selection strategies.
                 If None, creates a new ServiceNodeSelector instance.
+            container: Optional ONEX dependency injection container.
+                When provided, enables container-based service resolution.
 
         Example:
             >>> pool = await asyncpg.create_pool(dsn)
@@ -122,6 +129,7 @@ class ServiceCapabilityQuery:
         """
         self._projection_reader = projection_reader
         self._node_selector = node_selector or ServiceNodeSelector()
+        self._container = container
 
     async def find_nodes_by_capability(
         self,
@@ -165,6 +173,7 @@ class ServiceCapabilityQuery:
             >>> for node in nodes:
             ...     print(f"Found: {node.entity_id} - {node.node_type}")
         """
+        correlation_id = self._ensure_correlation_id(correlation_id)
         state = state or EnumRegistrationState.ACTIVE
         logger.debug(
             "Finding nodes by capability",
@@ -239,6 +248,7 @@ class ServiceCapabilityQuery:
             >>> for handler in handlers:
             ...     print(f"Can handle postgres.query: {handler.entity_id}")
         """
+        correlation_id = self._ensure_correlation_id(correlation_id)
         state = state or EnumRegistrationState.ACTIVE
         logger.debug(
             "Finding nodes by intent type",
@@ -321,6 +331,7 @@ class ServiceCapabilityQuery:
             >>> for handler in handlers:
             ...     print(f"Can handle postgres intents: {handler.entity_id}")
         """
+        correlation_id = self._ensure_correlation_id(correlation_id)
         if not intent_types:
             return []
 
@@ -397,6 +408,7 @@ class ServiceCapabilityQuery:
             ... )
             >>> print(f"Found {len(adapters)} event publishers")
         """
+        correlation_id = self._ensure_correlation_id(correlation_id)
         state = state or EnumRegistrationState.ACTIVE
         logger.debug(
             "Finding nodes by protocol",
@@ -474,6 +486,7 @@ class ServiceCapabilityQuery:
             ... else:
             ...     print("No node found for capability")
         """
+        correlation_id = self._ensure_correlation_id(correlation_id)
         logger.debug(
             "Resolving dependency",
             extra={
@@ -488,7 +501,7 @@ class ServiceCapabilityQuery:
         )
 
         # Determine state filter
-        state = self._parse_state(dependency_spec.state)
+        state = self._parse_state(dependency_spec.state, correlation_id)
 
         # Find candidates based on discovery strategy
         candidates: list[ModelRegistrationProjection] = []
@@ -527,7 +540,7 @@ class ServiceCapabilityQuery:
         # No filter specified - cannot resolve
         if not candidates and not dependency_spec.has_any_filter():
             logger.warning(
-                "Dependency spec has no capability filter",
+                "Dependency spec has no discovery filters",
                 extra={
                     "dependency_name": dependency_spec.name,
                     "correlation_id": correlation_id,
@@ -553,7 +566,9 @@ class ServiceCapabilityQuery:
             return None
 
         # Apply selection strategy
-        strategy = self._parse_selection_strategy(dependency_spec.selection_strategy)
+        strategy = self._parse_selection_strategy(
+            dependency_spec.selection_strategy, correlation_id
+        )
         selected = await self._node_selector.select(
             candidates=candidates,
             strategy=strategy,
@@ -583,41 +598,74 @@ class ServiceCapabilityQuery:
 
         return selected
 
-    def _parse_state(self, state_str: str) -> EnumRegistrationState:
+    def _ensure_correlation_id(self, correlation_id: str | None) -> str:
+        """Ensure correlation ID is present, generating one if missing.
+
+        Args:
+            correlation_id: Optional correlation ID from caller.
+
+        Returns:
+            The provided correlation ID, or a newly generated UUID4 string.
+        """
+        return correlation_id or str(uuid4())
+
+    def _parse_state(
+        self, state_str: str, correlation_id: str | None = None
+    ) -> EnumRegistrationState:
         """Parse state string to EnumRegistrationState.
 
         Args:
             state_str: State string (e.g., "ACTIVE", "active").
+            correlation_id: Optional correlation ID for tracing.
 
         Returns:
             EnumRegistrationState value.
+
+        Raises:
+            ProtocolConfigurationError: If state string is not a valid state.
         """
         try:
             return EnumRegistrationState(state_str.lower())
         except ValueError:
-            logger.warning(
-                "Unknown state value, defaulting to ACTIVE",
-                extra={"state": state_str},
+            valid_states = [s.value for s in EnumRegistrationState]
+            raise ProtocolConfigurationError(
+                f"Invalid registration state '{state_str}'. "
+                f"Valid states are: {valid_states}",
+                details={
+                    "state": state_str,
+                    "valid_states": valid_states,
+                    "correlation_id": correlation_id,
+                },
             )
-            return EnumRegistrationState.ACTIVE
 
-    def _parse_selection_strategy(self, strategy_str: str) -> EnumSelectionStrategy:
+    def _parse_selection_strategy(
+        self, strategy_str: str, correlation_id: str | None = None
+    ) -> EnumSelectionStrategy:
         """Parse selection strategy string to enum.
 
         Args:
             strategy_str: Strategy string (e.g., "first", "round_robin").
+            correlation_id: Optional correlation ID for tracing.
 
         Returns:
             EnumSelectionStrategy value.
+
+        Raises:
+            ProtocolConfigurationError: If strategy string is not a valid strategy.
         """
         try:
             return EnumSelectionStrategy(strategy_str.lower())
         except ValueError:
-            logger.warning(
-                "Unknown selection strategy, defaulting to FIRST",
-                extra={"strategy": strategy_str},
+            valid_strategies = [s.value for s in EnumSelectionStrategy]
+            raise ProtocolConfigurationError(
+                f"Invalid selection strategy '{strategy_str}'. "
+                f"Valid strategies are: {valid_strategies}",
+                details={
+                    "strategy": strategy_str,
+                    "valid_strategies": valid_strategies,
+                    "correlation_id": correlation_id,
+                },
             )
-            return EnumSelectionStrategy.FIRST
 
 
 __all__: list[str] = ["ServiceCapabilityQuery"]
