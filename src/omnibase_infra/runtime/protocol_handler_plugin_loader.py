@@ -166,6 +166,7 @@ class ProtocolHandlerPluginLoader(Protocol):
         self,
         directory: Path,
         correlation_id: str | None = None,
+        max_handlers: int | None = None,
     ) -> list[ModelLoadedHandler]:
         """Load all handlers from contract files in a directory.
 
@@ -181,6 +182,11 @@ class ProtocolHandlerPluginLoader(Protocol):
                 Must be an existing directory. Subdirectories are scanned
                 recursively.
             correlation_id: Optional correlation ID for tracing and error context.
+            max_handlers: Optional maximum number of handlers to discover and load.
+                If specified, discovery stops after finding this many contract files.
+                A warning is logged when the limit is reached. Set to None (default)
+                for unlimited discovery. This prevents runaway resource usage when
+                scanning directories with unexpectedly large numbers of handlers.
 
         Returns:
             list[ModelLoadedHandler]: List of successfully loaded handlers.
@@ -204,6 +210,12 @@ class ProtocolHandlerPluginLoader(Protocol):
                 print(f"Loaded {len(handlers)} handlers")
                 for handler in handlers:
                     print(f"  - {handler.handler_id}")
+
+                # Limit discovery to prevent runaway resource usage
+                handlers = loader.load_from_directory(
+                    Path("src/handlers"),
+                    max_handlers=100,
+                )
         """
         ...
 
@@ -212,6 +224,7 @@ class ProtocolHandlerPluginLoader(Protocol):
         patterns: list[str],
         correlation_id: str | None = None,
         base_path: Path | None = None,
+        max_handlers: int | None = None,
     ) -> list[ModelLoadedHandler]:
         """Discover contracts matching glob patterns and load handlers.
 
@@ -244,6 +257,11 @@ class ProtocolHandlerPluginLoader(Protocol):
                 If not provided, defaults to ``Path.cwd()``. Providing an
                 explicit base path ensures deterministic behavior regardless
                 of the current working directory.
+            max_handlers: Optional maximum number of handlers to discover and load.
+                If specified, discovery stops after finding this many contract files.
+                A warning is logged when the limit is reached. Set to None (default)
+                for unlimited discovery. This prevents runaway resource usage when
+                scanning directories with unexpectedly large numbers of handlers.
 
         Returns:
             list[ModelLoadedHandler]: List of successfully loaded handlers.
@@ -272,6 +290,12 @@ class ProtocolHandlerPluginLoader(Protocol):
                 handlers = loader.discover_and_load(
                     ["src/**/contract.yaml"],
                     base_path=Path("/app/project"),
+                )
+
+                # Limit discovery to prevent runaway resource usage
+                handlers = loader.discover_and_load(
+                    ["**/*.yaml"],
+                    max_handlers=50,
                 )
 
                 print(f"Discovered and loaded {len(handlers)} handlers")

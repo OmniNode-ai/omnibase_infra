@@ -114,35 +114,66 @@ nodes/authentication/
 
 ---
 
-## Handler Resolution Precedence
+## Contract File Precedence
 
-When scanning a directory, the loader discovers contracts in a deterministic order:
+> **WARNING: No Automatic Precedence Between Contract Types**
+>
+> When **both** `handler_contract.yaml` **and** `contract.yaml` exist in the **same directory**,
+> the loader will load **BOTH** files as separate handlers. There is **no precedence** -
+> both are treated as valid, independent handler contracts.
+>
+> This behavior can lead to:
+> - Duplicate handler registrations if both files define similar handlers
+> - Confusion about which contract is the "source of truth"
+> - Unexpected runtime behavior if handlers conflict
+>
+> **Best Practice**: Use only **ONE** contract file per handler directory.
 
 ### Discovery Rules
 
+When scanning a directory, the loader discovers contracts following these rules:
+
 1. **Both filenames searched**: `handler_contract.yaml` and `contract.yaml` are both valid
 2. **No precedence between files**: Both files in different directories are loaded
-3. **Deduplication by resolved path**: Same file via different paths is loaded once
-4. **Sorted processing**: Discovered paths are sorted for deterministic order
+3. **BOTH loaded if in same directory**: No file takes priority over the other
+4. **Deduplication by resolved path**: Same file via different paths is loaded once
+5. **Sorted processing**: Discovered paths are sorted for deterministic order
 
-### Same Directory Behavior
+### Same Directory Behavior (Ambiguous Configuration)
 
-If both `handler_contract.yaml` and `contract.yaml` exist in the same directory, **both are loaded** as separate contracts (if both are valid handler contracts).
+If both `handler_contract.yaml` and `contract.yaml` exist in the same directory,
+**both are loaded** as separate contracts. A warning is logged to alert operators:
 
-```python
-# Directory structure
+```
+WARNING: AMBIGUOUS CONTRACT CONFIGURATION: Directory '/app/handlers/auth' contains
+both handler_contract.yaml and contract.yaml. BOTH files will be loaded as separate
+handlers. This may cause duplicate handler registrations or unexpected behavior.
+```
+
+```
+# Directory structure (AVOID THIS)
 handlers/
-    handler_contract.yaml   # Loaded as one handler
-    contract.yaml          # Loaded as separate handler (if valid)
+    handler_contract.yaml   # Loaded as handler #1
+    contract.yaml          # Loaded as handler #2 (if valid)
 
-# Result: 2 handlers loaded
+# Result: 2 handlers loaded - potentially causing conflicts!
 ```
 
-### Recommended Practice
+### Why No Automatic Precedence?
 
-Use **one contract file per handler directory** to avoid confusion:
+The loader intentionally does **not** implement automatic precedence because:
+
+1. **Explicit is better than implicit**: Silent precedence could mask configuration errors
+2. **Different use cases**: Some projects may legitimately use both file types
+3. **Fail-fast philosophy**: The warning alerts operators to potential issues early
+4. **No assumptions**: The loader cannot know which file the user intends to be authoritative
+
+### Correct Configuration (Recommended)
+
+Use **one contract file per handler directory** to avoid ambiguity:
 
 ```
+# CORRECT: One contract per directory
 nodes/auth/
     handler_contract.yaml   # Preferred: dedicated handler contract
     handler_auth.py
@@ -151,6 +182,30 @@ nodes/validate/
     handler_contract.yaml
     handler_validate.py
 ```
+
+### Incorrect Configuration (Avoid)
+
+```
+# INCORRECT: Both contract types in same directory
+nodes/auth/
+    handler_contract.yaml   # Defines "auth.validate" handler
+    contract.yaml          # Also defines "auth.validate" handler (conflict!)
+    handler_auth.py
+
+# This will:
+# 1. Log a warning about ambiguous configuration
+# 2. Load BOTH handlers (may cause duplicate registration errors)
+# 3. Potentially cause runtime conflicts
+```
+
+### Resolving Ambiguous Configurations
+
+If you see the "AMBIGUOUS CONTRACT CONFIGURATION" warning:
+
+1. **Identify the intended contract**: Decide which file should be authoritative
+2. **Remove or rename the other**: Delete the unused contract or rename it (e.g., `contract.yaml.bak`)
+3. **Consolidate if needed**: Merge handler definitions into a single contract file
+4. **Verify after changes**: Re-run the loader and confirm no warnings appear
 
 ---
 

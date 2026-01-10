@@ -47,10 +47,11 @@ from __future__ import annotations
 
 import importlib
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import yaml
 from pydantic import ValidationError
@@ -58,7 +59,13 @@ from pydantic import ValidationError
 from omnibase_infra.enums import EnumHandlerLoaderError, EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ProtocolConfigurationError
 from omnibase_infra.models.errors import ModelInfraErrorContext
-from omnibase_infra.models.runtime import ModelHandlerContract, ModelLoadedHandler
+from omnibase_infra.models.runtime import (
+    ModelFailedPluginLoad,
+    ModelHandlerContract,
+    ModelLoadedHandler,
+    ModelPluginLoadContext,
+    ModelPluginLoadSummary,
+)
 from omnibase_infra.runtime.protocol_handler_plugin_loader import (
     ProtocolHandlerPluginLoader,
 )
@@ -329,6 +336,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         directory: Path,
         correlation_id: str | None = None,
+        max_handlers: int | None = None,
     ) -> list[ModelLoadedHandler]:
         """Load all handlers from contract files in a directory.
 
@@ -337,6 +345,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         and returns a list of successfully loaded handlers.
 
         Failed loads are logged but do not stop processing of other handlers.
+        A summary is logged at the end of the operation for observability.
 
         Args:
             directory: Path to the directory to scan for contract files.
@@ -345,6 +354,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 If not provided, a new UUID4 is auto-generated to ensure all
                 operations have traceable correlation IDs. The same correlation_id
                 is propagated to all contract loads within the directory scan.
+            max_handlers: Optional maximum number of handlers to discover and load.
+                If specified, discovery stops after finding this many contract files.
+                A warning is logged when the limit is reached. Set to None (default)
+                for unlimited discovery. This prevents runaway resource usage when
+                scanning directories with unexpectedly large numbers of handlers.
 
         Returns:
             List of successfully loaded handlers. May be empty if no
@@ -360,10 +374,17 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         # Auto-generate correlation_id if not provided (per ONEX guidelines)
         correlation_id = correlation_id or str(uuid4())
 
+        # Start timing for observability
+        start_time = time.perf_counter()
+
         logger.debug(
             "Loading handlers from directory: %s",
             directory,
-            extra={"directory": str(directory), "correlation_id": correlation_id},
+            extra={
+                "directory": str(directory),
+                "correlation_id": correlation_id,
+                "max_handlers": max_handlers,
+            },
         )
 
         # Validate directory exists
@@ -393,8 +414,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 directory=str(directory),
             )
 
-        # Find all contract files
-        contract_files = self._find_contract_files(directory, correlation_id)
+        # Find all contract files (with optional limit)
+        contract_files = self._find_contract_files(
+            directory, correlation_id, max_handlers=max_handlers
+        )
 
         logger.debug(
             "Found %d contract files in directory: %s",
@@ -408,11 +431,26 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         # Load each contract (graceful mode - continue on errors)
         handlers: list[ModelLoadedHandler] = []
+        failed_handlers: list[ModelFailedPluginLoad] = []
+
         for contract_path in contract_files:
             try:
                 handler = self.load_from_contract(contract_path, correlation_id)
                 handlers.append(handler)
             except (ProtocolConfigurationError, InfraConnectionError) as e:
+                # Extract error code if available
+                error_code: str | None = None
+                if hasattr(e, "model") and hasattr(e.model, "context"):
+                    error_code = e.model.context.get("loader_error")
+
+                failed_handlers.append(
+                    ModelFailedPluginLoad(
+                        contract_path=contract_path,
+                        error_message=str(e),
+                        error_code=error_code,
+                    )
+                )
+
                 logger.warning(
                     "Failed to load handler from %s: %s",
                     contract_path,
@@ -420,20 +458,25 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     extra={
                         "contract_path": str(contract_path),
                         "error": str(e),
+                        "error_code": error_code,
                         "correlation_id": correlation_id,
                     },
                 )
                 continue
 
-        logger.info(
-            "Loaded %d handlers from directory: %s",
-            len(handlers),
-            directory,
-            extra={
-                "directory": str(directory),
-                "loaded_count": len(handlers),
-                "total_contracts": len(contract_files),
-            },
+        # Calculate duration and log summary
+        duration_seconds = time.perf_counter() - start_time
+
+        self._log_load_summary(
+            ModelPluginLoadContext(
+                operation="load_from_directory",
+                source=str(directory),
+                total_discovered=len(contract_files),
+                handlers=handlers,
+                failed_plugins=failed_handlers,
+                duration_seconds=duration_seconds,
+                correlation_id=UUID(correlation_id),
+            )
         )
 
         return handlers
@@ -443,12 +486,15 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         patterns: list[str],
         correlation_id: str | None = None,
         base_path: Path | None = None,
+        max_handlers: int | None = None,
     ) -> list[ModelLoadedHandler]:
         """Discover contracts matching glob patterns and load handlers.
 
         Searches for contract files matching the given glob patterns,
         deduplicates matches, loads each handler, and returns a list
         of successfully loaded handlers.
+
+        A summary is logged at the end of the operation for observability.
 
         Working Directory Dependency:
             By default, glob patterns are resolved relative to the current
@@ -469,6 +515,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 If not provided, defaults to ``Path.cwd()``. Providing an
                 explicit base path ensures deterministic behavior regardless
                 of the current working directory.
+            max_handlers: Optional maximum number of handlers to discover and load.
+                If specified, discovery stops after finding this many contract files.
+                A warning is logged when the limit is reached. Set to None (default)
+                for unlimited discovery. This prevents runaway resource usage when
+                scanning directories with unexpectedly large numbers of handlers.
 
         Returns:
             List of successfully loaded handlers. May be empty if no
@@ -492,10 +543,17 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         # Auto-generate correlation_id if not provided (per ONEX guidelines)
         correlation_id = correlation_id or str(uuid4())
 
+        # Start timing for observability
+        start_time = time.perf_counter()
+
         logger.debug(
             "Discovering handlers with patterns: %s",
             patterns,
-            extra={"patterns": patterns, "correlation_id": correlation_id},
+            extra={
+                "patterns": patterns,
+                "correlation_id": correlation_id,
+                "max_handlers": max_handlers,
+            },
         )
 
         if not patterns:
@@ -512,6 +570,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         # Collect all matching contract files, deduplicated by resolved path
         discovered_paths: set[Path] = set()
+        limit_reached = False
 
         # Use explicit base_path if provided, otherwise fall back to cwd
         # Note: Using cwd can produce different results if the working directory
@@ -519,8 +578,28 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         glob_base = base_path if base_path is not None else Path.cwd()
 
         for pattern in patterns:
+            if limit_reached:
+                break
+
             matched_paths = list(glob_base.glob(pattern))
             for path in matched_paths:
+                # Check if we've reached the limit
+                if max_handlers is not None and len(discovered_paths) >= max_handlers:
+                    limit_reached = True
+                    logger.warning(
+                        "Handler discovery limit reached: stopped after discovering %d "
+                        "handlers (max_handlers=%d). Some handlers may not be loaded.",
+                        len(discovered_paths),
+                        max_handlers,
+                        extra={
+                            "discovered_count": len(discovered_paths),
+                            "max_handlers": max_handlers,
+                            "patterns": patterns,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                    break
+
                 if path.is_file():
                     # Early size validation to skip oversized files before expensive operations
                     if (
@@ -528,6 +607,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                             path, correlation_id=correlation_id, raise_on_error=False
                         )
                         is None
+                    ):
+                        continue
+
+                    # Early YAML syntax validation to fail fast before expensive resolve operations
+                    # This catches malformed YAML immediately after discovery rather than
+                    # deferring to load_from_contract, which is more efficient for batch discovery
+                    if not self._validate_yaml_syntax(
+                        path, correlation_id=correlation_id, raise_on_error=False
                     ):
                         continue
 
@@ -541,16 +628,32 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             extra={
                 "patterns": patterns,
                 "discovered_count": len(discovered_paths),
+                "limit_reached": limit_reached,
             },
         )
 
         # Load each discovered contract (graceful mode)
         handlers: list[ModelLoadedHandler] = []
+        failed_handlers: list[ModelFailedPluginLoad] = []
+
         for contract_path in sorted(discovered_paths):
             try:
                 handler = self.load_from_contract(contract_path, correlation_id)
                 handlers.append(handler)
             except (ProtocolConfigurationError, InfraConnectionError) as e:
+                # Extract error code if available
+                error_code: str | None = None
+                if hasattr(e, "model") and hasattr(e.model, "context"):
+                    error_code = e.model.context.get("loader_error")
+
+                failed_handlers.append(
+                    ModelFailedPluginLoad(
+                        contract_path=contract_path,
+                        error_message=str(e),
+                        error_code=error_code,
+                    )
+                )
+
                 logger.warning(
                     "Failed to load handler from %s: %s",
                     contract_path,
@@ -558,23 +661,144 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     extra={
                         "contract_path": str(contract_path),
                         "error": str(e),
+                        "error_code": error_code,
                         "correlation_id": correlation_id,
                     },
                 )
                 continue
 
-        logger.info(
-            "Discovered and loaded %d handlers from %d patterns",
-            len(handlers),
-            len(patterns),
-            extra={
-                "patterns": patterns,
-                "loaded_count": len(handlers),
-                "discovered_count": len(discovered_paths),
-            },
+        # Calculate duration and log summary
+        duration_seconds = time.perf_counter() - start_time
+
+        # Format patterns as comma-separated string for source
+        patterns_str = ", ".join(patterns)
+
+        self._log_load_summary(
+            ModelPluginLoadContext(
+                operation="discover_and_load",
+                source=patterns_str,
+                total_discovered=len(discovered_paths),
+                handlers=handlers,
+                failed_plugins=failed_handlers,
+                duration_seconds=duration_seconds,
+                correlation_id=UUID(correlation_id),
+            )
         )
 
         return handlers
+
+    def _log_load_summary(
+        self,
+        context: ModelPluginLoadContext,
+    ) -> ModelPluginLoadSummary:
+        """Log a summary of the handler loading operation for observability.
+
+        Creates a structured summary of the load operation and logs it at
+        an appropriate level (INFO for success, WARNING if there were failures).
+
+        The log message format is designed for easy parsing:
+        - Single line summary with counts and timing
+        - Detailed handler list with class names and modules
+        - Failed handler details with error reasons
+
+        Args:
+            context: The load context containing operation details, handlers,
+                failures, and timing information.
+
+        Returns:
+            ModelPluginLoadSummary containing the structured summary data.
+
+        Example log output:
+            Handler load complete: 5 handlers loaded in 0.23s (source: /app/handlers)
+              - HandlerAuth (myapp.handlers.auth)
+              - HandlerDb (myapp.handlers.db)
+              ...
+        """
+        # Build list of loaded handler details
+        loaded_handler_details = [
+            {
+                "name": h.handler_name,
+                "class": h.handler_class.rsplit(".", 1)[-1],
+                "module": h.handler_class.rsplit(".", 1)[0],
+            }
+            for h in context.handlers
+        ]
+
+        # Create summary model
+        summary = ModelPluginLoadSummary(
+            operation=context.operation,
+            source=context.source,
+            total_discovered=context.total_discovered,
+            total_loaded=len(context.handlers),
+            total_failed=len(context.failed_plugins),
+            loaded_plugins=loaded_handler_details,
+            failed_plugins=context.failed_plugins,
+            duration_seconds=context.duration_seconds,
+            correlation_id=context.correlation_id,
+            completed_at=datetime.now(UTC),
+        )
+
+        # Build log message with handler details
+        handler_lines = [
+            f"  - {h['class']} ({h['module']})" for h in loaded_handler_details
+        ]
+        handler_list_str = "\n".join(handler_lines) if handler_lines else "  (none)"
+
+        # Build failed handler message if any
+        failed_lines = []
+        for failed in context.failed_plugins:
+            error_code_str = f" [{failed.error_code}]" if failed.error_code else ""
+            failed_lines.append(f"  - {failed.contract_path}{error_code_str}")
+
+        failed_list_str = "\n".join(failed_lines) if failed_lines else ""
+
+        # Choose log level based on whether there were failures
+        if context.failed_plugins:
+            log_level = logging.WARNING
+            status = "with failures"
+        else:
+            log_level = logging.INFO
+            status = "successfully"
+
+        # Format duration for readability
+        if context.duration_seconds < 0.001:
+            duration_str = f"{context.duration_seconds * 1000000:.0f}us"
+        elif context.duration_seconds < 1.0:
+            duration_str = f"{context.duration_seconds * 1000:.2f}ms"
+        else:
+            duration_str = f"{context.duration_seconds:.2f}s"
+
+        # Log the summary
+        summary_msg = (
+            f"Handler load complete {status}: "
+            f"{len(context.handlers)} handlers loaded in {duration_str}"
+        )
+        if context.failed_plugins:
+            summary_msg += f" ({len(context.failed_plugins)} failed)"
+
+        # Build detailed message
+        detailed_msg = f"{summary_msg}\nLoaded handlers:\n{handler_list_str}"
+        if failed_list_str:
+            detailed_msg += f"\nFailed handlers:\n{failed_list_str}"
+
+        logger.log(
+            log_level,
+            detailed_msg,
+            extra={
+                "operation": context.operation,
+                "source": context.source,
+                "total_discovered": context.total_discovered,
+                "total_loaded": len(context.handlers),
+                "total_failed": len(context.failed_plugins),
+                "duration_seconds": context.duration_seconds,
+                "correlation_id": str(context.correlation_id),
+                "handler_names": [h.handler_name for h in context.handlers],
+                "handler_classes": [h.handler_class for h in context.handlers],
+                "failed_paths": [str(f.contract_path) for f in context.failed_plugins],
+            },
+        )
+
+        return summary
 
     def _validate_handler_protocol(self, handler_class: type) -> tuple[bool, list[str]]:
         """Validate handler implements required protocol (ProtocolHandler).
@@ -787,6 +1011,98 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         return handler_class
 
+    def _validate_yaml_syntax(
+        self,
+        path: Path,
+        correlation_id: str | None = None,
+        raise_on_error: bool = True,
+    ) -> bool:
+        """Validate YAML syntax of a contract file for early fail-fast behavior.
+
+        Performs early YAML syntax validation to fail fast before expensive
+        operations like path resolution and handler class loading. This method
+        only validates that the file contains valid YAML syntax; it does not
+        perform schema validation.
+
+        This enables the discover_and_load method to skip malformed YAML files
+        immediately after discovery, rather than deferring the error to
+        load_from_contract which would be less efficient for large discovery
+        operations.
+
+        Args:
+            path: Path to the YAML file to validate. Must be an existing file.
+            correlation_id: Optional correlation ID for error context.
+            raise_on_error: If True (default), raises ProtocolConfigurationError
+                on YAML syntax errors. If False, logs a warning and returns False,
+                allowing the caller to skip the file.
+
+        Returns:
+            True if YAML syntax is valid.
+            False if raise_on_error is False and YAML syntax is invalid.
+
+        Raises:
+            ProtocolConfigurationError: If raise_on_error is True and:
+                - INVALID_YAML_SYNTAX: File contains invalid YAML syntax
+                - FILE_READ_ERROR: Failed to read file (I/O error)
+
+        Note:
+            The error message includes the YAML parser error details which
+            typically contain line and column information for the syntax error.
+        """
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            if raise_on_error:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="validate_yaml_syntax",
+                    correlation_id=correlation_id,
+                )
+                raise ProtocolConfigurationError(
+                    f"Invalid YAML syntax in contract file '{path}': {e}",
+                    context=context,
+                    loader_error=EnumHandlerLoaderError.INVALID_YAML_SYNTAX.value,
+                    contract_path=str(path),
+                ) from e
+            logger.warning(
+                "Skipping contract file with invalid YAML syntax %s: %s",
+                path,
+                e,
+                extra={
+                    "path": str(path),
+                    "error": str(e),
+                    "correlation_id": correlation_id,
+                },
+            )
+            return False
+        except OSError as e:
+            if raise_on_error:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="validate_yaml_syntax",
+                    correlation_id=correlation_id,
+                )
+                raise ProtocolConfigurationError(
+                    f"Failed to read contract file '{path}': {e}",
+                    context=context,
+                    loader_error=EnumHandlerLoaderError.FILE_READ_ERROR.value,
+                    contract_path=str(path),
+                ) from e
+            logger.warning(
+                "Failed to read contract file %s: %s",
+                path,
+                e,
+                extra={
+                    "path": str(path),
+                    "error": str(e),
+                    "correlation_id": correlation_id,
+                },
+            )
+            return False
+
+        return True
+
     def _validate_file_size(
         self,
         path: Path,
@@ -878,6 +1194,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         directory: Path,
         correlation_id: str | None = None,
+        max_handlers: int | None = None,
     ) -> list[Path]:
         """Find all handler contract files under a directory.
 
@@ -885,20 +1202,48 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         Files exceeding MAX_CONTRACT_SIZE are skipped during discovery
         to fail fast before expensive path resolution and loading.
 
+        Contract File Precedence:
+            **WARNING**: When BOTH ``handler_contract.yaml`` AND ``contract.yaml``
+            exist in the same directory, BOTH files are loaded as separate handlers.
+            This is intentional to support different use cases:
+
+            - ``handler_contract.yaml``: Dedicated handler contract (preferred)
+            - ``contract.yaml``: General ONEX contract that may also define handlers
+
+            If this behavior causes confusion or duplicate handler registrations,
+            a warning is logged to alert operators. Best practice is to use only
+            ONE contract file per handler directory to avoid ambiguity.
+
+            See: docs/patterns/handler_plugin_loader.md#contract-file-precedence
+
         Args:
             directory: Directory to search recursively.
             correlation_id: Optional correlation ID for tracing and error context.
+            max_handlers: Optional maximum number of handlers to discover.
+                If specified, discovery stops after finding this many contract files.
                 Propagated to file size validation for consistent traceability.
 
         Returns:
             List of paths to contract files that pass size validation.
         """
         contract_files: list[Path] = []
+        # Track directories with both contract types to warn about ambiguity
+        dirs_with_both_contracts: set[Path] = set()
+        # Track if max_handlers limit was reached
+        limit_reached = False
 
         # Search for valid contract filenames in a single scan
         # This consolidates two rglob() calls into one for better performance
+        # WARNING: Both handler_contract.yaml and contract.yaml are loaded if present
+        # in the same directory. This may lead to duplicate handler registrations
+        # if both files define handlers. See docstring for details.
         valid_filenames = {HANDLER_CONTRACT_FILENAME, CONTRACT_YAML_FILENAME}
         for path in directory.rglob("*.yaml"):
+            # Check if we've reached the max_handlers limit
+            if max_handlers is not None and len(contract_files) >= max_handlers:
+                limit_reached = True
+                break
+
             if path.name in valid_filenames and path.is_file():
                 # Early size validation to skip oversized files before expensive operations
                 if (
@@ -910,6 +1255,49 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     continue
 
                 contract_files.append(path)
+
+        # Log warning if limit was reached
+        if limit_reached:
+            logger.warning(
+                "Handler discovery limit reached: stopped at %d handlers. "
+                "Increase max_handlers to discover more.",
+                max_handlers,
+                extra={
+                    "max_handlers": max_handlers,
+                    "directory": str(directory),
+                    "correlation_id": correlation_id,
+                },
+            )
+
+        # Detect directories with both contract types and warn about ambiguity
+        # This is an O(n) check after discovery, not during, to avoid overhead
+        # on every file. Build a map of parent_dir -> set of contract filenames.
+        dir_to_contract_types: dict[Path, set[str]] = {}
+        for path in contract_files:
+            parent = path.parent
+            if parent not in dir_to_contract_types:
+                dir_to_contract_types[parent] = set()
+            dir_to_contract_types[parent].add(path.name)
+
+        # Warn for each directory that has both contract types
+        for parent_dir, filenames in dir_to_contract_types.items():
+            if len(filenames) > 1:
+                logger.warning(
+                    "AMBIGUOUS CONTRACT CONFIGURATION: Directory '%s' contains both "
+                    "%s and %s. BOTH files will be loaded as separate handlers. "
+                    "This may cause duplicate handler registrations or unexpected behavior. "
+                    "Best practice: Use only ONE contract file per handler directory. "
+                    "See: docs/patterns/handler_plugin_loader.md#contract-file-precedence",
+                    parent_dir,
+                    HANDLER_CONTRACT_FILENAME,
+                    CONTRACT_YAML_FILENAME,
+                    extra={
+                        "directory": str(parent_dir),
+                        "contract_files": sorted(filenames),
+                        "correlation_id": correlation_id,
+                        "severity": "configuration_warning",
+                    },
+                )
 
         # Deduplicate by resolved path
         seen: set[Path] = set()

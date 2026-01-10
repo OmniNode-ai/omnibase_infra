@@ -269,3 +269,124 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         assert exc_info.value.model.correlation_id == test_correlation_id
         # Verify error is about module not found (from _import_handler_class)
         assert "module not found" in str(exc_info.value).lower()
+
+    def test_warns_when_both_contract_types_in_same_directory(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that a warning is logged when both contract types exist in same directory.
+
+        This verifies the contract precedence warning behavior documented in
+        docs/patterns/handler_plugin_loader.md#contract-file-precedence.
+
+        When both handler_contract.yaml and contract.yaml exist in the same directory,
+        both are loaded but a warning is logged to alert operators about the
+        potentially ambiguous configuration.
+        """
+        import logging
+
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        # Create directory with BOTH contract types (ambiguous configuration)
+        ambiguous_dir = tmp_path / "ambiguous"
+        ambiguous_dir.mkdir()
+
+        # Create handler_contract.yaml
+        (ambiguous_dir / "handler_contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.from.handler_contract",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+
+        # Create contract.yaml in SAME directory
+        (ambiguous_dir / "contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.from.contract",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+
+        loader = HandlerPluginLoader()
+
+        # Capture log messages at WARNING level
+        with caplog.at_level(
+            logging.WARNING, logger="omnibase_infra.runtime.handler_plugin_loader"
+        ):
+            handlers = loader.load_from_directory(tmp_path)
+
+        # Verify BOTH handlers were loaded (no precedence)
+        assert len(handlers) == 2
+        handler_names = {h.handler_name for h in handlers}
+        assert handler_names == {
+            "handler.from.handler_contract",
+            "handler.from.contract",
+        }
+
+        # Verify warning was logged about ambiguous configuration
+        warning_logs = [
+            record
+            for record in caplog.records
+            if record.levelno == logging.WARNING
+            and "AMBIGUOUS CONTRACT CONFIGURATION" in record.message
+        ]
+        assert len(warning_logs) == 1, (
+            "Expected exactly one warning about ambiguous contract configuration"
+        )
+
+        # Verify warning message contains useful information
+        warning_message = warning_logs[0].message
+        assert "handler_contract.yaml" in warning_message
+        assert "contract.yaml" in warning_message
+        assert "BOTH files will be loaded" in warning_message
+
+    def test_no_warning_when_single_contract_type_per_directory(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that no warning is logged when only one contract type per directory.
+
+        This verifies that the warning is only triggered for the specific case of
+        both contract types in the same directory, not for normal configurations.
+        """
+        import logging
+
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        # Create separate directories with one contract type each (correct config)
+        dir1 = tmp_path / "handler1"
+        dir1.mkdir()
+        (dir1 / "handler_contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.one",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+
+        dir2 = tmp_path / "handler2"
+        dir2.mkdir()
+        (dir2 / "contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.two",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+
+        loader = HandlerPluginLoader()
+
+        # Capture log messages at WARNING level
+        with caplog.at_level(
+            logging.WARNING, logger="omnibase_infra.runtime.handler_plugin_loader"
+        ):
+            handlers = loader.load_from_directory(tmp_path)
+
+        # Verify both handlers were loaded
+        assert len(handlers) == 2
+
+        # Verify NO warning about ambiguous configuration
+        ambiguity_warnings = [
+            record
+            for record in caplog.records
+            if "AMBIGUOUS CONTRACT CONFIGURATION" in record.message
+        ]
+        assert len(ambiguity_warnings) == 0, (
+            "No warning should be logged when contract types are in separate directories"
+        )
