@@ -141,7 +141,4 @@ class TestModelDependencySpecFilterValidation:
         assert spec.has_any_filter()
 
 
-__all__: list[str] = [
-    "TestModelDependencySpecSelectionStrategy",
-    "TestModelDependencySpecFilterValidation",
-]
+__all__: list[str] = []

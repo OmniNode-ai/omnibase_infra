@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
@@ -58,7 +58,7 @@ DEFAULT_DOMAIN = "registration"
 
 
 def create_mock_projection(
-    entity_id: str | None = None,
+    entity_id: UUID | None = None,
     state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
     node_type: EnumNodeKind = EnumNodeKind.EFFECT,
     capability_tags: list[str] | None = None,

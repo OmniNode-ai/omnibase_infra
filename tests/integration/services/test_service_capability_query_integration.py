@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
@@ -74,6 +74,8 @@ def create_mock_projection(
 
     Args:
         entity_id_suffix: Optional suffix for deterministic entity IDs in tests.
+            When provided, generates a deterministic UUID5 based on the suffix.
+            When None, generates a random UUID4.
         state: Registration state (default: ACTIVE)
         node_type: Node kind (default: EFFECT)
         capability_tags: List of capability tags
@@ -85,8 +87,13 @@ def create_mock_projection(
         ModelRegistrationProjection with test data
     """
     now = datetime.now(UTC)
+    entity_id = (
+        uuid5(NAMESPACE_URL, f"test-projection:{entity_id_suffix}")
+        if entity_id_suffix is not None
+        else uuid4()
+    )
     return ModelRegistrationProjection(
-        entity_id=uuid4(),
+        entity_id=entity_id,
         domain=DEFAULT_DOMAIN,
         current_state=state,
         node_type=node_type,
@@ -698,10 +705,9 @@ class TestErrorPropagation:
             with pytest.raises(InfraConnectionError):
                 await service.resolve_dependency(spec, correlation_id=correlation_id)
 
-        # Verify correlation_id was used in logging
-        # The service should log before the error is raised
+        # Verify correlation_id was attached to log records as an extra attribute
         assert any(
-            "correlation_id" in record.message or correlation_id in str(record.__dict__)
+            getattr(record, "correlation_id", None) == correlation_id
             for record in caplog.records
         )
 

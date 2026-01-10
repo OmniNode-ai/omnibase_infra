@@ -46,8 +46,6 @@ from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrateg
 from omnibase_infra.services.service_node_selector import ServiceNodeSelector
 
 if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
-
     from omnibase_infra.projectors.projection_reader_registration import (
         ProjectionReaderRegistration,
     )
@@ -112,16 +110,13 @@ class ServiceCapabilityQuery:
         orchestrators that use ``container.resolve()`` to obtain services
         dynamically, leaf services like this one are instantiated with
         concrete dependencies (projection_reader, node_selector) and are
-        themselves resolved by higher-level components. The optional
-        container parameter is reserved for future extension if this
-        service needs to resolve additional services at runtime.
+        themselves resolved by higher-level components.
     """
 
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
         node_selector: ServiceNodeSelector | None = None,
-        container: ModelONEXContainer | None = None,
     ) -> None:
         """Initialize the capability query service.
 
@@ -130,20 +125,6 @@ class ServiceCapabilityQuery:
                 Must be initialized with an asyncpg connection pool.
             node_selector: Optional node selector for selection strategies.
                 If None, creates a new ServiceNodeSelector instance.
-            container: Optional ONEX dependency injection container.
-                Currently reserved for future extension. This service is a
-                leaf infrastructure service that receives its dependencies
-                directly (projection_reader, node_selector) rather than
-                resolving them from a container. The optional container
-                parameter allows future versions to resolve additional
-                services if needed, while maintaining backward compatibility
-                with current instantiation patterns.
-
-                Unlike orchestrators that use ``container.resolve()`` to
-                obtain services dynamically, infrastructure services like
-                this one are typically instantiated directly with their
-                concrete dependencies by higher-level components that own
-                the container.
 
         Example:
             >>> pool = await asyncpg.create_pool(dsn)
@@ -152,7 +133,6 @@ class ServiceCapabilityQuery:
         """
         self._projection_reader = projection_reader
         self._node_selector = node_selector or ServiceNodeSelector()
-        self._container = container
 
     async def find_nodes_by_capability(
         self,

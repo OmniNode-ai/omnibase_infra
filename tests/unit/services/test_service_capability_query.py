@@ -13,9 +13,9 @@ Test Organization:
     - TestResolveDependency: Dependency resolution with strategies
     - TestServiceCapabilityQueryErrorHandling: Error scenarios
 
-TDD Note:
-    These tests are written TDD-style BEFORE the implementation exists.
-    They define the expected API contract for ServiceCapabilityQuery.
+Note:
+    These tests validate the ServiceCapabilityQuery API contract.
+    Implementation: omnibase_infra/services/service_capability_query.py
 
 Coverage Goals:
     - >90% code coverage for service

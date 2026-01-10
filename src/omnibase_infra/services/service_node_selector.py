@@ -32,6 +32,8 @@ import logging
 import random
 from typing import TYPE_CHECKING, assert_never
 
+from omnibase_core.container import ModelONEXContainer
+
 from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
 
 if TYPE_CHECKING:
@@ -82,8 +84,14 @@ class ServiceNodeSelector:
         _round_robin_lock: asyncio.Lock protecting state access.
     """
 
-    def __init__(self) -> None:
-        """Initialize the node selector with empty round-robin state and lock."""
+    def __init__(self, container: ModelONEXContainer | None = None) -> None:
+        """Initialize the node selector with empty round-robin state and lock.
+
+        Args:
+            container: Optional ONEX container for dependency injection.
+                When provided, enables access to shared services and configuration.
+        """
+        self._container = container
         self._round_robin_state: dict[str, int] = {}
         self._round_robin_lock: asyncio.Lock = asyncio.Lock()
 
@@ -103,7 +111,8 @@ class ServiceNodeSelector:
                 - RANDOM: Random selection (stateless load distribution)
                 - ROUND_ROBIN: Sequential cycling (stateful, even distribution)
                 - LEAST_LOADED: Not yet implemented (raises NotImplementedError)
-            selection_key: Optional key for state tracking (required for round-robin).
+            selection_key: Optional key for state tracking (recommended for round-robin).
+                If None, round-robin uses a shared "_default" key.
                 Different keys maintain independent round-robin sequences.
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
