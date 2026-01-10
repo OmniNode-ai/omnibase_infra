@@ -45,7 +45,7 @@ from omnibase_infra.handlers.models.mcp import (
     ModelMcpToolCall,
     ModelMcpToolResult,
 )
-from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -65,7 +65,7 @@ _SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class HandlerMCP(MixinEnvelopeExtraction):
+class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
     """MCP protocol handler for exposing ONEX nodes as AI agent tools.
 
     This handler creates an MCP server using streamable HTTP transport,
@@ -177,6 +177,15 @@ class HandlerMCP(MixinEnvelopeExtraction):
 
             # Initialize tool registry (empty until tools are registered)
             self._tool_registry = {}
+
+            # Initialize circuit breaker for tool execution resilience
+            # Configuration from contract.yaml: threshold=5, reset_timeout=60.0
+            self._init_circuit_breaker(
+                threshold=5,
+                reset_timeout=60.0,
+                service_name="mcp-handler",
+                transport_type=EnumInfraTransportType.MCP,
+            )
 
             # Note: The MCP server is created lazily when start_server() is called
             # This allows the handler to be initialized before tools are registered
@@ -468,6 +477,9 @@ class HandlerMCP(MixinEnvelopeExtraction):
         This method delegates to the ONEX node that provides this tool.
         The actual implementation will route through the ONEX dispatcher.
 
+        Circuit breaker protection is applied to prevent cascading failures
+        when tool execution repeatedly fails.
+
         Args:
             tool_name: Name of the tool to execute.
             arguments: Tool arguments.
@@ -477,29 +489,46 @@ class HandlerMCP(MixinEnvelopeExtraction):
             Tool execution result.
 
         Raises:
-            InfraUnavailableError: If tool execution fails.
+            InfraUnavailableError: If tool execution fails or circuit is open.
         """
-        # TODO(OMN-1288): Implement actual tool execution via ONEX dispatcher
-        # For now, return a placeholder response
-        logger.info(
-            "Tool execution requested",
-            extra={
-                "tool_name": tool_name,
-                "argument_count": len(arguments),
-                "correlation_id": str(correlation_id),
-            },
-        )
+        # Check circuit breaker before tool execution
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("execute_tool", correlation_id)
 
-        # Placeholder - actual implementation will:
-        # 1. Look up the ONEX node that provides this tool
-        # 2. Build an envelope for the node
-        # 3. Dispatch to the node via the ONEX runtime
-        # 4. Return the result
+        try:
+            # TODO(OMN-1288): Implement actual tool execution via ONEX dispatcher
+            # For now, return a placeholder response
+            logger.info(
+                "Tool execution requested",
+                extra={
+                    "tool_name": tool_name,
+                    "argument_count": len(arguments),
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
-        return {
-            "message": f"Tool '{tool_name}' executed successfully",
-            "arguments_received": list(arguments.keys()),
-        }
+            # Placeholder - actual implementation will:
+            # 1. Look up the ONEX node that provides this tool
+            # 2. Build an envelope for the node
+            # 3. Dispatch to the node via the ONEX runtime
+            # 4. Return the result
+
+            result: dict[str, object] = {
+                "message": f"Tool '{tool_name}' executed successfully",
+                "arguments_received": list(arguments.keys()),
+            }
+
+            # Reset circuit breaker on success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return result
+
+        except Exception:
+            # Record failure in circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("execute_tool", correlation_id)
+            raise
 
     def register_tool(self, tool: ProtocolMCPToolDefinition) -> bool:
         """Register an MCP tool definition.
