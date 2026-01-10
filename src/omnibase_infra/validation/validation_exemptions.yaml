@@ -216,6 +216,20 @@ pattern_exemptions:
       - CLAUDE.md (Infrastructure Patterns - Adapter Pattern)
     ticket: OMN-1092
   # ==========================================================================
+  # Projector Schema Model Exemptions (OMN-1168)
+  # ==========================================================================
+  # ModelProjectorSchema requires multiple methods for SQL generation, validation,
+  # and schema introspection operations.
+  - file_pattern: 'model_projector_schema\.py'
+    class_pattern: "Class 'ModelProjectorSchema'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Schema model requires SQL generation methods (to_create_table_sql, to_full_migration_sql), schema introspection (get_column_names, get_primary_key_columns), validation methods, and identifier quoting for complete projector schema management.
+
+    documentation:
+      - src/omnibase_infra/models/projectors/model_projector_schema.py (class docstring)
+    ticket: OMN-1168
+  # ==========================================================================
   # Execution Shape Validator Exemptions (OMN-958)
   # ==========================================================================
   - file_pattern: 'enum_handler_type\.py'
@@ -830,6 +844,21 @@ pattern_exemptions:
       - docs/patterns/correlation_id_tracking.md
     ticket: OMN-811
   # ==========================================================================
+  # MCP Handler Model Exemptions (OMN-1288)
+  # ==========================================================================
+  # tool_name in ModelMcpToolCall is the MCP protocol identifier for the tool
+  # to invoke (e.g., "get_weather", "search_documents"). It is NOT an entity
+  # reference requiring UUID + display_name pattern - it's a protocol-level
+  # identifier defined by the MCP specification.
+  - file_pattern: 'model_mcp_tool_call\.py'
+    violation_pattern: "Field 'tool_name' might reference an entity"
+    reason: >
+      tool_name is an MCP protocol identifier for the tool to invoke (e.g., "get_weather"). This is a protocol-level identifier from the Model Context Protocol specification, not an entity reference.
+
+    documentation:
+      - Model Context Protocol Specification (https://modelcontextprotocol.io/)
+    ticket: OMN-1288
+  # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================
   # These models use builder patterns with many convenience methods.
@@ -1354,28 +1383,39 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
     ticket: OMN-1263
   # ==========================================================================
-  # Architecture Validator OMN-1099 Exemptions (AST Visitor Pattern)
+  # ProjectorPluginLoader Exemptions (OMN-1168)
   # ==========================================================================
-  # OMN-1099 validators (no-direct-dispatch, no-handler-publishing, no-orchestrator-fsm)
-  # use Python AST visitor pattern which requires visit_* method names per Python stdlib.
-  # NOTE: model_architecture_violation.py exemptions for rule_id/rule_name are defined earlier
-  # in the "Architecture Violation Model Exemptions (OMN-1099)" section.
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Class name .* contains anti-pattern 'Handler'"
+  # Plugin loader pattern requires multiple discovery methods:
+  # - load_from_contract, load_from_directory, discover_and_load
+  # - Security validation methods (_validate_file_security, _sanitize_path)
+  # - Contract parsing (_load_contract, _parse_yaml)
+  # - Error handling (discover_with_errors, graceful mode support)
+  - file_pattern: 'projector_plugin_loader\.py'
+    class_pattern: "Class 'ProjectorPluginLoader'"
+    violation_pattern: 'has \d+ methods'
     reason: >
-      HandlerPublishingVisitor is an AST visitor class that detects handler publishing patterns. The name correctly describes its purpose: visiting AST nodes to find handlers that incorrectly publish events.
+      Plugin loader pattern requires multiple discovery methods (load_from_contract, load_from_directory, discover_and_load), security validation, contract parsing, and error handling methods. Mirrors handler_contract_source.py pattern.
 
     documentation:
-      - Python ast module (NodeVisitor pattern)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_.*\.py'
-    violation_pattern: "Function name 'visit_.*' should use snake_case"
+      - src/omnibase_infra/runtime/handler_contract_source.py (reference pattern)
+    ticket: OMN-1168
+  # ==========================================================================
+  # Projector Schema Model Exemptions (OMN-1168)
+  # ==========================================================================
+  # table_name is a standard database identifier, not an entity reference.
+  # This pattern is ubiquitous in database-related models.
+  # NOTE: Projector models are temporarily in omnibase_infra until omnibase_core
+  # provides canonical projector model types.
+  - file_pattern: 'model_projector_schema\.py'
+    violation_pattern: "Field 'table_name' might reference an entity"
     reason: >
-      AST visitor methods must follow Python's ast.NodeVisitor naming convention. visit_ClassDef, visit_FunctionDef, etc. are required method names for the AST visitor pattern from Python stdlib.
+      table_name is a PostgreSQL table identifier (e.g., 'node_registrations'), not an entity reference. Standard database schema pattern. Note: Projector models are temporarily located in omnibase_infra until omnibase_core provides canonical projector model types.
 
     documentation:
-      - Python ast module documentation (NodeVisitor.visit_* methods)
-    ticket: OMN-1099
+      - PostgreSQL CREATE TABLE syntax
+      - src/omnibase_infra/schemas/schema_registration_projection.sql (example usage)
+      - src/omnibase_infra/models/projectors/model_projector_schema.py (ModelProjectorSchema defines table_name as identifier, temporary location in omnibase_infra)
+    ticket: OMN-1168
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
