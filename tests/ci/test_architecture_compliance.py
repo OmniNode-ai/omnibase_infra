@@ -23,24 +23,6 @@ These tests run as part of the CI pipeline in two ways:
    - Runs: `poetry run python scripts/validate.py all --verbose`
    - Includes architecture_layers as part of the full validation suite
 
-Known Issues Tracking
-=====================
-
-Some imports have known violations that are tracked in Linear tickets.
-These use pytest.mark.xfail markers to:
-- Document the known issue with ticket reference
-- Allow CI to pass while the issue is tracked
-- Automatically detect when the issue is fixed (strict=False)
-
-Current known issues:
-- aiohttp: OMN-1015 - async HTTP client needs migration to infra
-- redis:   OMN-1295 - Redis client needs migration to infra
-
-The xfail markers ensure these violations are:
-1. Visible in test output with ticket references
-2. Not blocking CI until fixed
-3. Automatically promoted to failures when resolved
-
 Detection Limitations (IMPORTANT)
 =================================
 
@@ -730,22 +712,8 @@ class TestArchitectureCompliance:
             pytest.param("kafka", "event streaming", id="no-kafka"),
             pytest.param("httpx", "HTTP client", id="no-httpx"),
             pytest.param("asyncpg", "database driver", id="no-asyncpg"),
-            pytest.param(
-                "aiohttp",
-                "async HTTP",
-                marks=pytest.mark.xfail(
-                    reason="Known issue: tracked in OMN-1015", strict=False
-                ),
-                id="no-aiohttp",
-            ),
-            pytest.param(
-                "redis",
-                "cache",
-                marks=pytest.mark.xfail(
-                    reason="Known issue: tracked in OMN-1295", strict=False
-                ),
-                id="no-redis",
-            ),
+            pytest.param("aiohttp", "async HTTP", id="no-aiohttp"),
+            pytest.param("redis", "cache", id="no-redis"),
             pytest.param("psycopg", "PostgreSQL driver (v3)", id="no-psycopg"),
             pytest.param("psycopg2", "PostgreSQL driver (v2)", id="no-psycopg2"),
         ],
@@ -796,8 +764,8 @@ class TestArchitectureCompliance:
             "kafka",
             "httpx",
             "asyncpg",
-            # Note: aiohttp excluded - has dedicated xfail test (OMN-1015)
-            # Note: redis excluded - has dedicated xfail test (OMN-1295)
+            "aiohttp",
+            "redis",
             "psycopg",
             "psycopg2",
             "consul",

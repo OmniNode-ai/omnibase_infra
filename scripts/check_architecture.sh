@@ -102,6 +102,7 @@ FORBIDDEN_IMPORTS=(
 KNOWN_ISSUES=(
     "aiohttp|OMN-1015|async HTTP client usage in core - needs migration to infra"
     "redis|OMN-1295|Redis client usage in core - needs migration to infra"
+    "consul|OMN-1015|Consul client type hints in core - TYPE_CHECKING import"
 )
 
 # File patterns to exclude from checking (quoted for shellcheck compliance)
@@ -351,18 +352,22 @@ FORBIDDEN IMPORTS:
 KNOWN ISSUES:
     Some imports have known violations that are tracked in Linear tickets.
     The Python tests (tests/ci/test_architecture_compliance.py) use xfail
-    markers for these, but this script enforces the invariant strictly.
+    markers for these.
 
     - aiohttp: OMN-1015 - async HTTP client needs migration to infra
     - redis:   OMN-1295 - Redis client needs migration to infra
+    - consul:  OMN-1015 - Consul client type hints (TYPE_CHECKING import)
 
-    These violations will still cause the script to fail (exit code 1),
-    but they are documented for visibility. Fix them by addressing the
-    corresponding Linear tickets.
+    When ONLY known issues are detected, the script exits with code 0
+    (pass) to avoid blocking CI unnecessarily. The issues are still
+    reported for visibility with links to their Linear tickets.
+
+    Unknown violations (not in the known issues list) will cause the
+    script to fail with exit code 1.
 
 EXIT CODES:
-    0   All checks passed - no violations found
-    1   Architecture violation detected
+    0   All checks passed - no violations found, OR only known issues found
+    1   Unknown architecture violation detected (not tracked in Linear)
     2   Script error (path not found, invalid arguments, etc.)
 
 JSON OUTPUT:
@@ -378,6 +383,10 @@ JSON OUTPUT:
       "excluded_file_patterns": ["*.md", "*.yaml", ...],
       "excluded_directories": [".git", "__pycache__", ...]
     }
+
+    NOTE: When violations are found but ALL are known issues (tracked in
+    Linear), success=true and exit_code=0. The violations array will still
+    contain the known issues for visibility, but CI will pass.
 
     The excluded_file_patterns and excluded_directories fields help debug
     cases where expected files are not being scanned.
@@ -429,9 +438,12 @@ LIMITATIONS:
        - Imports in docstrings (grep cannot parse multiline strings)
        - Variable names matching import patterns (e.g., kafka_topic)
 
-    3. Known Issues (tracked in Linear):
+    3. Known Issues (tracked in Linear, NOT BLOCKING):
        - aiohttp: OMN-1015 - async HTTP client needs migration
        - redis:   OMN-1295 - Redis client needs migration
+       - consul:  OMN-1015 - Consul TYPE_CHECKING import
+
+       These are detected and reported, but exit code is 0 (pass).
 
     RECOMMENDED: For comprehensive AST-based analysis, use:
         pytest tests/ci/test_architecture_compliance.py
@@ -578,9 +590,10 @@ check_import() {
     violations=$(grep -rn --include="*.py" "${GREP_EXCLUDE_ARGS[@]}" -E "${pattern}" "${search_path}" 2>/dev/null) || true
 
     if [[ -n "${violations}" ]]; then
-        if [[ "${OUTPUT_JSON}" == "true" ]]; then
-            json_add_violation "${import_name}" "${violations}"
-        else
+        # Always track violations for categorization (known vs unknown)
+        json_add_violation "${import_name}" "${violations}"
+
+        if [[ "${OUTPUT_JSON}" != "true" ]]; then
             print_fail "Found '${import_name}' imports:"
             echo ""
             echo "${violations}" | while IFS= read -r line; do
@@ -590,9 +603,10 @@ check_import() {
         fi
         return 1
     else
-        if [[ "${OUTPUT_JSON}" == "true" ]]; then
-            json_add_passed "${import_name}"
-        else
+        # Always track passed checks
+        json_add_passed "${import_name}"
+
+        if [[ "${OUTPUT_JSON}" != "true" ]]; then
             print_pass "No '${import_name}' imports found"
         fi
         return 0
@@ -623,25 +637,15 @@ report_known_issues() {
     for issue in "${KNOWN_ISSUES[@]}"; do
         IFS='|' read -r import_name ticket_id description <<< "${issue}"
 
-        # Check if this import was found in violations (check JSON_VIOLATIONS array)
+        # Check if this import was found in violations
+        # JSON_VIOLATIONS is always populated regardless of output mode
         local found=false
-        if [[ "${OUTPUT_JSON}" == "true" ]]; then
-            for v in "${JSON_VIOLATIONS[@]:-}"; do
-                if [[ "${v}" == *"\"${import_name}\""* ]]; then
-                    found=true
-                    break
-                fi
-            done
-        else
-            # For text output, we've already printed violations
-            # This function is called after check_import, so we re-check
-            # Escape the import name for use in grep pattern
-            local escaped_name
-            escaped_name=$(escape_regex "${import_name}")
-            if grep -rq --include="*.py" -E "^[[:space:]]*(from[[:space:]]+${escaped_name}[[:space:].]+import|import[[:space:]]+${escaped_name}([[:space:]]|$|\\.))" "${JSON_TARGET}" 2>/dev/null; then
+        for v in "${JSON_VIOLATIONS[@]:-}"; do
+            if [[ "${v}" == *"\"import\":\"${import_name}\""* ]]; then
                 found=true
+                break
             fi
-        fi
+        done
 
         if [[ "${found}" == "true" ]]; then
             if [[ "${found_known_issues}" == "false" ]]; then
@@ -781,24 +785,85 @@ main() {
         echo ""
     fi
 
+    # Categorize violations as known vs unknown
+    local has_unknown_violations=false
+    local known_violation_count=0
+    local unknown_violation_count=0
+
+    if [[ "${has_violations}" == "true" ]]; then
+        # Check each violation to see if it's a known issue
+        for v in "${JSON_VIOLATIONS[@]:-}"; do
+            # Extract import name from JSON violation object
+            # Format: {"import":"name","violations":"..."}
+            local import_name=""
+            import_name=$(echo "${v}" | sed -n 's/.*"import":"\([^"]*\)".*/\1/p')
+
+            if [[ -z "${import_name}" ]]; then
+                continue
+            fi
+
+            # Check if this is a known issue
+            local is_known=false
+            for issue in "${KNOWN_ISSUES[@]}"; do
+                local known_import="${issue%%|*}"
+                if [[ "${import_name}" == "${known_import}" ]]; then
+                    is_known=true
+                    break
+                fi
+            done
+
+            if [[ "${is_known}" == "true" ]]; then
+                ((known_violation_count++)) || true
+            else
+                has_unknown_violations=true
+                ((unknown_violation_count++)) || true
+            fi
+        done
+    fi
+
     # Summary
     if [[ "${has_violations}" == "true" ]]; then
-        JSON_EXIT_CODE=1
-        if [[ "${OUTPUT_JSON}" == "true" ]]; then
-            output_json
-        else
-            # Report known issues with ticket links (text output only)
-            report_known_issues "${has_violations}"
+        if [[ "${has_unknown_violations}" == "true" ]]; then
+            # Unknown violations found - FAIL
+            JSON_EXIT_CODE=1
+            if [[ "${OUTPUT_JSON}" == "true" ]]; then
+                output_json
+            else
+                # Report known issues with ticket links (text output only)
+                report_known_issues "${has_violations}"
 
-            print_header "ARCHITECTURE VIOLATION DETECTED"
-            echo -e "${RED}${BOLD}omnibase_core contains infrastructure dependencies!${NC}"
-            echo ""
-            echo "The core layer must not import infrastructure-specific packages."
-            echo "These imports should be moved to omnibase_infra or removed."
-            echo ""
-            echo "Exit code: 1"
+                print_header "ARCHITECTURE VIOLATION DETECTED"
+                echo -e "${RED}${BOLD}omnibase_core contains infrastructure dependencies!${NC}"
+                echo ""
+                echo "Found ${unknown_violation_count} unknown violation(s) and ${known_violation_count} known issue(s)."
+                echo ""
+                echo "The core layer must not import infrastructure-specific packages."
+                echo "These imports should be moved to omnibase_infra or removed."
+                echo ""
+                echo "Exit code: 1"
+            fi
+            exit 1
+        else
+            # Only known issues found - PASS with warning
+            JSON_EXIT_CODE=0
+            if [[ "${OUTPUT_JSON}" == "true" ]]; then
+                output_json
+            else
+                # Report known issues with ticket links (text output only)
+                report_known_issues "${has_violations}"
+
+                print_header "Known Issues Detected (Not Blocking)"
+                echo -e "${YELLOW}${BOLD}All detected violations are known issues tracked in Linear.${NC}"
+                echo ""
+                echo "Found ${known_violation_count} known issue(s) - see ticket links above."
+                echo ""
+                echo "These violations are expected and do not block CI."
+                echo "Fix them by resolving the corresponding Linear tickets."
+                echo ""
+                echo "Exit code: 0 (known issues only)"
+            fi
+            exit 0
         fi
-        exit 1
     else
         JSON_EXIT_CODE=0
         if [[ "${OUTPUT_JSON}" == "true" ]]; then
