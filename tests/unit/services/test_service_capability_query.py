@@ -167,9 +167,15 @@ def mock_projection_reader() -> AsyncMock:
     Uses spec=ProtocolCapabilityProjection for type safety. The spec ensures:
     - Method calls match the protocol interface
     - Typos in method names are caught as AttributeError
+    - Signature drift in test doubles is caught (accessing undefined methods fails)
+
+    Individual method mocks (e.g., get_by_capability_tag) inherit the spec from
+    the parent AsyncMock. The explicit assignments override return values while
+    preserving spec validation for method existence.
 
     Note: get_by_intent_types is added explicitly as it's an extension method
-    in ProjectionReaderRegistration not yet in the protocol.
+    in ProjectionReaderRegistration not yet in the protocol. This is intentional
+    to support bulk intent queries that aren't part of the base protocol.
     """
     reader = AsyncMock(spec=ProtocolCapabilityProjection)
     reader.get_by_capability_tag = AsyncMock(return_value=[])
@@ -177,7 +183,8 @@ def mock_projection_reader() -> AsyncMock:
     reader.get_by_capability_tags_any = AsyncMock(return_value=[])
     reader.get_by_intent_type = AsyncMock(return_value=[])
     # get_by_intent_types is an extension method not in ProtocolCapabilityProjection
-    # but is implemented in ProjectionReaderRegistration for bulk intent queries
+    # but is implemented in ProjectionReaderRegistration for bulk intent queries.
+    # Adding this explicitly is intentional since it's a production method.
     reader.get_by_intent_types = AsyncMock(return_value=[])
     reader.get_by_protocol = AsyncMock(return_value=[])
     reader.get_by_contract_type = AsyncMock(return_value=[])

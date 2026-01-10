@@ -138,28 +138,16 @@ class ServiceNodeSelector:
         self._round_robin_lock: asyncio.Lock = asyncio.Lock()
         self._max_round_robin_entries = max_round_robin_entries
 
-    def _safe_uuid(self, correlation_id: str) -> UUID:
-        """Safely convert correlation_id string to UUID.
+    def _ensure_correlation_id(self, correlation_id: UUID | None) -> UUID:
+        """Ensure correlation ID is present, generating one if missing.
 
         Args:
-            correlation_id: String representation of a UUID.
+            correlation_id: Optional correlation ID from caller.
 
         Returns:
-            UUID object.
-
-        Raises:
-            RuntimeHostError: If the correlation_id is not a valid UUID format.
+            The provided correlation ID, or a newly generated UUID4.
         """
-        try:
-            return UUID(correlation_id)
-        except ValueError as e:
-            raise RuntimeHostError(
-                f"Invalid correlation_id format: {correlation_id}",
-                context=ModelInfraErrorContext(
-                    operation="uuid_conversion",
-                ),
-                original_error=str(e),
-            ) from e
+        return correlation_id or uuid4()
 
     async def _prune_round_robin_state(self) -> int:
         """Prune oldest round-robin entries when limit is exceeded.
@@ -226,7 +214,7 @@ class ServiceNodeSelector:
         candidates: list[ModelRegistrationProjection],
         strategy: EnumSelectionStrategy,
         selection_key: str | None = None,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> ModelRegistrationProjection | None:
         """Select a node from candidates using the specified strategy.
 
@@ -274,13 +262,13 @@ class ServiceNodeSelector:
             >>> result == candidates[0]
             True
         """
-        # Auto-generate correlation_id if not provided for distributed tracing
-        correlation_id = correlation_id or str(uuid4())
+        # Ensure correlation_id is present for distributed tracing
+        cid = self._ensure_correlation_id(correlation_id)
 
         if not candidates:
             logger.debug(
                 "No candidates provided for selection",
-                extra={"correlation_id": correlation_id},
+                extra={"correlation_id": str(cid)},
             )
             return None
 
@@ -289,25 +277,23 @@ class ServiceNodeSelector:
                 "Single candidate, returning directly",
                 extra={
                     "entity_id": str(candidates[0].entity_id),
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(cid),
                 },
             )
             return candidates[0]
 
         if strategy == EnumSelectionStrategy.FIRST:
-            return self._select_first(candidates, correlation_id)
+            return self._select_first(candidates, cid)
         elif strategy == EnumSelectionStrategy.RANDOM:
-            return self._select_random(candidates, correlation_id)
+            return self._select_random(candidates, cid)
         elif strategy == EnumSelectionStrategy.ROUND_ROBIN:
-            return await self._select_round_robin(
-                candidates, selection_key, correlation_id
-            )
+            return await self._select_round_robin(candidates, selection_key, cid)
         elif strategy == EnumSelectionStrategy.LEAST_LOADED:
             raise RuntimeHostError(
                 "LEAST_LOADED selection strategy is not yet implemented",
                 context=ModelInfraErrorContext(
                     operation="select",
-                    correlation_id=self._safe_uuid(correlation_id),
+                    correlation_id=cid,
                 ),
                 strategy=strategy.value,
                 selection_key=selection_key,
@@ -322,7 +308,7 @@ class ServiceNodeSelector:
                 f"Unhandled selection strategy: {strategy.value}",
                 context=ModelInfraErrorContext(
                     operation="select",
-                    correlation_id=self._safe_uuid(correlation_id),
+                    correlation_id=cid,
                 ),
                 strategy=strategy.value,
                 selection_key=selection_key,
@@ -332,13 +318,13 @@ class ServiceNodeSelector:
     def _select_first(
         self,
         candidates: list[ModelRegistrationProjection],
-        correlation_id: str | None = None,
+        correlation_id: UUID,
     ) -> ModelRegistrationProjection:
         """Select the first candidate (deterministic).
 
         Args:
             candidates: Non-empty list of candidates.
-            correlation_id: Optional correlation ID for distributed tracing.
+            correlation_id: Correlation ID for distributed tracing.
 
         Returns:
             First candidate in the list.
@@ -349,7 +335,7 @@ class ServiceNodeSelector:
             extra={
                 "entity_id": str(selected.entity_id),
                 "total_candidates": len(candidates),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
         return selected
@@ -357,13 +343,13 @@ class ServiceNodeSelector:
     def _select_random(
         self,
         candidates: list[ModelRegistrationProjection],
-        correlation_id: str | None = None,
+        correlation_id: UUID,
     ) -> ModelRegistrationProjection:
         """Select a random candidate.
 
         Args:
             candidates: Non-empty list of candidates.
-            correlation_id: Optional correlation ID for distributed tracing.
+            correlation_id: Correlation ID for distributed tracing.
 
         Returns:
             Randomly selected candidate.
@@ -374,7 +360,7 @@ class ServiceNodeSelector:
             extra={
                 "entity_id": str(selected.entity_id),
                 "total_candidates": len(candidates),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
         return selected
@@ -382,8 +368,8 @@ class ServiceNodeSelector:
     async def _select_round_robin(
         self,
         candidates: list[ModelRegistrationProjection],
-        selection_key: str | None = None,
-        correlation_id: str | None = None,
+        selection_key: str | None,
+        correlation_id: UUID,
     ) -> ModelRegistrationProjection:
         """Select the next candidate in round-robin sequence.
 
@@ -401,7 +387,7 @@ class ServiceNodeSelector:
             candidates: Non-empty list of candidates. Treated as immutable -
                 the list is accessed by index but never modified.
             selection_key: Key for state tracking. Defaults to "_default".
-            correlation_id: Optional correlation ID for distributed tracing.
+            correlation_id: Correlation ID for distributed tracing.
 
         Returns:
             Next candidate in the round-robin sequence.
@@ -424,7 +410,7 @@ class ServiceNodeSelector:
                         "selection_key": key,
                         "computed_index": (last_index + 1) % len(candidates),
                         "candidates_count": len(candidates),
-                        "correlation_id": correlation_id,
+                        "correlation_id": str(correlation_id),
                     },
                 )
 
@@ -446,7 +432,7 @@ class ServiceNodeSelector:
                 "selection_key": key,
                 "index": next_index,
                 "total_candidates": len(candidates),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
         return selected

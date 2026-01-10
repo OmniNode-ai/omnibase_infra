@@ -45,6 +45,9 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.models.discovery import ModelDependencySpec
 from omnibase_infra.models.projection import ModelRegistrationProjection
+from omnibase_infra.models.projection.model_registration_projection import (
+    ContractTypeWithUnknown,
+)
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
@@ -77,7 +80,7 @@ def create_mock_projection(
     capability_tags: list[str] | None = None,
     intent_types: list[str] | None = None,
     protocols: list[str] | None = None,
-    contract_type: str | None = "effect",
+    contract_type: ContractTypeWithUnknown = "effect",
 ) -> ModelRegistrationProjection:
     """Create a mock projection with sensible defaults.
 
@@ -90,7 +93,9 @@ def create_mock_projection(
         capability_tags: List of capability tags
         intent_types: List of intent types this node handles
         protocols: List of protocols this node implements
-        contract_type: Contract type (effect, compute, reducer, orchestrator)
+        contract_type: Contract type (effect, compute, reducer, orchestrator).
+            Required parameter with default "effect" - use explicit value
+            to test filtering scenarios.
 
     Returns:
         ModelRegistrationProjection with test data
@@ -168,9 +173,15 @@ def mock_projection_reader() -> AsyncMock:
     Uses spec=ProtocolCapabilityProjection for type safety. The spec ensures:
     - Method calls match the protocol interface
     - Typos in method names are caught as AttributeError
+    - Signature drift in test doubles is caught (accessing undefined methods fails)
+
+    Individual method mocks (e.g., get_by_capability_tag) inherit the spec from
+    the parent AsyncMock. The explicit assignments override return values while
+    preserving spec validation for method existence.
 
     Note: get_by_intent_types is added explicitly as it's an extension method
-    in ProjectionReaderRegistration not yet in the protocol.
+    in ProjectionReaderRegistration not yet in the protocol. This is intentional
+    to support bulk intent queries that aren't part of the base protocol.
     """
     from omnibase_infra.protocols.protocol_capability_projection import (
         ProtocolCapabilityProjection,
@@ -182,7 +193,8 @@ def mock_projection_reader() -> AsyncMock:
     reader.get_by_capability_tags_any = AsyncMock(return_value=[])
     reader.get_by_intent_type = AsyncMock(return_value=[])
     # get_by_intent_types is an extension method not in ProtocolCapabilityProjection
-    # but is implemented in ProjectionReaderRegistration for bulk intent queries
+    # but is implemented in ProjectionReaderRegistration for bulk intent queries.
+    # Adding this explicitly is intentional since it's a production method.
     reader.get_by_intent_types = AsyncMock(return_value=[])
     reader.get_by_protocol = AsyncMock(return_value=[])
     reader.get_by_contract_type = AsyncMock(return_value=[])

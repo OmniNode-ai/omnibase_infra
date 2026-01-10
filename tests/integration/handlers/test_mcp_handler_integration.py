@@ -51,6 +51,20 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
+# Check if MCP SDK is available for tests that require it
+try:
+    import mcp
+
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+
+requires_mcp = pytest.mark.skipif(
+    not MCP_AVAILABLE,
+    reason="MCP SDK not installed. Install via: poetry add mcp",
+)
+
+
 # =============================================================================
 # Test Helper Classes
 # =============================================================================
@@ -364,6 +378,7 @@ class TestMcpTransportCreation:
         assert transport.is_running is False
 
 
+@requires_mcp
 class TestMcpAppCreation:
     """Tests for MCP application creation."""
 
@@ -420,6 +435,7 @@ class TestMcpAppCreation:
         assert isinstance(app, Starlette)
 
 
+@requires_mcp
 class TestMcpHttpEndpoint:
     """Tests for MCP HTTP endpoint using ASGI transport."""
 
@@ -664,6 +680,7 @@ class TestMcpTransportLifecycle:
         await mcp_transport.stop()
         assert mcp_transport.is_running is False
 
+    @requires_mcp
     async def test_transport_app_cleared_on_stop(
         self,
         mcp_transport: TransportMCPStreamableHttp,

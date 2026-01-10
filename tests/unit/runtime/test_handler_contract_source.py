@@ -32,14 +32,16 @@ import pytest
 # Protocol imports from omnibase_infra - HandlerContractSource implements
 # ProtocolContractSource, NOT omnibase_spi's ProtocolHandlerSource.
 #
-# Why local protocols are used instead of SPI protocols:
-#   - omnibase_spi.ProtocolHandlerSource has sync list_handler_descriptors()
-#     returning tuple[ModelHandlerDescriptor, ...]
-#   - ProtocolContractSource has async discover_handlers() returning
-#     ModelContractDiscoveryResult (with validation error collection)
+# Why local ProtocolContractSource is used instead of SPI ProtocolHandlerSource:
+#   - omnibase_spi.ProtocolHandlerSource.discover_handlers() returns
+#     list[ProtocolHandlerDescriptor] (simple list of descriptors)
+#   - ProtocolContractSource.discover_handlers() returns
+#     ModelContractDiscoveryResult (with both descriptors AND validation_errors)
 #
-# The local protocols provide the async discovery pattern with graceful error
-# handling that the implementation requires.
+# The local ProtocolContractSource provides graceful error handling with
+# structured validation error collection that the SPI protocol doesn't support.
+# This enables the graceful_mode=True pattern where discovery continues despite
+# errors and returns both valid descriptors and collected validation errors.
 from omnibase_infra.models.handlers.model_handler_descriptor import (
     ModelHandlerDescriptor,
 )

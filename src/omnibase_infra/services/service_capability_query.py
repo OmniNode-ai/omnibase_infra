@@ -755,17 +755,6 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
                 correlation_id=correlation_id,
             )
 
-        # No filter specified - cannot resolve
-        if not candidates and not dependency_spec.has_any_filter():
-            logger.warning(
-                "Dependency spec has no discovery filters",
-                extra={
-                    "dependency_name": dependency_spec.name,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return None
-
         # No matches found
         if not candidates:
             # TODO: Implement fallback_module support here when needed.
@@ -791,7 +780,7 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
             candidates=candidates,
             strategy=strategy,
             selection_key=dependency_spec.name,
-            correlation_id=str(correlation_id),
+            correlation_id=correlation_id,
         )
 
         if selected:
@@ -847,7 +836,8 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
             EnumRegistrationState value.
 
         Raises:
-            ProtocolConfigurationError: If state string is not a valid state.
+            ProtocolConfigurationError: If state string is not a valid state or
+                if an unexpected error occurs during parsing.
         """
         # Handle None - default to ACTIVE
         if state_value is None:
@@ -871,32 +861,66 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
                     "correlation_id": correlation_id,
                 },
             ) from e
+        except Exception as e:
+            # Catch any other unexpected errors (e.g., AttributeError if state_value
+            # is an unexpected type that passed type checking)
+            raise ProtocolConfigurationError(
+                f"Failed to parse registration state: {type(e).__name__}",
+                details={
+                    "state": str(state_value),
+                    "error": str(e),
+                    "correlation_id": correlation_id,
+                },
+            ) from e
 
     def _parse_selection_strategy(
-        self, strategy_str: str, correlation_id: UUID | None = None
+        self,
+        strategy: str | EnumSelectionStrategy,
+        correlation_id: UUID | None = None,
     ) -> EnumSelectionStrategy:
-        """Parse selection strategy string to enum.
+        """Parse selection strategy to enum.
+
+        Accepts either an EnumSelectionStrategy enum value (returned as-is)
+        or a string representation (parsed to enum).
 
         Args:
-            strategy_str: Strategy string (e.g., "first", "round_robin").
+            strategy: Strategy as EnumSelectionStrategy or string
+                (e.g., "first", "round_robin").
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
             EnumSelectionStrategy value.
 
         Raises:
-            ProtocolConfigurationError: If strategy string is not a valid strategy.
+            ProtocolConfigurationError: If strategy string is not a valid strategy
+                or if an unexpected error occurs during parsing.
         """
+        # If already an enum, return directly
+        if isinstance(strategy, EnumSelectionStrategy):
+            return strategy
+
+        # Parse string to enum
         try:
-            return EnumSelectionStrategy(strategy_str.lower())
+            return EnumSelectionStrategy(strategy.lower())
         except ValueError as e:
             valid_strategies = [s.value for s in EnumSelectionStrategy]
             raise ProtocolConfigurationError(
-                f"Invalid selection strategy '{strategy_str}'. "
+                f"Invalid selection strategy '{strategy}'. "
                 f"Valid strategies are: {valid_strategies}",
                 details={
-                    "strategy": strategy_str,
+                    "strategy": strategy,
                     "valid_strategies": valid_strategies,
+                    "correlation_id": correlation_id,
+                },
+            ) from e
+        except Exception as e:
+            # Catch any other unexpected errors (e.g., AttributeError if strategy
+            # is an unexpected type that passed type checking)
+            raise ProtocolConfigurationError(
+                f"Failed to parse selection strategy: {type(e).__name__}",
+                details={
+                    "strategy": str(strategy),
+                    "error": str(e),
                     "correlation_id": correlation_id,
                 },
             ) from e

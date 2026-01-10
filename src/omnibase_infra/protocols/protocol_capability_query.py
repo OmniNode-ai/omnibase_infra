@@ -111,7 +111,7 @@ class ProtocolCapabilityQuery(Protocol):
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, INACTIVE).
+                nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -146,7 +146,7 @@ class ProtocolCapabilityQuery(Protocol):
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, INACTIVE).
+                nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -181,7 +181,7 @@ class ProtocolCapabilityQuery(Protocol):
             state: Registration state filter. When None (default), filters to
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
-                nodes in other states (e.g., PENDING, INACTIVE).
+                nodes in other states (e.g., PENDING_REGISTRATION, LIVENESS_EXPIRED).
 
         Returns:
             List of matching registration projections. Empty list if no matches.

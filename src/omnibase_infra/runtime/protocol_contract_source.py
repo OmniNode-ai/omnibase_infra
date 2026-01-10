@@ -1,18 +1,25 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Contract Source Protocol Definition (Fallback).
+"""Contract Source Protocol Definition.
 
-This module provides a fallback protocol definition for contract sources
-when omnibase_spi is not available.
+This module provides the ProtocolContractSource protocol for handler sources
+that need graceful error handling with validation error collection.
 
 Part of OMN-1097: HandlerContractSource + Filesystem Discovery.
 
-Note:
-    This is a fallback definition. When omnibase_spi is available,
-    the canonical protocol definition from that package should be used.
+Why this exists alongside omnibase_spi.ProtocolHandlerSource:
+    - omnibase_spi.ProtocolHandlerSource.discover_handlers() returns
+      list[ProtocolHandlerDescriptor] (simple list of descriptors)
+    - ProtocolContractSource.discover_handlers() returns
+      ModelContractDiscoveryResult (with both descriptors AND validation_errors)
+
+    This protocol enables graceful_mode=True pattern where discovery continues
+    despite errors and returns both valid descriptors and collected validation
+    errors. The SPI protocol is simpler and suitable for sources that don't
+    need structured error collection.
 
 See Also:
-    - ProtocolHandlerSource: Canonical protocol in omnibase_spi
+    - omnibase_spi.ProtocolHandlerSource: Simpler protocol in SPI package
     - HandlerContractSource: Implementation of this protocol
 
 .. versionadded:: 0.6.2
@@ -29,14 +36,14 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class ProtocolContractSource(Protocol):
-    """Protocol for handler sources.
+    """Protocol for handler sources with validation error collection.
 
-    Defines the interface that handler sources must implement.
+    Defines the interface for handler sources that support graceful error
+    handling through structured validation error collection.
 
-    Note:
-        Named ProtocolContractSource to avoid pattern validation
-        warnings. This is a fallback protocol for when omnibase_spi
-        is not available.
+    This protocol differs from omnibase_spi.ProtocolHandlerSource by returning
+    ModelContractDiscoveryResult which contains both discovered descriptors
+    AND validation errors, enabling graceful_mode discovery patterns.
     """
 
     @property
