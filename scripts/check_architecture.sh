@@ -29,8 +29,8 @@ FORBIDDEN_IMPORTS=(
     "kafka"
     "httpx"
     "asyncpg"
-    "aiohttp"      # Known issue: OMN-1015 (xfail in Python tests)
-    "redis"        # Known issue: OMN-1295 (xfail in Python tests)
+    "aiohttp"            # Known issue: OMN-1015 (xfail in Python tests)
+    "redis"              # Known issue: OMN-1295 (xfail in Python tests)
     "psycopg"
     "psycopg2"
     "consul"
@@ -48,7 +48,7 @@ KNOWN_ISSUES=(
     "redis|OMN-1295|Redis client usage in core - needs migration to infra"
 )
 
-# File patterns to exclude from checking
+# File patterns to exclude from checking (quoted for shellcheck compliance)
 EXCLUDE_PATTERNS=(
     "requirements*.txt"
     "pyproject.toml"
@@ -63,7 +63,7 @@ EXCLUDE_PATTERNS=(
     "*.lock"
 )
 
-# Directory patterns to exclude
+# Directory patterns to exclude (quoted for shellcheck compliance)
 EXCLUDE_DIRS=(
     ".git"
     "__pycache__"

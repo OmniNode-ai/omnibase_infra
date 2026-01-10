@@ -192,6 +192,10 @@ def _scan_file_for_imports(
         for line_num, line in enumerate(lines, start=1):
             stripped = line.lstrip()
 
+            # The portion of the line to check for imports
+            # (modified when closing a multiline string to only check content after)
+            line_to_check = line
+
             # Skip comment lines (only if not in multiline string)
             if not in_multiline_string and stripped.startswith("#"):
                 continue
@@ -210,33 +214,55 @@ def _scan_file_for_imports(
             else:
                 # Already in a multiline string - check for closing delimiter
                 assert multiline_delimiter is not None
-                count = line.count(multiline_delimiter)
-                if count > 0 and count % 2 == 1:
-                    # Odd count of our delimiter means we're closing it
-                    in_multiline_string = False
-                    multiline_delimiter = None
+                closing_pos = line.find(multiline_delimiter)
+                if closing_pos != -1:
+                    count = line.count(multiline_delimiter)
+                    if count % 2 == 1:
+                        # Odd count means we're closing the multiline string
+                        in_multiline_string = False
+                        multiline_delimiter = None
+                        # Only check content AFTER the closing delimiter for imports
+                        # 3 = len('"""') or len("'''")
+                        line_to_check = line[closing_pos + 3 :]
 
             # Skip lines inside multiline strings (docstrings)
             if in_multiline_string:
                 continue
 
-            # Skip lines that contain only single-line docstrings
-            # (check after multiline handling to avoid double-processing)
-            skip_line = False
-            # Handle string prefixes: r, f, b, rf, fr, br, rb
-            prefix_pattern = r"^[rRfFbB]{0,2}"
+            # Handle single-line docstrings that start the line
+            # If there's content after the docstring, check that content for imports
+            check_stripped = line_to_check.lstrip()
+            # Handle valid Python string prefixes: r, f, b, u (single)
+            # and rf, fr, rb, br (combinations) - case insensitive
+            prefix_pattern = r"^([rRfFbBuU]|[rR][fFbB]|[fFbB][rR])?"
             for delimiter in ('"""', "'''"):
                 # Check if line starts with optional prefix + delimiter
-                if re.match(prefix_pattern + re.escape(delimiter), stripped):
+                prefix_match = re.match(
+                    prefix_pattern + re.escape(delimiter), check_stripped
+                )
+                if prefix_match:
                     # Count occurrences of this delimiter
-                    if _is_balanced_string_line(stripped, delimiter):
+                    if _is_balanced_string_line(check_stripped, delimiter):
                         # Balanced means it's a single-line docstring
-                        skip_line = True
+                        # Find where the second delimiter ends
+                        first_pos = check_stripped.find(delimiter)
+                        second_pos = check_stripped.find(delimiter, first_pos + 3)
+                        if second_pos != -1:
+                            # Get content after the closing delimiter
+                            after_docstring = check_stripped[second_pos + 3 :]
+                            if after_docstring.strip():
+                                # There's content after the docstring - check it
+                                line_to_check = after_docstring
+                            else:
+                                # Only whitespace after docstring - skip line
+                                line_to_check = ""
                         break
-            if skip_line:
+
+            # Skip if line_to_check is empty (was only a docstring)
+            if not line_to_check.strip():
                 continue
 
-            if import_regex.match(line):
+            if import_regex.match(line_to_check):
                 violations.append(
                     ArchitectureViolation(
                         file_path=file_path,
@@ -781,3 +807,157 @@ import kafka
         assert "import kafka" in result
         # Verify content is stripped
         assert "  import kafka  " not in result
+
+    # --- Tests for docstring edge cases ---
+
+    def test_scan_file_for_imports_unclosed_multiline_at_eof(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify unclosed multiline string at EOF does not produce false violations.
+
+        If a file ends with an unclosed multiline string, the scanner should
+        not report any violations from within that string.
+        """
+        test_file = tmp_path / "test_module.py"
+        # Unclosed multiline string - no closing triple quotes
+        content = """\
+'''
+This docstring mentions import kafka
+but is never closed
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_import_after_closing_docstring_same_line(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify import after closing docstring on same line is detected.
+
+        An import statement following a closing docstring delimiter on the
+        same line should be detected as a violation.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = '"""closing docstring""" import kafka\n'
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 1
+        assert violations[0].import_pattern == "kafka"
+
+    def test_scan_file_for_imports_nested_quotes_in_docstrings(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify nested quote delimiters inside docstrings are handled.
+
+        Triple single quotes inside triple double quotes should not break
+        the docstring parsing.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = (
+            '"""\n'
+            "Example: use ''' for nested\n"
+            "import kafka should be ignored\n"
+            '"""\n'
+            "\n"
+            "def my_func():\n"
+            "    pass\n"
+        )
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_fstring_docstring(self, tmp_path: Path) -> None:
+        """Verify f-string prefixed docstrings are handled correctly.
+
+        Content inside f-string formatted docstrings should not trigger
+        violations.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = '''\
+f"""docstring with import kafka"""
+
+def my_func():
+    pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_raw_string_docstring(self, tmp_path: Path) -> None:
+        """Verify r-string prefixed docstrings are handled correctly.
+
+        Content inside raw string formatted docstrings should not trigger
+        violations.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = '''\
+r"""raw docstring with import kafka"""
+
+def my_func():
+    pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_mixed_delimiters(self, tmp_path: Path) -> None:
+        """Verify files with both triple-quote delimiters are handled.
+
+        A file containing both triple-double-quote and triple-single-quote
+        docstrings should have both properly handled without confusion.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = (
+            '"""\n'
+            "First docstring with import kafka mentioned\n"
+            '"""\n'
+            "\n"
+            "def func_one():\n"
+            "    pass\n"
+            "\n"
+            "'''\n"
+            "Second docstring with from kafka import Producer\n"
+            "'''\n"
+            "\n"
+            "def func_two():\n"
+            "    pass\n"
+            "\n"
+            "import os  # This should not trigger kafka violation\n"
+        )
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_mixed_delimiters_with_real_import(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify real imports are detected after mixed delimiter docstrings.
+
+        A file with both delimiter types should still detect real imports
+        outside of docstrings.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = (
+            '"""\n'
+            "Module docstring mentions kafka in example\n"
+            '"""\n'
+            "\n"
+            "'''\n"
+            "Function docstring with from kafka import X\n"
+            "'''\n"
+            "\n"
+            "import kafka  # This is a real import\n"
+        )
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 9
+        assert violations[0].import_pattern == "kafka"

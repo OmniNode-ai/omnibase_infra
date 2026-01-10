@@ -17,8 +17,10 @@ Note:
     ModelDiscoveredCapabilities) should be imported from their canonical locations
     in omnibase_infra.models.discovery, not from this module.
 
-    Configuration models for mixins:
-    - ModelCircuitBreakerConfig: from omnibase_infra.models.resilience
+    Configuration models for mixins are re-exported here for convenience:
+    - ModelCircuitBreakerConfig: Re-exported here (canonical: omnibase_infra.models.resilience)
+
+    Other configuration models (import from canonical locations):
     - ModelIntrospectionConfig: from omnibase_infra.models.discovery
     - ModelIntrospectionTaskConfig: from omnibase_infra.models.discovery
 

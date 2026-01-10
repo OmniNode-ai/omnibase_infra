@@ -79,6 +79,7 @@ def run_architecture_layers(verbose: bool = False) -> bool:
             capture_output=True,
             text=True,
             timeout=120,  # 120 second timeout for large codebases
+            shell=False,
         )
 
         # Print output
