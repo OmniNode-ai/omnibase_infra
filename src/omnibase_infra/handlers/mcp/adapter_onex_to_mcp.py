@@ -24,6 +24,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -211,15 +218,27 @@ class ONEXToMCPAdapter:
             Tool execution result.
 
         Raises:
-            ValueError: If tool not found.
-            RuntimeError: If node executor not configured.
+            InfraUnavailableError: If tool not found in registry.
+            ProtocolConfigurationError: If node executor not configured.
         """
         if tool_name not in self._tool_cache:
-            raise ValueError(f"Tool '{tool_name}' not found in registry")
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.MCP,
+                operation="invoke_tool",
+                target_name=tool_name,
+            )
+            raise InfraUnavailableError(
+                f"Tool '{tool_name}' not found in registry", context=ctx
+            )
 
         if self._node_executor is None:
-            raise RuntimeError(
-                "Node executor not configured. Cannot invoke tools without executor."
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.MCP,
+                operation="invoke_tool",
+            )
+            raise ProtocolConfigurationError(
+                "Node executor not configured. Cannot invoke tools without executor.",
+                context=ctx,
             )
 
         correlation_id = correlation_id or uuid4()
@@ -313,7 +332,9 @@ class ONEXToMCPAdapter:
         parameters: list[MCPToolParameter] = []
         properties = schema.get("properties", {})
         required_list = schema.get("required", [])
-        required: set[str] = set(required_list) if isinstance(required_list, list) else set()
+        required: set[str] = (
+            set(required_list) if isinstance(required_list, list) else set()
+        )
 
         if not isinstance(properties, dict):
             return parameters
