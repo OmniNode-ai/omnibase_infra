@@ -22,7 +22,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from uuid import uuid4
+from uuid import UUID
 
 import asyncpg
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -36,16 +36,8 @@ from omnibase_infra.errors import (
 )
 
 # NOTE: Import from omnibase_infra.models.projectors until omnibase_core provides them.
-# Future import path: from omnibase_core.models.projectors import (
-#     ModelProjectorSchema,
-#     ModelProjectorColumn,
-#     ModelProjectorIndex,
-# )
-from omnibase_infra.models.projectors import (
-    ModelProjectorColumn,
-    ModelProjectorIndex,
-    ModelProjectorSchema,
-)
+# Future import path: from omnibase_core.models.projectors import ModelProjectorSchema
+from omnibase_infra.models.projectors import ModelProjectorSchema
 
 logger = logging.getLogger(__name__)
 
@@ -169,32 +161,10 @@ class ProjectorSchemaValidator:
         """
         self._pool = db_pool
 
-    def _get_correlation_id(self, correlation_id: str | None, method_name: str) -> str:
-        """Get or generate a correlation ID string.
-
-        If the provided correlation_id is None, logs a warning about potential
-        distributed tracing issues and generates a new UUID.
-
-        Args:
-            correlation_id: Optional correlation ID string.
-            method_name: Name of the calling method for logging context.
-
-        Returns:
-            The provided correlation ID or a newly generated UUID string.
-        """
-        if correlation_id is None:
-            logger.warning(
-                "Missing correlation_id in %s - generating new UUID. "
-                "This may break distributed tracing chains.",
-                method_name,
-            )
-            return str(uuid4())
-        return correlation_id
-
     async def ensure_schema_exists(
         self,
         schema: ModelProjectorSchema,
-        correlation_id: str | None = None,
+        correlation_id: UUID,
     ) -> None:
         """Verify that the projection table schema exists.
 
@@ -208,7 +178,8 @@ class ProjectorSchemaValidator:
 
         Args:
             schema: Projector schema to validate.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Correlation ID for distributed tracing. Required
+                to ensure proper observability across service boundaries.
 
         Raises:
             ProjectorSchemaError: If table does not exist or required columns
@@ -218,12 +189,12 @@ class ProjectorSchemaValidator:
 
         Example:
             >>> try:
-            ...     await manager.ensure_schema_exists(schema)
+            ...     await manager.ensure_schema_exists(schema, correlation_id)
             ...     print("Schema valid")
             ... except ProjectorSchemaError as e:
             ...     print(f"Migration needed: {e}")
         """
-        corr_id = self._get_correlation_id(correlation_id, "ensure_schema_exists")
+        corr_id = str(correlation_id)
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="ensure_schema_exists",
@@ -232,7 +203,7 @@ class ProjectorSchemaValidator:
         )
 
         # Check table exists
-        exists = await self.table_exists(schema.table_name, correlation_id=corr_id)
+        exists = await self.table_exists(schema.table_name, correlation_id)
         if not exists:
             migration_hint = (
                 "Run migration first. Generate migration SQL with:\n"
@@ -246,7 +217,9 @@ class ProjectorSchemaValidator:
             )
 
         # Check columns exist
-        existing_columns = await self._get_table_columns(schema.table_name, corr_id)
+        existing_columns = await self._get_table_columns(
+            schema.table_name, correlation_id
+        )
         required_columns = schema.get_column_names()
         missing_columns = [
             col for col in required_columns if col not in existing_columns
@@ -381,10 +354,10 @@ class ProjectorSchemaValidator:
 
         return warnings
 
-    async def generate_migration(
+    def generate_migration(
         self,
         schema: ModelProjectorSchema,
-        correlation_id: str | None = None,
+        correlation_id: UUID,
     ) -> str:
         """Generate CREATE TABLE SQL for manual application.
 
@@ -395,21 +368,25 @@ class ProjectorSchemaValidator:
         The generated SQL uses IF NOT EXISTS clauses to be idempotent.
         This SQL should be reviewed before applying to production.
 
+        Note:
+            This method is synchronous as it only performs string generation
+            without any I/O operations.
+
         Args:
             schema: Projector schema to generate migration for.
-            correlation_id: Optional correlation ID for tracing (for logging).
+            correlation_id: Correlation ID for distributed tracing (for logging).
 
         Returns:
             Complete SQL migration script as a string.
 
         Example:
-            >>> migration_sql = await manager.generate_migration(schema)
+            >>> migration_sql = manager.generate_migration(schema, correlation_id)
             >>> print(migration_sql)
             -- Migration for registration_projections (version 1.0.0)
             -- Generated by ProjectorSchemaValidator
             ...
         """
-        corr_id = self._get_correlation_id(correlation_id, "generate_migration")
+        corr_id = str(correlation_id)
 
         logger.debug(
             "Generating migration SQL",
@@ -426,8 +403,8 @@ class ProjectorSchemaValidator:
     async def table_exists(
         self,
         table_name: str,
+        correlation_id: UUID,
         schema_name: str | None = None,
-        correlation_id: str | None = None,
     ) -> bool:
         """Check if a table exists in the database.
 
@@ -435,8 +412,9 @@ class ProjectorSchemaValidator:
 
         Args:
             table_name: Name of the table to check.
+            correlation_id: Correlation ID for distributed tracing. Required
+                to ensure proper observability across service boundaries.
             schema_name: Optional database schema name. Defaults to 'public'.
-            correlation_id: Optional correlation ID for tracing.
 
         Returns:
             True if table exists, False otherwise.
@@ -446,7 +424,7 @@ class ProjectorSchemaValidator:
             InfraTimeoutError: If query times out.
             RuntimeHostError: For other database errors.
         """
-        corr_id = self._get_correlation_id(correlation_id, "table_exists")
+        corr_id = str(correlation_id)
         effective_schema = schema_name or "public"
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
@@ -490,7 +468,7 @@ class ProjectorSchemaValidator:
     async def _get_table_columns(
         self,
         table_name: str,
-        correlation_id: str | None = None,
+        correlation_id: UUID,
         schema_name: str | None = None,
     ) -> list[str]:
         """Get list of existing column names for a table.
@@ -500,7 +478,8 @@ class ProjectorSchemaValidator:
 
         Args:
             table_name: Name of the table to inspect.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Correlation ID for distributed tracing. Required
+                to ensure proper observability across service boundaries.
             schema_name: Optional database schema name. Defaults to 'public'.
 
         Returns:
@@ -511,7 +490,7 @@ class ProjectorSchemaValidator:
             InfraTimeoutError: If query times out.
             RuntimeHostError: For other database errors.
         """
-        corr_id = self._get_correlation_id(correlation_id, "_get_table_columns")
+        corr_id = str(correlation_id)
         effective_schema = schema_name or "public"
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,

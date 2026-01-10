@@ -11,6 +11,7 @@ Part of OMN-1168: ProjectorPluginLoader contract discovery loading.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 if TYPE_CHECKING:
     from omnibase_infra.models.projectors.model_projector_validation_error import (
@@ -30,21 +31,25 @@ class ModelProjectorDiscoveryResult:
     Attributes:
         projectors: List of successfully loaded projectors.
         validation_errors: List of errors for failed contracts.
+        discovery_correlation_id: Correlation ID for the entire discovery operation.
     """
 
     def __init__(
         self,
         projectors: list[ProtocolEventProjector],
         validation_errors: list[ModelProjectorValidationError],
+        discovery_correlation_id: UUID | None = None,
     ) -> None:
         """Initialize discovery result.
 
         Args:
             projectors: List of successfully loaded projectors.
             validation_errors: List of errors for failed contracts.
+            discovery_correlation_id: Correlation ID for the entire discovery operation.
         """
         self.projectors = projectors
         self.validation_errors = validation_errors
+        self.discovery_correlation_id = discovery_correlation_id
 
     @property
     def success_count(self) -> int:

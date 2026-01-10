@@ -17,6 +17,8 @@ Related Tickets:
 from __future__ import annotations
 
 import re
+from collections import Counter
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -40,9 +42,18 @@ class ModelProjectorSchema(BaseModel):
 
     Attributes:
         table_name: Name of the projection table (snake_case by convention).
+        schema_name: PostgreSQL schema name (currently only 'public' supported).
         columns: List of column definitions.
         indexes: List of index definitions (optional).
         schema_version: Schema version string (semver format).
+
+    Schema Limitation:
+        Currently only the 'public' schema is supported. This is because:
+        1. Most ONEX projections use the default public schema
+        2. Multi-schema support requires additional migration complexity
+        3. Schema-qualified identifiers need additional SQL generation changes
+
+        Future versions may support custom schemas (see ticket backlog).
 
     Example:
         >>> from omnibase_infra.models.projectors import (
@@ -81,6 +92,15 @@ class ModelProjectorSchema(BaseModel):
         description="Name of the projection table (snake_case by convention)",
         min_length=1,
         max_length=128,
+    )
+
+    schema_name: Literal["public"] = Field(
+        default="public",
+        description=(
+            "PostgreSQL schema name. Currently only 'public' is supported. "
+            "This limitation exists because multi-schema support requires "
+            "additional migration tooling and schema-qualified SQL generation."
+        ),
     )
 
     columns: list[ModelProjectorColumn] = Field(
@@ -201,10 +221,14 @@ class ModelProjectorSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_column_names_unique(self) -> ModelProjectorSchema:
-        """Validate that column names are unique within the schema."""
+        """Validate that column names are unique within the schema.
+
+        Uses Counter for O(n) duplicate detection instead of O(n^2) list.count().
+        """
         names = [col.name for col in self.columns]
-        if len(names) != len(set(names)):
-            duplicates = [name for name in names if names.count(name) > 1]
+        name_counts = Counter(names)
+        duplicates = [name for name, count in name_counts.items() if count > 1]
+        if duplicates:
             raise ValueError(f"Duplicate column names: {set(duplicates)}")
         return self
 
@@ -347,6 +371,16 @@ class ModelProjectorSchema(BaseModel):
             ...
             COMMENT ON TABLE "users" IS 'Stores user projection data';
             COMMENT ON COLUMN "users"."id" IS 'Unique user identifier';
+
+        Security Notes:
+            - All identifiers (table name, column names, index names) are validated
+              during model construction and quoted in SQL output.
+            - schema_version is validated to semver format and must not contain line
+              breaks (prevents SQL comment injection).
+            - description fields are validated to reject line breaks and are properly
+              escaped for SQL string literals.
+            - TRUST BOUNDARIES exist for: column default values, index where_clause.
+              These accept raw SQL and must only come from trusted contract.yaml sources.
         """
         parts = [
             f"-- Migration for {self.table_name} (version {self.schema_version})",

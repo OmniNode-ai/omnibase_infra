@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 from omnibase_infra.models.projectors.util_sql_identifiers import (
     IDENT_PATTERN,
     quote_identifier,
+    validate_identifier,
 )
 
 
@@ -75,7 +76,11 @@ class ModelProjectorIndex(BaseModel):
 
     where_clause: str | None = Field(
         default=None,
-        description="Optional partial index predicate (SQL expression)",
+        description=(
+            "Optional partial index predicate (SQL expression). "
+            "TRUST BOUNDARY: This field accepts raw SQL and must only come from "
+            "trusted contract.yaml sources. Do NOT populate from user input."
+        ),
     )
 
     model_config = {
@@ -142,13 +147,17 @@ class ModelProjectorIndex(BaseModel):
         """Generate SQL CREATE INDEX statement.
 
         Uses quoted identifiers for index name, table name, and column names
-        to prevent SQL injection.
+        to prevent SQL injection. Validates table_name for defense-in-depth.
 
         Args:
-            table_name: Name of the table to create the index on.
+            table_name: Name of the table to create the index on. Must be a valid
+                PostgreSQL identifier (letters, digits, underscores only).
 
         Returns:
             SQL CREATE INDEX statement with properly quoted identifiers.
+
+        Raises:
+            ValueError: If table_name is not a valid PostgreSQL identifier.
 
         Example:
             >>> index = ModelProjectorIndex(
@@ -158,7 +167,18 @@ class ModelProjectorIndex(BaseModel):
             ... )
             >>> index.to_sql_definition("registration_projections")
             'CREATE INDEX IF NOT EXISTS "idx_registration_state" ON "registration_projections" ("current_state")'
+
+        Security Notes:
+            - All identifiers (index name, table name, columns) are validated
+              against the PostgreSQL identifier pattern and quoted.
+            - The where_clause field is a **TRUST BOUNDARY**: It accepts raw SQL
+              expressions by design for partial index predicates. Only accept
+              where_clause values from trusted sources (contract.yaml files).
+              Untrusted input in where_clause could enable SQL injection.
         """
+        # Defense-in-depth: validate table_name even though callers should validate
+        validate_identifier(table_name, "table name")
+
         unique_clause = "UNIQUE " if self.unique else ""
         using_clause = (
             f"USING {self.index_type.upper()}" if self.index_type != "btree" else ""
@@ -181,8 +201,10 @@ class ModelProjectorIndex(BaseModel):
         parts.append(f"({columns_sql})")
 
         if self.where_clause:
-            # Note: where_clause is trusted SQL expression from contract.yaml
-            # It is raw SQL by design and should only come from trusted sources
+            # TRUST BOUNDARY: where_clause is raw SQL from contract.yaml
+            # This enables partial index predicates like "deleted_at IS NULL"
+            # SECURITY: Only accept where_clause from trusted contract sources
+            # Do NOT accept user input here - it would enable SQL injection
             parts.append(f"WHERE {self.where_clause}")
 
         return " ".join(parts)

@@ -59,15 +59,35 @@ class ProtocolEventProjector(Protocol):
     async def project(
         self,
         event: ModelEventEnvelope,
+        correlation_id: UUID,
     ) -> ModelProjectionResult:
-        """Project event to persistence store."""
+        """Project event to persistence store.
+
+        Args:
+            event: The event envelope to project.
+            correlation_id: Correlation ID for distributed tracing. Required
+                to ensure proper observability across service boundaries.
+
+        Returns:
+            Result of the projection operation.
+        """
         ...
 
     async def get_state(
         self,
         aggregate_id: UUID,
+        correlation_id: UUID,
     ) -> object | None:
-        """Get current projected state for an aggregate."""
+        """Get current projected state for an aggregate.
+
+        Args:
+            aggregate_id: The unique identifier of the aggregate.
+            correlation_id: Correlation ID for distributed tracing. Required
+                to ensure proper observability across service boundaries.
+
+        Returns:
+            The current projected state, or None if no state exists.
+        """
         ...
 
 

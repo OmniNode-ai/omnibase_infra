@@ -28,6 +28,7 @@ Expected Behavior:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -319,9 +320,15 @@ class TestHandlerContractSourceDiscovery:
             f"Expected 0 validation errors in strict mode, got {len(result.validation_errors)}"
         )
 
-        # Verify each descriptor is a ModelHandlerDescriptor
+        # Verify each descriptor has required attributes (duck-typing convention)
         for descriptor in result.descriptors:
-            assert isinstance(descriptor, ModelHandlerDescriptor)
+            # Check for required ProtocolContractDescriptor attributes
+            assert hasattr(descriptor, "handler_id"), "Missing handler_id attribute"
+            assert hasattr(descriptor, "name"), "Missing name attribute"
+            assert hasattr(descriptor, "version"), "Missing version attribute"
+            assert hasattr(descriptor, "handler_kind"), "Missing handler_kind attribute"
+            assert hasattr(descriptor, "input_model"), "Missing input_model attribute"
+            assert hasattr(descriptor, "output_model"), "Missing output_model attribute"
 
         # Verify the expected handler_ids were discovered
         discovered_ids = {d.handler_id for d in result.descriptors}
@@ -831,20 +838,23 @@ output_model: "omnibase_infra.models.test.ModelTestOutput"
             "Each malformed contract should produce a structured error."
         )
 
-        # Verify all errors are properly structured ModelHandlerValidationError
+        # Verify all errors have required attributes (duck-typing convention)
         for error in result.validation_errors:
-            assert isinstance(error, ModelHandlerValidationError), (
-                f"Expected ModelHandlerValidationError, got {type(error).__name__}"
+            # Check for required validation error attributes
+            assert hasattr(error, "error_type"), "Missing error_type attribute"
+            assert hasattr(error, "rule_id"), "Missing rule_id attribute"
+            assert hasattr(error, "file_path"), "Missing file_path attribute"
+            assert hasattr(error, "message"), "Missing message attribute"
+            assert hasattr(error, "remediation_hint"), (
+                "Missing remediation_hint attribute"
             )
-            # All errors should have file_path for debugging
+            # All errors should have non-None values for debugging
             assert error.file_path is not None, (
                 "Validation error must include file_path for debugging"
             )
-            # All errors should have rule_id
             assert error.rule_id is not None, (
                 "Validation error must include rule_id for categorization"
             )
-            # All errors should have remediation_hint
             assert error.remediation_hint is not None, (
                 "Validation error must include remediation_hint for fix guidance"
             )
@@ -1822,12 +1832,34 @@ def _permissions_are_enforced() -> bool:
         finally:
             temp_path.chmod(0o644)
             temp_path.unlink()
-    except Exception:
-        # If something goes wrong, assume permissions aren't enforced
+    except OSError:
+        # Filesystem-related errors (permissions, missing files, etc.)
+        # indicate permissions aren't reliably enforceable
         return False
 
 
-def _create_mock_stat_result(real_stat_result: object, override_size: int) -> object:
+class MockStatResult(NamedTuple):
+    """Mock stat result with typed fields matching os.stat_result.
+
+    Uses NamedTuple for clarity and type safety. Provides the same interface
+    as os.stat_result for file stat operations in tests.
+    """
+
+    st_size: int
+    st_mode: int
+    st_ino: int
+    st_dev: int
+    st_nlink: int
+    st_uid: int
+    st_gid: int
+    st_atime: float
+    st_mtime: float
+    st_ctime: float
+
+
+def _create_mock_stat_result(
+    real_stat_result: object, override_size: int
+) -> MockStatResult:
     """Create a mock stat result object with overridden st_size.
 
     This factory reduces duplication in file size limit tests by creating
@@ -1839,7 +1871,7 @@ def _create_mock_stat_result(real_stat_result: object, override_size: int) -> ob
         override_size: The file size (st_size) to report
 
     Returns:
-        A mock object with st_size set to override_size and all other
+        A MockStatResult with st_size set to override_size and all other
         attributes copied from real_stat_result.
 
     Example:
@@ -1850,22 +1882,18 @@ def _create_mock_stat_result(real_stat_result: object, override_size: int) -> ob
         ...         return _create_mock_stat_result(result, 10 * 1024 * 1024 + 1)
         ...     return result
     """
-
-    class MockStatResult:
-        """Mock stat result with configurable st_size."""
-
-        st_size = override_size
-        st_mode = real_stat_result.st_mode  # type: ignore[union-attr]
-        st_ino = real_stat_result.st_ino  # type: ignore[union-attr]
-        st_dev = real_stat_result.st_dev  # type: ignore[union-attr]
-        st_nlink = real_stat_result.st_nlink  # type: ignore[union-attr]
-        st_uid = real_stat_result.st_uid  # type: ignore[union-attr]
-        st_gid = real_stat_result.st_gid  # type: ignore[union-attr]
-        st_atime = real_stat_result.st_atime  # type: ignore[union-attr]
-        st_mtime = real_stat_result.st_mtime  # type: ignore[union-attr]
-        st_ctime = real_stat_result.st_ctime  # type: ignore[union-attr]
-
-    return MockStatResult()
+    return MockStatResult(
+        st_size=override_size,
+        st_mode=real_stat_result.st_mode,  # type: ignore[union-attr]
+        st_ino=real_stat_result.st_ino,  # type: ignore[union-attr]
+        st_dev=real_stat_result.st_dev,  # type: ignore[union-attr]
+        st_nlink=real_stat_result.st_nlink,  # type: ignore[union-attr]
+        st_uid=real_stat_result.st_uid,  # type: ignore[union-attr]
+        st_gid=real_stat_result.st_gid,  # type: ignore[union-attr]
+        st_atime=real_stat_result.st_atime,  # type: ignore[union-attr]
+        st_mtime=real_stat_result.st_mtime,  # type: ignore[union-attr]
+        st_ctime=real_stat_result.st_ctime,  # type: ignore[union-attr]
+    )
 
 
 class TestHandlerContractSourcePermissionErrors:

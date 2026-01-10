@@ -84,8 +84,9 @@ def _permissions_are_enforced() -> bool:
             finally:
                 # Restore permissions for cleanup
                 test_file.chmod(original_mode)
-    except Exception:
-        # If anything fails, assume permissions aren't enforced
+    except OSError:
+        # Filesystem-related errors (permissions, missing files, etc.)
+        # indicate permissions aren't reliably enforceable
         return False
 
 

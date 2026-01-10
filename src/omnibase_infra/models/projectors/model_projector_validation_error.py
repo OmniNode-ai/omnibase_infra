@@ -10,6 +10,8 @@ Part of OMN-1168: ProjectorPluginLoader contract discovery loading.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 
 class ModelProjectorValidationError:
     """Structured error for projector validation failures.
@@ -22,6 +24,7 @@ class ModelProjectorValidationError:
         contract_path: Path to the failing contract file.
         message: Human-readable error message.
         remediation_hint: Suggested fix for the error.
+        correlation_id: Request correlation ID for distributed tracing.
     """
 
     def __init__(
@@ -30,6 +33,7 @@ class ModelProjectorValidationError:
         contract_path: str,
         message: str,
         remediation_hint: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> None:
         """Initialize validation error.
 
@@ -38,15 +42,22 @@ class ModelProjectorValidationError:
             contract_path: Path to the failing contract file.
             message: Human-readable error message.
             remediation_hint: Suggested fix for the error.
+            correlation_id: Request correlation ID for distributed tracing.
         """
         self.error_type = error_type
         self.contract_path = contract_path
         self.message = message
         self.remediation_hint = remediation_hint
+        self.correlation_id = correlation_id
 
     def __repr__(self) -> str:
         """Return string representation."""
-        return f"ModelProjectorValidationError(type={self.error_type!r}, path={self.contract_path!r})"
+        return (
+            f"ModelProjectorValidationError("
+            f"type={self.error_type!r}, "
+            f"path={self.contract_path!r}, "
+            f"correlation_id={self.correlation_id})"
+        )
 
 
 __all__ = ["ModelProjectorValidationError"]

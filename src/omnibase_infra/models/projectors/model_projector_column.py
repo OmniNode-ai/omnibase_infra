@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from omnibase_infra.models.projectors.util_sql_identifiers import (
     IDENT_PATTERN,
@@ -80,7 +80,13 @@ class ModelProjectorColumn(BaseModel):
 
     default: str | None = Field(
         default=None,
-        description="Default value expression (SQL literal or expression)",
+        description=(
+            "Default value expression (SQL literal or expression). "
+            "TRUST BOUNDARY: This field accepts raw SQL expressions (e.g., 'now()', "
+            "'true', 'gen_random_uuid()') and must only come from trusted contract.yaml "
+            "sources. Do NOT populate from user input. Line breaks are rejected to "
+            "prevent multi-statement injection."
+        ),
     )
 
     primary_key: bool = Field(
@@ -90,9 +96,13 @@ class ModelProjectorColumn(BaseModel):
 
     length: int | None = Field(
         default=None,
-        description="Length for varchar columns (e.g., 128 for VARCHAR(128))",
+        description=(
+            "Length for varchar columns (e.g., 128 for VARCHAR(128)). "
+            "Required when column_type='varchar' to prevent schema drift. "
+            "PostgreSQL maximum is 10485760, but values above 65535 are rarely needed."
+        ),
         ge=1,
-        le=65535,
+        le=10485760,  # PostgreSQL maximum varchar length
     )
 
     description: str | None = Field(
@@ -179,6 +189,27 @@ class ModelProjectorColumn(BaseModel):
             raise ValueError("description must not contain line breaks")
         return v
 
+    @model_validator(mode="after")
+    def validate_varchar_has_length(self) -> ModelProjectorColumn:
+        """Validate that varchar columns specify an explicit length.
+
+        Prevents schema drift by requiring explicit length specification for
+        varchar columns. Without this, different environments might use
+        different defaults, causing migration inconsistencies.
+
+        Returns:
+            Self if validation passes.
+
+        Raises:
+            ValueError: If column_type is 'varchar' but length is not specified.
+        """
+        if self.column_type == "varchar" and self.length is None:
+            raise ValueError(
+                f"Column '{self.name}' with type 'varchar' must specify an explicit "
+                "length to prevent schema drift (e.g., length=255)"
+            )
+        return self
+
     def to_sql_definition(self) -> str:
         """Generate SQL column definition for CREATE TABLE statement.
 
@@ -202,10 +233,20 @@ class ModelProjectorColumn(BaseModel):
             >>> column_with_desc = ModelProjectorColumn(
             ...     name="name",
             ...     column_type="varchar",
+            ...     length=255,
             ...     description="Display name for the entity",
             ... )
             >>> column_with_desc.to_sql_definition()
             '"name" VARCHAR(255)  -- Display name for the entity'
+
+        Security Notes:
+            - Column name is validated against PostgreSQL identifier pattern
+              during model construction and quoted in SQL output.
+            - The default field is a **TRUST BOUNDARY**: It accepts raw SQL
+              expressions by design (e.g., 'now()', 'gen_random_uuid()').
+              Only accept default values from trusted sources (contract.yaml).
+            - The description field is validated to reject line breaks and
+              is only used in SQL comments (safe context).
         """
         # Map column_type to PostgreSQL type with length
         type_map: dict[str, str] = {

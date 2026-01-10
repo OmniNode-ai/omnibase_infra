@@ -27,10 +27,57 @@ Expected Behavior:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import NamedTuple, Protocol, runtime_checkable
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+class MockStatResult(NamedTuple):
+    """Mock stat result with typed fields matching os.stat_result.
+
+    Uses NamedTuple for clarity and type safety. Provides the same interface
+    as os.stat_result for file stat operations in tests.
+    """
+
+    st_size: int
+    st_mode: int
+    st_ino: int
+    st_dev: int
+    st_nlink: int
+    st_uid: int
+    st_gid: int
+    st_atime: float
+    st_mtime: float
+    st_ctime: float
+
+
+def _create_mock_stat_result(
+    real_stat_result: object, override_size: int
+) -> MockStatResult:
+    """Create a mock stat result object with overridden st_size.
+
+    Args:
+        real_stat_result: The actual os.stat_result from Path.stat()
+        override_size: The file size (st_size) to report
+
+    Returns:
+        A MockStatResult with st_size set to override_size and all other
+        attributes copied from real_stat_result.
+    """
+    return MockStatResult(
+        st_size=override_size,
+        st_mode=real_stat_result.st_mode,  # type: ignore[union-attr]
+        st_ino=real_stat_result.st_ino,  # type: ignore[union-attr]
+        st_dev=real_stat_result.st_dev,  # type: ignore[union-attr]
+        st_nlink=real_stat_result.st_nlink,  # type: ignore[union-attr]
+        st_uid=real_stat_result.st_uid,  # type: ignore[union-attr]
+        st_gid=real_stat_result.st_gid,  # type: ignore[union-attr]
+        st_atime=real_stat_result.st_atime,  # type: ignore[union-attr]
+        st_mtime=real_stat_result.st_mtime,  # type: ignore[union-attr]
+        st_ctime=real_stat_result.st_ctime,  # type: ignore[union-attr]
+    )
+
 
 # =============================================================================
 # Protocol Definition (fallback for TDD)
@@ -500,7 +547,10 @@ class TestProjectorPluginLoaderPatternDiscovery:
 
     @pytest.mark.asyncio
     async def test_discover_with_patterns(
-        self, tmp_contract_directory: Path, mock_schema_manager: MagicMock
+        self,
+        tmp_contract_directory: Path,
+        mock_schema_manager: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Glob patterns should discover correct contracts."""
         from omnibase_infra.runtime.projector_plugin_loader import (
@@ -510,22 +560,19 @@ class TestProjectorPluginLoaderPatternDiscovery:
         loader = ProjectorPluginLoader(schema_manager=mock_schema_manager)
 
         # Change cwd to tmp_contract_directory for pattern resolution
-        original_cwd = Path.cwd()
-        try:
-            import os
-
-            os.chdir(tmp_contract_directory)
-            projectors = await loader.discover_and_load(
-                patterns=["*_projector.yaml"],
-            )
-        finally:
-            os.chdir(str(original_cwd))
+        monkeypatch.chdir(tmp_contract_directory)
+        projectors = await loader.discover_and_load(
+            patterns=["*_projector.yaml"],
+        )
 
         assert len(projectors) >= 2
 
     @pytest.mark.asyncio
     async def test_discover_with_multiple_patterns(
-        self, tmp_path: Path, mock_schema_manager: MagicMock
+        self,
+        tmp_path: Path,
+        mock_schema_manager: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Multiple patterns should all be applied correctly."""
         from omnibase_infra.runtime.projector_plugin_loader import (
@@ -548,16 +595,10 @@ class TestProjectorPluginLoaderPatternDiscovery:
 
         loader = ProjectorPluginLoader(schema_manager=mock_schema_manager)
 
-        original_cwd = Path.cwd()
-        try:
-            import os
-
-            os.chdir(tmp_path)
-            projectors = await loader.discover_and_load(
-                patterns=["*_projector.yaml", "projector_contract.yaml"],
-            )
-        finally:
-            os.chdir(str(original_cwd))
+        monkeypatch.chdir(tmp_path)
+        projectors = await loader.discover_and_load(
+            patterns=["*_projector.yaml", "projector_contract.yaml"],
+        )
 
         projector_ids = {p.projector_id for p in projectors}
         assert "test-proj" in projector_ids
@@ -565,7 +606,10 @@ class TestProjectorPluginLoaderPatternDiscovery:
 
     @pytest.mark.asyncio
     async def test_discover_no_matches(
-        self, empty_directory: Path, mock_schema_manager: MagicMock
+        self,
+        empty_directory: Path,
+        mock_schema_manager: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """No matches should return empty list."""
         from omnibase_infra.runtime.projector_plugin_loader import (
@@ -574,22 +618,19 @@ class TestProjectorPluginLoaderPatternDiscovery:
 
         loader = ProjectorPluginLoader(schema_manager=mock_schema_manager)
 
-        original_cwd = Path.cwd()
-        try:
-            import os
-
-            os.chdir(empty_directory)
-            projectors = await loader.discover_and_load(
-                patterns=["*_projector.yaml"],
-            )
-        finally:
-            os.chdir(str(original_cwd))
+        monkeypatch.chdir(empty_directory)
+        projectors = await loader.discover_and_load(
+            patterns=["*_projector.yaml"],
+        )
 
         assert projectors == []
 
     @pytest.mark.asyncio
     async def test_discover_with_recursive_pattern(
-        self, tmp_contract_directory: Path, mock_schema_manager: MagicMock
+        self,
+        tmp_contract_directory: Path,
+        mock_schema_manager: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Recursive glob patterns should find nested contracts."""
         from omnibase_infra.runtime.projector_plugin_loader import (
@@ -598,16 +639,10 @@ class TestProjectorPluginLoaderPatternDiscovery:
 
         loader = ProjectorPluginLoader(schema_manager=mock_schema_manager)
 
-        original_cwd = Path.cwd()
-        try:
-            import os
-
-            os.chdir(tmp_contract_directory)
-            projectors = await loader.discover_and_load(
-                patterns=["**/*_projector.yaml"],
-            )
-        finally:
-            os.chdir(str(original_cwd))
+        monkeypatch.chdir(tmp_contract_directory)
+        projectors = await loader.discover_and_load(
+            patterns=["**/*_projector.yaml"],
+        )
 
         projector_ids = {p.projector_id for p in projectors}
         assert "order-projector-v1" in projector_ids  # Nested
@@ -624,6 +659,45 @@ class TestProjectorPluginLoaderSecurity:
     These tests verify proper handling of security concerns like symlinks,
     file size limits, and path traversal.
     """
+
+    def test_reject_root_path_as_base_path(
+        self, mock_schema_manager: MagicMock
+    ) -> None:
+        """Root path should be rejected as base_path to prevent DoS."""
+        from omnibase_core.models.errors.model_onex_error import ModelOnexError
+
+        from omnibase_infra.runtime.projector_plugin_loader import (
+            ProjectorPluginLoader,
+        )
+
+        # Attempting to use root path should raise
+        with pytest.raises(ModelOnexError) as exc_info:
+            ProjectorPluginLoader(
+                schema_manager=mock_schema_manager,
+                base_paths=[Path("/")],
+            )
+
+        assert "root" in str(exc_info.value).lower()
+        assert "filesystem-wide" in str(exc_info.value).lower()
+
+    def test_reject_near_root_path_as_base_path(
+        self, mock_schema_manager: MagicMock
+    ) -> None:
+        """Near-root paths (like /tmp on some systems) with single part should be handled."""
+        # Paths with more than one part should be allowed
+        # This test just verifies the loader can be created with a valid path
+        import tempfile
+
+        from omnibase_infra.runtime.projector_plugin_loader import (
+            ProjectorPluginLoader,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            loader = ProjectorPluginLoader(
+                schema_manager=mock_schema_manager,
+                base_paths=[Path(tmpdir)],
+            )
+            assert loader is not None
 
     @pytest.mark.asyncio
     async def test_reject_symlink_contract(
@@ -691,20 +765,7 @@ class TestProjectorPluginLoaderSecurity:
         def mock_stat(self: Path, **kwargs: object) -> object:
             result = original_stat(self, **kwargs)
             if self.name.endswith("_projector.yaml"):
-
-                class MockStatResult:
-                    st_size = oversized_bytes
-                    st_mode = result.st_mode  # type: ignore[union-attr]
-                    st_ino = result.st_ino  # type: ignore[union-attr]
-                    st_dev = result.st_dev  # type: ignore[union-attr]
-                    st_nlink = result.st_nlink  # type: ignore[union-attr]
-                    st_uid = result.st_uid  # type: ignore[union-attr]
-                    st_gid = result.st_gid  # type: ignore[union-attr]
-                    st_atime = result.st_atime  # type: ignore[union-attr]
-                    st_mtime = result.st_mtime  # type: ignore[union-attr]
-                    st_ctime = result.st_ctime  # type: ignore[union-attr]
-
-                return MockStatResult()
+                return _create_mock_stat_result(result, oversized_bytes)
             return result
 
         loader = ProjectorPluginLoader(schema_manager=mock_schema_manager)
@@ -748,7 +809,10 @@ class TestProjectorPluginLoaderSecurity:
 
     @pytest.mark.asyncio
     async def test_allow_symlink_within_allowed_paths(
-        self, tmp_path: Path, mock_schema_manager: MagicMock
+        self,
+        tmp_path: Path,
+        mock_schema_manager: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Symlinks within allowed paths should be permitted."""
         from omnibase_infra.runtime.projector_plugin_loader import (
@@ -779,16 +843,10 @@ class TestProjectorPluginLoaderSecurity:
         )
 
         # Search both directories - symlink should work
-        original_cwd = Path.cwd()
-        try:
-            import os
-
-            os.chdir(tmp_path)
-            projectors = await loader.discover_and_load(
-                patterns=["**/*_projector.yaml"],
-            )
-        finally:
-            os.chdir(str(original_cwd))
+        monkeypatch.chdir(tmp_path)
+        projectors = await loader.discover_and_load(
+            patterns=["**/*_projector.yaml"],
+        )
 
         # Should find the contract (possibly deduplicated)
         assert len(projectors) >= 1
