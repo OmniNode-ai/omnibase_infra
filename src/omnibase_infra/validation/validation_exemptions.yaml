@@ -830,6 +830,21 @@ pattern_exemptions:
       - docs/patterns/correlation_id_tracking.md
     ticket: OMN-811
   # ==========================================================================
+  # MCP Handler Model Exemptions (OMN-1288)
+  # ==========================================================================
+  # tool_name in ModelMcpToolCall is the MCP protocol identifier for the tool
+  # to invoke (e.g., "get_weather", "search_documents"). It is NOT an entity
+  # reference requiring UUID + display_name pattern - it's a protocol-level
+  # identifier defined by the MCP specification.
+  - file_pattern: 'model_mcp_tool_call\.py'
+    violation_pattern: "Field 'tool_name' might reference an entity"
+    reason: >
+      tool_name is an MCP protocol identifier for the tool to invoke (e.g., "get_weather"). This is a protocol-level identifier from the Model Context Protocol specification, not an entity reference.
+
+    documentation:
+      - Model Context Protocol Specification (https://modelcontextprotocol.io/)
+    ticket: OMN-1288
+  # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================
   # These models use builder patterns with many convenience methods.

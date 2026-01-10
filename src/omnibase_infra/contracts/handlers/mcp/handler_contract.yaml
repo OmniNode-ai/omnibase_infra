@@ -1,0 +1,138 @@
+# Handler ID follows convention: {node_type}.{domain}.handler
+handler_id: effect.mcp.handler
+name: MCP Handler
+version: "1.0.0"
+description: >
+  Effect handler for Model Context Protocol (MCP) integration. Exposes ONEX nodes as MCP tools for AI agent integration via streamable HTTP transport.
+
+descriptor:
+  handler_kind: effect
+  purity: side_effecting
+  # Idempotent: true for list_tools/describe, false for call_tool (depends on target)
+  # Overall handler is marked non-idempotent since tool execution may have side effects.
+  idempotent: false
+  # TIMEOUT CONFIGURATION (30 seconds)
+  # ---------------------------------
+  # MCP tool execution timeout. This is the default timeout for tool calls.
+  # Individual tools may have their own timeout configurations.
+  #
+  # OVERRIDE GUIDANCE:
+  # - Reduce for latency-sensitive deployments
+  # - Increase for tools with known long execution times
+  # - Consider per-tool timeout configuration for fine-grained control
+  timeout_ms: 30000
+  retry_policy:
+    enabled: true
+    max_retries: 3
+    backoff_strategy: exponential
+    base_delay_ms: 500
+    max_delay_ms: 10000
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    # Reset timeout: 60s = 2x handler timeout_ms
+    timeout_ms: 60000
+  # Concurrent: MCP supports multiple simultaneous tool calls
+  concurrency_policy: parallel_ok
+  isolation_policy: none
+  observability_level: standard
+capability_outputs:
+  - mcp.list_tools
+  - mcp.call_tool
+  - mcp.describe
+# NOTE: Models defined in OMN-1288 (MCP Handler)
+input_model: omnibase_infra.handlers.models.mcp.ModelMcpToolCall
+output_model: omnibase_infra.handlers.models.mcp.ModelMcpToolResult
+supports_lifecycle: true
+supports_health_check: true
+supports_provisioning: false
+tags:
+  - mcp
+  - effect
+  - infrastructure
+  - ai-agent
+  - tool-interface
+metadata:
+  author: OmniNode Team
+  ticket: OMN-1288
+  transport:
+    # =========================================================================
+    # TRANSPORT CONFIGURATION
+    # =========================================================================
+    # MCP transport layer configuration for streamable HTTP.
+    # =========================================================================
+    type: streamable_http
+    default_host: "0.0.0.0"
+    default_port: 8090
+    default_path: "/mcp"
+    # Stateless mode for horizontal scaling (recommended for production)
+    stateless: true
+    # JSON response mode for compatibility (recommended)
+    json_response: true
+  security:
+    # =========================================================================
+    # SECURITY CONFIGURATION
+    # =========================================================================
+    # Security constraints for MCP operations.
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # AUTHENTICATION
+    # -------------------------------------------------------------------------
+    # MCP protocol supports API key authentication.
+    authentication:
+      # Whether authentication is required for tool access
+      required: false
+      # Authentication methods supported
+      methods:
+        - api_key_header
+      # Header name for API key authentication
+      api_key_header: "X-MCP-API-Key"
+    # -------------------------------------------------------------------------
+    # TOOL ACCESS CONTROL
+    # -------------------------------------------------------------------------
+    # Controls which tools can be exposed via MCP.
+    tool_access:
+      # Maximum number of tools that can be exposed
+      max_tools: 100
+      # Tags required for a node to be exposed as MCP tool
+      required_tags: []
+      # Tags that exclude a node from MCP exposure
+      excluded_tags:
+        - internal
+        - deprecated
+        - unsafe
+    # -------------------------------------------------------------------------
+    # RATE LIMITING
+    # -------------------------------------------------------------------------
+    rate_limiting:
+      enabled: false
+      deferred_to: orchestration_layer
+      future_considerations:
+        - per_tool_limits: "Different limits per tool based on complexity"
+        - burst_allowance: "Token bucket with configurable burst"
+        - client_tracking: "Rate limit by API key or client ID"
+    # -------------------------------------------------------------------------
+    # INPUT VALIDATION
+    # -------------------------------------------------------------------------
+    input_validation:
+      # Maximum size of tool arguments (in bytes)
+      max_arguments_size: 1048576 # 1 MB
+      # Maximum depth of nested objects in arguments
+      max_nesting_depth: 10
+      # Validate arguments against tool schema
+      validate_schema: true
+    # -------------------------------------------------------------------------
+    # AUDIT AND LOGGING
+    # -------------------------------------------------------------------------
+    audit_logging:
+      required_events:
+        - tool_invocation
+        - authentication_failure
+        - rate_limit_exceeded
+        - tool_execution_error
+      security_event_level: warning
+      include_correlation_id: true
+      never_log:
+        - api_keys
+        - sensitive_arguments
