@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import MINIMAL_HANDLER_CONTRACT_YAML, MockValidHandler
+from .conftest import MINIMAL_HANDLER_CONTRACT_YAML
 
 
 class TestHandlerPluginLoaderLoadFromDirectory:

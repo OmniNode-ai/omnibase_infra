@@ -278,7 +278,7 @@ class TestCorrelationIdInErrors:
 
     def test_file_not_found_includes_correlation_id(self, tmp_path: Path) -> None:
         """Test that FILE_NOT_FOUND error includes correlation_id."""
-        from uuid import UUID, uuid4
+        from uuid import uuid4
 
         from omnibase_infra.errors import ProtocolConfigurationError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
@@ -302,7 +302,7 @@ class TestCorrelationIdInErrors:
 
     def test_not_a_file_includes_correlation_id(self, tmp_path: Path) -> None:
         """Test that NOT_A_FILE error includes correlation_id."""
-        from uuid import UUID, uuid4
+        from uuid import uuid4
 
         from omnibase_infra.errors import ProtocolConfigurationError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader

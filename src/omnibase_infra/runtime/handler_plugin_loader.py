@@ -15,7 +15,16 @@ The loader implements ProtocolHandlerPluginLoader and supports:
 
 Thread Safety:
     The loader is designed to be stateless and safe for concurrent use
-    from multiple threads. Each load operation is independent.
+    from multiple threads. Each load operation is independent:
+
+    - No instance state is stored after ``__init__`` (empty constructor)
+    - All method variables are local to each call (thread-local by nature)
+    - ``importlib.import_module()`` is thread-safe in CPython (uses import lock)
+    - File operations use independent file handles per call
+
+    Caveat: The ``discover_and_load()`` method uses ``Path.cwd()`` by default,
+    which reads process-level state. For deterministic behavior in multi-threaded
+    environments, provide an explicit ``base_path`` parameter.
 
 See Also:
     - ProtocolHandlerPluginLoader: Protocol definition for plugin loaders
@@ -277,20 +286,22 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         )
 
         # Validate handler implements protocol
-        if not self._validate_handler_protocol(handler_class):
+        is_valid, missing_methods = self._validate_handler_protocol(handler_class)
+        if not is_valid:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
                 correlation_id=correlation_id,
             )
+            missing_str = ", ".join(missing_methods)
             raise ProtocolConfigurationError(
                 f"Handler class {handler_class_path} does not implement "
-                "ProtocolHandler (missing required method(s): handler_type, "
-                "initialize, shutdown, execute, or describe)",
+                f"ProtocolHandler (missing required method(s): {missing_str})",
                 context=context,
                 loader_error=EnumHandlerLoaderError.PROTOCOL_NOT_IMPLEMENTED.value,
                 contract_path=str(contract_path),
                 handler_class=handler_class_path,
+                missing_methods=missing_methods,
             )
 
         logger.info(
@@ -383,7 +394,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             )
 
         # Find all contract files
-        contract_files = self._find_contract_files(directory)
+        contract_files = self._find_contract_files(directory, correlation_id)
 
         logger.debug(
             "Found %d contract files in directory: %s",
@@ -512,7 +523,12 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             for path in matched_paths:
                 if path.is_file():
                     # Early size validation to skip oversized files before expensive operations
-                    if self._validate_file_size(path, raise_on_error=False) is None:
+                    if (
+                        self._validate_file_size(
+                            path, correlation_id=correlation_id, raise_on_error=False
+                        )
+                        is None
+                    ):
                         continue
 
                     resolved = path.resolve()
@@ -560,7 +576,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         return handlers
 
-    def _validate_handler_protocol(self, handler_class: type) -> bool:
+    def _validate_handler_protocol(self, handler_class: type) -> tuple[bool, list[str]]:
         """Validate handler implements required protocol (ProtocolHandler).
 
         Uses duck typing to verify the handler class has the required
@@ -607,8 +623,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 not an instance.
 
         Returns:
-            True if handler implements all required protocol methods, False otherwise.
-            Returns False if any required method is missing or not callable.
+            A tuple of (is_valid, missing_methods) where:
+            - is_valid: True if handler implements all required protocol methods
+            - missing_methods: List of method names that are missing or not callable.
+              Empty list if all methods are present.
 
         Example:
             >>> class ValidHandler:
@@ -621,13 +639,13 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             ...
             >>> loader = HandlerPluginLoader()
             >>> loader._validate_handler_protocol(ValidHandler)
-            True
+            (True, [])
 
             >>> class IncompleteHandler:
             ...     def describe(self): return {}
             ...
             >>> loader._validate_handler_protocol(IncompleteHandler)
-            False
+            (False, ['handler_type', 'initialize', 'shutdown', 'execute'])
 
         See Also:
             - ``omnibase_spi.protocols.handlers.protocol_handler.ProtocolHandler``
@@ -635,32 +653,33 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         """
         # Check for required ProtocolHandler methods via duck typing
         # All 5 core methods must be present for protocol compliance
+        missing_methods: list[str] = []
 
         # 1. handler_type property - can be property or method
         if not hasattr(handler_class, "handler_type"):
-            return False
+            missing_methods.append("handler_type")
 
         # 2. initialize() - async method for connection setup
         if not callable(getattr(handler_class, "initialize", None)):
-            return False
+            missing_methods.append("initialize")
 
         # 3. shutdown() - async method for resource cleanup
         if not callable(getattr(handler_class, "shutdown", None)):
-            return False
+            missing_methods.append("shutdown")
 
         # 4. execute() - async method for operation execution
         if not callable(getattr(handler_class, "execute", None)):
-            return False
+            missing_methods.append("execute")
 
         # 5. describe() - sync method for introspection
         if not callable(getattr(handler_class, "describe", None)):
-            return False
+            missing_methods.append("describe")
 
         # Note: health_check() is part of ProtocolHandler but is NOT validated
         # because existing handlers (HandlerHttp, HandlerDb, etc.) do not
         # implement it. Future handlers SHOULD implement health_check().
 
-        return True
+        return (len(missing_methods) == 0, missing_methods)
 
     def _import_handler_class(
         self,
@@ -855,7 +874,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         return file_size
 
-    def _find_contract_files(self, directory: Path) -> list[Path]:
+    def _find_contract_files(
+        self,
+        directory: Path,
+        correlation_id: str | None = None,
+    ) -> list[Path]:
         """Find all handler contract files under a directory.
 
         Searches for both handler_contract.yaml and contract.yaml files.
@@ -864,6 +887,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         Args:
             directory: Directory to search recursively.
+            correlation_id: Optional correlation ID for tracing and error context.
+                Propagated to file size validation for consistent traceability.
 
         Returns:
             List of paths to contract files that pass size validation.
@@ -876,7 +901,12 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         for path in directory.rglob("*.yaml"):
             if path.name in valid_filenames and path.is_file():
                 # Early size validation to skip oversized files before expensive operations
-                if self._validate_file_size(path, raise_on_error=False) is None:
+                if (
+                    self._validate_file_size(
+                        path, correlation_id=correlation_id, raise_on_error=False
+                    )
+                    is None
+                ):
                     continue
 
                 contract_files.append(path)
@@ -885,6 +915,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         seen: set[Path] = set()
         deduplicated: list[Path] = []
         for path in contract_files:
+            # path.resolve() can raise OSError in several scenarios:
+            # - Broken symlinks: symlink target no longer exists
+            # - Race conditions: file deleted between glob discovery and resolution
+            # - Permission issues: lacking read permission on parent directories
+            # - Filesystem errors: unmounted volumes, network filesystem failures
             try:
                 resolved = path.resolve()
             except OSError as e:

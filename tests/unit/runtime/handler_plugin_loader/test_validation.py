@@ -56,7 +56,9 @@ class TestHandlerPluginLoaderValidation:
         loader = HandlerPluginLoader()
 
         # MockValidHandler has all 5 required methods
-        assert loader._validate_handler_protocol(MockValidHandler) is True
+        is_valid, missing_methods = loader._validate_handler_protocol(MockValidHandler)
+        assert is_valid is True
+        assert missing_methods == []
 
     def test_validate_handler_without_any_protocol_methods(self) -> None:
         """Test protocol validation for handler without any protocol methods."""
@@ -65,7 +67,18 @@ class TestHandlerPluginLoaderValidation:
         loader = HandlerPluginLoader()
 
         # MockInvalidHandler has no protocol methods at all
-        assert loader._validate_handler_protocol(MockInvalidHandler) is False
+        is_valid, missing_methods = loader._validate_handler_protocol(
+            MockInvalidHandler
+        )
+        assert is_valid is False
+        # Should be missing all 5 required methods
+        assert set(missing_methods) == {
+            "handler_type",
+            "initialize",
+            "shutdown",
+            "execute",
+            "describe",
+        }
 
     def test_validate_partial_handler_rejected(self) -> None:
         """Test that handler with only describe() is rejected.
@@ -79,7 +92,17 @@ class TestHandlerPluginLoaderValidation:
         loader = HandlerPluginLoader()
 
         # MockPartialHandler only has describe(), missing other 4 methods
-        assert loader._validate_handler_protocol(MockPartialHandler) is False
+        is_valid, missing_methods = loader._validate_handler_protocol(
+            MockPartialHandler
+        )
+        assert is_valid is False
+        # Should be missing 4 methods (has describe, missing the rest)
+        assert set(missing_methods) == {
+            "handler_type",
+            "initialize",
+            "shutdown",
+            "execute",
+        }
 
     def test_validate_non_callable_describe_rejected(self) -> None:
         """Test that non-callable describe attribute is rejected."""
@@ -91,14 +114,19 @@ class TestHandlerPluginLoaderValidation:
         class HandlerWithNonCallableDescribe:
             describe = "not a method"
 
-        result = loader._validate_handler_protocol(HandlerWithNonCallableDescribe)
-        assert result is False
+        is_valid, missing_methods = loader._validate_handler_protocol(
+            HandlerWithNonCallableDescribe
+        )
+        assert is_valid is False
+        # describe should be in missing_methods because it's not callable
+        assert "describe" in missing_methods
 
     def test_validate_missing_individual_methods(self) -> None:
         """Test that each missing required method causes validation to fail.
 
         Verifies that validation is comprehensive - missing ANY of the 5
-        required methods should cause rejection.
+        required methods should cause rejection, and the specific missing
+        method is reported in the returned missing_methods list.
         """
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
@@ -118,7 +146,9 @@ class TestHandlerPluginLoaderValidation:
             def describe(self) -> dict[str, object]:
                 return {}
 
-        assert loader._validate_handler_protocol(MissingHandlerType) is False
+        is_valid, missing = loader._validate_handler_protocol(MissingHandlerType)
+        assert is_valid is False
+        assert "handler_type" in missing
 
         # Missing initialize
         class MissingInitialize:
@@ -135,7 +165,9 @@ class TestHandlerPluginLoaderValidation:
             def describe(self) -> dict[str, object]:
                 return {}
 
-        assert loader._validate_handler_protocol(MissingInitialize) is False
+        is_valid, missing = loader._validate_handler_protocol(MissingInitialize)
+        assert is_valid is False
+        assert "initialize" in missing
 
         # Missing shutdown
         class MissingShutdown:
@@ -152,7 +184,9 @@ class TestHandlerPluginLoaderValidation:
             def describe(self) -> dict[str, object]:
                 return {}
 
-        assert loader._validate_handler_protocol(MissingShutdown) is False
+        is_valid, missing = loader._validate_handler_protocol(MissingShutdown)
+        assert is_valid is False
+        assert "shutdown" in missing
 
         # Missing execute
         class MissingExecute:
@@ -169,7 +203,9 @@ class TestHandlerPluginLoaderValidation:
             def describe(self) -> dict[str, object]:
                 return {}
 
-        assert loader._validate_handler_protocol(MissingExecute) is False
+        is_valid, missing = loader._validate_handler_protocol(MissingExecute)
+        assert is_valid is False
+        assert "execute" in missing
 
         # Missing describe (already tested but included for completeness)
         class MissingDescribe:
@@ -186,7 +222,9 @@ class TestHandlerPluginLoaderValidation:
             async def execute(self, request: object, config: object) -> object:
                 return {}
 
-        assert loader._validate_handler_protocol(MissingDescribe) is False
+        is_valid, missing = loader._validate_handler_protocol(MissingDescribe)
+        assert is_valid is False
+        assert "describe" in missing
 
     def test_capability_tags_extracted_correctly(self, tmp_path: Path) -> None:
         """Test that capability tags are extracted from contract."""

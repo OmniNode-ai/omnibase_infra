@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from .conftest import MINIMAL_HANDLER_CONTRACT_YAML, MockValidHandler
+from .conftest import MINIMAL_HANDLER_CONTRACT_YAML
 
 # =============================================================================
 # File Size Limit Tests
