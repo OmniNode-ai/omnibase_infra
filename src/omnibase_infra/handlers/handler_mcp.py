@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
+from pydantic import ValidationError
 
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -50,6 +51,7 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtract
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
         ProtocolMCPToolDefinition,
     )
@@ -87,13 +89,17 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         - Correlation ID propagation for tracing
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerMCP in uninitialized state."""
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize HandlerMCP with ONEX container for dependency injection.
+
+        Args:
+            container: ONEX container providing dependency injection for
+                services, configuration, and runtime context.
+        """
+        self._container = container
         self._config: ModelMcpHandlerConfig | None = None
         self._initialized: bool = False
         self._tool_registry: dict[str, ProtocolMCPToolDefinition] = {}
-        # MCP server instance (lazy initialization)
-        self._mcp_server: object | None = None
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -152,28 +158,8 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         )
 
         try:
-            # Parse configuration with safe type extraction
-            host_val = config.get("host", "0.0.0.0")  # noqa: S104
-            port_val = config.get("port", 8090)
-            path_val = config.get("path", "/mcp")
-            stateless_val = config.get("stateless", True)
-            json_response_val = config.get("json_response", True)
-            timeout_val = config.get("timeout_seconds", 30.0)
-            max_tools_val = config.get("max_tools", 100)
-
-            self._config = ModelMcpHandlerConfig(
-                host=str(host_val) if host_val is not None else "0.0.0.0",  # noqa: S104
-                port=int(port_val) if isinstance(port_val, (int, float, str)) else 8090,
-                path=str(path_val) if path_val is not None else "/mcp",
-                stateless=bool(stateless_val),
-                json_response=bool(json_response_val),
-                timeout_seconds=float(timeout_val)
-                if isinstance(timeout_val, (int, float, str))
-                else 30.0,
-                max_tools=int(max_tools_val)
-                if isinstance(max_tools_val, (int, float, str))
-                else 100,
-            )
+            # Use Pydantic validation for type-safe configuration parsing
+            self._config = ModelMcpHandlerConfig(**config)
 
             # Initialize tool registry (empty until tools are registered)
             self._tool_registry = {}
@@ -204,6 +190,16 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 },
             )
 
+        except ValidationError as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.MCP,
+                operation="initialize",
+                target_name="mcp_handler",
+                correlation_id=init_correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid MCP handler configuration: {e}", context=ctx
+            ) from e
         except (TypeError, ValueError) as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.MCP,
@@ -217,9 +213,6 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
     async def shutdown(self) -> None:
         """Shutdown MCP handler and release resources."""
-        if self._mcp_server is not None:
-            # Cleanup MCP server if running
-            self._mcp_server = None
         self._tool_registry.clear()
         self._config = None
         self._initialized = False
@@ -381,7 +374,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         try:
             result = await self._execute_tool(tool_name, arguments, correlation_id)
-            execution_time_ms = int((time.perf_counter() - start_time) * 1000)
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
 
             tool_result = ModelMcpToolResult(
                 success=True,
@@ -391,14 +384,83 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 execution_time_ms=execution_time_ms,
             )
 
-        except Exception as e:
-            execution_time_ms = int((time.perf_counter() - start_time) * 1000)
+        except InfraUnavailableError as e:
+            # Circuit breaker open or tool unavailable
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
             logger.warning(
-                "Tool execution failed",
+                "Tool execution failed: infrastructure unavailable",
                 extra={
                     "tool_name": tool_name,
                     "error": str(e),
+                    "error_type": "InfraUnavailableError",
                     "correlation_id": str(correlation_id),
+                    "execution_time_ms": execution_time_ms,
+                },
+            )
+            tool_result = ModelMcpToolResult(
+                success=False,
+                content=str(e),
+                is_error=True,
+                error_message=str(e),
+                correlation_id=correlation_id,
+                execution_time_ms=execution_time_ms,
+            )
+
+        except (RuntimeHostError, ProtocolConfigurationError) as e:
+            # Handler or configuration errors
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            logger.warning(
+                "Tool execution failed: runtime or configuration error",
+                extra={
+                    "tool_name": tool_name,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                    "execution_time_ms": execution_time_ms,
+                },
+            )
+            tool_result = ModelMcpToolResult(
+                success=False,
+                content=str(e),
+                is_error=True,
+                error_message=str(e),
+                correlation_id=correlation_id,
+                execution_time_ms=execution_time_ms,
+            )
+
+        except (TimeoutError, OSError) as e:
+            # Network/IO errors during tool execution
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            logger.exception(
+                "Tool execution failed: network or timeout error",
+                extra={
+                    "tool_name": tool_name,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                    "execution_time_ms": execution_time_ms,
+                },
+            )
+            tool_result = ModelMcpToolResult(
+                success=False,
+                content=str(e),
+                is_error=True,
+                error_message=str(e),
+                correlation_id=correlation_id,
+                execution_time_ms=execution_time_ms,
+            )
+
+        except (ValueError, TypeError, KeyError) as e:
+            # Data validation or type errors
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            logger.warning(
+                "Tool execution failed: data validation error",
+                extra={
+                    "tool_name": tool_name,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                    "execution_time_ms": execution_time_ms,
                 },
             )
             tool_result = ModelMcpToolResult(
@@ -538,6 +600,19 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Returns:
             True if tool was registered successfully, False if max tool limit exceeded.
+
+        Note:
+            Callers MUST check the return value. If False, the tool was NOT registered
+            due to the max_tools limit being reached. Silently ignoring a False return
+            will lead to tools being unavailable without any error being raised.
+
+            The tool registry is a simple dict and is NOT thread-safe. If concurrent
+            registration is required, external synchronization must be provided by
+            the caller.
+
+        Example:
+            if not handler.register_tool(my_tool):
+                raise RuntimeError(f"Failed to register tool: {my_tool.name}")
         """
         if self._config and len(self._tool_registry) >= self._config.max_tools:
             logger.warning(

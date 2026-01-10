@@ -15,6 +15,14 @@ Example:
     adapter = ONEXToMCPAdapter(node_registry)
     tools = await adapter.discover_tools()
     result = await adapter.invoke_tool("node_name", {"param": "value"})
+
+Note:
+    This adapter is designed for future integration with the ONEX node registry.
+    Currently, tool discovery is manual via `register_node_as_tool()`. Once the
+    ONEX registry is fully implemented (OMN-1288), this adapter will automatically
+    scan the registry for nodes that expose MCP capabilities through their
+    contract.yaml `mcp_enabled: true` flag, enabling zero-configuration tool
+    discovery for AI agents.
 """
 
 from __future__ import annotations
@@ -311,15 +319,28 @@ class ONEXToMCPAdapter:
 
             if issubclass(model_class, BaseModel):
                 return model_class.model_json_schema()
-        except (TypeError, ImportError):
-            logger.debug(
-                "Could not generate Pydantic schema, using fallback",
+        except TypeError as e:
+            # TypeError occurs when model_class is not a valid class type
+            # (e.g., None, primitive, or other non-class object)
+            logger.warning(
+                "Cannot generate Pydantic schema: model_class is not a valid type, "
+                "using fallback",
                 extra={
-                    "model_class": getattr(model_class, "__name__", str(model_class))
+                    "model_class": getattr(model_class, "__name__", str(model_class)),
+                    "error": str(e),
+                },
+            )
+        except ImportError as e:
+            # ImportError occurs when pydantic is not installed
+            logger.warning(
+                "Cannot generate Pydantic schema: pydantic not available, using fallback",
+                extra={
+                    "model_class": getattr(model_class, "__name__", str(model_class)),
+                    "error": str(e),
                 },
             )
 
-        # Fallback for non-Pydantic types
+        # Fallback for non-Pydantic types or when pydantic unavailable
         return {"type": "object"}
 
     @staticmethod

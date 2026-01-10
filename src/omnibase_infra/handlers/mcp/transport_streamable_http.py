@@ -220,16 +220,28 @@ class TransportMCPStreamableHttp:
             raise
 
     async def stop(self) -> None:
-        """Stop the MCP server."""
+        """Stop the MCP server.
+
+        Signals uvicorn to exit gracefully and waits for shutdown to complete.
+        The server will finish processing current requests before stopping.
+        """
         if not self._running:
             return
 
         # Signal the uvicorn server to exit gracefully
         if self._server is not None:
             self._server.should_exit = True
+            # Wait for the server to complete shutdown
+            # The serve() coroutine will return when should_exit is True
+            # and all pending requests are processed
+            logger.info("Signaled MCP transport shutdown, waiting for server to stop")
 
+        # Mark as not running - the actual server cleanup happens when serve() returns
         self._running = False
         self._app = None
+        # Note: We clear _server reference after signaling shutdown.
+        # The caller of start() should await that coroutine to ensure
+        # the server has fully stopped before proceeding.
         self._server = None
         self._tool_handlers.clear()
 

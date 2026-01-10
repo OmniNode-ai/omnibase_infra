@@ -5,10 +5,15 @@
 
 Comprehensive test suite covering initialization, MCP operations,
 tool registration, and lifecycle management.
+
+Tests focus on observable behavior via public APIs (describe, health_check,
+execute) rather than directly accessing internal state where possible.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -29,20 +34,29 @@ from omnibase_infra.handlers.models.mcp import (
     ModelMcpHandlerConfig,
 )
 
+if TYPE_CHECKING:
+    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+
 
 class TestHandlerMCPInitialization:
     """Test suite for HandlerMCP initialization."""
 
     @pytest.fixture
-    def handler(self) -> HandlerMCP:
-        """Create HandlerMCP fixture."""
-        return HandlerMCP()
+    def handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create HandlerMCP fixture with mock container."""
+        return HandlerMCP(container=mock_container)
 
     def test_handler_init_default_state(self, handler: HandlerMCP) -> None:
         """Test handler initializes in uninitialized state."""
         assert handler._initialized is False
         assert handler._config is None
         assert handler._tool_registry == {}
+
+    def test_handler_stores_container(
+        self, handler: HandlerMCP, mock_container: MagicMock
+    ) -> None:
+        """Test handler stores container reference for dependency injection."""
+        assert handler._container is mock_container
 
     def test_handler_type_returns_infra_handler(self, handler: HandlerMCP) -> None:
         """Test handler_type property returns EnumHandlerType.INFRA_HANDLER."""
@@ -110,9 +124,9 @@ class TestHandlerMCPDescribe:
     """Test suite for describe operation."""
 
     @pytest.fixture
-    async def initialized_handler(self) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture."""
-        handler = HandlerMCP()
+    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create and initialize a HandlerMCP fixture with mock container."""
+        handler = HandlerMCP(container=mock_container)
         await handler.initialize({})
         yield handler
         await handler.shutdown()
@@ -136,9 +150,9 @@ class TestHandlerMCPListTools:
     """Test suite for list_tools operation."""
 
     @pytest.fixture
-    async def initialized_handler(self) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture."""
-        handler = HandlerMCP()
+    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create and initialize a HandlerMCP fixture with mock container."""
+        handler = HandlerMCP(container=mock_container)
         await handler.initialize({})
         yield handler
         await handler.shutdown()
@@ -160,9 +174,11 @@ class TestHandlerMCPListTools:
         assert result.result["payload"]["tools"] == []
 
     @pytest.mark.asyncio
-    async def test_execute_without_initialization_raises(self) -> None:
+    async def test_execute_without_initialization_raises(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test execute raises RuntimeHostError if not initialized."""
-        handler = HandlerMCP()
+        handler = HandlerMCP(container=mock_container)
         envelope = {
             "operation": EnumMcpOperationType.LIST_TOOLS.value,
             "payload": {},
@@ -178,9 +194,9 @@ class TestHandlerMCPCallTool:
     """Test suite for call_tool operation."""
 
     @pytest.fixture
-    async def initialized_handler(self) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture."""
-        handler = HandlerMCP()
+    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create and initialize a HandlerMCP fixture with mock container."""
+        handler = HandlerMCP(container=mock_container)
         await handler.initialize({})
         yield handler
         await handler.shutdown()
@@ -225,9 +241,9 @@ class TestHandlerMCPOperationValidation:
     """Test suite for operation validation."""
 
     @pytest.fixture
-    async def initialized_handler(self) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture."""
-        handler = HandlerMCP()
+    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create and initialize a HandlerMCP fixture with mock container."""
+        handler = HandlerMCP(container=mock_container)
         await handler.initialize({})
         yield handler
         await handler.shutdown()
@@ -266,9 +282,9 @@ class TestHandlerMCPHealthCheck:
     """Test suite for health check."""
 
     @pytest.fixture
-    async def initialized_handler(self) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture."""
-        handler = HandlerMCP()
+    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create and initialize a HandlerMCP fixture with mock container."""
+        handler = HandlerMCP(container=mock_container)
         await handler.initialize({})
         yield handler
         await handler.shutdown()
@@ -286,9 +302,11 @@ class TestHandlerMCPHealthCheck:
         assert health["transport_type"] == "mcp"
 
     @pytest.mark.asyncio
-    async def test_health_check_not_initialized(self) -> None:
+    async def test_health_check_not_initialized(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test health check returns unhealthy when not initialized."""
-        handler = HandlerMCP()
+        handler = HandlerMCP(container=mock_container)
         health = await handler.health_check()
 
         assert health["healthy"] is False
@@ -336,3 +354,110 @@ class TestMcpHandlerConfig:
 
         with pytest.raises(Exception):  # Pydantic raises ValidationError on frozen
             config.host = "changed"
+
+
+class TestHandlerMCPDescribeOperation:
+    """Test suite for mcp.describe operation via execute method."""
+
+    @pytest.fixture
+    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create and initialize a HandlerMCP fixture with mock container."""
+        handler = HandlerMCP(container=mock_container)
+        await handler.initialize({})
+        yield handler
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_describe_operation_returns_success(
+        self, initialized_handler: HandlerMCP
+    ) -> None:
+        """Test mcp.describe operation via execute returns success with metadata."""
+        envelope = {
+            "operation": EnumMcpOperationType.DESCRIBE.value,
+            "payload": {},
+            "correlation_id": str(uuid4()),
+        }
+
+        result = await initialized_handler.execute(envelope)
+
+        assert result.result["status"] == "success"
+        payload = result.result["payload"]
+        assert payload["handler_type"] == "infra_handler"
+        assert payload["transport_type"] == "mcp"
+        assert payload["initialized"] is True
+
+    @pytest.mark.asyncio
+    async def test_describe_operation_includes_correlation_id(
+        self, initialized_handler: HandlerMCP
+    ) -> None:
+        """Test mcp.describe operation includes correlation_id in response."""
+        correlation_id = str(uuid4())
+        envelope = {
+            "operation": EnumMcpOperationType.DESCRIBE.value,
+            "payload": {},
+            "correlation_id": correlation_id,
+        }
+
+        result = await initialized_handler.execute(envelope)
+
+        assert result.result["correlation_id"] == correlation_id
+
+
+class TestHandlerMCPLifecycle:
+    """Test suite for handler lifecycle transitions."""
+
+    @pytest.fixture
+    def handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create HandlerMCP fixture with mock container."""
+        return HandlerMCP(container=mock_container)
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_transition_healthy_after_init(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Test handler becomes healthy after initialization via health_check."""
+        # Before init - unhealthy
+        health_before = await handler.health_check()
+        assert health_before["healthy"] is False
+
+        # After init - healthy
+        await handler.initialize({})
+        health_after = await handler.health_check()
+        assert health_after["healthy"] is True
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_transition_unhealthy_after_shutdown(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Test handler becomes unhealthy after shutdown via health_check."""
+        await handler.initialize({})
+
+        # Before shutdown - healthy
+        health_before = await handler.health_check()
+        assert health_before["healthy"] is True
+
+        # After shutdown - unhealthy
+        await handler.shutdown()
+        health_after = await handler.health_check()
+        assert health_after["healthy"] is False
+
+    @pytest.mark.asyncio
+    async def test_describe_reflects_initialization_state(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Test describe reflects initialization state correctly."""
+        # Before init
+        desc_before = handler.describe()
+        assert desc_before["initialized"] is False
+
+        # After init
+        await handler.initialize({})
+        desc_after = handler.describe()
+        assert desc_after["initialized"] is True
+
+        # After shutdown
+        await handler.shutdown()
+        desc_final = handler.describe()
+        assert desc_final["initialized"] is False

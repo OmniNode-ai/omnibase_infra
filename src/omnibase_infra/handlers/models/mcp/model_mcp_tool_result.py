@@ -34,8 +34,9 @@ class ModelMcpToolResult(BaseModel):
     correlation_id: UUID | None = Field(
         default=None, description="Correlation ID from the original request"
     )
-    execution_time_ms: int | None = Field(
-        default=None, description="Execution duration in milliseconds"
+    execution_time_ms: float | None = Field(
+        default=None,
+        description="Execution duration in milliseconds (sub-ms precision)",
     )
 
     model_config = {"frozen": True}
