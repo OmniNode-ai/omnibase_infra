@@ -114,15 +114,11 @@ result = validate_contracts(str(directory))
 - `yaml_files_found`: Number of contract YAML files
 - `violations_found`: Count of invalid contracts
 
-**Deep Validation**: `ProtocolContractValidator` for comprehensive checking:
+**Deep Validation**: Use `validate_yaml_file()` for comprehensive checking:
 ```python
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
+from omnibase_core.validation import validate_yaml_file
 
-validator = ProtocolContractValidator()
-result = validator.validate_contract_file(
-    Path(contract_path),
-    contract_type="effect"  # or compute, reducer, orchestrator
-)
+result = validate_yaml_file(Path(contract_path))
 ```
 
 ### 3. Pattern Validator

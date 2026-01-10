@@ -14,8 +14,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Import all validators and constants
-from omnibase_core.validation import ModelModuleImportResult
-
 from omnibase_infra.validation.infra_validators import (
     INFRA_MAX_UNIONS,
     INFRA_MAX_VIOLATIONS,
@@ -23,6 +21,7 @@ from omnibase_infra.validation.infra_validators import (
     INFRA_PATTERNS_STRICT,
     INFRA_SRC_PATH,
     INFRA_UNIONS_STRICT,
+    ModelModuleImportResult,
     ValidationResult,
     validate_infra_all,
     validate_infra_architecture,

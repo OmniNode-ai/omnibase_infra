@@ -44,6 +44,10 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 ProtocolHandlerSource = ProtocolContractSource
 ProtocolHandlerDescriptor = ProtocolContractDescriptor
 
+# Import the actual model returned by HandlerContractSource
+from omnibase_infra.models.handlers.model_handler_descriptor import (
+    ModelHandlerDescriptor,
+)
 
 # =============================================================================
 # Constants for Test Contracts
@@ -315,9 +319,9 @@ class TestHandlerContractSourceDiscovery:
             f"Expected 0 validation errors in strict mode, got {len(result.validation_errors)}"
         )
 
-        # Verify each descriptor is a ProtocolHandlerDescriptor
+        # Verify each descriptor is a ModelHandlerDescriptor
         for descriptor in result.descriptors:
-            assert isinstance(descriptor, ProtocolHandlerDescriptor)
+            assert isinstance(descriptor, ModelHandlerDescriptor)
 
         # Verify the expected handler_ids were discovered
         discovered_ids = {d.handler_id for d in result.descriptors}

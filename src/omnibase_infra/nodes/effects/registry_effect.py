@@ -19,6 +19,26 @@ Note on ONEX Naming Convention:
 This module provides NodeRegistryEffect, an Effect node responsible for executing
 registration operations against both Consul and PostgreSQL backends.
 
+Intent Format Compatibility (OMN-1258):
+    This Effect node receives domain-specific request objects (ModelRegistryRequest),
+    NOT raw ModelIntent objects. The intent-to-request translation is handled by the
+    Orchestrator layer.
+
+    The RegistrationReducer emits intents with typed payloads:
+        - intent_type="extension"
+        - payload.intent_type="consul.register" or "postgres.upsert_registration"
+
+    The Orchestrator/Runtime layer is responsible for:
+        1. Consuming ModelIntent objects from reducer output
+        2. Checking intent_type == "extension"
+        3. Extracting payload.intent_type to determine target backend
+        4. Building a ModelRegistryRequest from payload.data
+        5. Calling NodeRegistryEffect.register_node(request)
+
+    This design keeps the Effect layer focused on I/O execution without coupling
+    to the intent format. Infrastructure handlers (ConsulHandler, DbHandler) work
+    similarly with envelope-based `operation` routing, not intent_type checking.
+
 Architecture:
     NodeRegistryEffect follows the ONEX Effect node pattern:
     - Receives registration requests (from Reducer intents)

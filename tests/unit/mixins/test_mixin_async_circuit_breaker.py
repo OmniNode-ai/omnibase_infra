@@ -653,7 +653,7 @@ class TestMixinAsyncCircuitBreakerFromConfig:
         assert service.circuit_breaker_threshold == 5
         assert service.circuit_breaker_reset_timeout == 60.0
         assert service.service_name == "unknown"
-        assert service.transport_type == EnumInfraTransportType.HTTP
+        assert service._cb_transport_type == EnumInfraTransportType.HTTP
 
     async def test_init_from_config_with_custom_values(self) -> None:
         """Test initialization from config with custom values."""
@@ -671,7 +671,7 @@ class TestMixinAsyncCircuitBreakerFromConfig:
         assert service.circuit_breaker_threshold == 10
         assert service.circuit_breaker_reset_timeout == 120.0
         assert service.service_name == "kafka.production"
-        assert service.transport_type == EnumInfraTransportType.KAFKA
+        assert service._cb_transport_type == EnumInfraTransportType.KAFKA
 
     async def test_init_from_config_circuit_functions_correctly(self) -> None:
         """Test that circuit breaker initialized from config functions correctly."""
@@ -726,7 +726,7 @@ class TestMixinAsyncCircuitBreakerFromConfig:
             assert service.circuit_breaker_threshold == 3
             assert service.circuit_breaker_reset_timeout == 30.0
             assert service.service_name == "consul.dev"
-            assert service.transport_type == EnumInfraTransportType.CONSUL
+            assert service._cb_transport_type == EnumInfraTransportType.CONSUL
 
     async def test_init_from_config_all_transport_types(self) -> None:
         """Test initialization from config with all transport types."""
@@ -752,5 +752,5 @@ class TestMixinAsyncCircuitBreakerFromConfig:
             )
             service = CircuitBreakerConfigServiceStub(config)
 
-            assert service.transport_type == transport_type
+            assert service._cb_transport_type == transport_type
             assert service.service_name == f"service.{transport_type.value}"

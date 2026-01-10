@@ -5,8 +5,8 @@
 This package contains node-specific Pydantic models for the registry effect node.
 Models follow ONEX naming conventions: Model<Name>.
 
-Current models are re-exported from the effects package for backwards compatibility.
-Future models specific to the declarative node pattern will be defined here.
+Shared models are re-exported from the effects package for convenience.
+Node-specific models are defined here.
 
 Model Categories:
     - Input Models: Request payloads for effect operations

@@ -163,8 +163,12 @@ class TestA3OrchestratedDualRegistration:
         assert consul_client.call_count == 0, "Reducer should NOT call Consul"
         assert postgres_adapter.call_count == 0, "Reducer should NOT call PostgreSQL"
 
-        # Verify intents are for correct backends
-        intent_types = {intent.intent_type for intent in reducer_output.intents}
+        # Verify intents are for correct backends (extension format)
+        intent_types = {
+            intent.payload.intent_type
+            for intent in reducer_output.intents
+            if intent.intent_type == "extension"
+        }
         assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
 
@@ -228,23 +232,24 @@ class TestA3OrchestratedDualRegistration:
         assert len(reducer_output.intents) == 2
 
         for intent in reducer_output.intents:
-            assert intent.intent_type in (
+            # All intents use extension format
+            assert intent.intent_type == "extension"
+            assert intent.target is not None
+            assert intent.payload is not None
+            assert intent.payload.intent_type in (
                 "consul.register",
                 "postgres.upsert_registration",
             )
-            assert intent.target is not None
-            assert intent.payload is not None
 
-            if intent.intent_type == "consul.register":
-                # Consul intent should have service registration payload
+            if intent.payload.intent_type == "consul.register":
+                # Consul intent should have service registration payload attributes
                 assert hasattr(intent.payload, "correlation_id")
                 assert hasattr(intent.payload, "service_id")
                 assert hasattr(intent.payload, "service_name")
 
-            elif intent.intent_type == "postgres.upsert_registration":
-                # PostgreSQL intent should have intent_type and record payload
-                # Note: correlation_id is not at the top level for postgres payload
-                assert hasattr(intent.payload, "intent_type")
+            elif intent.payload.intent_type == "postgres.upsert_registration":
+                # PostgreSQL intent should have record payload attributes
+                assert hasattr(intent.payload, "correlation_id")
                 assert hasattr(intent.payload, "record")
 
     async def test_a3_multiple_node_types(
@@ -670,21 +675,19 @@ class TestOrchestratedWorkflowIntegration:
 
         # Verify correlation ID in intents that support it
         for intent in reducer_output.intents:
-            # Only Consul payload has correlation_id at top level
-            # Postgres payload has it nested in the record
-            if intent.intent_type == "consul.register":
-                payload_correlation_id = getattr(intent.payload, "correlation_id", None)
-                # Handle both UUID and string representations
-                if isinstance(payload_correlation_id, str):
-                    assert payload_correlation_id == str(expected_correlation_id), (
-                        f"Expected correlation_id {expected_correlation_id}, "
-                        f"got {payload_correlation_id}"
-                    )
-                else:
-                    assert payload_correlation_id == expected_correlation_id, (
-                        f"Expected correlation_id {expected_correlation_id}, "
-                        f"got {payload_correlation_id}"
-                    )
+            # Payload has direct correlation_id attribute - use equality check
+            payload_correlation_id = intent.payload.correlation_id
+            # Handle both UUID and string representations
+            if isinstance(payload_correlation_id, str):
+                assert payload_correlation_id == str(expected_correlation_id), (
+                    f"Expected correlation_id {expected_correlation_id}, "
+                    f"got {payload_correlation_id}"
+                )
+            else:
+                assert payload_correlation_id == expected_correlation_id, (
+                    f"Expected correlation_id {expected_correlation_id}, "
+                    f"got {payload_correlation_id}"
+                )
 
         # Verify correlation ID in response
         assert response.correlation_id == expected_correlation_id

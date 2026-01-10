@@ -46,11 +46,11 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from omnibase_infra.enums.enum_execution_shape_violation import (
+from omnibase_infra.enums import (
     EnumExecutionShapeViolation,
+    EnumMessageCategory,
+    EnumNodeOutputType,
 )
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.validation.model_category_match_result import (
     ModelCategoryMatchResult,

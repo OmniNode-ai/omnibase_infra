@@ -4,6 +4,12 @@
 
 This module provides ModelNodeCapabilities for strongly-typed node capabilities
 in the ONEX 2-way registration pattern.
+
+Note:
+    This model does NOT use MixinDictLikeAccessors because it requires custom
+    logic to differentiate between known model fields (model_fields) and custom
+    capabilities stored in model_extra. The mixin's simple hasattr/getattr pattern
+    would not correctly handle this distinction.
 """
 
 from omnibase_core.types import JsonType

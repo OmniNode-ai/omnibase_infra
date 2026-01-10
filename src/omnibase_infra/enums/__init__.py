@@ -16,6 +16,7 @@ Exports:
     EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
     EnumDispatchStatus: Dispatch operation status enumeration
     EnumEnvironment: Deployment environment classification (DEVELOPMENT, STAGING, PRODUCTION, CI)
+    EnumExecutionShapeViolation: Specific execution shape violation types
     EnumHandlerErrorType: Handler error types for validation and lifecycle
     EnumHandlerSourceType: Handler validation error source types
     EnumHandlerType: Handler architectural roles (INFRA_HANDLER, NODE_HANDLER)
@@ -43,6 +44,9 @@ from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.enums.enum_contract_type import EnumContractType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_environment import EnumEnvironment
+from omnibase_infra.enums.enum_execution_shape_violation import (
+    EnumExecutionShapeViolation,
+)
 from omnibase_infra.enums.enum_handler_error_type import EnumHandlerErrorType
 from omnibase_infra.enums.enum_handler_source_type import EnumHandlerSourceType
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
@@ -69,6 +73,7 @@ __all__: list[str] = [
     "EnumContractType",
     "EnumDispatchStatus",
     "EnumEnvironment",
+    "EnumExecutionShapeViolation",
     "EnumHandlerErrorType",
     "EnumHandlerSourceType",
     "EnumHandlerType",

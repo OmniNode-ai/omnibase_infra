@@ -9,7 +9,7 @@ Handlers:
     - PostgresRegistrationStorageHandler: PostgreSQL-backed storage
     - MockRegistrationStorageHandler: In-memory mock for testing
 
-Models:
+Models (from omnibase_infra.nodes.node_registration_storage_effect.models):
     - ModelRegistrationRecord: Registration record model
     - ModelUpsertResult: Upsert operation result
     - ModelStorageResult: Storage query result
@@ -24,13 +24,13 @@ from omnibase_infra.handlers.registration_storage.handler_mock_registration_stor
 from omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage import (
     PostgresRegistrationStorageHandler,
 )
-from omnibase_infra.handlers.registration_storage.models import (
+from omnibase_infra.handlers.registration_storage.protocol_registration_storage_handler import (
+    ProtocolRegistrationStorageHandler,
+)
+from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelRegistrationRecord,
     ModelStorageResult,
     ModelUpsertResult,
-)
-from omnibase_infra.handlers.registration_storage.protocol_registration_storage_handler import (
-    ProtocolRegistrationStorageHandler,
 )
 
 __all__: list[str] = [

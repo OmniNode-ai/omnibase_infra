@@ -15,6 +15,11 @@ Supported Operations:
     - consul.kv_put: Store value in KV store
     - consul.register: Register service with Consul agent
     - consul.deregister: Deregister service from Consul agent
+
+Envelope-Based Routing:
+    This handler uses envelope-based operation routing. See CLAUDE.md section
+    "Intent Model Architecture > Envelope-Based Handler Routing" for the full
+    design pattern and how orchestrators translate intents to handler envelopes.
 """
 
 from __future__ import annotations

@@ -24,6 +24,19 @@ Thread Safety:
     All validation and helper functions are pure functions that produce fresh objects.
     Thread safety depends on the wrapped MessageDispatchEngine's thread safety.
 
+Typing Note (ModelEventEnvelope[object]):
+    Functions in this module use ``ModelEventEnvelope[object]`` instead of ``Any``
+    per CLAUDE.md guidance: "Use ``object`` for generic payloads".
+
+    This is intentional:
+    - CLAUDE.md mandates "NEVER use ``Any``" for type annotations
+    - Chain validation functions must work with envelopes containing any payload
+      type, as they validate correlation/causation chains regardless of content
+    - The ``object`` type parameter signals "any object payload" while maintaining
+      type safety (unlike ``Any`` which disables type checking)
+    - When creating child envelopes with specific payload types, use the generic
+      ``create_child_envelope[T]()`` method which preserves type information
+
 Usage:
     >>> from omnibase_infra.runtime import ChainAwareDispatcher, MessageDispatchEngine
     >>> from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
