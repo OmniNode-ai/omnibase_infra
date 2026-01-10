@@ -328,6 +328,40 @@ async def route_intent(intent: ModelIntent) -> None:
 **Reference Implementation**: `src/omnibase_infra/nodes/reducers/registration_reducer.py`
 **Payload Models**: `src/omnibase_infra/nodes/reducers/models/model_payload_*.py`
 
+**Envelope-Based Handler Routing**:
+
+Infrastructure handlers (`HandlerConsul`, `HandlerDb`, etc.) work with envelope-based operation routing, NOT raw `ModelIntent` objects. Routing is based on `envelope["operation"]` field values, not `intent_type`.
+
+When reducers emit intents with:
+- `intent_type="extension"`
+- `payload.intent_type="consul.register"` (or `"postgres.upsert_registration"`)
+
+The Orchestrator/Runtime layer translates these to envelope format:
+```python
+# Consul example
+{
+    "operation": "consul.register",
+    "payload": {...},  # Consul-specific data from intent.payload
+    "correlation_id": "...",
+}
+
+# PostgreSQL example
+{
+    "operation": "db.execute",
+    "payload": {
+        "sql": "...",
+        "parameters": [...],
+    },
+    "correlation_id": "...",
+}
+```
+
+This design keeps infrastructure handlers decoupled from the intent format, allowing them to be reused for:
+- Direct envelope-based invocation (CLI tools, direct API calls)
+- Intent-driven workflows (via orchestrator translation)
+
+**Handler Implementations**: `src/omnibase_infra/handlers/handler_consul.py`, `src/omnibase_infra/handlers/handler_db.py`
+
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
 - **Container Injection** - `def __init__(self, container: ModelONEXContainer)`
