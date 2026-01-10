@@ -27,57 +27,11 @@ Expected Behavior:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NamedTuple, Protocol, runtime_checkable
+from types import SimpleNamespace
+from typing import Protocol, runtime_checkable
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-
-class MockStatResult(NamedTuple):
-    """Mock stat result with typed fields matching os.stat_result.
-
-    Uses NamedTuple for clarity and type safety. Provides the same interface
-    as os.stat_result for file stat operations in tests.
-    """
-
-    st_size: int
-    st_mode: int
-    st_ino: int
-    st_dev: int
-    st_nlink: int
-    st_uid: int
-    st_gid: int
-    st_atime: float
-    st_mtime: float
-    st_ctime: float
-
-
-def _create_mock_stat_result(
-    real_stat_result: object, override_size: int
-) -> MockStatResult:
-    """Create a mock stat result object with overridden st_size.
-
-    Args:
-        real_stat_result: The actual os.stat_result from Path.stat()
-        override_size: The file size (st_size) to report
-
-    Returns:
-        A MockStatResult with st_size set to override_size and all other
-        attributes copied from real_stat_result.
-    """
-    return MockStatResult(
-        st_size=override_size,
-        st_mode=real_stat_result.st_mode,  # type: ignore[union-attr]
-        st_ino=real_stat_result.st_ino,  # type: ignore[union-attr]
-        st_dev=real_stat_result.st_dev,  # type: ignore[union-attr]
-        st_nlink=real_stat_result.st_nlink,  # type: ignore[union-attr]
-        st_uid=real_stat_result.st_uid,  # type: ignore[union-attr]
-        st_gid=real_stat_result.st_gid,  # type: ignore[union-attr]
-        st_atime=real_stat_result.st_atime,  # type: ignore[union-attr]
-        st_mtime=real_stat_result.st_mtime,  # type: ignore[union-attr]
-        st_ctime=real_stat_result.st_ctime,  # type: ignore[union-attr]
-    )
-
 
 # =============================================================================
 # Protocol Definition (fallback for TDD)
@@ -758,14 +712,26 @@ class TestProjectorPluginLoaderSecurity:
             )
         )
 
-        # Mock stat to return oversized value
+        # Mock stat to return oversized value using SimpleNamespace
         oversized_bytes = MAX_CONTRACT_SIZE + 1
         original_stat = Path.stat
 
         def mock_stat(self: Path, **kwargs: object) -> object:
             result = original_stat(self, **kwargs)
             if self.name.endswith("_projector.yaml"):
-                return _create_mock_stat_result(result, oversized_bytes)
+                # Return SimpleNamespace with oversized st_size
+                return SimpleNamespace(
+                    st_size=oversized_bytes,
+                    st_mode=result.st_mode,
+                    st_ino=result.st_ino,
+                    st_dev=result.st_dev,
+                    st_nlink=result.st_nlink,
+                    st_uid=result.st_uid,
+                    st_gid=result.st_gid,
+                    st_atime=result.st_atime,
+                    st_mtime=result.st_mtime,
+                    st_ctime=result.st_ctime,
+                )
             return result
 
         loader = ProjectorPluginLoader(schema_manager=mock_schema_manager)

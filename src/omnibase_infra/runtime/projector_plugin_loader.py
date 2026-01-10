@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import yaml
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.projectors import ModelProjectorContract
@@ -59,6 +60,9 @@ PROJECTOR_CONTRACT_PATTERNS = ("*_projector.yaml", "projector_contract.yaml")
 
 # Maximum contract file size (10MB) to prevent memory exhaustion
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024
+
+# Maximum files to discover in a single operation to prevent DoS via filesystem-wide glob scans
+MAX_DISCOVERY_FILES = 10000
 
 
 # =============================================================================
@@ -227,6 +231,7 @@ class ProjectorPluginLoader:
 
     def __init__(
         self,
+        container: ModelONEXContainer | None = None,
         schema_manager: ProtocolProjectorSchemaValidator | None = None,
         graceful_mode: bool = False,
         base_paths: list[Path] | None = None,
@@ -234,6 +239,8 @@ class ProjectorPluginLoader:
         """Initialize the projector plugin loader.
 
         Args:
+            container: ONEX container for dependency injection. If provided,
+                can be used to resolve dependencies like schema_manager.
             schema_manager: Schema validator for validating database schemas.
                 If None, schema validation is skipped during loading.
                 NOTE: Currently stored for future use by ProjectorShell (OMN-1169).
@@ -245,6 +252,7 @@ class ProjectorPluginLoader:
                 Symlinks are only allowed if they resolve within these paths.
                 If None, uses the paths provided to discovery methods.
         """
+        self._container = container
         # NOTE: schema_manager is stored for future use by ProjectorShell (OMN-1169).
         # When ProjectorShell is implemented, it will use this to validate that
         # the target projection table exists before the projector starts.
@@ -290,6 +298,25 @@ class ProjectorPluginLoader:
             return str(Path(path.parent.name) / path.name)
         except (ValueError, AttributeError):
             return path.name
+
+    def _format_file_size(self, size_bytes: int) -> str:
+        """Format file size with KB/MB granularity for safe logging.
+
+        Avoids exposing exact byte counts in error messages which could
+        leak storage implementation details.
+
+        Args:
+            size_bytes: The file size in bytes.
+
+        Returns:
+            Human-readable size string with KB/MB granularity.
+        """
+        if size_bytes < 1024:
+            return "less than 1 KB"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes // 1024} KB"
+        else:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
 
     def _is_projector_contract(self, filename: str) -> bool:
         """Check if a filename matches projector contract patterns.
@@ -345,7 +372,7 @@ class ProjectorPluginLoader:
             if file_size > MAX_CONTRACT_SIZE:
                 return (
                     False,
-                    f"Contract file exceeds size limit: {file_size} bytes (max: {MAX_CONTRACT_SIZE} bytes)",
+                    f"Contract file exceeds size limit: {self._format_file_size(file_size)} (max: {MAX_CONTRACT_SIZE // (1024 * 1024)} MB)",
                 )
         except OSError as e:
             return (False, f"Failed to stat file: {e}")
@@ -461,10 +488,10 @@ class ProjectorPluginLoader:
             contract_path=self._sanitize_path_for_logging(contract_path),
             message=(
                 f"Contract file {self._sanitize_path_for_logging(contract_path)} exceeds size limit: "
-                f"{file_size} bytes (max: {MAX_CONTRACT_SIZE} bytes)"
+                f"{self._format_file_size(file_size)} (max: {MAX_CONTRACT_SIZE // (1024 * 1024)} MB)"
             ),
             remediation_hint=(
-                f"Reduce contract file size to under {MAX_CONTRACT_SIZE // (1024 * 1024)}MB. "
+                f"Reduce contract file size to under {MAX_CONTRACT_SIZE // (1024 * 1024)} MB. "
                 "Consider splitting into multiple contracts if needed."
             ),
             correlation_id=correlation_id,
@@ -901,6 +928,10 @@ class ProjectorPluginLoader:
             },
         )
 
+        # Phase 1: Collect all matched files from all patterns (for count-based DoS prevention)
+        unique_contract_files: list[Path] = []
+        seen_resolved: set[Path] = set()
+
         for pattern in patterns:
             pattern_path = Path(pattern)
 
@@ -962,99 +993,118 @@ class ProjectorPluginLoader:
                 f for f in matched_files if self._is_projector_contract(f.name)
             ]
 
+            # Collect unique files (deduplicate by resolved path)
             for contract_file in matched_files:
                 resolved_path = contract_file.resolve()
-                if resolved_path in discovered_paths:
-                    continue
+                if resolved_path not in seen_resolved:
+                    seen_resolved.add(resolved_path)
+                    unique_contract_files.append(contract_file)
 
-                discovered_paths.add(resolved_path)
+        # Phase 2: Check file count to prevent DoS via expensive glob patterns
+        total_matched = len(unique_contract_files)
+        if total_matched > MAX_DISCOVERY_FILES:
+            raise ModelOnexError(
+                f"Discovery aborted: matched {total_matched} files (limit: {MAX_DISCOVERY_FILES}). "
+                "Use more specific patterns to reduce scope.",
+                error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+            )
 
-                # Security validation
-                is_valid, error_msg = self._validate_file_security(
-                    contract_file, allowed_bases
+        logger.debug(
+            "Discovery matched %d unique contract files",
+            total_matched,
+            extra={
+                "total_matched": total_matched,
+                "max_allowed": MAX_DISCOVERY_FILES,
+                "correlation_id": str(discovery_correlation_id),
+            },
+        )
+
+        # Phase 3: Process each collected file
+        for contract_file in unique_contract_files:
+            resolved_path = contract_file.resolve()
+            discovered_paths.add(resolved_path)
+
+            # Security validation
+            is_valid, error_msg = self._validate_file_security(
+                contract_file, allowed_bases
+            )
+            if not is_valid:
+                if not self._graceful_mode:
+                    raise ModelOnexError(
+                        error_msg or "Security validation failed",
+                        error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+                    )
+                logger.warning(
+                    "Security validation failed for %s, skipping",
+                    self._sanitize_path_for_logging(contract_file),
+                    extra={"correlation_id": str(discovery_correlation_id)},
                 )
-                if not is_valid:
-                    if not self._graceful_mode:
-                        raise ModelOnexError(
-                            error_msg or "Security validation failed",
-                            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
-                        )
-                    logger.warning(
-                        "Security validation failed for %s, skipping",
-                        self._sanitize_path_for_logging(contract_file),
-                        extra={"correlation_id": str(discovery_correlation_id)},
+                validation_errors.append(
+                    self._create_security_error(
+                        contract_file, error_msg or "", discovery_correlation_id
                     )
-                    validation_errors.append(
-                        self._create_security_error(
-                            contract_file, error_msg or "", discovery_correlation_id
-                        )
-                    )
-                    continue
+                )
+                continue
 
-                try:
-                    contract = self._load_contract(contract_file)
-                    projector = ProjectorShellPlaceholder(contract)
-                    projectors.append(projector)
-                    logger.debug(
-                        "Successfully loaded contract from pattern: %s",
-                        self._sanitize_path_for_logging(contract_file),
-                        extra={
-                            "contract_file": self._sanitize_path_for_logging(
-                                contract_file
-                            ),
-                            "projector_id": contract.projector_id,
-                            "pattern": pattern,
-                            "correlation_id": str(discovery_correlation_id),
-                        },
-                    )
-                except yaml.YAMLError as e:
-                    error = self._create_parse_error(
-                        contract_file, e, discovery_correlation_id
-                    )
-                    if not self._graceful_mode:
-                        raise ModelOnexError(
-                            f"Failed to parse YAML contract at {self._sanitize_path_for_logging(contract_file)}: {e}",
-                            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
-                        ) from e
-                    validation_errors.append(error)
-                except ValidationError as e:
-                    error = self._create_validation_error(
-                        contract_file, e, discovery_correlation_id
-                    )
-                    if not self._graceful_mode:
-                        raise ModelOnexError(
-                            f"Contract validation failed at {self._sanitize_path_for_logging(contract_file)}: {e}",
-                            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
-                        ) from e
-                    validation_errors.append(error)
-                except ModelOnexError as e:
-                    error_code = getattr(e, "error_code", None)
-                    if (
-                        error_code == EnumCoreErrorCode.VALIDATION_FAILED
-                        and self._graceful_mode
-                    ):
-                        try:
-                            file_size = contract_file.stat().st_size
-                        except OSError:
-                            file_size = 0
-                        validation_errors.append(
-                            self._create_size_limit_error(
-                                contract_file, file_size, discovery_correlation_id
-                            )
-                        )
-                    else:
-                        raise
-                except OSError as e:
-                    if not self._graceful_mode:
-                        raise ModelOnexError(
-                            f"Failed to read contract file at {self._sanitize_path_for_logging(contract_file)}: {e}",
-                            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
-                        ) from e
+            try:
+                contract = self._load_contract(contract_file)
+                projector = ProjectorShellPlaceholder(contract)
+                projectors.append(projector)
+                logger.debug(
+                    "Successfully loaded contract from pattern: %s",
+                    self._sanitize_path_for_logging(contract_file),
+                    extra={
+                        "contract_file": self._sanitize_path_for_logging(contract_file),
+                        "projector_id": contract.projector_id,
+                        "correlation_id": str(discovery_correlation_id),
+                    },
+                )
+            except yaml.YAMLError as e:
+                error = self._create_parse_error(
+                    contract_file, e, discovery_correlation_id
+                )
+                if not self._graceful_mode:
+                    raise ModelOnexError(
+                        f"Failed to parse YAML contract at {self._sanitize_path_for_logging(contract_file)}: {e}",
+                        error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+                    ) from e
+                validation_errors.append(error)
+            except ValidationError as e:
+                error = self._create_validation_error(
+                    contract_file, e, discovery_correlation_id
+                )
+                if not self._graceful_mode:
+                    raise ModelOnexError(
+                        f"Contract validation failed at {self._sanitize_path_for_logging(contract_file)}: {e}",
+                        error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+                    ) from e
+                validation_errors.append(error)
+            except ModelOnexError as e:
+                error_code = getattr(e, "error_code", None)
+                if (
+                    error_code == EnumCoreErrorCode.VALIDATION_FAILED
+                    and self._graceful_mode
+                ):
+                    try:
+                        file_size = contract_file.stat().st_size
+                    except OSError:
+                        file_size = 0
                     validation_errors.append(
-                        self._create_io_error(
-                            contract_file, e, discovery_correlation_id
+                        self._create_size_limit_error(
+                            contract_file, file_size, discovery_correlation_id
                         )
                     )
+                else:
+                    raise
+            except OSError as e:
+                if not self._graceful_mode:
+                    raise ModelOnexError(
+                        f"Failed to read contract file at {self._sanitize_path_for_logging(contract_file)}: {e}",
+                        error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+                    ) from e
+                validation_errors.append(
+                    self._create_io_error(contract_file, e, discovery_correlation_id)
+                )
 
         duration_seconds = time.perf_counter() - start_time
         self._log_discovery_results(
@@ -1247,6 +1297,7 @@ class ProjectorPluginLoader:
 
 __all__ = [
     "MAX_CONTRACT_SIZE",
+    "MAX_DISCOVERY_FILES",
     "ModelProjectorDiscoveryResult",  # Re-exported from omnibase_infra.models.projectors
     "ModelProjectorValidationError",  # Re-exported from omnibase_infra.models.projectors
     "PROJECTOR_CONTRACT_PATTERNS",
