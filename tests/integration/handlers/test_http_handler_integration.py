@@ -26,7 +26,10 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
-from werkzeug import Response
+
+# Skip entire module if werkzeug is not installed (optional dependency via pytest-httpserver)
+werkzeug = pytest.importorskip("werkzeug")
+Response = werkzeug.Response
 
 from omnibase_infra.errors import InfraTimeoutError, InfraUnavailableError
 from omnibase_infra.handlers import HttpRestHandler

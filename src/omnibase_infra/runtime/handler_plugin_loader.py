@@ -13,18 +13,22 @@ The loader implements ProtocolHandlerPluginLoader and supports:
 - Directory-based discovery with recursive scanning
 - Glob pattern-based discovery for flexible matching
 
-Thread Safety:
-    The loader is designed to be stateless and safe for concurrent use
-    from multiple threads. Each load operation is independent:
+Concurrency Notes:
+    The loader is stateless and reentrant - each load operation is independent:
 
     - No instance state is stored after ``__init__`` (empty constructor)
-    - All method variables are local to each call (thread-local by nature)
+    - All method variables are local to each call
     - ``importlib.import_module()`` is thread-safe in CPython (uses import lock)
     - File operations use independent file handles per call
 
-    Caveat: The ``discover_and_load()`` method uses ``Path.cwd()`` by default,
-    which reads process-level state. For deterministic behavior in multi-threaded
-    environments, provide an explicit ``base_path`` parameter.
+    For concurrent calls loading the SAME handler module, Python's import lock
+    serializes the imports automatically. Repeated loads of the same handler
+    are idempotent - the second call returns the cached module.
+
+    Working Directory Dependency:
+        The ``discover_and_load()`` method uses ``Path.cwd()`` by default,
+        which reads process-level state. For deterministic behavior when cwd
+        may change between calls, provide an explicit ``base_path`` parameter.
 
 See Also:
     - ProtocolHandlerPluginLoader: Protocol definition for plugin loaders
@@ -70,9 +74,6 @@ from omnibase_infra.runtime.protocol_handler_plugin_loader import (
     ProtocolHandlerPluginLoader,
 )
 
-if TYPE_CHECKING:
-    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
-
 logger = logging.getLogger(__name__)
 
 # File pattern for handler contracts
@@ -81,6 +82,33 @@ CONTRACT_YAML_FILENAME = "contract.yaml"
 
 # Maximum contract file size (10MB) to prevent memory exhaustion
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024
+
+
+def _parse_correlation_id_to_uuid(correlation_id: str) -> UUID:
+    """Convert correlation_id string to UUID for observability models.
+
+    ONEX observability models (like ModelPluginLoadContext) require UUID type
+    for correlation_id to ensure consistent distributed tracing. This helper
+    gracefully handles both valid UUID strings and arbitrary correlation strings.
+
+    Args:
+        correlation_id: The correlation ID string to convert.
+
+    Returns:
+        UUID: Either the parsed UUID if the string is valid UUID format,
+            or a newly generated UUID if parsing fails.
+
+    Note:
+        When parsing fails, the original correlation_id is still available
+        in log extra fields for debugging. The generated UUID ensures
+        observability infrastructure continues to function.
+    """
+    try:
+        return UUID(correlation_id)
+    except ValueError:
+        # Non-UUID correlation_id provided; generate one for observability models.
+        # The original string is preserved in log extra fields for debugging.
+        return uuid4()
 
 
 class HandlerPluginLoader(ProtocolHandlerPluginLoader):
@@ -188,7 +216,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
-                f"Contract file not found: {contract_path}",
+                f"Contract file not found: {contract_path.name}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.FILE_NOT_FOUND.value,
                 contract_path=str(contract_path),
@@ -201,7 +229,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
-                f"Contract path is not a file: {contract_path}",
+                f"Contract path is not a file: {contract_path.name}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.NOT_A_FILE.value,
                 contract_path=str(contract_path),
@@ -395,7 +423,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
-                f"Directory not found: {directory}",
+                f"Directory not found: {directory.name}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.DIRECTORY_NOT_FOUND.value,
                 directory=str(directory),
@@ -408,7 +436,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
-                f"Path is not a directory: {directory}",
+                f"Path is not a directory: {directory.name}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.NOT_A_DIRECTORY.value,
                 directory=str(directory),
@@ -475,7 +503,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 handlers=handlers,
                 failed_plugins=failed_handlers,
                 duration_seconds=duration_seconds,
-                correlation_id=UUID(correlation_id),
+                correlation_id=_parse_correlation_id_to_uuid(correlation_id),
             )
         )
 
@@ -681,7 +709,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 handlers=handlers,
                 failed_plugins=failed_handlers,
                 duration_seconds=duration_seconds,
-                correlation_id=UUID(correlation_id),
+                correlation_id=_parse_correlation_id_to_uuid(correlation_id),
             )
         )
 
@@ -1060,14 +1088,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     correlation_id=correlation_id,
                 )
                 raise ProtocolConfigurationError(
-                    f"Invalid YAML syntax in contract file '{path}': {e}",
+                    f"Invalid YAML syntax in contract file '{path.name}': {e}",
                     context=context,
                     loader_error=EnumHandlerLoaderError.INVALID_YAML_SYNTAX.value,
                     contract_path=str(path),
                 ) from e
             logger.warning(
                 "Skipping contract file with invalid YAML syntax %s: %s",
-                path,
+                path.name,
                 e,
                 extra={
                     "path": str(path),
@@ -1084,14 +1112,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     correlation_id=correlation_id,
                 )
                 raise ProtocolConfigurationError(
-                    f"Failed to read contract file '{path}': {e}",
+                    f"Failed to read contract file '{path.name}': {e}",
                     context=context,
                     loader_error=EnumHandlerLoaderError.FILE_READ_ERROR.value,
                     contract_path=str(path),
                 ) from e
             logger.warning(
                 "Failed to read contract file %s: %s",
-                path,
+                path.name,
                 e,
                 extra={
                     "path": str(path),
@@ -1152,9 +1180,13 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 ) from e
             logger.warning(
                 "Failed to stat contract file %s: %s",
-                path,
+                path.name,
                 e,
-                extra={"path": str(path), "error": str(e)},
+                extra={
+                    "path": str(path),
+                    "error": str(e),
+                    "correlation_id": correlation_id,
+                },
             )
             return None
 
@@ -1177,13 +1209,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 )
             logger.warning(
                 "Skipping oversized contract file %s: %d bytes exceeds limit of %d bytes",
-                path,
+                path.name,
                 file_size,
                 MAX_CONTRACT_SIZE,
                 extra={
                     "path": str(path),
                     "file_size": file_size,
                     "max_size": MAX_CONTRACT_SIZE,
+                    "correlation_id": correlation_id,
                 },
             )
             return None
@@ -1227,8 +1260,6 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             List of paths to contract files that pass size validation.
         """
         contract_files: list[Path] = []
-        # Track directories with both contract types to warn about ambiguity
-        dirs_with_both_contracts: set[Path] = set()
         # Track if max_handlers limit was reached
         limit_reached = False
 
@@ -1313,9 +1344,13 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             except OSError as e:
                 logger.warning(
                     "Failed to resolve path %s: %s",
-                    path,
+                    path.name,
                     e,
-                    extra={"path": str(path), "error": str(e)},
+                    extra={
+                        "path": str(path),
+                        "error": str(e),
+                        "correlation_id": correlation_id,
+                    },
                 )
                 continue
             if resolved not in seen:

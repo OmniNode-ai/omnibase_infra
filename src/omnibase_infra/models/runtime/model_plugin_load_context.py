@@ -15,16 +15,14 @@ See Also:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from omnibase_infra.models.runtime.model_failed_plugin_load import (
-        ModelFailedPluginLoad,
-    )
-    from omnibase_infra.models.runtime.model_loaded_handler import ModelLoadedHandler
+from omnibase_infra.models.runtime.model_failed_plugin_load import (
+    ModelFailedPluginLoad,
+)
+from omnibase_infra.models.runtime.model_loaded_handler import ModelLoadedHandler
 
 
 class ModelPluginLoadContext(BaseModel):
