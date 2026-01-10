@@ -41,11 +41,12 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import yaml
 from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumHandlerLoaderError, EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ProtocolConfigurationError
 from omnibase_infra.models.errors import ModelInfraErrorContext
 from omnibase_infra.models.runtime import ModelHandlerContract, ModelLoadedHandler
@@ -125,6 +126,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         Args:
             contract_path: Path to the handler contract YAML file.
                 Must be an absolute or relative path to an existing file.
+            correlation_id: Optional correlation ID for tracing and error context.
+                If not provided, a new UUID4 is auto-generated to ensure all
+                operations have traceable correlation IDs.
 
         Returns:
             ModelLoadedHandler containing the loaded handler metadata
@@ -133,18 +137,24 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         Raises:
             ProtocolConfigurationError: If the contract file is invalid,
                 missing required fields, or fails validation. Error codes:
-                - HANDLER_LOADER_001: Contract file not found
+                - HANDLER_LOADER_001: Contract file not found (path doesn't exist)
                 - HANDLER_LOADER_002: Invalid YAML syntax
                 - HANDLER_LOADER_003: Schema validation failed
                 - HANDLER_LOADER_004: Missing required fields
                 - HANDLER_LOADER_005: Contract file exceeds size limit
                 - HANDLER_LOADER_006: Handler does not implement protocol
+                - HANDLER_LOADER_007: Path exists but is not a file (e.g., directory)
+                - HANDLER_LOADER_008: Failed to read contract file (I/O error)
+                - HANDLER_LOADER_009: Failed to stat contract file (I/O error)
             InfraConnectionError: If the handler class cannot be imported.
                 Error codes:
                 - HANDLER_LOADER_010: Module not found
                 - HANDLER_LOADER_011: Class not found in module
                 - HANDLER_LOADER_012: Import error (syntax/dependency)
         """
+        # Auto-generate correlation_id if not provided (per ONEX guidelines)
+        correlation_id = correlation_id or str(uuid4())
+
         logger.debug(
             "Loading handler from contract: %s",
             contract_path,
@@ -164,7 +174,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 f"Contract file not found: {contract_path}",
                 context=context,
-                loader_error="HANDLER_LOADER_001",
+                loader_error=EnumHandlerLoaderError.FILE_NOT_FOUND.value,
                 contract_path=str(contract_path),
             )
 
@@ -177,7 +187,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 f"Contract path is not a file: {contract_path}",
                 context=context,
-                loader_error="HANDLER_LOADER_001",
+                loader_error=EnumHandlerLoaderError.NOT_A_FILE.value,
                 contract_path=str(contract_path),
             )
 
@@ -193,7 +203,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 f"Failed to stat contract file: {e}",
                 context=context,
-                loader_error="HANDLER_LOADER_001",
+                loader_error=EnumHandlerLoaderError.FILE_STAT_ERROR.value,
                 contract_path=str(contract_path),
             ) from e
 
@@ -207,7 +217,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 f"Contract file exceeds size limit: {file_size} bytes "
                 f"(max: {MAX_CONTRACT_SIZE} bytes)",
                 context=context,
-                loader_error="HANDLER_LOADER_005",
+                loader_error=EnumHandlerLoaderError.FILE_SIZE_EXCEEDED.value,
                 contract_path=str(contract_path),
                 file_size=file_size,
                 max_size=MAX_CONTRACT_SIZE,
@@ -226,7 +236,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 f"Invalid YAML syntax in contract: {e}",
                 context=context,
-                loader_error="HANDLER_LOADER_002",
+                loader_error=EnumHandlerLoaderError.INVALID_YAML_SYNTAX.value,
                 contract_path=str(contract_path),
             ) from e
         except OSError as e:
@@ -238,7 +248,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 f"Failed to read contract file: {e}",
                 context=context,
-                loader_error="HANDLER_LOADER_001",
+                loader_error=EnumHandlerLoaderError.FILE_READ_ERROR.value,
                 contract_path=str(contract_path),
             ) from e
 
@@ -251,7 +261,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 "Contract file is empty",
                 context=context,
-                loader_error="HANDLER_LOADER_003",
+                loader_error=EnumHandlerLoaderError.SCHEMA_VALIDATION_FAILED.value,
                 contract_path=str(contract_path),
             )
 
@@ -272,7 +282,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 f"Contract validation failed: {error_details}",
                 context=context,
-                loader_error="HANDLER_LOADER_003",
+                loader_error=EnumHandlerLoaderError.SCHEMA_VALIDATION_FAILED.value,
                 contract_path=str(contract_path),
                 validation_errors=[
                     {"loc": err["loc"], "msg": err["msg"], "type": err["type"]}
@@ -301,7 +311,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 f"Handler class {handler_class_path} does not implement "
                 "ProtocolHandler (missing 'describe' method)",
                 context=context,
-                loader_error="HANDLER_LOADER_006",
+                loader_error=EnumHandlerLoaderError.PROTOCOL_NOT_IMPLEMENTED.value,
                 contract_path=str(contract_path),
                 handler_class=handler_class_path,
             )
@@ -343,6 +353,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         Args:
             directory: Path to the directory to scan for contract files.
                 Must be an existing directory.
+            correlation_id: Optional correlation ID for tracing and error context.
+                If not provided, a new UUID4 is auto-generated to ensure all
+                operations have traceable correlation IDs. The same correlation_id
+                is propagated to all contract loads within the directory scan.
 
         Returns:
             List of successfully loaded handlers. May be empty if no
@@ -355,6 +369,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - HANDLER_LOADER_021: Permission denied
                 - HANDLER_LOADER_022: Not a directory
         """
+        # Auto-generate correlation_id if not provided (per ONEX guidelines)
+        correlation_id = correlation_id or str(uuid4())
+
         logger.debug(
             "Loading handlers from directory: %s",
             directory,
@@ -371,7 +388,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 f"Directory not found: {directory}",
                 context=context,
-                loader_error="HANDLER_LOADER_020",
+                loader_error=EnumHandlerLoaderError.DIRECTORY_NOT_FOUND.value,
                 directory=str(directory),
             )
 
@@ -384,7 +401,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 f"Path is not a directory: {directory}",
                 context=context,
-                loader_error="HANDLER_LOADER_022",
+                loader_error=EnumHandlerLoaderError.NOT_A_DIRECTORY.value,
                 directory=str(directory),
             )
 
@@ -457,6 +474,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             patterns: List of glob patterns to match contract files.
                 Supports standard glob syntax including ** for recursive.
             correlation_id: Optional correlation ID for tracing and error context.
+                If not provided, a new UUID4 is auto-generated to ensure all
+                operations have traceable correlation IDs. The same correlation_id
+                is propagated to all discovered contract loads.
             base_path: Optional base path for resolving glob patterns.
                 If not provided, defaults to ``Path.cwd()``. Providing an
                 explicit base path ensures deterministic behavior regardless
@@ -481,6 +501,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             ...     base_path=Path("/app/project"),
             ... )
         """
+        # Auto-generate correlation_id if not provided (per ONEX guidelines)
+        correlation_id = correlation_id or str(uuid4())
+
         logger.debug(
             "Discovering handlers with patterns: %s",
             patterns,
@@ -496,7 +519,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise ProtocolConfigurationError(
                 "Patterns list cannot be empty",
                 context=context,
-                loader_error="HANDLER_LOADER_030",
+                loader_error=EnumHandlerLoaderError.EMPTY_PATTERNS_LIST.value,
             )
 
         # Collect all matching contract files, deduplicated by resolved path
@@ -715,7 +738,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 f"Invalid class path '{class_path}': must be fully qualified "
                 "(e.g., 'myapp.handlers.AuthHandler')",
                 context=context,
-                loader_error="HANDLER_LOADER_010",
+                loader_error=EnumHandlerLoaderError.MODULE_NOT_FOUND.value,
                 class_path=class_path,
                 contract_path=str(contract_path),
             )
@@ -734,7 +757,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise InfraConnectionError(
                 f"Module not found: {module_path}",
                 context=context,
-                loader_error="HANDLER_LOADER_010",
+                loader_error=EnumHandlerLoaderError.MODULE_NOT_FOUND.value,
                 module_path=module_path,
                 class_path=class_path,
                 contract_path=str(contract_path),
@@ -748,7 +771,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise InfraConnectionError(
                 f"Import error loading module {module_path}: {e}",
                 context=context,
-                loader_error="HANDLER_LOADER_012",
+                loader_error=EnumHandlerLoaderError.IMPORT_ERROR.value,
                 module_path=module_path,
                 class_path=class_path,
                 contract_path=str(contract_path),
@@ -764,7 +787,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise InfraConnectionError(
                 f"Class '{class_name}' not found in module '{module_path}'",
                 context=context,
-                loader_error="HANDLER_LOADER_011",
+                loader_error=EnumHandlerLoaderError.CLASS_NOT_FOUND.value,
                 module_path=module_path,
                 class_name=class_name,
                 class_path=class_path,
@@ -783,7 +806,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             raise InfraConnectionError(
                 f"'{class_path}' is not a class",
                 context=context,
-                loader_error="HANDLER_LOADER_011",
+                loader_error=EnumHandlerLoaderError.CLASS_NOT_FOUND.value,
                 class_path=class_path,
                 contract_path=str(contract_path),
             )

@@ -136,10 +136,15 @@ class ProtocolHandlerPluginLoader(Protocol):
         Raises:
             ProtocolConfigurationError: If the contract file is invalid, missing
                 required fields, or fails schema validation. Error codes:
-                - HANDLER_LOADER_001: Contract file not found
+                - HANDLER_LOADER_001: Contract file not found (path doesn't exist)
                 - HANDLER_LOADER_002: Invalid YAML syntax
                 - HANDLER_LOADER_003: Schema validation failed
                 - HANDLER_LOADER_004: Missing required fields
+                - HANDLER_LOADER_005: Contract file exceeds size limit
+                - HANDLER_LOADER_006: Handler does not implement protocol
+                - HANDLER_LOADER_007: Path exists but is not a file (e.g., directory)
+                - HANDLER_LOADER_008: Failed to read contract file (I/O error)
+                - HANDLER_LOADER_009: Failed to stat contract file (I/O error)
             InfraConnectionError: If the handler class cannot be imported due
                 to module resolution failures or import errors. Error codes:
                 - HANDLER_LOADER_010: Module not found

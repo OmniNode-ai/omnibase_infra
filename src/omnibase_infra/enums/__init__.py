@@ -16,6 +16,7 @@ Exports:
     EnumDispatchStatus: Dispatch operation status enumeration
     EnumEnvironment: Deployment environment classification (DEVELOPMENT, STAGING, PRODUCTION, CI)
     EnumHandlerErrorType: Handler error types for validation and lifecycle
+    EnumHandlerLoaderError: Handler loader error codes for plugin loading
     EnumHandlerSourceType: Handler validation error source types
     EnumHandlerType: Handler architectural roles (INFRA_HANDLER, NODE_HANDLER)
     EnumHandlerTypeCategory: Behavioral classification (COMPUTE, EFFECT)
@@ -41,6 +42,7 @@ from omnibase_infra.enums.enum_contract_type import EnumContractType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_environment import EnumEnvironment
 from omnibase_infra.enums.enum_handler_error_type import EnumHandlerErrorType
+from omnibase_infra.enums.enum_handler_loader_error import EnumHandlerLoaderError
 from omnibase_infra.enums.enum_handler_source_type import EnumHandlerSourceType
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
@@ -65,6 +67,7 @@ __all__: list[str] = [
     "EnumDispatchStatus",
     "EnumEnvironment",
     "EnumHandlerErrorType",
+    "EnumHandlerLoaderError",
     "EnumHandlerSourceType",
     "EnumHandlerType",
     "EnumHandlerTypeCategory",

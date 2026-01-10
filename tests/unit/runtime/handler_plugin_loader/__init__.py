@@ -7,6 +7,7 @@ This package contains focused test modules for the HandlerPluginLoader:
 - test_load_from_contract.py: Contract loading tests
 - test_load_from_directory.py: Directory-based discovery tests
 - test_discover_and_load.py: Glob pattern discovery tests
+- test_explicit_base_path.py: Explicit base_path parameter tests
 - test_validation.py: Handler validation logic tests
 - test_edge_cases.py: Edge cases, file size limits, idempotency, case sensitivity
 """
