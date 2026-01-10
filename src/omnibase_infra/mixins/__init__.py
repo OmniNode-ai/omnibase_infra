@@ -8,24 +8,38 @@ Reusable mixin classes providing:
 - Correlation ID propagation
 - Configurable behavior
 
-Protocols:
-    - ProtocolCircuitBreakerAware: Interface for circuit breaker capability
-      (tightly coupled to MixinAsyncCircuitBreaker)
+Exports (in __all__):
+    Mixins:
+        - MixinAsyncCircuitBreaker: Coroutine-safe circuit breaker implementation
+        - MixinDictLikeAccessors: Dictionary-style access helpers
+        - MixinEnvelopeExtraction: Event envelope extraction utilities
+        - MixinNodeIntrospection: Node capability introspection
+        - MixinRetryExecution: Retry logic with exponential backoff
 
-Note:
-    TypedDicts and model types used by mixins (e.g., ModelIntrospectionPerformanceMetrics,
-    ModelDiscoveredCapabilities) should be imported from their canonical locations
-    in omnibase_infra.models.discovery, not from this module.
+    Protocols:
+        - ProtocolCircuitBreakerAware: Interface for circuit breaker capability
+          (tightly coupled to MixinAsyncCircuitBreaker, co-located here)
 
-    Configuration models for mixins are re-exported here for convenience:
-    - ModelCircuitBreakerConfig: Re-exported here (canonical: omnibase_infra.models.resilience)
+    Enums:
+        - EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
+        - EnumRetryErrorCategory: Error categorization for retry logic
 
-    Other configuration models (import from canonical locations):
-    - ModelIntrospectionConfig: from omnibase_infra.models.discovery
-    - ModelIntrospectionTaskConfig: from omnibase_infra.models.discovery
+    Models:
+        - ModelCircuitBreakerConfig: Circuit breaker configuration
+        - ModelRetryErrorClassification: Retry error classification result
 
-    ProtocolEventBusLike is defined in omnibase_infra.protocols (general-purpose
-    event bus abstraction). Import it from there, not from this package.
+    TypedDicts:
+        - TypedDictPerformanceMetricsCache: Performance metrics cache structure
+
+NOT Exported (import from canonical locations):
+    - ProtocolEventBusLike: General-purpose event bus protocol.
+      Import from: omnibase_infra.protocols
+
+    - ModelIntrospectionConfig, ModelIntrospectionTaskConfig: Introspection settings.
+      Import from: omnibase_infra.models.discovery
+
+    - ModelIntrospectionPerformanceMetrics, ModelDiscoveredCapabilities: Discovery models.
+      Import from: omnibase_infra.models.discovery
 """
 
 from omnibase_infra.enums import EnumCircuitState, EnumRetryErrorCategory

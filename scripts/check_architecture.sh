@@ -25,6 +25,11 @@ set -euo pipefail
 # For known issues that are tracked in Linear, see KNOWN_ISSUES below.
 # The Python tests in tests/ci/test_architecture_compliance.py use xfail
 # markers for these known issues, but this script enforces the invariant.
+#
+# SYNC NOTE: This list should match test_comprehensive_infra_scan() in
+# tests/ci/test_architecture_compliance.py, PLUS aiohttp and redis which
+# have dedicated xfail tests (not included in comprehensive scan to avoid
+# duplicate failures).
 FORBIDDEN_IMPORTS=(
     "kafka"
     "httpx"
@@ -133,6 +138,10 @@ print_warn() {
     echo -e "  ${YELLOW}[WARN]${NC} $1"
 }
 
+print_skip() {
+    echo -e "  ${YELLOW}[SKIP]${NC} $1"
+}
+
 # =============================================================================
 # Help
 # =============================================================================
@@ -201,6 +210,39 @@ EXAMPLES:
     # Run in CI (no colors)
     ./scripts/check_architecture.sh --no-color
 
+LIMITATIONS:
+    This script uses grep-based pattern matching, which has limitations
+    compared to AST-based Python analysis:
+
+    1. False Negatives (May Miss):
+       - Imports constructed dynamically at runtime
+       - Imports hidden behind conditional logic
+       - Imports using __import__() or importlib
+
+    2. False Positives (May Incorrectly Flag):
+       - Commented imports (mitigated by regex patterns)
+       - Imports in docstrings (grep cannot fully parse multiline strings)
+       - Variable names that match import patterns
+
+    3. Known Issues:
+       - aiohttp: OMN-1015 - async HTTP client needs migration
+       - redis:   OMN-1295 - Redis client needs migration
+
+    For comprehensive AST-based analysis, use the Python tests:
+        pytest tests/ci/test_architecture_compliance.py
+
+    The Python tests provide:
+       - Proper AST parsing of import statements
+       - Multiline docstring handling
+       - xfail markers for known issues
+
+COMPARISON WITH PYTHON TESTS:
+    This bash script is designed for quick CI checks. The Python tests in
+    tests/ci/test_architecture_compliance.py provide more thorough analysis.
+
+    Both tools check the same forbidden imports list. Discrepancies should
+    be reported as bugs.
+
 EOF
 }
 
@@ -253,31 +295,34 @@ find_omnibase_core_path() {
 # Check Functions
 # =============================================================================
 
+# Build array of grep exclude arguments
+# This approach avoids shellcheck SC2086 by using proper array expansion
+declare -a GREP_EXCLUDE_ARGS=()
+
 build_grep_excludes() {
-    local excludes=""
+    GREP_EXCLUDE_ARGS=()
 
     # Add file pattern excludes
+    # Array iteration with quotes preserves glob patterns for grep
     for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-        excludes="$excludes --exclude=$pattern"
+        GREP_EXCLUDE_ARGS+=("--exclude=$pattern")
     done
 
     # Add directory excludes
     for dir in "${EXCLUDE_DIRS[@]}"; do
-        excludes="$excludes --exclude-dir=$dir"
+        GREP_EXCLUDE_ARGS+=("--exclude-dir=$dir")
     done
-
-    echo "$excludes"
 }
 
 check_import() {
     local import_name="$1"
     local search_path="$2"
     local verbose="$3"
-    local excludes
 
-    excludes=$(build_grep_excludes)
+    # Build exclude arguments array
+    build_grep_excludes
 
-    # Build grep command
+    # Build grep pattern
     # Looking for:
     # - import kafka
     # - from kafka import ...
@@ -286,9 +331,9 @@ check_import() {
     local pattern="^[[:space:]]*(from[[:space:]]+${import_name}[[:space:].]+import|import[[:space:]]+${import_name}([[:space:]]|$|\.))"
 
     # Run grep and capture output
+    # Using array expansion "${GREP_EXCLUDE_ARGS[@]}" for shellcheck compliance
     local violations
-    # shellcheck disable=SC2086
-    violations=$(grep -rn --include="*.py" $excludes -E "$pattern" "$search_path" 2>/dev/null) || true
+    violations=$(grep -rn --include="*.py" "${GREP_EXCLUDE_ARGS[@]}" -E "$pattern" "$search_path" 2>/dev/null) || true
 
     if [[ -n "$violations" ]]; then
         print_fail "Found '${import_name}' imports:"
@@ -361,10 +406,17 @@ main() {
 
     echo "Target: $core_path"
 
+    # Always show file count for CI debugging
+    local file_count
+    file_count=$(count_python_files "$core_path")
+    print_info "Found $file_count Python files to scan"
+
+    # Always show what's being excluded for CI debugging
+    print_skip "Excluding file patterns: ${EXCLUDE_PATTERNS[*]}"
+    print_skip "Excluding directories: ${EXCLUDE_DIRS[*]}"
+
     if [[ "$verbose" == "true" ]]; then
-        local file_count
-        file_count=$(count_python_files "$core_path")
-        print_info "Found $file_count Python files to scan"
+        print_info "Verbose mode enabled - showing all check details"
     fi
 
     echo ""

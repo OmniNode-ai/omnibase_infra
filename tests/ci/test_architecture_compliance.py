@@ -216,14 +216,25 @@ def _scan_file_for_imports(
                 assert multiline_delimiter is not None
                 closing_pos = line.find(multiline_delimiter)
                 if closing_pos != -1:
-                    count = line.count(multiline_delimiter)
-                    if count % 2 == 1:
-                        # Odd count means we're closing the multiline string
-                        in_multiline_string = False
-                        multiline_delimiter = None
-                        # Only check content AFTER the closing delimiter for imports
-                        # 3 = len('"""') or len("'''")
-                        line_to_check = line[closing_pos + 3 :]
+                    # First occurrence ALWAYS closes the multiline string we're in
+                    # regardless of how many additional delimiters appear on this line
+                    in_multiline_string = False
+                    multiline_delimiter = None
+                    # Content AFTER the closing delimiter may contain code or new strings
+                    # 3 = len('"""') or len("'''")
+                    after_close = line[closing_pos + 3 :]
+
+                    # Check if the remainder starts a NEW multiline string
+                    new_delim, _ = _find_first_unquoted_delimiter(after_close)
+                    if new_delim is not None:
+                        if not _is_balanced_string_line(after_close, new_delim):
+                            # Unbalanced - entering a new multiline string
+                            in_multiline_string = True
+                            multiline_delimiter = new_delim
+                            # Skip this line entirely as it's inside a new multiline
+                            continue
+
+                    line_to_check = after_close
 
             # Skip lines inside multiline strings (docstrings)
             if in_multiline_string:
@@ -231,32 +242,40 @@ def _scan_file_for_imports(
 
             # Handle single-line docstrings that start the line
             # If there's content after the docstring, check that content for imports
+            # Loop to handle multiple consecutive single-line strings (e.g., """a""" '''b''')
             check_stripped = line_to_check.lstrip()
-            # Handle valid Python string prefixes: r, f, b, u (single)
-            # and rf, fr, rb, br (combinations) - case insensitive
-            prefix_pattern = r"^([rRfFbBuU]|[rR][fFbB]|[fFbB][rR])?"
-            for delimiter in ('"""', "'''"):
-                # Check if line starts with optional prefix + delimiter
-                prefix_match = re.match(
-                    prefix_pattern + re.escape(delimiter), check_stripped
-                )
-                if prefix_match:
-                    # Count occurrences of this delimiter
-                    if _is_balanced_string_line(check_stripped, delimiter):
-                        # Balanced means it's a single-line docstring
-                        # Find where the second delimiter ends
-                        first_pos = check_stripped.find(delimiter)
-                        second_pos = check_stripped.find(delimiter, first_pos + 3)
-                        if second_pos != -1:
-                            # Get content after the closing delimiter
-                            after_docstring = check_stripped[second_pos + 3 :]
-                            if after_docstring.strip():
-                                # There's content after the docstring - check it
-                                line_to_check = after_docstring
-                            else:
-                                # Only whitespace after docstring - skip line
-                                line_to_check = ""
-                        break
+            # Handle valid Python string prefixes (case insensitive):
+            #   Single: r, f, b, u
+            #   Combinations: rf/fr (raw f-string), rb/br (raw bytes)
+            # Note: u cannot combine with other prefixes in Python 3
+            prefix_pattern = r"^([rRfFbBuU]|[rR][fF]|[fF][rR]|[rR][bB]|[bB][rR])?"
+            found_string = True
+            while found_string:
+                found_string = False
+                for delimiter in ('"""', "'''"):
+                    # Check if line starts with optional prefix + delimiter
+                    prefix_match = re.match(
+                        prefix_pattern + re.escape(delimiter), check_stripped
+                    )
+                    if prefix_match:
+                        # Count occurrences of this delimiter
+                        if _is_balanced_string_line(check_stripped, delimiter):
+                            # Balanced means it's a single-line docstring
+                            # Find where the second delimiter ends
+                            first_pos = check_stripped.find(delimiter)
+                            second_pos = check_stripped.find(delimiter, first_pos + 3)
+                            if second_pos != -1:
+                                # Get content after the closing delimiter
+                                after_docstring = check_stripped[second_pos + 3 :]
+                                if after_docstring.strip():
+                                    # There's content after - continue processing
+                                    check_stripped = after_docstring.lstrip()
+                                    found_string = True
+                                else:
+                                    # Only whitespace after docstring - skip line
+                                    check_stripped = ""
+                                break  # Restart with updated check_stripped
+            line_to_check = check_stripped
 
             # Skip if line_to_check is empty (was only a docstring)
             if not line_to_check.strip():
@@ -961,3 +980,195 @@ def my_func():
         assert len(violations) == 1
         assert violations[0].line_number == 9
         assert violations[0].import_pattern == "kafka"
+
+    def test_scan_file_for_imports_multiple_delimiters_on_same_line(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify multiple delimiter types on same line are handled correctly.
+
+        A line containing both triple-double and triple-single quotes
+        should be handled without confusion, with imports after both detected.
+        """
+        test_file = tmp_path / "test_module.py"
+        # Both delimiter types on the same line, followed by import
+        content = "\"\"\"docstring1\"\"\" '''docstring2''' import kafka\n"
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 1
+        assert violations[0].import_pattern == "kafka"
+
+    def test_scan_file_for_imports_closing_starts_new_multiline(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify closing delimiter followed by new multiline start is handled.
+
+        When a line closes one multiline and immediately starts another,
+        content inside the new multiline should not trigger violations.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = (
+            '"""\n'
+            "First docstring\n"
+            '""" """\n'  # Close first, start second (unbalanced - opens new multiline)
+            "import kafka inside second docstring\n"
+            '"""\n'
+            "x = 1\n"
+        )
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_close_multiline_opens_new(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify closing multiline then opening new multiline is handled.
+
+        When closing a multiline string, if the remainder starts a new
+        unbalanced string, the import inside should NOT be detected.
+        """
+        test_file = tmp_path / "test_module.py"
+        # Close multiline, then `text"""` starts a NEW multiline
+        # So `import kafka` is inside the new multiline - no violation
+        content = (
+            '"""\n'
+            "Starting a multiline docstring\n"
+            '"""text""" import kafka\n'  # Close first, text""" starts new multiline
+            '"""\n'  # Close the second multiline
+            "x = 1\n"
+        )
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        # Import is inside new multiline string, so no violation
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_close_multiline_with_import(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify import after closing multiline on same line is detected.
+
+        When closing a multiline string and there's an import after it
+        (not inside a new string), the import should be detected.
+        """
+        test_file = tmp_path / "test_module.py"
+        # Close multiline, then import (no new string started)
+        content = (
+            '"""\n'
+            "Starting a multiline docstring\n"
+            '""" import kafka\n'  # Close multiline, then import
+        )
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 3
+        assert violations[0].import_pattern == "kafka"
+
+    def test_scan_file_for_imports_close_multiline_balanced_then_import(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify closing multiline followed by balanced string then import.
+
+        When closing a multiline, then having a balanced single-line string,
+        then an import, the import should be detected.
+        """
+        test_file = tmp_path / "test_module.py"
+        # Close multiline, balanced single-line string """x""", then import
+        content = (
+            '"""\n'
+            "Starting a multiline docstring\n"
+            '""" """x""" import kafka\n'  # Close first, """x""" is balanced, import
+        )
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 3
+        assert violations[0].import_pattern == "kafka"
+
+    def test_scan_file_for_imports_br_prefix_string(self, tmp_path: Path) -> None:
+        """Verify br (raw bytes) string prefix is handled correctly.
+
+        Content inside br-prefixed strings should not trigger violations.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = '''\
+br"""raw bytes docstring with import kafka"""
+
+def my_func():
+    pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_rb_prefix_string(self, tmp_path: Path) -> None:
+        """Verify rb (raw bytes) string prefix is handled correctly.
+
+        Content inside rb-prefixed strings should not trigger violations.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = '''\
+rb"""raw bytes docstring with import kafka"""
+
+def my_func():
+    pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_uppercase_prefix(self, tmp_path: Path) -> None:
+        """Verify uppercase string prefixes are handled correctly.
+
+        Python allows uppercase prefixes like R, F, B, RF, BR, etc.
+        """
+        test_file = tmp_path / "test_module.py"
+        content = '''\
+RF"""uppercase raw f-string with import kafka"""
+BR"""uppercase raw bytes with from kafka import X"""
+
+def my_func():
+    pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_docstring_immediate_import_no_space(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify import immediately after docstring with no space is detected.
+
+        Edge case where there's no space between the closing delimiter
+        and the import keyword.
+        """
+        test_file = tmp_path / "test_module.py"
+        # No space between closing """ and import
+        content = '"""docstring"""import kafka\n'
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 1
+
+    def test_scan_file_for_imports_multiline_closes_at_eof_no_newline(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify multiline string closing at EOF without trailing newline.
+
+        Files may not have a trailing newline after the last line.
+        """
+        test_file = tmp_path / "test_module.py"
+        # No trailing newline after closing docstring
+        content = '"""\nimport kafka in docstring\n"""'
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
