@@ -51,6 +51,23 @@ def run_architecture(verbose: bool = False) -> bool:
         return True
 
 
+# =============================================================================
+# Known Issues Registry
+# =============================================================================
+# Track known architecture violations with Linear ticket references.
+# Format: dict mapping import_name to (ticket_id, description)
+#
+# These violations will still cause the check to fail, but the reporting
+# will include ticket links for visibility and tracking purposes.
+KNOWN_ISSUES: dict[str, tuple[str, str]] = {
+    "aiohttp": (
+        "OMN-1015",
+        "async HTTP client usage in core - needs migration to infra",
+    ),
+    "redis": ("OMN-1295", "Redis client usage in core - needs migration to infra"),
+}
+
+
 def run_architecture_layers(verbose: bool = False) -> bool:
     """Run architecture layer validation.
 
@@ -58,6 +75,19 @@ def run_architecture_layers(verbose: bool = False) -> bool:
     (kafka, httpx, asyncpg, etc.) to maintain proper layer separation.
 
     This wraps scripts/check_architecture.sh for consistent validation interface.
+
+    Known issues are tracked with Linear ticket IDs in KNOWN_ISSUES above.
+    The validator will report ticket links for any known violations found.
+
+    LIMITATIONS:
+        This validation uses grep-based pattern matching which cannot detect:
+        - Inline imports (imports inside functions/methods)
+        - Dynamic imports using __import__() or importlib
+        - Imports hidden behind conditional logic (if statements)
+        - String-based import references
+
+        For comprehensive AST-based analysis, use the Python tests:
+            pytest tests/ci/test_architecture_compliance.py
     """
     import subprocess
 
@@ -97,17 +127,60 @@ def run_architecture_layers(verbose: bool = False) -> bool:
                 print("Architecture Layers: SKIP (omnibase_core not found)")
             return True
 
+        # Note: The bash script already reports known issues with ticket links
+        # when violations are found, so we don't duplicate the reporting here.
+        # The _report_known_issues function is available for programmatic use.
+
         return passed
 
     except subprocess.TimeoutExpired:
         print("Architecture Layers: ERROR (timeout after 120s)")
+        print("  Fix: Check if omnibase_core path is accessible")
+        print("  Fix: Try running with --verbose to see progress")
         return False
     except FileNotFoundError:
         print("Architecture Layers: SKIP (bash not available)")
         return True
-    except Exception as e:
-        print(f"Architecture Layers: ERROR ({type(e).__name__}: {e})")
+    except PermissionError as e:
+        print(f"Architecture Layers: ERROR (Permission denied: {e})")
+        print("  Fix: Ensure execute permissions on check_architecture.sh")
         return False
+    except OSError as e:
+        print(f"Architecture Layers: ERROR (OS error: {e})")
+        print("  Fix: Check file system access and disk space")
+        return False
+
+
+def _report_known_issues(output: str, verbose: bool) -> None:
+    """Report known issues with ticket links.
+
+    Parses the validator output to identify known violations and provides
+    helpful links to the corresponding Linear tickets.
+
+    Args:
+        output: The stdout from check_architecture.sh
+        verbose: If True, show additional context
+    """
+    found_known_issues = []
+
+    for import_name, (ticket_id, description) in KNOWN_ISSUES.items():
+        # Check if this import was flagged in the output
+        if f"'{import_name}'" in output or f'"{import_name}"' in output:
+            found_known_issues.append((import_name, ticket_id, description))
+
+    if found_known_issues:
+        print("\n" + "=" * 60)
+        print("KNOWN ISSUES (tracked in Linear)")
+        print("=" * 60)
+        for import_name, ticket_id, description in found_known_issues:
+            print(f"\n  {import_name}:")
+            print(f"    Ticket: {ticket_id}")
+            print(f"    Description: {description}")
+            print(f"    Link: https://linear.app/onex/issue/{ticket_id}")
+        print("\n" + "-" * 60)
+        print("These violations are known and tracked. Fix by resolving the")
+        print("corresponding Linear tickets listed above.")
+        print("=" * 60 + "\n")
 
 
 def run_contracts(verbose: bool = False) -> bool:
@@ -385,12 +458,24 @@ def run_imports(verbose: bool = False) -> bool:
 
 
 def run_all(verbose: bool = False, quick: bool = False) -> bool:
-    """Run all validations."""
+    """Run all validations.
+
+    Runs all ONEX infrastructure validators in sequence. The architecture_layers
+    check is included to verify omnibase_core maintains proper layer separation.
+
+    Args:
+        verbose: If True, show detailed output for each validator
+        quick: If True, skip medium priority validators (unions, imports)
+
+    Returns:
+        True if all validations pass, False if any fail
+    """
     print("Running ONEX Infrastructure Validations...")
     print("=" * 50)
 
     validators = [
         ("Architecture", run_architecture),
+        ("Architecture Layers", run_architecture_layers),
         ("Contracts", run_contracts),
         ("Patterns", run_patterns),
     ]

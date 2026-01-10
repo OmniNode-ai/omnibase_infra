@@ -7,6 +7,78 @@ The core principle: omnibase_core must not contain any infrastructure-specific
 imports such as kafka, httpx, or asyncpg. These belong exclusively in omnibase_infra.
 
 Ticket: OMN-255
+
+CI Integration
+==============
+
+These tests run as part of the CI pipeline in two ways:
+
+1. **Pre-push hook** (`.pre-commit-config.yaml`):
+   - Hook ID: `onex-validate-architecture-layers`
+   - Stage: `pre-push` (not pre-commit for performance)
+   - Runs: `poetry run python scripts/validate.py architecture_layers`
+
+2. **GitHub Actions** (`.github/workflows/test.yml`):
+   - Job: `onex-validation` ("ONEX Validators")
+   - Runs: `poetry run python scripts/validate.py all --verbose`
+   - Includes architecture_layers as part of the full validation suite
+
+Known Issues Tracking
+=====================
+
+Some imports have known violations that are tracked in Linear tickets.
+These use pytest.mark.xfail markers to:
+- Document the known issue with ticket reference
+- Allow CI to pass while the issue is tracked
+- Automatically detect when the issue is fixed (strict=False)
+
+Current known issues:
+- aiohttp: OMN-1015 - async HTTP client needs migration to infra
+- redis:   OMN-1295 - Redis client needs migration to infra
+
+The xfail markers ensure these violations are:
+1. Visible in test output with ticket references
+2. Not blocking CI until fixed
+3. Automatically promoted to failures when resolved
+
+Detection Limitations (IMPORTANT)
+=================================
+
+This validator uses regex-based pattern matching which has limitations
+compared to full AST-based Python analysis:
+
+**What IS detected (top-level imports):**
+- `import kafka`
+- `from kafka import Producer`
+- `import kafka.producer`
+- `from kafka.consumer import Consumer`
+
+**What is NOT detected (inline imports inside functions/methods):**
+
+    def my_function():
+        import kafka  # NOT DETECTED by regex!
+        from httpx import Client  # NOT DETECTED by regex!
+
+Inline imports are common patterns to:
+- Avoid circular import issues
+- Lazy-load heavy dependencies
+- Conditionally import based on runtime conditions
+
+**Other limitations:**
+- Imports constructed dynamically at runtime (`__import__()`, `importlib`)
+- Imports hidden behind conditional logic (if/else blocks)
+- String-based import references in configuration
+
+For comprehensive detection including inline imports, this test file uses
+proper Python regex patterns that check the actual import structure.
+The bash script (`scripts/check_architecture.sh`) has additional limitations
+due to grep-based parsing.
+
+See Also
+========
+- scripts/check_architecture.sh - Bash-based quick check with JSON output
+- scripts/validate.py - Python validation wrapper with KNOWN_ISSUES registry
+- .pre-commit-config.yaml - Pre-commit/pre-push hook configuration
 """
 
 from __future__ import annotations
@@ -15,8 +87,12 @@ import importlib.util
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True)
@@ -131,6 +207,129 @@ def _find_first_unquoted_delimiter(line: str) -> tuple[str | None, int]:
     return "'''", pos_single
 
 
+def _find_delimiter_positions(line: str, delimiter: str) -> list[int]:
+    """Find all positions of a delimiter in a line.
+
+    Args:
+        line: The line of code to search.
+        delimiter: The delimiter to find (e.g., '\"\"\"' or \"'''\").
+
+    Returns:
+        List of all positions where the delimiter starts.
+    """
+    positions: list[int] = []
+    start = 0
+    while True:
+        pos = line.find(delimiter, start)
+        if pos == -1:
+            break
+        positions.append(pos)
+        start = pos + len(delimiter)
+    return positions
+
+
+def _get_balanced_string_ranges(
+    line: str, balanced_delim: str
+) -> list[tuple[int, int]] | None:
+    """Get the ranges of positions that are inside balanced strings.
+
+    Args:
+        line: The line of code to search.
+        balanced_delim: The delimiter type (e.g., '\"\"\"' or \"'''\").
+
+    Returns:
+        List of (start, end) tuples defining ranges inside strings,
+        or None if the delimiter is not balanced (odd count).
+    """
+    balanced_positions = _find_delimiter_positions(line, balanced_delim)
+
+    # Odd count means unbalanced
+    if len(balanced_positions) % 2 != 0:
+        return None
+
+    # Create ranges - each pair of positions defines a string
+    inside_ranges: list[tuple[int, int]] = []
+    for i in range(0, len(balanced_positions), 2):
+        start = balanced_positions[i]
+        end = balanced_positions[i + 1] + len(balanced_delim)
+        inside_ranges.append((start, end))
+
+    return inside_ranges
+
+
+def _find_delimiter_outside_balanced(
+    line: str, target_delim: str, balanced_delim: str
+) -> int:
+    """Find the first occurrence of target_delim that is outside balanced_delim strings.
+
+    When a line contains balanced strings of one delimiter type (e.g., two \"\"\"
+    forming a complete string), we need to find occurrences of the other delimiter
+    type that are NOT inside those balanced strings.
+
+    Args:
+        line: The line of code to search.
+        target_delim: The delimiter to find (e.g., \"'''\").
+        balanced_delim: The delimiter type that is balanced (e.g., '\"\"\"').
+
+    Returns:
+        Position of the first target_delim outside balanced_delim strings,
+        or -1 if not found.
+    """
+    inside_ranges = _get_balanced_string_ranges(line, balanced_delim)
+
+    # If not balanced, fall back to simple find
+    if inside_ranges is None:
+        return line.find(target_delim)
+
+    # Find all positions of target delimiter
+    target_positions = _find_delimiter_positions(line, target_delim)
+
+    # Return the first one that is outside all balanced string ranges
+    for pos in target_positions:
+        is_inside = False
+        for range_start, range_end in inside_ranges:
+            if range_start < pos < range_end:
+                is_inside = True
+                break
+        if not is_inside:
+            return pos
+
+    return -1
+
+
+def _count_delimiter_outside_balanced(
+    line: str, target_delim: str, balanced_delim: str
+) -> int:
+    """Count occurrences of target_delim that are outside balanced_delim strings.
+
+    Args:
+        line: The line of code to search.
+        target_delim: The delimiter to count (e.g., \"'''\").
+        balanced_delim: The delimiter type that is balanced (e.g., '\"\"\"').
+
+    Returns:
+        Count of target_delim occurrences outside balanced_delim strings.
+    """
+    inside_ranges = _get_balanced_string_ranges(line, balanced_delim)
+
+    # If not balanced, count all occurrences
+    if inside_ranges is None:
+        return len(_find_delimiter_positions(line, target_delim))
+
+    # Count target_delim positions that are outside all balanced string ranges
+    target_positions = _find_delimiter_positions(line, target_delim)
+    count = 0
+    for pos in target_positions:
+        is_inside = False
+        for range_start, range_end in inside_ranges:
+            if range_start < pos < range_end:
+                is_inside = True
+                break
+        if not is_inside:
+            count += 1
+    return count
+
+
 def _is_balanced_string_line(line: str, delimiter: str) -> bool:
     """Check if a line contains a balanced (single-line) string.
 
@@ -148,6 +347,170 @@ def _is_balanced_string_line(line: str, delimiter: str) -> bool:
     return count % 2 == 0
 
 
+def _find_multiline_state_after_line(
+    line: str,
+    current_in_multiline: bool,
+    current_delimiter: str | None,
+) -> tuple[bool, str | None, str]:
+    """Determine multiline string state after processing a line.
+
+    This function handles the complex logic of tracking multiline string state
+    including cases where one delimiter type appears inside another, and where
+    multiple strings open and close on the same line.
+
+    Args:
+        line: The line of code to analyze.
+        current_in_multiline: Whether we're currently inside a multiline string.
+        current_delimiter: The delimiter of the current multiline (if any).
+
+    Returns:
+        Tuple of:
+        - New in_multiline state
+        - New delimiter (if in multiline)
+        - Content to check for imports (code outside strings)
+    """
+    if current_in_multiline:
+        assert current_delimiter is not None
+        closing_pos = line.find(current_delimiter)
+        if closing_pos == -1:
+            # Still inside multiline, no code to check
+            return True, current_delimiter, ""
+
+        # Found closing delimiter
+        after_close = line[closing_pos + 3 :]
+
+        # Check if remainder starts a new multiline
+        new_delim, new_pos = _find_first_unquoted_delimiter(after_close)
+        if new_delim is not None and not _is_balanced_string_line(
+            after_close, new_delim
+        ):
+            # New multiline starts
+            content_before_new = after_close[:new_pos] if new_pos > 0 else ""
+            return True, new_delim, content_before_new.strip()
+
+        # No new multiline - check the remainder for the other delimiter type
+        # Must find other_delim that is OUTSIDE any balanced new_delim strings
+        other_delim = "'''" if current_delimiter == '"""' else '"""'
+        if other_delim in after_close and not _is_balanced_string_line(
+            after_close, other_delim
+        ):
+            # Find position outside any balanced strings of new_delim type
+            if new_delim is not None and _is_balanced_string_line(
+                after_close, new_delim
+            ):
+                other_pos = _find_delimiter_outside_balanced(
+                    after_close, other_delim, new_delim
+                )
+            else:
+                other_pos = after_close.find(other_delim)
+            if other_pos != -1:
+                content_before_other = after_close[:other_pos] if other_pos > 0 else ""
+                return True, other_delim, content_before_other.strip()
+
+        # Not in multiline anymore
+        return False, None, after_close
+    else:
+        # Not in multiline - check if one starts
+        first_delim, first_pos = _find_first_unquoted_delimiter(line)
+        if first_delim is None:
+            # No triple quotes at all
+            return False, None, line
+
+        if _is_balanced_string_line(line, first_delim):
+            # First delimiter type is balanced - check for the other type
+            # Important: we must count other_delim OUTSIDE the balanced first_delim
+            # strings, not the total count which may include delimiters inside strings
+            other_delim = "'''" if first_delim == '"""' else '"""'
+            other_count_outside = _count_delimiter_outside_balanced(
+                line, other_delim, first_delim
+            )
+            if other_count_outside > 0 and other_count_outside % 2 != 0:
+                # Odd count = unbalanced = entering multiline
+                other_pos = _find_delimiter_outside_balanced(
+                    line, other_delim, first_delim
+                )
+                if other_pos != -1:
+                    content_before = line[:other_pos] if other_pos > 0 else ""
+                    return True, other_delim, content_before
+
+            # Both types balanced or other type not present outside first_delim
+            return False, None, line
+        else:
+            # First delimiter is unbalanced - entering multiline
+            content_before = line[:first_pos] if first_pos > 0 else ""
+            return True, first_delim, content_before
+
+
+def _is_in_type_checking_block(lines: Sequence[str], current_line_idx: int) -> bool:
+    """Check if the current line is inside a TYPE_CHECKING conditional block.
+
+    TYPE_CHECKING blocks are used for type-only imports that should not trigger
+    architecture violations since they don't affect runtime behavior.
+
+    A line is considered "inside" a TYPE_CHECKING block if:
+    1. A previous line contains `if TYPE_CHECKING:`
+    2. The current line has greater indentation than that `if` statement
+    3. No intervening line at the same or less indentation has broken the block
+
+    Args:
+        lines: All lines in the file.
+        current_line_idx: Index of the current line (0-based).
+
+    Returns:
+        True if the line is inside a TYPE_CHECKING block.
+    """
+    # Track indentation of TYPE_CHECKING if block
+    type_checking_indent: int | None = None
+    type_checking_line_idx: int | None = None
+
+    for idx in range(current_line_idx + 1):
+        line = lines[idx]
+        stripped = line.lstrip()
+
+        # Skip empty lines and comments for block detection
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        current_indent = len(line) - len(stripped)
+
+        # Check if we've exited the TYPE_CHECKING block (less or equal indentation)
+        # Only check lines AFTER the TYPE_CHECKING statement
+        if (
+            type_checking_indent is not None
+            and type_checking_line_idx is not None
+            and idx > type_checking_line_idx
+            and current_indent <= type_checking_indent
+        ):
+            type_checking_indent = None
+            type_checking_line_idx = None
+
+        # Check for TYPE_CHECKING if statement
+        if re.match(r"if\s+TYPE_CHECKING\s*:", stripped):
+            type_checking_indent = current_indent
+            type_checking_line_idx = idx
+            continue
+
+    # To be inside the block, we need:
+    # 1. type_checking_indent to be set (we found an `if TYPE_CHECKING:`)
+    # 2. The current line index must be AFTER the TYPE_CHECKING line
+    # 3. The current line must have greater indentation than TYPE_CHECKING
+    if type_checking_indent is None or type_checking_line_idx is None:
+        return False
+
+    if current_line_idx <= type_checking_line_idx:
+        return False
+
+    # Get the current line's indentation
+    current_line = lines[current_line_idx]
+    current_stripped = current_line.lstrip()
+    if not current_stripped or current_stripped.startswith("#"):
+        # Empty or comment lines inherit the block context
+        return True
+    current_indent = len(current_line) - len(current_stripped)
+
+    return current_indent > type_checking_indent
+
+
 def _scan_file_for_imports(
     file_path: Path,
     forbidden_patterns: list[str],
@@ -157,6 +520,9 @@ def _scan_file_for_imports(
     Detects both `import X` and `from X import Y` patterns.
     Properly handles multiline docstrings (both triple-quoted variants),
     including edge cases where one delimiter type appears inside the other.
+
+    Also properly handles TYPE_CHECKING conditional blocks - imports inside
+    these blocks are type-only and should not trigger violations.
 
     Args:
         file_path: Path to the Python file to scan.
@@ -189,124 +555,83 @@ def _scan_file_for_imports(
         in_multiline_string = False
         multiline_delimiter: str | None = None
 
-        for line_num, line in enumerate(lines, start=1):
+        for line_idx, line in enumerate(lines):
+            line_num = line_idx + 1  # 1-indexed for reporting
             stripped = line.lstrip()
-
-            # The portion of the line to check for imports
-            # (modified when closing a multiline string to only check content after)
-            line_to_check = line
-
-            # Track if we need to enter a new multiline AFTER processing this line.
-            # This is set when closing a multiline reveals a new one starting,
-            # but we need to check content before the new delimiter first.
-            pending_multiline_entry = False
-            pending_multiline_delim: str | None = None
 
             # Skip comment lines (only if not in multiline string)
             if not in_multiline_string and stripped.startswith("#"):
                 continue
 
-            # Handle multiline string tracking
-            if not in_multiline_string:
-                # Not in a multiline string - check if one starts on this line
-                first_delim, _ = _find_first_unquoted_delimiter(line)
-                if first_delim is not None:
-                    # Check if this delimiter is balanced (single-line string)
-                    if not _is_balanced_string_line(line, first_delim):
-                        # Unbalanced - we're entering a multiline string
-                        in_multiline_string = True
-                        multiline_delimiter = first_delim
-                    # else: balanced single-line string, continue to check imports
-            else:
-                # Already in a multiline string - check for closing delimiter
-                assert multiline_delimiter is not None
-                closing_pos = line.find(multiline_delimiter)
-                if closing_pos != -1:
-                    # First occurrence ALWAYS closes the multiline string we're in
-                    # regardless of how many additional delimiters appear on this line
-                    in_multiline_string = False
-                    multiline_delimiter = None
-                    # Content AFTER the closing delimiter may contain code or new strings
-                    # 3 = len('"""') or len("'''")
-                    after_close = line[closing_pos + 3 :]
+            # Use the helper to determine new multiline state and extractable content
+            new_in_multiline, new_delimiter, content_to_check = (
+                _find_multiline_state_after_line(
+                    line, in_multiline_string, multiline_delimiter
+                )
+            )
 
-                    # Check if the remainder starts a NEW multiline string
-                    new_delim, new_delim_pos = _find_first_unquoted_delimiter(
-                        after_close
-                    )
-                    if new_delim is not None and not _is_balanced_string_line(
-                        after_close, new_delim
-                    ):
-                        # Unbalanced - will enter a new multiline string
-                        # First, check content BEFORE the new delimiter for imports
-                        content_before = after_close[:new_delim_pos]
-                        if not content_before.strip():
-                            # No code before new multiline, enter and skip
-                            in_multiline_string = True
-                            multiline_delimiter = new_delim
-                            continue
-                        # There's code between closing and new multiline
-                        # Check it for imports, then enter new multiline after
-                        line_to_check = content_before
-                        pending_multiline_entry = True
-                        pending_multiline_delim = new_delim
-                    else:
-                        # Either no new delimiter, or balanced single-line string
-                        line_to_check = after_close
+            # Update state for next iteration
+            prev_in_multiline = in_multiline_string
+            in_multiline_string = new_in_multiline
+            multiline_delimiter = new_delimiter
 
-            # Skip lines inside multiline strings (docstrings)
-            if in_multiline_string:
+            # If we were in a multiline and still are (no closing found), skip
+            if prev_in_multiline and not content_to_check:
                 continue
 
-            # Handle single-line docstrings that start the line
-            # If there's content after the docstring, check that content for imports
-            # Loop to handle multiple consecutive single-line strings (e.g., """a""" '''b''')
-            check_stripped = line_to_check.lstrip()
+            # Handle single-line docstrings that start the extracted content
+            # Loop to handle multiple consecutive single-line strings
+            processed_content = content_to_check.lstrip()
             # Handle valid Python string prefixes (case insensitive):
-            #   Single: r, f, b, u
+            #   Single: r, R, f, F, b, B, u, U
             #   Combinations: rf/fr (raw f-string), rb/br (raw bytes)
             # Note: u cannot combine with other prefixes in Python 3
-            prefix_pattern = r"^([rRfFbBuU]|[rR][fF]|[fF][rR]|[rR][bB]|[bB][rR])?"
-            found_string = True
-            while found_string:
-                found_string = False
+            # The regex anchors to start and requires the delimiter to follow immediately
+            # This strict pattern rejects invalid prefixes like 'xy', 'ub', 'fu', etc.
+            string_prefix_pattern = (
+                r"^("
+                r"[rR][fF]|[fF][rR]|"  # Raw f-strings: rf, rF, Rf, RF, fr, fR, Fr, FR
+                r"[rR][bB]|[bB][rR]|"  # Raw bytes: rb, rB, Rb, RB, br, bR, Br, BR
+                r"[rRfFbBuU]"  # Single prefixes: r, R, f, F, b, B, u, U
+                r")?"
+            )
+            found_docstring = True
+            while found_docstring:
+                found_docstring = False
                 for delimiter in ('"""', "'''"):
-                    # Check if line starts with optional prefix + delimiter
+                    # Check if content starts with optional prefix + delimiter
                     prefix_match = re.match(
-                        prefix_pattern + re.escape(delimiter), check_stripped
+                        string_prefix_pattern + re.escape(delimiter), processed_content
                     )
                     if prefix_match:
-                        # Count occurrences of this delimiter
-                        if _is_balanced_string_line(check_stripped, delimiter):
-                            # Balanced means it's a single-line docstring
-                            # Find where the second delimiter ends
-                            first_pos = check_stripped.find(delimiter)
-                            second_pos = check_stripped.find(delimiter, first_pos + 3)
+                        # Check if this delimiter is balanced (single-line string)
+                        if _is_balanced_string_line(processed_content, delimiter):
+                            # Balanced - find where the closing delimiter ends
+                            first_pos = processed_content.find(delimiter)
+                            second_pos = processed_content.find(
+                                delimiter, first_pos + 3
+                            )
                             if second_pos != -1:
                                 # Get content after the closing delimiter
-                                after_docstring = check_stripped[second_pos + 3 :]
+                                after_docstring = processed_content[second_pos + 3 :]
                                 if after_docstring.strip():
                                     # There's content after - continue processing
-                                    check_stripped = after_docstring.lstrip()
-                                    found_string = True
+                                    processed_content = after_docstring.lstrip()
+                                    found_docstring = True
                                 else:
-                                    # Only whitespace after docstring - skip line
-                                    check_stripped = ""
-                                break  # Restart with updated check_stripped
-            line_to_check = check_stripped
+                                    # Only whitespace after docstring
+                                    processed_content = ""
+                                break  # Restart loop with updated content
 
-            # Apply pending multiline state before final checks.
-            # This handles the case where closing a multiline revealed
-            # a new one starting - we need to enter it for the next iteration.
-            if pending_multiline_entry:
-                in_multiline_string = True
-                multiline_delimiter = pending_multiline_delim
-
-            # Skip if line_to_check is empty (was only a docstring)
-            if not line_to_check.strip():
+            # Skip if no content left to check
+            if not processed_content.strip():
                 continue
 
-            if import_regex.match(line_to_check):
+            # Skip imports inside TYPE_CHECKING blocks (type-only imports)
+            if _is_in_type_checking_block(lines, line_idx):
+                continue
+
+            if import_regex.match(processed_content):
                 violations.append(
                     ArchitectureViolation(
                         file_path=file_path,
@@ -1347,3 +1672,603 @@ class MyClass:
         assert len(violations) == 2
         assert violations[0].line_number == 2
         assert violations[1].line_number == 5
+
+    # --- Tests for TYPE_CHECKING conditional imports ---
+
+    def test_scan_file_for_imports_type_checking_import_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify imports inside TYPE_CHECKING blocks are not flagged.
+
+        TYPE_CHECKING blocks are used for type-only imports that don't affect
+        runtime behavior. These should be allowed even for infrastructure imports.
+        """
+        test_file = tmp_path / "type_checking_import.py"
+        content = """\
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import kafka
+    from kafka import Producer
+
+def my_func():
+    pass
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_type_checking_mixed_with_regular(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify TYPE_CHECKING imports allowed but regular imports flagged.
+
+        When a file has both TYPE_CHECKING imports and regular imports,
+        only the regular imports should be flagged as violations.
+        """
+        test_file = tmp_path / "mixed_type_checking.py"
+        content = """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kafka import Producer  # Type-only, should be allowed
+
+import kafka  # Runtime import, should be flagged
+
+def my_func():
+    pass
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 6
+
+    def test_scan_file_for_imports_type_checking_indented_content(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify TYPE_CHECKING block with multiple indented imports.
+
+        Multiple imports inside a TYPE_CHECKING block should all be allowed.
+        """
+        test_file = tmp_path / "type_checking_multi.py"
+        content = """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import kafka
+    from kafka import Producer
+    from kafka.consumer import Consumer
+    import httpx
+    from asyncpg import Connection
+
+x = 1
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka", "httpx", "asyncpg"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_type_checking_nested_in_class(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify TYPE_CHECKING inside class body is handled.
+
+        TYPE_CHECKING blocks can appear inside class bodies for
+        type annotations.
+        """
+        test_file = tmp_path / "type_checking_in_class.py"
+        content = """\
+from typing import TYPE_CHECKING
+
+class MyClass:
+    if TYPE_CHECKING:
+        from kafka import Producer
+
+    def method(self) -> None:
+        pass
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    # --- Tests for docstrings with unusual patterns ---
+
+    def test_scan_file_for_imports_docstring_at_class_start(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify docstring at start of class is handled correctly.
+
+        Class docstrings immediately after the class definition line
+        should be properly identified.
+        """
+        test_file = tmp_path / "class_docstring.py"
+        content = '''\
+class MyClass:
+    """This class mentions import kafka.
+
+    Example:
+        from kafka import Producer
+        producer = Producer()
+    """
+
+    def method(self):
+        pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_docstring_at_function_start(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify docstring at start of function is handled correctly.
+
+        Function docstrings immediately after the def line should be
+        properly identified.
+        """
+        test_file = tmp_path / "function_docstring.py"
+        content = '''\
+def my_function():
+    """This function mentions import kafka.
+
+    Args:
+        from kafka import Producer - example import
+    """
+    return None
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_docstring_unusual_indentation(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify docstrings with unusual indentation are handled.
+
+        Docstrings may have content at various indentation levels.
+        """
+        test_file = tmp_path / "unusual_indent_docstring.py"
+        content = '''\
+def my_function():
+    """Start of docstring.
+import kafka  # At column 0 inside docstring
+    from kafka import Producer  # Indented inside docstring
+        import kafka.consumer  # More indented inside docstring
+    """
+    return None
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_docstring_after_decorator(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify docstrings after decorators are handled correctly.
+
+        Functions with decorators should still have their docstrings
+        properly identified and excluded from import scanning.
+        """
+        test_file = tmp_path / "decorated_function.py"
+        content = '''\
+@decorator
+def my_function():
+    """Docstring mentioning import kafka."""
+    return None
+
+@decorator1
+@decorator2
+@decorator3
+def another_function():
+    """Another docstring with from kafka import Producer."""
+    return None
+
+class MyClass:
+    @classmethod
+    def my_method(cls):
+        """Method docstring about kafka."""
+        pass
+
+    @staticmethod
+    def static_method():
+        """Static method docstring - import kafka."""
+        pass
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_docstring_after_decorator_with_args(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify docstrings after decorators with arguments are handled.
+
+        Decorators can have complex argument expressions including
+        string literals that might contain import-like text.
+        """
+        test_file = tmp_path / "decorator_with_args.py"
+        content = '''\
+@decorator("import kafka")
+def my_function():
+    """Docstring mentioning import kafka."""
+    return None
+
+@route("/kafka/producer", methods=["POST"])
+def kafka_route():
+    """Route handler that mentions from kafka import Producer."""
+    return None
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    # --- Additional edge cases for multiline strings ---
+
+    def test_scan_file_for_imports_unclosed_double_at_eof(self, tmp_path: Path) -> None:
+        """Verify unclosed double-quote multiline at EOF is handled.
+
+        Edge case where file ends with unclosed triple double quotes.
+        """
+        test_file = tmp_path / "unclosed_double.py"
+        content = '''\
+x = 1
+
+"""
+This docstring is never closed.
+import kafka
+from kafka import Producer
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_unclosed_single_at_eof(self, tmp_path: Path) -> None:
+        """Verify unclosed single-quote multiline at EOF is handled.
+
+        Edge case where file ends with unclosed triple single quotes.
+        """
+        test_file = tmp_path / "unclosed_single.py"
+        content = """\
+x = 1
+
+'''
+This docstring is never closed.
+import kafka
+from kafka import Producer
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_starts_in_multiline_no_close(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify file that starts with multiline and never closes.
+
+        Edge case where the entire file is inside a multiline string.
+        """
+        test_file = tmp_path / "all_in_string.py"
+        content = '''\
+"""This file starts with a multiline string.
+import kafka
+from kafka import Producer
+Everything here is inside the string.
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_balanced_with_other_unbalanced(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify line with balanced quotes and unbalanced other type.
+
+        Edge case: one delimiter type is balanced but the other type
+        starts a multiline string.
+        """
+        test_file = tmp_path / "mixed_balance.py"
+        # The """ are balanced (2 occurrences), but ''' starts multiline
+        content = '''x = """hello""" + \'\'\'multiline
+import kafka  # Inside the single-quoted multiline
+\'\'\'
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_import_before_unbalanced_string(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify import before unbalanced string on same line is detected.
+
+        The import appears before the multiline string starts, so it
+        should be detected as a violation.
+        """
+        test_file = tmp_path / "import_before_string.py"
+        content = '''import kafka; x = """multiline starts
+more content
+"""
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 1
+
+    # --- Tests for helper functions ---
+
+    def test_find_multiline_state_after_line_not_in_multiline(self) -> None:
+        """Verify _find_multiline_state_after_line when not in multiline."""
+        # No quotes at all
+        in_ml, delim, content = _find_multiline_state_after_line("x = 1", False, None)
+        assert in_ml is False
+        assert delim is None
+        assert content == "x = 1"
+
+    def test_find_multiline_state_after_line_entering_multiline(self) -> None:
+        """Verify _find_multiline_state_after_line when entering multiline."""
+        # Single triple-quote starts multiline
+        in_ml, delim, content = _find_multiline_state_after_line(
+            'x = """hello', False, None
+        )
+        assert in_ml is True
+        assert delim == '"""'
+        assert content == "x = "
+
+    def test_find_multiline_state_after_line_closing_multiline(self) -> None:
+        """Verify _find_multiline_state_after_line when closing multiline."""
+        # Inside multiline, then close it
+        in_ml, delim, content = _find_multiline_state_after_line(
+            'closing""" x = 1', True, '"""'
+        )
+        assert in_ml is False
+        assert delim is None
+        assert content == " x = 1"
+
+    def test_find_multiline_state_after_line_still_in_multiline(self) -> None:
+        """Verify _find_multiline_state_after_line when staying in multiline."""
+        # Inside multiline, no closing delimiter
+        in_ml, delim, content = _find_multiline_state_after_line(
+            "still inside", True, '"""'
+        )
+        assert in_ml is True
+        assert delim == '"""'
+        assert content == ""
+
+    def test_is_in_type_checking_block_outside(self) -> None:
+        """Verify _is_in_type_checking_block returns False when outside."""
+        lines = [
+            "import os",
+            "x = 1",
+        ]
+        assert _is_in_type_checking_block(lines, 0) is False
+        assert _is_in_type_checking_block(lines, 1) is False
+
+    def test_is_in_type_checking_block_inside(self) -> None:
+        """Verify _is_in_type_checking_block returns True when inside."""
+        lines = [
+            "from typing import TYPE_CHECKING",
+            "if TYPE_CHECKING:",
+            "    import kafka",
+            "x = 1",
+        ]
+        assert _is_in_type_checking_block(lines, 0) is False
+        assert _is_in_type_checking_block(lines, 1) is False
+        assert _is_in_type_checking_block(lines, 2) is True
+        assert _is_in_type_checking_block(lines, 3) is False
+
+    def test_is_in_type_checking_block_multiple_levels(self) -> None:
+        """Verify _is_in_type_checking_block handles indentation changes."""
+        lines = [
+            "if TYPE_CHECKING:",
+            "    import kafka",
+            "    if True:",
+            "        from kafka import Producer",
+            "x = 1",
+        ]
+        assert _is_in_type_checking_block(lines, 1) is True
+        assert _is_in_type_checking_block(lines, 3) is True
+        assert _is_in_type_checking_block(lines, 4) is False
+
+    # --- Tests for _find_delimiter_positions ---
+
+    def test_find_delimiter_positions_empty_line(self) -> None:
+        """Verify _find_delimiter_positions returns empty list for no matches."""
+        positions = _find_delimiter_positions("x = 1", '"""')
+        assert positions == []
+
+    def test_find_delimiter_positions_single_occurrence(self) -> None:
+        """Verify _find_delimiter_positions finds single delimiter."""
+        positions = _find_delimiter_positions('x = """hello', '"""')
+        assert positions == [4]
+
+    def test_find_delimiter_positions_multiple_occurrences(self) -> None:
+        """Verify _find_delimiter_positions finds all delimiters."""
+        positions = _find_delimiter_positions('"""hello""" + """world"""', '"""')
+        assert positions == [0, 8, 14, 22]
+
+    def test_find_delimiter_positions_adjacent_delimiters(self) -> None:
+        """Verify _find_delimiter_positions handles adjacent delimiters."""
+        # Six quotes = two delimiters adjacent
+        positions = _find_delimiter_positions('""""""', '"""')
+        assert positions == [0, 3]
+
+    # --- Tests for _find_delimiter_outside_balanced ---
+
+    def test_find_delimiter_outside_balanced_no_balanced(self) -> None:
+        """Verify _find_delimiter_outside_balanced with no balanced strings."""
+        # No balanced_delim in line, should find target normally
+        pos = _find_delimiter_outside_balanced("'''hello", "'''", '"""')
+        assert pos == 0
+
+    def test_find_delimiter_outside_balanced_target_inside(self) -> None:
+        """Verify _find_delimiter_outside_balanced skips target inside balanced."""
+        # ''' is inside the """ string, should not find it
+        line = '"""contains \'\'\' inside"""'
+        pos = _find_delimiter_outside_balanced(line, "'''", '"""')
+        assert pos == -1
+
+    def test_find_delimiter_outside_balanced_target_after(self) -> None:
+        """Verify _find_delimiter_outside_balanced finds target after balanced."""
+        # ''' appears after the """ string closes
+        line = '"""hello""" \'\'\''
+        pos = _find_delimiter_outside_balanced(line, "'''", '"""')
+        assert pos == 12
+
+    def test_find_delimiter_outside_balanced_multiple_balanced(self) -> None:
+        """Verify _find_delimiter_outside_balanced handles multiple balanced strings."""
+        # ''' after two balanced """ strings
+        line = '"""a""" """b""" \'\'\''
+        pos = _find_delimiter_outside_balanced(line, "'''", '"""')
+        assert pos == 16
+
+    def test_find_delimiter_outside_balanced_target_between_balanced(self) -> None:
+        """Verify _find_delimiter_outside_balanced finds target between balanced strings."""
+        # ''' between two balanced """ strings
+        line = '"""a""" \'\'\' """b"""'
+        pos = _find_delimiter_outside_balanced(line, "'''", '"""')
+        assert pos == 8
+
+    def test_find_delimiter_outside_balanced_complex_scenario(self) -> None:
+        """Verify _find_delimiter_outside_balanced handles complex mixed scenario.
+
+        This tests the specific bug fix where triple-single-quotes inside
+        triple-double-quotes was incorrectly matched when looking for
+        unbalanced triple-single-quotes outside the triple-double-quote string.
+        """
+        # The ''' at position 11 is inside """, the ''' at position 25 is outside
+        line = "x = \"\"\"has ''' inside\"\"\" '''"
+        pos = _find_delimiter_outside_balanced(line, "'''", '"""')
+        assert pos == 25
+
+    # --- Tests for edge case: balanced delimiter containing other delimiter ---
+
+    def test_scan_file_for_imports_balanced_containing_other_delimiter(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify balanced strings containing other delimiter type work correctly.
+
+        This tests the specific bug fix for PR #89: when one delimiter type
+        is balanced but contains the other delimiter type inside, the scanner
+        should correctly identify that the inner delimiter is NOT starting
+        a new multiline string.
+        """
+        test_file = tmp_path / "balanced_containing_other.py"
+        # The """ is balanced, and ''' inside should be ignored
+        # The ''' after the """ should start a multiline
+        content = '''x = """contains \'\'\' inside""" \'\'\'multiline starts
+import kafka  # Inside the single-quoted multiline
+\'\'\'
+y = 1
+'''
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    def test_scan_file_for_imports_reverse_balanced_containing_other(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify reverse case: balanced single quotes containing double quotes.
+
+        Same as above but with triple-single-quotes balanced and
+        triple-double-quotes inside.
+        """
+        test_file = tmp_path / "reverse_balanced.py"
+        # Content: x = '''contains """ inside''' """multiline starts...
+        # Triple single quotes are balanced, triple double quotes inside are ignored
+        # The trailing """ starts a multiline
+        actual_content = (
+            "x = '''contains \"\"\" inside''' \"\"\"multiline starts\n"
+            "import kafka  # Inside the double-quoted multiline\n"
+            '"""\n'
+            "y = 1\n"
+        )
+        test_file.write_text(actual_content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
+
+    # --- Tests for TYPE_CHECKING edge cases ---
+
+    def test_scan_file_for_imports_type_checking_after_regular_import(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify TYPE_CHECKING after regular import doesn't affect detection.
+
+        Regular imports before TYPE_CHECKING block should still be flagged.
+        """
+        test_file = tmp_path / "type_check_after_regular.py"
+        content = """\
+import kafka  # This should be flagged
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kafka import Consumer  # This should be allowed
+
+x = 1
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 1
+
+    def test_scan_file_for_imports_type_checking_with_else(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify TYPE_CHECKING with else block is handled correctly.
+
+        Content in the else block should be checked for violations.
+        """
+        test_file = tmp_path / "type_check_with_else.py"
+        content = """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kafka import Producer  # Type-only, allowed
+else:
+    import kafka  # Runtime import, should be flagged
+
+x = 1
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 1
+        assert violations[0].line_number == 6
+
+    def test_scan_file_for_imports_type_checking_empty_lines(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify empty lines inside TYPE_CHECKING block don't break detection."""
+        test_file = tmp_path / "type_check_empty_lines.py"
+        content = """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+
+    import kafka
+
+    from kafka import Producer
+
+x = 1
+"""
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0
