@@ -258,7 +258,7 @@ consumed_events:
 # This section defines the event-to-handler routing that the orchestrator
 # performs at runtime. Each handler is stateless and returns EVENTS only.
 #
-# Handler Pattern (from omnibase_infra/orchestrators/registration/handlers/):
+# Handler Pattern (from omnibase_infra/nodes/node_registration_orchestrator/handlers/):
 #   async def handle(event, now, correlation_id) -> list[BaseModel]
 #
 # All handlers:
@@ -282,7 +282,7 @@ handler_routing:
         module: "omnibase_infra.models.registration.model_node_introspection_event"
       handler:
         name: "HandlerNodeIntrospected"
-        module: "omnibase_infra.orchestrators.registration.handlers.handler_node_introspected"
+        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected"
       output_events:
         - "ModelNodeRegistrationInitiated"
       state_decision_matrix:
@@ -323,7 +323,7 @@ handler_routing:
         module: "omnibase_infra.runtime.models.model_runtime_tick"
       handler:
         name: "HandlerRuntimeTick"
-        module: "omnibase_infra.orchestrators.registration.handlers.handler_runtime_tick"
+        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtime_tick"
       output_events:
         - "ModelNodeRegistrationAckTimedOut"
         - "ModelNodeLivenessExpired"
@@ -343,7 +343,7 @@ handler_routing:
         module: "omnibase_infra.models.registration.commands.model_node_registration_acked"
       handler:
         name: "HandlerNodeRegistrationAcked"
-        module: "omnibase_infra.orchestrators.registration.handlers.handler_node_registration_acked"
+        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked"
       message_category: "COMMAND"
       output_events:
         - "ModelNodeRegistrationAckReceived"

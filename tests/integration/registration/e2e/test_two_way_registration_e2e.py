@@ -85,6 +85,9 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
     )
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
+    )
     from omnibase_infra.projectors import (
         ProjectionReaderRegistration,
         ProjectorRegistration,
@@ -1375,7 +1378,7 @@ class TestSuite4HeartbeatPublishing:
     @pytest.mark.slow
     async def test_heartbeat_updates_projection_liveness(
         self,
-        registration_orchestrator: NodeRegistrationOrchestrator,
+        heartbeat_handler: HandlerNodeHeartbeat,
         projection_reader: ProjectionReaderRegistration,
         real_projector: ProjectorRegistration,
         introspectable_test_node: ProtocolIntrospectableTestNode,
@@ -1385,6 +1388,9 @@ class TestSuite4HeartbeatPublishing:
 
         Validates that when a heartbeat is received, the registration
         projection's liveness deadline is updated correctly.
+
+        OMN-1102: Test now uses heartbeat_handler directly instead of
+        through orchestrator methods (declarative pattern).
 
         Steps:
             1. Create a projection record (simulating completed registration)
@@ -1444,9 +1450,10 @@ class TestSuite4HeartbeatPublishing:
             timestamp=datetime.now(UTC),
         )
 
-        # Process heartbeat through the orchestrator's heartbeat handler directly
+        # Process heartbeat through the handler directly
+        # OMN-1102: Orchestrator is declarative - test handler directly
         # (In full E2E with runtime, this would come from Kafka consumer)
-        await registration_orchestrator.handle_heartbeat(heartbeat_event)
+        await heartbeat_handler.handle(heartbeat_event)
 
         # Query the projection to verify heartbeat was processed
         projection = await projection_reader.get_entity_state(

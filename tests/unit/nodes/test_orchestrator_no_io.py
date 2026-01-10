@@ -266,48 +266,12 @@ class TestOrchestratorNoDirectNetworkCalls:
             and name in NodeRegistrationOrchestrator.__dict__
         ]
 
-        # Whitelist: Timeout coordination methods added by OMN-932.
-        # These are legitimate public methods for RuntimeTick timeout handling
-        # and do not violate the "pure coordinator" principle because they:
-        # 1. Delegate to TimeoutCoordinator (no direct I/O)
-        # 2. Are optional integration points, not core workflow logic
-        # 3. Follow the same delegation pattern as other workflow steps
-        timeout_coordinator_methods = frozenset(
-            {
-                "set_timeout_coordinator",  # Setter for timeout coordinator injection
-                "has_timeout_coordinator",  # Property to check if coordinator is set
-                "handle_runtime_tick",  # RuntimeTick event handler (delegates to coordinator)
-            }
-        )
-
-        # Whitelist: Heartbeat handler methods added by OMN-1006.
-        # These are legitimate public methods for heartbeat event handling
-        # and do not violate the "pure coordinator" principle because they:
-        # 1. Delegate to HandlerNodeHeartbeat (no direct I/O)
-        # 2. Are optional integration points for liveness tracking
-        # 3. Follow the same delegation pattern as timeout coordination
-        heartbeat_handler_methods = frozenset(
-            {
-                "set_heartbeat_handler",  # Setter for heartbeat handler injection
-                "has_heartbeat_handler",  # Property to check if handler is set
-                "handle_heartbeat",  # Heartbeat event handler (delegates to handler)
-            }
-        )
-
-        # Combined whitelist of all allowed methods
-        whitelisted_methods = timeout_coordinator_methods | heartbeat_handler_methods
-
-        # Filter out whitelisted methods
-        non_whitelisted_methods = [
-            m for m in own_methods if m not in whitelisted_methods
-        ]
-
-        # Orchestrator should have NO public methods defined directly
-        # except for whitelisted coordination methods
-        assert non_whitelisted_methods == [], (
+        # OMN-1102: Orchestrator is now fully declarative.
+        # No public methods should be defined directly - all behavior
+        # comes from base class and contract.yaml handler routing.
+        assert own_methods == [], (
             f"Orchestrator should have no custom public methods.\n"
-            f"Found: {non_whitelisted_methods}\n"
-            f"(Whitelisted methods: {sorted(whitelisted_methods)})\n"
+            f"Found: {own_methods}\n"
             f"A pure coordinator delegates all work to the base class "
             f"which handles workflow execution via contract.yaml."
         )
@@ -467,53 +431,18 @@ class TestOrchestratorIsPureCoordinator:
         # Get method names for reporting
         method_names = [m.name for m in methods]
 
-        # Whitelist: Timeout coordination methods added by OMN-932.
-        # These are legitimate public methods for RuntimeTick timeout handling
-        # and do not violate the "pure coordinator" principle because they:
-        # 1. Delegate to TimeoutCoordinator (no direct I/O)
-        # 2. Are optional integration points, not core workflow logic
-        # 3. Follow the same delegation pattern as other workflow steps
-        timeout_coordinator_methods = frozenset(
-            {
-                "set_timeout_coordinator",  # Setter for timeout coordinator injection
-                "has_timeout_coordinator",  # Property to check if coordinator is set
-                "handle_runtime_tick",  # RuntimeTick event handler (delegates to coordinator)
-            }
-        )
-
-        # Whitelist: Heartbeat handler methods added by OMN-1006.
-        # These are legitimate public methods for heartbeat event handling
-        # and do not violate the "pure coordinator" principle because they:
-        # 1. Delegate to HandlerNodeHeartbeat (no direct I/O)
-        # 2. Are optional integration points for liveness tracking
-        # 3. Follow the same delegation pattern as timeout coordination
-        heartbeat_handler_methods = frozenset(
-            {
-                "set_heartbeat_handler",  # Setter for heartbeat handler injection
-                "has_heartbeat_handler",  # Property to check if handler is set
-                "handle_heartbeat",  # Heartbeat event handler (delegates to handler)
-            }
-        )
-
-        # Combined whitelist of all allowed methods
-        whitelisted_methods = timeout_coordinator_methods | heartbeat_handler_methods
-
-        # Pure coordinator should have only __init__ and whitelisted methods
-        non_init_methods = [
-            name
-            for name in method_names
-            if name != "__init__" and name not in whitelisted_methods
-        ]
+        # OMN-1102: Orchestrator is now fully declarative.
+        # Pure coordinator should have only __init__ method - no custom methods.
+        non_init_methods = [name for name in method_names if name != "__init__"]
 
         assert not non_init_methods, (
             f"Pure coordinator should only have __init__ method.\n"
             f"Found additional methods: {non_init_methods}\n"
-            f"(Whitelisted methods: {sorted(whitelisted_methods)})\n"
             f"Orchestrator should only call super().__init__(container) and rely on "
             f"base class + contract.yaml for all behavior."
         )
 
-        # Verify __init__ is minimal (just super().__init__ call + handler initializers)
+        # Verify __init__ is minimal (just super().__init__ call)
         init_method = next((m for m in methods if m.name == "__init__"), None)
         if init_method:
             # Count statements in __init__ body (excluding docstring)
@@ -521,15 +450,11 @@ class TestOrchestratorIsPureCoordinator:
                 stmt for stmt in init_method.body if not is_docstring(stmt)
             ]
 
-            # Allow up to 3 statements:
-            # 1. super().__init__(container) call
-            # 2. _timeout_coordinator = None (OMN-932)
-            # 3. _heartbeat_handler = None (OMN-1006)
-            assert len(init_statements) <= 3, (
-                f"__init__ should be minimal (1-3 statements).\n"
+            # OMN-1102: __init__ should have only 1 statement: super().__init__(container)
+            assert len(init_statements) == 1, (
+                f"__init__ should be minimal (1 statement: super().__init__ call).\n"
                 f"Found {len(init_statements)} statements in __init__ body.\n"
-                f"Orchestrator should only call super().__init__(container) and "
-                f"initialize optional handler attributes, relying on "
+                f"Orchestrator should only call super().__init__(container), relying on "
                 f"base class + contract.yaml for all other behavior."
             )
 
