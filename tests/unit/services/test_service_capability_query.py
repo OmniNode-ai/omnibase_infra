@@ -160,6 +160,7 @@ def mock_projection_reader() -> AsyncMock:
     reader.get_by_capability_tags_all = AsyncMock(return_value=[])
     reader.get_by_capability_tags_any = AsyncMock(return_value=[])
     reader.get_by_intent_type = AsyncMock(return_value=[])
+    reader.get_by_intent_types = AsyncMock(return_value=[])
     reader.get_by_protocol = AsyncMock(return_value=[])
     reader.get_by_contract_type = AsyncMock(return_value=[])
     return reader
@@ -377,6 +378,158 @@ class TestFindNodesByIntentType:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+class TestFindNodesByIntentTypes:
+    """Tests for find_nodes_by_intent_types bulk query method."""
+
+    async def test_find_by_intent_types_returns_matching_nodes(
+        self,
+        mock_projection_reader: AsyncMock,
+        service: ServiceCapabilityQuery,
+    ) -> None:
+        """Should return nodes matching ANY of the specified intent types.
+
+        Given: A projection reader with nodes handling various postgres intents
+        When: find_nodes_by_intent_types is called with multiple intent types
+        Then: Returns all matching nodes in a single query
+        """
+        projections = [
+            create_mock_projection(intent_types=["postgres.query", "postgres.upsert"]),
+            create_mock_projection(intent_types=["postgres.delete"]),
+        ]
+        mock_projection_reader.get_by_intent_types.return_value = projections
+
+        result = await service.find_nodes_by_intent_types(
+            ["postgres.query", "postgres.delete"]
+        )
+
+        assert len(result) == 2
+        mock_projection_reader.get_by_intent_types.assert_called_once_with(
+            intent_types=["postgres.query", "postgres.delete"],
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+    async def test_find_by_intent_types_empty_list_returns_empty(
+        self,
+        mock_projection_reader: AsyncMock,
+        service: ServiceCapabilityQuery,
+    ) -> None:
+        """Should return empty list when intent_types list is empty.
+
+        Given: An empty intent_types list
+        When: find_nodes_by_intent_types is called
+        Then: Returns empty list without calling the reader
+        """
+        result = await service.find_nodes_by_intent_types([])
+
+        assert result == []
+        mock_projection_reader.get_by_intent_types.assert_not_called()
+
+    async def test_find_by_intent_types_with_contract_type_filter(
+        self,
+        mock_projection_reader: AsyncMock,
+        service: ServiceCapabilityQuery,
+    ) -> None:
+        """Should filter results by contract_type."""
+        effect_projection = create_mock_projection(
+            intent_types=["postgres.query"],
+            contract_type="effect",
+        )
+        reducer_projection = create_mock_projection(
+            intent_types=["postgres.query"],
+            contract_type="reducer",
+        )
+        mock_projection_reader.get_by_intent_types.return_value = [
+            effect_projection,
+            reducer_projection,
+        ]
+
+        result = await service.find_nodes_by_intent_types(
+            ["postgres.query"],
+            contract_type="effect",
+        )
+
+        # Only effect node should be returned due to contract_type filter
+        assert len(result) == 1
+        assert result[0].contract_type == "effect"
+
+    async def test_find_by_intent_types_with_custom_state(
+        self,
+        mock_projection_reader: AsyncMock,
+        service: ServiceCapabilityQuery,
+    ) -> None:
+        """Should filter by custom state when specified."""
+        pending_projection = create_mock_projection(
+            state=EnumRegistrationState.PENDING_REGISTRATION,
+            intent_types=["postgres.query"],
+        )
+        mock_projection_reader.get_by_intent_types.return_value = [pending_projection]
+
+        result = await service.find_nodes_by_intent_types(
+            ["postgres.query"],
+            state=EnumRegistrationState.PENDING_REGISTRATION,
+        )
+
+        assert len(result) == 1
+        mock_projection_reader.get_by_intent_types.assert_called_once_with(
+            intent_types=["postgres.query"],
+            state=EnumRegistrationState.PENDING_REGISTRATION,
+        )
+
+    async def test_find_by_intent_types_defaults_to_active_state(
+        self,
+        mock_projection_reader: AsyncMock,
+        service: ServiceCapabilityQuery,
+    ) -> None:
+        """Should default to ACTIVE state when no state specified."""
+        mock_projection_reader.get_by_intent_types.return_value = []
+
+        await service.find_nodes_by_intent_types(["any.intent"])
+
+        mock_projection_reader.get_by_intent_types.assert_called_once()
+        call_kwargs = mock_projection_reader.get_by_intent_types.call_args.kwargs
+        assert call_kwargs.get("state") == EnumRegistrationState.ACTIVE
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestResolveDependencyBulkQuery:
+    """Tests for resolve_dependency using bulk intent type queries."""
+
+    async def test_resolve_by_multiple_intent_types_uses_bulk_query(
+        self,
+        mock_projection_reader: AsyncMock,
+        service: ServiceCapabilityQuery,
+    ) -> None:
+        """Should use bulk query for multiple intent types instead of N queries.
+
+        Given: A dependency spec with multiple intent types
+        When: resolve_dependency is called
+        Then: Uses single bulk query (get_by_intent_types) instead of N queries
+        """
+        projection = create_postgres_adapter_projection()
+        mock_projection_reader.get_by_intent_types.return_value = [projection]
+
+        spec = ModelDependencySpec(
+            name="storage",
+            type="node",
+            intent_types=["postgres.query", "postgres.upsert", "postgres.delete"],
+        )
+        result = await service.resolve_dependency(spec)
+
+        assert result is not None
+        # Verify bulk query was called once (not 3 times for 3 intent types)
+        mock_projection_reader.get_by_intent_types.assert_called_once()
+        # Verify all intent types were passed
+        call_kwargs = mock_projection_reader.get_by_intent_types.call_args.kwargs
+        assert call_kwargs["intent_types"] == [
+            "postgres.query",
+            "postgres.upsert",
+            "postgres.delete",
+        ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestFindNodesByProtocol:
     """Tests for find_nodes_by_protocol method."""
 
@@ -523,7 +676,8 @@ class TestResolveDependency:
     ) -> None:
         """Should resolve to a single node when querying by intent type."""
         projection = create_postgres_adapter_projection()
-        mock_projection_reader.get_by_intent_type.return_value = [projection]
+        # Now uses bulk query method get_by_intent_types
+        mock_projection_reader.get_by_intent_types.return_value = [projection]
 
         spec = ModelDependencySpec(
             name="storage",

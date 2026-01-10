@@ -599,6 +599,70 @@ class TestServiceNodeSelectorInstantiation:
 
 
 @pytest.mark.unit
+class TestSelectionStrategyExhaustiveness:
+    """Tests for selection strategy exhaustiveness handling."""
+
+    @pytest.mark.asyncio
+    async def test_all_enum_values_have_explicit_handlers(self) -> None:
+        """Should explicitly handle all EnumSelectionStrategy values.
+
+        Given: All defined EnumSelectionStrategy values
+        When: select is called with each strategy
+        Then: Each strategy is handled explicitly (not falling through to else)
+
+        This test verifies the exhaustiveness guarantee: the service uses
+        assert_never to ensure compile-time checking that all enum values
+        are handled. At runtime, this test confirms no unexpected fallback
+        behavior exists.
+
+        Note: LEAST_LOADED raises NotImplementedError (expected behavior).
+        """
+        candidates = create_candidate_list(3)
+        selector = ServiceNodeSelector()
+
+        handled_strategies = []
+        for strategy in EnumSelectionStrategy:
+            try:
+                result = await selector.select(
+                    candidates=candidates,
+                    strategy=strategy,
+                    selection_key="exhaustiveness_test",
+                )
+                # Strategy was handled (returned a result)
+                assert result is not None
+                handled_strategies.append(strategy)
+            except NotImplementedError:
+                # LEAST_LOADED raises NotImplementedError - this is expected
+                assert strategy == EnumSelectionStrategy.LEAST_LOADED
+                handled_strategies.append(strategy)
+            except AssertionError:
+                # assert_never raises AssertionError for unhandled cases
+                pytest.fail(
+                    f"Strategy {strategy} not handled! "
+                    "Update select() to handle this enum value."
+                )
+
+        # Verify all strategies were tested
+        assert set(handled_strategies) == set(EnumSelectionStrategy)
+
+    def test_selection_strategy_enum_values_documented(self) -> None:
+        """Should have consistent enum values with service docstring.
+
+        Given: The EnumSelectionStrategy enum
+        When: Checking documented strategies
+        Then: All four strategies (FIRST, RANDOM, ROUND_ROBIN, LEAST_LOADED) exist
+        """
+        expected_strategies = {"FIRST", "RANDOM", "ROUND_ROBIN", "LEAST_LOADED"}
+        actual_strategies = {s.name for s in EnumSelectionStrategy}
+
+        assert actual_strategies == expected_strategies, (
+            f"Enum strategies changed! Expected {expected_strategies}, "
+            f"got {actual_strategies}. Update select() method to handle "
+            "new strategies."
+        )
+
+
+@pytest.mark.unit
 class TestServiceNodeSelectorThreadSafety:
     """Tests for thread safety with asyncio.Lock."""
 

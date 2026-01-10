@@ -63,7 +63,8 @@ class ServiceCapabilityQuery:
 
     Query Methods:
         - find_nodes_by_capability: Find by capability tag
-        - find_nodes_by_intent_type: Find by intent type handled
+        - find_nodes_by_intent_type: Find by single intent type handled
+        - find_nodes_by_intent_types: Find by multiple intent types (bulk query)
         - find_nodes_by_protocol: Find by protocol implemented
 
     Dependency Resolution:
@@ -127,6 +128,7 @@ class ServiceCapabilityQuery:
         capability: str,
         contract_type: str | None = None,
         state: EnumRegistrationState | None = None,
+        correlation_id: str | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find nodes that provide a specific capability.
 
@@ -142,6 +144,8 @@ class ServiceCapabilityQuery:
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
                 nodes in other states (e.g., PENDING, INACTIVE).
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -168,6 +172,7 @@ class ServiceCapabilityQuery:
                 "capability": capability,
                 "contract_type": contract_type,
                 "state": str(state),
+                "correlation_id": correlation_id,
             },
         )
 
@@ -186,6 +191,7 @@ class ServiceCapabilityQuery:
             extra={
                 "capability": capability,
                 "result_count": len(results),
+                "correlation_id": correlation_id,
             },
         )
 
@@ -196,6 +202,7 @@ class ServiceCapabilityQuery:
         intent_type: str,
         contract_type: str = "effect",
         state: EnumRegistrationState | None = None,
+        correlation_id: str | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find effect nodes that handle a specific intent type.
 
@@ -211,6 +218,8 @@ class ServiceCapabilityQuery:
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
                 nodes in other states (e.g., PENDING, INACTIVE).
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -237,6 +246,7 @@ class ServiceCapabilityQuery:
                 "intent_type": intent_type,
                 "contract_type": contract_type,
                 "state": str(state),
+                "correlation_id": correlation_id,
             },
         )
 
@@ -255,6 +265,93 @@ class ServiceCapabilityQuery:
             extra={
                 "intent_type": intent_type,
                 "result_count": len(results),
+                "correlation_id": correlation_id,
+            },
+        )
+
+        return results
+
+    async def find_nodes_by_intent_types(
+        self,
+        intent_types: list[str],
+        contract_type: str = "effect",
+        state: EnumRegistrationState | None = None,
+        correlation_id: str | None = None,
+    ) -> list[ModelRegistrationProjection]:
+        """Find effect nodes that handle ANY of the specified intent types.
+
+        Bulk query method that retrieves nodes matching any intent type in a single
+        database call. This is more efficient than calling find_nodes_by_intent_type
+        repeatedly for each intent type.
+
+        Performance Note:
+            This method reduces N database queries to 1 query when resolving
+            dependencies with multiple intent types. For N intent types:
+            - Previous: N sequential database calls
+            - Now: 1 bulk query using SQL array overlap
+
+        Args:
+            intent_types: List of intent types to search for (e.g.,
+                ["postgres.upsert", "postgres.query", "postgres.delete"]).
+            contract_type: Filter by contract type (default: "effect").
+                Intents are typically handled by effect nodes.
+            state: Registration state filter. When None (default), filters to
+                EnumRegistrationState.ACTIVE to return only actively registered
+                nodes. Pass an explicit EnumRegistrationState value to query
+                nodes in other states (e.g., PENDING, INACTIVE).
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
+
+        Returns:
+            List of matching registration projections. Empty list if no matches
+            or if intent_types list is empty.
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            InfraUnavailableError: If circuit breaker is open
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> handlers = await query.find_nodes_by_intent_types(
+            ...     ["postgres.query", "postgres.upsert", "postgres.delete"],
+            ...     contract_type="effect",
+            ...     state=EnumRegistrationState.ACTIVE,
+            ... )
+            >>> for handler in handlers:
+            ...     print(f"Can handle postgres intents: {handler.entity_id}")
+        """
+        if not intent_types:
+            return []
+
+        state = state or EnumRegistrationState.ACTIVE
+        logger.debug(
+            "Finding nodes by intent types (bulk)",
+            extra={
+                "intent_types": intent_types,
+                "intent_count": len(intent_types),
+                "contract_type": contract_type,
+                "state": str(state),
+                "correlation_id": correlation_id,
+            },
+        )
+
+        # Query by intent types (bulk)
+        results = await self._projection_reader.get_by_intent_types(
+            intent_types=intent_types,
+            state=state,
+        )
+
+        # Filter by contract_type if specified
+        if contract_type is not None:
+            results = [r for r in results if r.contract_type == contract_type]
+
+        logger.debug(
+            "Intent types query completed (bulk)",
+            extra={
+                "intent_types": intent_types,
+                "result_count": len(results),
+                "correlation_id": correlation_id,
             },
         )
 
@@ -265,6 +362,7 @@ class ServiceCapabilityQuery:
         protocol: str,
         contract_type: str | None = None,
         state: EnumRegistrationState | None = None,
+        correlation_id: str | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find nodes implementing a specific protocol.
 
@@ -280,6 +378,8 @@ class ServiceCapabilityQuery:
                 EnumRegistrationState.ACTIVE to return only actively registered
                 nodes. Pass an explicit EnumRegistrationState value to query
                 nodes in other states (e.g., PENDING, INACTIVE).
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             List of matching registration projections. Empty list if no matches.
@@ -304,6 +404,7 @@ class ServiceCapabilityQuery:
                 "protocol": protocol,
                 "contract_type": contract_type,
                 "state": str(state),
+                "correlation_id": correlation_id,
             },
         )
 
@@ -322,6 +423,7 @@ class ServiceCapabilityQuery:
             extra={
                 "protocol": protocol,
                 "result_count": len(results),
+                "correlation_id": correlation_id,
             },
         )
 
@@ -330,6 +432,7 @@ class ServiceCapabilityQuery:
     async def resolve_dependency(
         self,
         dependency_spec: ModelDependencySpec,
+        correlation_id: str | None = None,
     ) -> ModelRegistrationProjection | None:
         """Resolve a dependency specification to a concrete node.
 
@@ -338,27 +441,24 @@ class ServiceCapabilityQuery:
 
         Resolution Strategy:
             1. If capability specified -> find by capability
-            2. If intent_types specified -> find by intent type (uses first intent)
+            2. If intent_types specified -> find by intent types (bulk query)
             3. If protocol specified -> find by protocol
             4. Apply selection strategy from spec to choose among matches
 
         Args:
             dependency_spec: Dependency specification from contract.
                 Contains capability filters and selection strategy.
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             Resolved node registration, or None if not found.
 
         Note:
-            Performance consideration: When resolving by intent types, this method
-            executes sequential queries (one database call per intent type). For N
-            intent types in the dependency spec, N separate queries are made to the
-            registry adapter. This is acceptable for typical use cases with 1-3 intent
-            types, but may become a bottleneck at scale.
-
-            Future optimization: A bulk query method could be added to the registry
-            adapter that accepts multiple intent types and uses an IN clause, reducing
-            N queries to a single query for better performance.
+            Performance: When resolving by intent types, this method uses a bulk
+            query that retrieves all matching nodes in a single database call using
+            SQL array overlap. This reduces N queries to 1 query regardless of the
+            number of intent types in the dependency spec.
 
         Example:
             >>> spec = ModelDependencySpec(
@@ -383,6 +483,7 @@ class ServiceCapabilityQuery:
                 "intent_types": dependency_spec.intent_types,
                 "protocol": dependency_spec.protocol,
                 "selection_strategy": dependency_spec.selection_strategy,
+                "correlation_id": correlation_id,
             },
         )
 
@@ -393,49 +494,61 @@ class ServiceCapabilityQuery:
         candidates: list[ModelRegistrationProjection] = []
 
         if dependency_spec.has_capability_filter():
+            # Assert for type narrowing - has_capability_filter guarantees not None
+            assert dependency_spec.capability is not None
             candidates = await self.find_nodes_by_capability(
-                capability=dependency_spec.capability,  # type: ignore[arg-type]
+                capability=dependency_spec.capability,
                 contract_type=dependency_spec.contract_type,
                 state=state,
+                correlation_id=correlation_id,
             )
 
         elif dependency_spec.has_intent_filter():
-            # Use first intent type for discovery
+            # Use bulk query for multiple intent types (single database call)
             intent_types = dependency_spec.intent_types
             if intent_types:
-                for intent_type in intent_types:
-                    nodes = await self.find_nodes_by_intent_type(
-                        intent_type=intent_type,
-                        contract_type=dependency_spec.contract_type or "effect",
-                        state=state,
-                    )
-                    # Add nodes not already in candidates
-                    existing_ids = {c.entity_id for c in candidates}
-                    for node in nodes:
-                        if node.entity_id not in existing_ids:
-                            candidates.append(node)
-                            existing_ids.add(node.entity_id)
+                candidates = await self.find_nodes_by_intent_types(
+                    intent_types=intent_types,
+                    contract_type=dependency_spec.contract_type or "effect",
+                    state=state,
+                    correlation_id=correlation_id,
+                )
 
         elif dependency_spec.has_protocol_filter():
+            # Assert for type narrowing - has_protocol_filter guarantees not None
+            assert dependency_spec.protocol is not None
             candidates = await self.find_nodes_by_protocol(
-                protocol=dependency_spec.protocol,  # type: ignore[arg-type]
+                protocol=dependency_spec.protocol,
                 contract_type=dependency_spec.contract_type,
                 state=state,
+                correlation_id=correlation_id,
             )
 
         # No filter specified - cannot resolve
         if not candidates and not dependency_spec.has_any_filter():
             logger.warning(
                 "Dependency spec has no capability filter",
-                extra={"dependency_name": dependency_spec.name},
+                extra={
+                    "dependency_name": dependency_spec.name,
+                    "correlation_id": correlation_id,
+                },
             )
             return None
 
         # No matches found
         if not candidates:
+            # TODO: Implement fallback_module support here when needed.
+            # If dependency_spec.fallback_module is set, could use:
+            #   module = importlib.import_module(fallback_module_path)
+            #   adapter_class = getattr(module, class_name)
+            #   return adapter_class(...)
+            # See ModelDependencySpec.fallback_module for details.
             logger.debug(
                 "No candidates found for dependency",
-                extra={"dependency_name": dependency_spec.name},
+                extra={
+                    "dependency_name": dependency_spec.name,
+                    "correlation_id": correlation_id,
+                },
             )
             return None
 
@@ -445,6 +558,7 @@ class ServiceCapabilityQuery:
             candidates=candidates,
             strategy=strategy,
             selection_key=dependency_spec.name,
+            correlation_id=correlation_id,
         )
 
         if selected:
@@ -455,12 +569,16 @@ class ServiceCapabilityQuery:
                     "selected_entity_id": str(selected.entity_id),
                     "total_candidates": len(candidates),
                     "strategy": dependency_spec.selection_strategy,
+                    "correlation_id": correlation_id,
                 },
             )
         else:
             logger.debug(
                 "No node selected for dependency",
-                extra={"dependency_name": dependency_spec.name},
+                extra={
+                    "dependency_name": dependency_spec.name,
+                    "correlation_id": correlation_id,
+                },
             )
 
         return selected

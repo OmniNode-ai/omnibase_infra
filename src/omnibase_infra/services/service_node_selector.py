@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
 
@@ -89,20 +89,32 @@ class ServiceNodeSelector:
         candidates: list[ModelRegistrationProjection],
         strategy: EnumSelectionStrategy,
         selection_key: str | None = None,
+        correlation_id: str | None = None,
     ) -> ModelRegistrationProjection | None:
         """Select a node from candidates using the specified strategy.
 
         Args:
             candidates: List of nodes matching capability criteria.
-            strategy: Selection strategy to use.
+            strategy: Selection strategy to use. Must be one of:
+                - FIRST: Return first candidate (deterministic)
+                - RANDOM: Random selection (stateless load distribution)
+                - ROUND_ROBIN: Sequential cycling (stateful, even distribution)
+                - LEAST_LOADED: Not yet implemented (raises NotImplementedError)
             selection_key: Optional key for state tracking (required for round-robin).
                 Different keys maintain independent round-robin sequences.
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, included in all log messages for request tracking.
 
         Returns:
             Selected node, or None if candidates is empty.
 
         Raises:
             NotImplementedError: If LEAST_LOADED strategy is requested.
+            AssertionError: If strategy is not a valid EnumSelectionStrategy value.
+                This should never happen with properly typed code, as all enum
+                values are explicitly handled. The check exists for runtime
+                safety and to ensure exhaustive handling if new enum values
+                are added.
 
         Example:
             >>> selector = ServiceNodeSelector()
@@ -118,22 +130,30 @@ class ServiceNodeSelector:
             True
         """
         if not candidates:
-            logger.debug("No candidates provided for selection")
+            logger.debug(
+                "No candidates provided for selection",
+                extra={"correlation_id": correlation_id},
+            )
             return None
 
         if len(candidates) == 1:
             logger.debug(
                 "Single candidate, returning directly",
-                extra={"entity_id": str(candidates[0].entity_id)},
+                extra={
+                    "entity_id": str(candidates[0].entity_id),
+                    "correlation_id": correlation_id,
+                },
             )
             return candidates[0]
 
         if strategy == EnumSelectionStrategy.FIRST:
-            return self._select_first(candidates)
+            return self._select_first(candidates, correlation_id)
         elif strategy == EnumSelectionStrategy.RANDOM:
-            return self._select_random(candidates)
+            return self._select_random(candidates, correlation_id)
         elif strategy == EnumSelectionStrategy.ROUND_ROBIN:
-            return await self._select_round_robin(candidates, selection_key)
+            return await self._select_round_robin(
+                candidates, selection_key, correlation_id
+            )
         elif strategy == EnumSelectionStrategy.LEAST_LOADED:
             raise NotImplementedError(
                 f"LEAST_LOADED selection strategy is not yet implemented "
@@ -141,21 +161,21 @@ class ServiceNodeSelector:
                 "Use FIRST, RANDOM, or ROUND_ROBIN instead."
             )
         else:
-            # Fallback to first for unknown strategies
-            logger.warning(
-                "Unknown selection strategy, falling back to FIRST",
-                extra={"strategy": str(strategy)},
-            )
-            return self._select_first(candidates)
+            # Type-safe exhaustiveness check: ensures all enum values are handled.
+            # If a new EnumSelectionStrategy value is added, the type checker will
+            # flag this as an error because strategy won't narrow to Never.
+            assert_never(strategy)
 
     def _select_first(
         self,
         candidates: list[ModelRegistrationProjection],
+        correlation_id: str | None = None,
     ) -> ModelRegistrationProjection:
         """Select the first candidate (deterministic).
 
         Args:
             candidates: Non-empty list of candidates.
+            correlation_id: Optional correlation ID for distributed tracing.
 
         Returns:
             First candidate in the list.
@@ -166,6 +186,7 @@ class ServiceNodeSelector:
             extra={
                 "entity_id": str(selected.entity_id),
                 "total_candidates": len(candidates),
+                "correlation_id": correlation_id,
             },
         )
         return selected
@@ -173,11 +194,13 @@ class ServiceNodeSelector:
     def _select_random(
         self,
         candidates: list[ModelRegistrationProjection],
+        correlation_id: str | None = None,
     ) -> ModelRegistrationProjection:
         """Select a random candidate.
 
         Args:
             candidates: Non-empty list of candidates.
+            correlation_id: Optional correlation ID for distributed tracing.
 
         Returns:
             Randomly selected candidate.
@@ -188,6 +211,7 @@ class ServiceNodeSelector:
             extra={
                 "entity_id": str(selected.entity_id),
                 "total_candidates": len(candidates),
+                "correlation_id": correlation_id,
             },
         )
         return selected
@@ -196,6 +220,7 @@ class ServiceNodeSelector:
         self,
         candidates: list[ModelRegistrationProjection],
         selection_key: str | None = None,
+        correlation_id: str | None = None,
     ) -> ModelRegistrationProjection:
         """Select the next candidate in round-robin sequence.
 
@@ -205,6 +230,7 @@ class ServiceNodeSelector:
         Args:
             candidates: Non-empty list of candidates.
             selection_key: Key for state tracking. If None, uses "_default".
+            correlation_id: Optional correlation ID for distributed tracing.
 
         Returns:
             Next candidate in the round-robin sequence.
@@ -227,6 +253,7 @@ class ServiceNodeSelector:
                 "selection_key": key,
                 "index": next_index,
                 "total_candidates": len(candidates),
+                "correlation_id": correlation_id,
             },
         )
         return selected

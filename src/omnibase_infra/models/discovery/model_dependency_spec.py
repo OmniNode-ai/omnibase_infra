@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ModelDependencySpec(BaseModel):
@@ -46,7 +46,7 @@ class ModelDependencySpec(BaseModel):
         - first: Return first candidate (deterministic, fast)
         - random: Random selection (load distribution)
         - round_robin: Cycle through candidates (even distribution)
-        - least_loaded: Select based on load metrics (future)
+        - least_loaded: RESERVED FOR FUTURE USE - not yet implemented
 
     Attributes:
         name: Dependency name for reference in code
@@ -57,7 +57,7 @@ class ModelDependencySpec(BaseModel):
         contract_type: Filter by contract type (effect, compute, reducer, orchestrator)
         state: Filter by registration state (default: ACTIVE)
         selection_strategy: Strategy for selecting among multiple matches
-        fallback_module: Fallback module if auto-discovery fails
+        fallback_module: Reserved for future - fallback module if auto-discovery fails
         description: Human-readable description of the dependency
 
     Example - Capability-based:
@@ -135,14 +135,27 @@ class ModelDependencySpec(BaseModel):
     selection_strategy: Literal["first", "random", "round_robin", "least_loaded"] = (
         Field(
             default="first",
-            description="Strategy for selecting among multiple matches",
+            description=(
+                "Strategy for selecting among multiple matches. "
+                "Valid values: 'first', 'random', 'round_robin'. "
+                "Note: 'least_loaded' is reserved for future use and not yet implemented."
+            ),
         )
     )
 
     # Fallback (if capability not found)
+    # NOTE: Reserved for future implementation. When auto-discovery fails to find
+    # any matching nodes, this module path could be dynamically imported and
+    # instantiated as a last resort. Currently NOT used by ServiceCapabilityQuery.
+    # See: resolve_dependency() returns None when no candidates found.
+    # Future implementation would involve: importlib.import_module + class instantiation.
     fallback_module: str | None = Field(
         default=None,
-        description="Fallback module path if auto-discovery fails",
+        description=(
+            "Reserved for future implementation. Module path to import if "
+            "auto-discovery fails (e.g., 'mypackage.adapters.FallbackAdapter'). "
+            "Currently not used by ServiceCapabilityQuery - returns None instead."
+        ),
     )
 
     # Documentation
@@ -151,6 +164,41 @@ class ModelDependencySpec(BaseModel):
         max_length=1024,
         description="Human-readable description of the dependency",
     )
+
+    @field_validator("selection_strategy")
+    @classmethod
+    def validate_selection_strategy_implemented(cls, v: str) -> str:
+        """Validate that the selection strategy is implemented.
+
+        The 'least_loaded' strategy is reserved for future use and requires
+        load metrics infrastructure that is not yet available. This validator
+        provides fail-fast behavior at model creation time rather than at
+        runtime during node selection.
+
+        Args:
+            v: The selection strategy value to validate.
+
+        Returns:
+            The validated selection strategy value.
+
+        Raises:
+            ValueError: If 'least_loaded' is specified.
+
+        Example:
+            >>> spec = ModelDependencySpec(
+            ...     name="test",
+            ...     type="node",
+            ...     capability="test.cap",
+            ...     selection_strategy="least_loaded",
+            ... )
+            ValueError: LEAST_LOADED selection strategy is not yet implemented...
+        """
+        if v == "least_loaded":
+            raise ValueError(
+                "LEAST_LOADED selection strategy is not yet implemented. "
+                "Use 'first', 'random', or 'round_robin' instead."
+            )
+        return v
 
     @model_validator(mode="after")
     def validate_has_filter(self) -> ModelDependencySpec:
