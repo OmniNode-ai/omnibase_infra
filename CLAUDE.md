@@ -9,6 +9,7 @@
 - `circuit_breaker_implementation.md` - Circuit breaker details
 - `dispatcher_resilience.md` - Dispatcher-owned resilience pattern
 - `security_patterns.md` - Node introspection security, input validation, secrets
+- `handler_plugin_loader.md` - Plugin-based handler loading, security trade-offs
 
 ---
 
@@ -333,6 +334,71 @@ The `MixinNodeIntrospection` mixin uses Python reflection for service discovery.
 - Configure Kafka topic ACLs for introspection topics
 
 **See**: `docs/patterns/security_patterns.md#introspection-security` for complete threat model and deployment checklist
+
+### Handler Plugin Loader Patterns
+
+The runtime uses a **plugin-based handler loading** system instead of hardcoded registries. Handlers are discovered and loaded dynamically from YAML contracts.
+
+**Why Plugin Pattern Over Hardcoded Registry:**
+
+| Approach | Trade-off |
+|----------|-----------|
+| Hardcoded registry | Compile-time safety, but tight coupling and requires code changes to add handlers |
+| Plugin pattern | Loose coupling, runtime discovery, but requires path validation |
+
+**Benefits of Plugin Architecture:**
+- **Contract-driven**: Handler configuration lives in `contract.yaml`, not Python code
+- **Loose coupling**: Orchestrators don't import handler modules directly
+- **Runtime discovery**: New handlers can be added without modifying orchestrator code
+- **Testability**: Mock handlers can be injected via contract configuration
+
+**Why YAML Contracts Over Python Decorators:**
+
+| Aspect | YAML Contracts | Python Decorators |
+|--------|---------------|-------------------|
+| Tooling | Machine-readable, lintable, diffable | Requires AST parsing |
+| Auditability | Changes visible in git, reviewable | Scattered across codebase |
+| Non-Python access | CI/CD, dashboards can read contracts | Requires Python runtime |
+| Separation of concerns | Configuration separate from logic | Mixes config with code |
+
+**Contract-Based Handler Declaration:**
+```yaml
+# contract.yaml
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model: "ModelNodeIntrospectionEvent"
+      handler_class: "HandlerNodeIntrospected"
+      handler_module: "omnibase_infra.handlers.handler_node_introspected"
+```
+
+**Security Trade-offs and Mitigations:**
+
+Dynamic imports (`importlib.import_module`) introduce security considerations:
+
+| Risk | Mitigation |
+|------|------------|
+| Arbitrary code execution | Validate handler paths against allowlist |
+| Path traversal | Reject paths with `..` or absolute paths |
+| Untrusted modules | Only load from trusted package namespaces |
+
+**Built-in Security Controls:**
+- **Protocol validation**: Loaded classes must implement `ProtocolHandler`
+- **Namespace restriction**: Only `omnibase_*` packages are trusted by default
+- **Path normalization**: Module paths are validated before import
+- **Correlation tracking**: All load operations are logged with correlation IDs
+
+**Secure Deployment Checklist:**
+1. **Trusted paths only**: Configure `allowed_handler_namespaces` in runtime config
+2. **No user input**: Handler paths must come from validated contracts, never user input
+3. **Audit logging**: Enable handler load logging for security monitoring
+4. **Contract validation**: Run `onex validate` in CI to catch malformed contracts
+
+**Error Codes:**
+- `HANDLER_LOAD_FAILED` - Module import failed
+- `HANDLER_CLASS_NOT_FOUND` - Class not found in module
+- `HANDLER_PROTOCOL_VIOLATION` - Class does not implement `ProtocolHandler`
+- `HANDLER_PATH_INVALID` - Module path failed security validation
 
 ### Service Integration Architecture
 - **Adapter Pattern** - External services wrapped in ONEX adapters

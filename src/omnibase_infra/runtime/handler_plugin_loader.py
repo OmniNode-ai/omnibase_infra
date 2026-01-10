@@ -191,37 +191,13 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 contract_path=str(contract_path),
             )
 
-        # Validate file size
-        try:
-            file_size = contract_path.stat().st_size
-        except OSError as e:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="load_from_contract",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                f"Failed to stat contract file: {e}",
-                context=context,
-                loader_error=EnumHandlerLoaderError.FILE_STAT_ERROR.value,
-                contract_path=str(contract_path),
-            ) from e
-
-        if file_size > MAX_CONTRACT_SIZE:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="load_from_contract",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                f"Contract file exceeds size limit: {file_size} bytes "
-                f"(max: {MAX_CONTRACT_SIZE} bytes)",
-                context=context,
-                loader_error=EnumHandlerLoaderError.FILE_SIZE_EXCEEDED.value,
-                contract_path=str(contract_path),
-                file_size=file_size,
-                max_size=MAX_CONTRACT_SIZE,
-            )
+        # Validate file size (raises ProtocolConfigurationError on failure)
+        self._validate_file_size(
+            contract_path,
+            correlation_id=correlation_id,
+            operation="load_from_contract",
+            raise_on_error=True,
+        )
 
         # Parse YAML contract
         try:
@@ -536,29 +512,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             for path in matched_paths:
                 if path.is_file():
                     # Early size validation to skip oversized files before expensive operations
-                    try:
-                        file_size = path.stat().st_size
-                    except OSError as e:
-                        logger.warning(
-                            "Failed to stat contract file %s: %s",
-                            path,
-                            e,
-                            extra={"path": str(path), "error": str(e)},
-                        )
-                        continue
-
-                    if file_size > MAX_CONTRACT_SIZE:
-                        logger.warning(
-                            "Skipping oversized contract file %s: %d bytes exceeds limit of %d bytes",
-                            path,
-                            file_size,
-                            MAX_CONTRACT_SIZE,
-                            extra={
-                                "path": str(path),
-                                "file_size": file_size,
-                                "max_size": MAX_CONTRACT_SIZE,
-                            },
-                        )
+                    if self._validate_file_size(path, raise_on_error=False) is None:
                         continue
 
                     resolved = path.resolve()
@@ -814,6 +768,93 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         return handler_class
 
+    def _validate_file_size(
+        self,
+        path: Path,
+        correlation_id: str | None = None,
+        operation: str = "load_from_contract",
+        raise_on_error: bool = True,
+    ) -> int | None:
+        """Validate file size is within limits.
+
+        Checks that the file at the given path can be stat'd and does not
+        exceed MAX_CONTRACT_SIZE. Supports both strict mode (raising exceptions)
+        and graceful mode (logging warnings and returning None).
+
+        Args:
+            path: Path to the file to validate. Must be an existing file.
+            correlation_id: Optional correlation ID for error context.
+            operation: The operation name for error context in exceptions.
+            raise_on_error: If True (default), raises ProtocolConfigurationError
+                on stat failure or size exceeded. If False, logs a warning
+                and returns None, allowing the caller to skip the file.
+
+        Returns:
+            File size in bytes if validation passes.
+            None if raise_on_error is False and validation fails (stat error
+            or size exceeded).
+
+        Raises:
+            ProtocolConfigurationError: If raise_on_error is True and:
+                - FILE_STAT_ERROR: Failed to stat the file (I/O error)
+                - FILE_SIZE_EXCEEDED: File exceeds MAX_CONTRACT_SIZE
+        """
+        # Attempt to get file size
+        try:
+            file_size = path.stat().st_size
+        except OSError as e:
+            if raise_on_error:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation=operation,
+                    correlation_id=correlation_id,
+                )
+                raise ProtocolConfigurationError(
+                    f"Failed to stat contract file: {e}",
+                    context=context,
+                    loader_error=EnumHandlerLoaderError.FILE_STAT_ERROR.value,
+                    contract_path=str(path),
+                ) from e
+            logger.warning(
+                "Failed to stat contract file %s: %s",
+                path,
+                e,
+                extra={"path": str(path), "error": str(e)},
+            )
+            return None
+
+        # Check size limit
+        if file_size > MAX_CONTRACT_SIZE:
+            if raise_on_error:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation=operation,
+                    correlation_id=correlation_id,
+                )
+                raise ProtocolConfigurationError(
+                    f"Contract file exceeds size limit: {file_size} bytes "
+                    f"(max: {MAX_CONTRACT_SIZE} bytes)",
+                    context=context,
+                    loader_error=EnumHandlerLoaderError.FILE_SIZE_EXCEEDED.value,
+                    contract_path=str(path),
+                    file_size=file_size,
+                    max_size=MAX_CONTRACT_SIZE,
+                )
+            logger.warning(
+                "Skipping oversized contract file %s: %d bytes exceeds limit of %d bytes",
+                path,
+                file_size,
+                MAX_CONTRACT_SIZE,
+                extra={
+                    "path": str(path),
+                    "file_size": file_size,
+                    "max_size": MAX_CONTRACT_SIZE,
+                },
+            )
+            return None
+
+        return file_size
+
     def _find_contract_files(self, directory: Path) -> list[Path]:
         """Find all handler contract files under a directory.
 
@@ -835,29 +876,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         for path in directory.rglob("*.yaml"):
             if path.name in valid_filenames and path.is_file():
                 # Early size validation to skip oversized files before expensive operations
-                try:
-                    file_size = path.stat().st_size
-                except OSError as e:
-                    logger.warning(
-                        "Failed to stat contract file %s: %s",
-                        path,
-                        e,
-                        extra={"path": str(path), "error": str(e)},
-                    )
-                    continue
-
-                if file_size > MAX_CONTRACT_SIZE:
-                    logger.warning(
-                        "Skipping oversized contract file %s: %d bytes exceeds limit of %d bytes",
-                        path,
-                        file_size,
-                        MAX_CONTRACT_SIZE,
-                        extra={
-                            "path": str(path),
-                            "file_size": file_size,
-                            "max_size": MAX_CONTRACT_SIZE,
-                        },
-                    )
+                if self._validate_file_size(path, raise_on_error=False) is None:
                     continue
 
                 contract_files.append(path)

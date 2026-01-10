@@ -150,8 +150,6 @@ class TestFileOperationErrorCodes:
         loader = HandlerPluginLoader()
 
         # Mock open to raise OSError (not during stat, but during open)
-        original_open = Path.open
-
         def mock_open(self, *args, **kwargs):
             raise OSError("Read error")
 
