@@ -49,9 +49,12 @@ from uuid import UUID, uuid4
 from omnibase_core.container import ModelONEXContainer
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.discovery.model_dependency_spec import ModelDependencySpec
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
 from omnibase_infra.services.service_node_selector import ServiceNodeSelector
@@ -177,6 +180,11 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
         Queries the registry for nodes with the specified capability tag.
         Results can be filtered by contract type and registration state.
 
+        Coroutine Safety:
+            This method is coroutine-safe when called concurrently from multiple
+            coroutines within the same event loop. The circuit breaker state is
+            protected by an asyncio.Lock.
+
         Args:
             capability: Capability tag to search for (e.g., "postgres.storage",
                 "kafka.consumer", "consul.registration").
@@ -252,14 +260,32 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
 
             return results
 
-        except Exception:
-            # Record failure
+        except RuntimeHostError:
+            # Record failure and re-raise infrastructure errors as-is
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     operation="find_nodes_by_capability",
                     correlation_id=correlation_id,
                 )
             raise
+        except Exception as e:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="find_nodes_by_capability",
+                    correlation_id=correlation_id,
+                )
+            # Wrap unexpected exceptions with RuntimeHostError
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="find_nodes_by_capability",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Capability query failed: {type(e).__name__}",
+                context=context,
+                capability=capability,
+            ) from e
 
     async def find_nodes_by_intent_type(
         self,
@@ -272,6 +298,11 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
 
         Queries the registry for nodes that can handle the specified intent type.
         Typically used to find effect nodes that execute specific intents.
+
+        Coroutine Safety:
+            This method is coroutine-safe when called concurrently from multiple
+            coroutines within the same event loop. The circuit breaker state is
+            protected by an asyncio.Lock.
 
         Args:
             intent_type: Intent type to search for (e.g., "postgres.upsert",
@@ -348,14 +379,32 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
 
             return results
 
-        except Exception:
-            # Record failure
+        except RuntimeHostError:
+            # Record failure and re-raise infrastructure errors as-is
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     operation="find_nodes_by_intent_type",
                     correlation_id=correlation_id,
                 )
             raise
+        except Exception as e:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="find_nodes_by_intent_type",
+                    correlation_id=correlation_id,
+                )
+            # Wrap unexpected exceptions with RuntimeHostError
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="find_nodes_by_intent_type",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Intent type query failed: {type(e).__name__}",
+                context=context,
+                intent_type=intent_type,
+            ) from e
 
     async def find_nodes_by_intent_types(
         self,
@@ -369,6 +418,11 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
         Bulk query method that retrieves nodes matching any intent type in a single
         database call. This is more efficient than calling find_nodes_by_intent_type
         repeatedly for each intent type.
+
+        Coroutine Safety:
+            This method is coroutine-safe when called concurrently from multiple
+            coroutines within the same event loop. The circuit breaker state is
+            protected by an asyncio.Lock.
 
         Performance Note:
             This method reduces N database queries to 1 query when resolving
@@ -456,14 +510,32 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
 
             return results
 
-        except Exception:
-            # Record failure
+        except RuntimeHostError:
+            # Record failure and re-raise infrastructure errors as-is
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     operation="find_nodes_by_intent_types",
                     correlation_id=correlation_id,
                 )
             raise
+        except Exception as e:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="find_nodes_by_intent_types",
+                    correlation_id=correlation_id,
+                )
+            # Wrap unexpected exceptions with RuntimeHostError
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="find_nodes_by_intent_types",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Intent types query failed: {type(e).__name__}",
+                context=context,
+                intent_types=intent_types,
+            ) from e
 
     async def find_nodes_by_protocol(
         self,
@@ -476,6 +548,11 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
 
         Queries the registry for nodes that implement the specified protocol.
         Useful for finding nodes that satisfy interface requirements.
+
+        Coroutine Safety:
+            This method is coroutine-safe when called concurrently from multiple
+            coroutines within the same event loop. The circuit breaker state is
+            protected by an asyncio.Lock.
 
         Args:
             protocol: Protocol name to search for (e.g., "ProtocolEventPublisher",
@@ -550,14 +627,32 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
 
             return results
 
-        except Exception:
-            # Record failure
+        except RuntimeHostError:
+            # Record failure and re-raise infrastructure errors as-is
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     operation="find_nodes_by_protocol",
                     correlation_id=correlation_id,
                 )
             raise
+        except Exception as e:
+            # Record failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="find_nodes_by_protocol",
+                    correlation_id=correlation_id,
+                )
+            # Wrap unexpected exceptions with RuntimeHostError
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="find_nodes_by_protocol",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Protocol query failed: {type(e).__name__}",
+                context=context,
+                protocol=protocol,
+            ) from e
 
     async def resolve_dependency(
         self,
@@ -574,6 +669,11 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
             2. If intent_types specified -> find by intent types (bulk query)
             3. If protocol specified -> find by protocol
             4. Apply selection strategy from spec to choose among matches
+
+        Coroutine Safety:
+            This method is coroutine-safe when called concurrently from multiple
+            coroutines within the same event loop. Uses circuit-breaker-protected
+            query methods internally.
 
         Args:
             dependency_spec: Dependency specification from contract.

@@ -20,7 +20,7 @@ Exports:
     TimeoutScanner: Alias for ServiceTimeoutScanner
 """
 
-from omnibase_infra.services.enum_selection_strategy import EnumSelectionStrategy
+from omnibase_infra.enums import EnumSelectionStrategy
 from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
 from omnibase_infra.services.service_node_selector import (
     DEFAULT_SELECTION_KEY,

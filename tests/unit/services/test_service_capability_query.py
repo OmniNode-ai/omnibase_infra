@@ -921,6 +921,3 @@ class TestServiceCapabilityQueryErrorHandling:
 
         with pytest.raises(InfraUnavailableError):
             await service.find_nodes_by_protocol("ProtocolTest")
-
-
-__all__: list[str] = []

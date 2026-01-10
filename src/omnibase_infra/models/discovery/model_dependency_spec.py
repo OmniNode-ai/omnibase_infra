@@ -29,7 +29,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumRegistrationState, EnumSelectionStrategy
 
 
 class ModelDependencySpec(BaseModel):
@@ -134,15 +134,13 @@ class ModelDependencySpec(BaseModel):
     )
 
     # Selection strategy (when multiple matches)
-    selection_strategy: Literal["first", "random", "round_robin", "least_loaded"] = (
-        Field(
-            default="first",
-            description=(
-                "Strategy for selecting among multiple matches. "
-                "Valid values: 'first', 'random', 'round_robin'. "
-                "Note: 'least_loaded' is reserved for future use and not yet implemented."
-            ),
-        )
+    selection_strategy: EnumSelectionStrategy = Field(
+        default=EnumSelectionStrategy.FIRST,
+        description=(
+            "Strategy for selecting among multiple matches. "
+            "Valid values: 'first', 'random', 'round_robin'. "
+            "Note: 'least_loaded' is reserved for future use and not yet implemented."
+        ),
     )
 
     # Fallback (if capability not found)
@@ -185,9 +183,40 @@ class ModelDependencySpec(BaseModel):
             return None
         return v
 
-    @field_validator("selection_strategy")
+    @field_validator("selection_strategy", mode="before")
     @classmethod
-    def validate_selection_strategy_implemented(cls, v: str) -> str:
+    def normalize_selection_strategy(
+        cls, v: str | EnumSelectionStrategy
+    ) -> str | EnumSelectionStrategy:
+        """Normalize selection strategy input to handle case variations.
+
+        Accepts both string and enum input for flexibility. String inputs
+        are normalized to lowercase for case-insensitive matching.
+
+        Args:
+            v: The selection strategy value (string or enum).
+
+        Returns:
+            Normalized string (lowercase) or the original enum value.
+
+        Example:
+            >>> # These all work:
+            >>> spec = ModelDependencySpec(name="test", type="node", capability="cap",
+            ...     selection_strategy="FIRST")  # normalized to "first"
+            >>> spec = ModelDependencySpec(name="test", type="node", capability="cap",
+            ...     selection_strategy="First")  # normalized to "first"
+            >>> spec = ModelDependencySpec(name="test", type="node", capability="cap",
+            ...     selection_strategy=EnumSelectionStrategy.FIRST)  # enum preserved
+        """
+        if isinstance(v, str):
+            return v.lower()
+        return v
+
+    @field_validator("selection_strategy", mode="after")
+    @classmethod
+    def validate_selection_strategy_implemented(
+        cls, v: EnumSelectionStrategy
+    ) -> EnumSelectionStrategy:
         """Validate that the selection strategy is implemented.
 
         The 'least_loaded' strategy is reserved for future use and requires
@@ -196,13 +225,13 @@ class ModelDependencySpec(BaseModel):
         runtime during node selection.
 
         Args:
-            v: The selection strategy value to validate.
+            v: The selection strategy enum value to validate.
 
         Returns:
-            The validated selection strategy value.
+            The validated selection strategy enum value.
 
         Raises:
-            ValueError: If 'least_loaded' is specified.
+            ValueError: If LEAST_LOADED is specified.
 
         Example:
             >>> spec = ModelDependencySpec(
@@ -213,7 +242,7 @@ class ModelDependencySpec(BaseModel):
             ... )
             ValueError: LEAST_LOADED selection strategy is not yet implemented...
         """
-        if v == "least_loaded":
+        if v == EnumSelectionStrategy.LEAST_LOADED:
             raise ValueError(
                 "LEAST_LOADED selection strategy is not yet implemented. "
                 "Use 'first', 'random', or 'round_robin' instead."

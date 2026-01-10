@@ -13,6 +13,15 @@ Test Organization:
     - TestEmptyResultsHandling: Edge cases with no matching nodes
     - TestErrorPropagation: Error handling from projection reader
 
+Note:
+    These tests use a mock ProjectionReaderRegistration. For tests against a
+    real PostgreSQL database with actual ProjectionReaderRegistration instances,
+    see the database integration tests.
+
+    TODO(OMN-1136): Add integration tests with actual ProjectionReaderRegistration
+    and PostgreSQL database to validate end-to-end capability query behavior,
+    including SQL array overlap queries and circuit breaker recovery scenarios.
+
 Related Tickets:
     - OMN-1135: ServiceCapabilityQuery for capability-based discovery
     - OMN-1134: Registry Projection Extensions for Capabilities
@@ -154,12 +163,26 @@ def create_kafka_adapter_projection() -> ModelRegistrationProjection:
 
 @pytest.fixture
 def mock_projection_reader() -> AsyncMock:
-    """Create a mock projection reader with all capability query methods."""
-    reader = AsyncMock()
+    """Create a mock projection reader with all capability query methods.
+
+    Uses spec=ProtocolCapabilityProjection for type safety. The spec ensures:
+    - Method calls match the protocol interface
+    - Typos in method names are caught as AttributeError
+
+    Note: get_by_intent_types is added explicitly as it's an extension method
+    in ProjectionReaderRegistration not yet in the protocol.
+    """
+    from omnibase_infra.protocols.protocol_capability_projection import (
+        ProtocolCapabilityProjection,
+    )
+
+    reader = AsyncMock(spec=ProtocolCapabilityProjection)
     reader.get_by_capability_tag = AsyncMock(return_value=[])
     reader.get_by_capability_tags_all = AsyncMock(return_value=[])
     reader.get_by_capability_tags_any = AsyncMock(return_value=[])
     reader.get_by_intent_type = AsyncMock(return_value=[])
+    # get_by_intent_types is an extension method not in ProtocolCapabilityProjection
+    # but is implemented in ProjectionReaderRegistration for bulk intent queries
     reader.get_by_intent_types = AsyncMock(return_value=[])
     reader.get_by_protocol = AsyncMock(return_value=[])
     reader.get_by_contract_type = AsyncMock(return_value=[])
@@ -701,16 +724,33 @@ class TestErrorPropagation:
             capability="postgres.storage",
         )
 
-        correlation_id = "test-correlation-123"
+        correlation_id = uuid4()
 
         with caplog.at_level(logging.DEBUG):
             with pytest.raises(InfraConnectionError):
                 await service.resolve_dependency(spec, correlation_id=correlation_id)
 
-        # Verify correlation_id was attached to log records as an extra attribute
-        assert any(
-            getattr(record, "correlation_id", None) == correlation_id
+        # Verify correlation_id was attached to log records as an extra attribute.
+        # Must check both UUID and string representations since logging may store
+        # correlation_id in either format depending on the service implementation.
+        correlation_str = str(correlation_id)
+        matching_records = [
+            record
             for record in caplog.records
+            if getattr(record, "correlation_id", None)
+            in (correlation_id, correlation_str)
+        ]
+        assert len(matching_records) > 0, (
+            f"Expected log records with correlation_id={correlation_id}, "
+            f"but found none. Records: {[(r.message, getattr(r, 'correlation_id', None)) for r in caplog.records]}"
+        )
+        # Verify at least one record is from the capability query operation
+        assert any(
+            "capability" in record.message.lower()
+            or "dependency" in record.message.lower()
+            for record in matching_records
+        ), (
+            f"Expected capability/dependency operation log, got: {[r.message for r in matching_records]}"
         )
 
 
@@ -784,6 +824,3 @@ class TestFilterPriority:
         assert result is not None
         mock_projection_reader.get_by_intent_types.assert_called_once()
         mock_projection_reader.get_by_protocol.assert_not_called()
-
-
-__all__: list[str] = []

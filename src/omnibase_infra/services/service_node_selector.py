@@ -16,6 +16,15 @@ Thread Safety:
         Each event loop should have its own ServiceNodeSelector instance.
         Do not share instances between threads.
 
+State Management:
+    Round-Robin State Growth:
+        The round-robin state dictionary grows as new selection_key values are used.
+        To prevent unbounded growth, an LRU eviction mechanism is implemented:
+        - Default max entries: 1000 (configurable via max_round_robin_entries)
+        - When limit is reached, oldest 10% of entries are evicted
+        - Use reset_round_robin_state() for manual cleanup
+        - Call prune_round_robin_state() for explicit eviction
+
 Related Tickets:
     - OMN-1135: ServiceCapabilityQuery for capability-based discovery
 
@@ -30,7 +39,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import TYPE_CHECKING, Never
+import time
+from typing import TYPE_CHECKING, NamedTuple, Never
 from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
@@ -45,6 +55,24 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SELECTION_KEY: str = "_default"
 """Default key for round-robin state tracking when no selection_key is provided."""
+
+DEFAULT_MAX_ROUND_ROBIN_ENTRIES: int = 1000
+"""Default maximum number of round-robin state entries before LRU eviction."""
+
+EVICTION_PERCENTAGE: float = 0.1
+"""Percentage of entries to evict when max limit is reached (10%)."""
+
+
+class RoundRobinEntry(NamedTuple):
+    """Round-robin state entry with LRU tracking.
+
+    Attributes:
+        current_index: The last used index for this selection key.
+        last_access: Timestamp of last access for LRU eviction.
+    """
+
+    current_index: int
+    last_access: float
 
 
 class ServiceNodeSelector:
@@ -70,6 +98,10 @@ class ServiceNodeSelector:
         cycling for different dependency types (e.g., "db" vs "consul").
         All state access is protected by an asyncio.Lock for coroutine safety.
 
+        To prevent unbounded memory growth, the round-robin state implements
+        LRU eviction. When the number of entries exceeds max_round_robin_entries,
+        the oldest 10% of entries (by last access time) are evicted.
+
     Example:
         >>> selector = ServiceNodeSelector()
         >>>
@@ -82,20 +114,112 @@ class ServiceNodeSelector:
         >>> # node1 and node2 will be different if len(candidates) > 1
 
     Attributes:
-        _round_robin_state: Internal state tracking last index per selection key.
+        _round_robin_state: Internal state tracking index and last access per key.
         _round_robin_lock: asyncio.Lock protecting state access.
+        _max_round_robin_entries: Maximum entries before LRU eviction triggers.
     """
 
-    def __init__(self, container: ModelONEXContainer | None = None) -> None:
+    def __init__(
+        self,
+        container: ModelONEXContainer | None = None,
+        max_round_robin_entries: int = DEFAULT_MAX_ROUND_ROBIN_ENTRIES,
+    ) -> None:
         """Initialize the node selector with empty round-robin state and lock.
 
         Args:
             container: Optional ONEX container for dependency injection.
                 When provided, enables access to shared services and configuration.
+            max_round_robin_entries: Maximum number of round-robin state entries
+                before LRU eviction. Defaults to 1000. Set to 0 for unlimited
+                (not recommended in production).
         """
         self._container = container
-        self._round_robin_state: dict[str, int] = {}
+        self._round_robin_state: dict[str, RoundRobinEntry] = {}
         self._round_robin_lock: asyncio.Lock = asyncio.Lock()
+        self._max_round_robin_entries = max_round_robin_entries
+
+    def _safe_uuid(self, correlation_id: str) -> UUID:
+        """Safely convert correlation_id string to UUID.
+
+        Args:
+            correlation_id: String representation of a UUID.
+
+        Returns:
+            UUID object.
+
+        Raises:
+            RuntimeHostError: If the correlation_id is not a valid UUID format.
+        """
+        try:
+            return UUID(correlation_id)
+        except ValueError as e:
+            raise RuntimeHostError(
+                f"Invalid correlation_id format: {correlation_id}",
+                context=ModelInfraErrorContext(
+                    operation="uuid_conversion",
+                ),
+                original_error=str(e),
+            ) from e
+
+    async def _prune_round_robin_state(self) -> int:
+        """Prune oldest round-robin entries when limit is exceeded.
+
+        This method is called automatically when the state dictionary exceeds
+        max_round_robin_entries. It evicts the oldest 10% of entries based on
+        last access time.
+
+        Must be called while holding _round_robin_lock.
+
+        Returns:
+            Number of entries evicted.
+        """
+        if (
+            self._max_round_robin_entries <= 0
+            or len(self._round_robin_state) <= self._max_round_robin_entries
+        ):
+            return 0
+
+        # Calculate how many to evict (10% of max, minimum 1)
+        evict_count = max(1, int(self._max_round_robin_entries * EVICTION_PERCENTAGE))
+
+        # Sort by last_access and get oldest entries
+        sorted_keys = sorted(
+            self._round_robin_state.keys(),
+            key=lambda k: self._round_robin_state[k].last_access,
+        )
+
+        # Evict oldest entries
+        keys_to_evict = sorted_keys[:evict_count]
+        for key in keys_to_evict:
+            del self._round_robin_state[key]
+
+        logger.debug(
+            "Pruned round-robin state entries (LRU eviction)",
+            extra={
+                "evicted_count": len(keys_to_evict),
+                "remaining_count": len(self._round_robin_state),
+                "max_entries": self._max_round_robin_entries,
+            },
+        )
+        return len(keys_to_evict)
+
+    async def prune_round_robin_state(self) -> int:
+        """Explicitly prune oldest round-robin entries.
+
+        This is the public interface for triggering LRU eviction. Useful for
+        maintenance operations or when you want to proactively free memory.
+
+        Returns:
+            Number of entries evicted.
+
+        Example:
+            >>> selector = ServiceNodeSelector(max_round_robin_entries=100)
+            >>> # After many operations...
+            >>> evicted = await selector.prune_round_robin_state()
+            >>> print(f"Evicted {evicted} stale entries")
+        """
+        async with self._round_robin_lock:
+            return await self._prune_round_robin_state()
 
     async def select(
         self,
@@ -106,16 +230,22 @@ class ServiceNodeSelector:
     ) -> ModelRegistrationProjection | None:
         """Select a node from candidates using the specified strategy.
 
+        Coroutine Safety:
+            This method is coroutine-safe when called concurrently from multiple
+            coroutines within the same event loop. The asyncio.Lock protects
+            round-robin state access.
+
         Args:
-            candidates: List of nodes matching capability criteria.
+            candidates: List of nodes matching capability criteria. Treated as
+                immutable during selection - the list is not modified.
             strategy: Selection strategy to use. Must be one of:
                 - FIRST: Return first candidate (deterministic)
                 - RANDOM: Random selection (stateless load distribution)
                 - ROUND_ROBIN: Sequential cycling (stateful, even distribution)
                 - LEAST_LOADED: Not yet implemented (raises RuntimeHostError)
-            selection_key: Optional key for state tracking (recommended for round-robin).
-                If None, round-robin uses a shared "_default" key.
+            selection_key: Key for round-robin state tracking. Defaults to "_default".
                 Different keys maintain independent round-robin sequences.
+                For FIRST and RANDOM strategies, this parameter is ignored.
             correlation_id: Optional correlation ID for distributed tracing.
                 When provided, included in all log messages for request tracking.
 
@@ -177,7 +307,7 @@ class ServiceNodeSelector:
                 "LEAST_LOADED selection strategy is not yet implemented",
                 context=ModelInfraErrorContext(
                     operation="select",
-                    correlation_id=UUID(correlation_id),
+                    correlation_id=self._safe_uuid(correlation_id),
                 ),
                 strategy=strategy.value,
                 selection_key=selection_key,
@@ -192,7 +322,7 @@ class ServiceNodeSelector:
                 f"Unhandled selection strategy: {strategy.value}",
                 context=ModelInfraErrorContext(
                     operation="select",
-                    correlation_id=UUID(correlation_id),
+                    correlation_id=self._safe_uuid(correlation_id),
                 ),
                 strategy=strategy.value,
                 selection_key=selection_key,
@@ -260,9 +390,17 @@ class ServiceNodeSelector:
         State is tracked per selection_key, allowing independent cycling
         for different dependency types. Access is protected by asyncio.Lock.
 
+        Coroutine Safety:
+            This method is coroutine-safe when called concurrently from multiple
+            coroutines within the same event loop.
+
+        Implements LRU eviction: when state entries exceed max_round_robin_entries,
+        the oldest 10% (by last access time) are automatically evicted.
+
         Args:
-            candidates: Non-empty list of candidates.
-            selection_key: Key for state tracking. If None, uses "_default".
+            candidates: Non-empty list of candidates. Treated as immutable -
+                the list is accessed by index but never modified.
+            selection_key: Key for state tracking. Defaults to "_default".
             correlation_id: Optional correlation ID for distributed tracing.
 
         Returns:
@@ -271,8 +409,9 @@ class ServiceNodeSelector:
         key = selection_key or DEFAULT_SELECTION_KEY
 
         async with self._round_robin_lock:
-            # Get current index, default to -1 (so first selection is index 0)
-            last_index = self._round_robin_state.get(key, -1)
+            # Get current entry, default to index -1 (so first selection is index 0)
+            current_entry = self._round_robin_state.get(key)
+            last_index = current_entry.current_index if current_entry else -1
             next_index = (last_index + 1) % len(candidates)
 
             # Defensive bounds check - ensure index is valid for current candidates list
@@ -289,8 +428,14 @@ class ServiceNodeSelector:
                     },
                 )
 
-            # Update state
-            self._round_robin_state[key] = next_index
+            # Update state with new entry (index + current timestamp for LRU)
+            self._round_robin_state[key] = RoundRobinEntry(
+                current_index=next_index,
+                last_access=time.monotonic(),
+            )
+
+            # Trigger LRU eviction if needed (while holding lock)
+            await self._prune_round_robin_state()
 
             # Access candidate inside lock for transaction safety
             selected = candidates[next_index]
@@ -332,12 +477,13 @@ class ServiceNodeSelector:
                 logger.debug("Reset all round-robin state")
 
     async def get_round_robin_state(self) -> dict[str, int]:
-        """Get a copy of the current round-robin state.
+        """Get a copy of the current round-robin state (indices only).
 
         Access is protected by asyncio.Lock.
 
         Returns:
             Dictionary mapping selection keys to their last used index.
+            Note: Last access timestamps are not included for API simplicity.
 
         Example:
             >>> selector = ServiceNodeSelector()
@@ -346,7 +492,34 @@ class ServiceNodeSelector:
             {'db': 2, 'consul': 0}
         """
         async with self._round_robin_lock:
+            return {
+                key: entry.current_index
+                for key, entry in self._round_robin_state.items()
+            }
+
+    async def get_round_robin_state_full(self) -> dict[str, RoundRobinEntry]:
+        """Get a copy of the current round-robin state with full details.
+
+        Access is protected by asyncio.Lock.
+
+        Returns:
+            Dictionary mapping selection keys to RoundRobinEntry objects
+            containing both index and last access timestamp.
+
+        Example:
+            >>> selector = ServiceNodeSelector()
+            >>> state = await selector.get_round_robin_state_full()
+            >>> for key, entry in state.items():
+            ...     print(f"{key}: idx={entry.current_index}, access={entry.last_access}")
+        """
+        async with self._round_robin_lock:
             return dict(self._round_robin_state)
 
 
-__all__: list[str] = ["DEFAULT_SELECTION_KEY", "ServiceNodeSelector"]
+__all__: list[str] = [
+    "DEFAULT_MAX_ROUND_ROBIN_ENTRIES",
+    "DEFAULT_SELECTION_KEY",
+    "EVICTION_PERCENTAGE",
+    "RoundRobinEntry",
+    "ServiceNodeSelector",
+]

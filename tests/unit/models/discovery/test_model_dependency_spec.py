@@ -196,6 +196,3 @@ class TestModelDependencySpecIntentTypesNormalization:
 
         error_str = str(exc_info.value)
         assert "must have at least one discovery filter" in error_str
-
-
-__all__: list[str] = []

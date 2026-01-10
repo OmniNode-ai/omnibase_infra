@@ -43,7 +43,11 @@ from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
-from omnibase_infra.services import EnumSelectionStrategy, ServiceNodeSelector
+from omnibase_infra.services import (
+    DEFAULT_SELECTION_KEY,
+    EnumSelectionStrategy,
+    ServiceNodeSelector,
+)
 
 # =============================================================================
 # Test Constants
@@ -136,7 +140,7 @@ class TestEnumSelectionStrategy:
         assert EnumSelectionStrategy.LEAST_LOADED.value == "least_loaded"
 
     def test_strategy_is_string_enum(self) -> None:
-        """Should be a StrEnum for string serialization."""
+        """Should be a string enum (str, Enum) for string serialization."""
         assert str(EnumSelectionStrategy.FIRST) == "first"
         assert str(EnumSelectionStrategy.RANDOM) == "random"
 
@@ -505,7 +509,7 @@ class TestServiceNodeSelectorEdgeCases:
 
         Given: ROUND_ROBIN strategy
         When: select is called without selection_key parameter
-        Then: Uses a default key ("_default") for state tracking
+        Then: Uses DEFAULT_SELECTION_KEY for state tracking
         """
         candidates = create_candidate_list(3)
 
@@ -522,9 +526,9 @@ class TestServiceNodeSelectorEdgeCases:
         assert result is not None
         assert result.entity_id == candidates[0].entity_id
 
-        # Verify state was tracked under "_default" key
+        # Verify state was tracked under DEFAULT_SELECTION_KEY
         state = await selector.get_round_robin_state()
-        assert "_default" in state
+        assert DEFAULT_SELECTION_KEY in state
 
 
 @pytest.mark.unit
@@ -740,6 +744,3 @@ class TestServiceNodeSelectorThreadSafety:
 
         # Should complete without errors
         await asyncio.gather(*tasks)
-
-
-__all__: list[str] = []
