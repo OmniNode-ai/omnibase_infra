@@ -26,8 +26,9 @@ python = "^3.12"
 # - Breaking changes are communicated through semver major versions
 # - Internal packages are co-developed with this codebase
 #
-# omnibase-core v0.6.3: Fixes circular import bug (OMN-1257).
-# - service_registry is now properly initialized in ModelONEXContainer
+# omnibase-core v0.6.3: Package-level imports recommended for forward compatibility.
+# - Required by OMN-1258 (deep module import migration)
+# - Fixes circular import bug (OMN-1257)
 # - Handler security models and EnumHandlerTypeCategory (OMN-1137)
 omnibase-core = "^0.6.3"
 # omnibase-spi v0.4.2: Adds ProtocolCapabilityQuery interface (OMN-1135)
@@ -73,7 +74,11 @@ click = "^8.1.0"
 rich = "^13.7.0"
 
 # System utilities
-# cryptography v46.0.3: Security-reviewed upgrade (see docs/decisions/adr-cryptography-upgrade-46.md)
+# cryptography: Transitive dependency (via omnibase_core -> paramiko/pyopenssl).
+# Explicitly declared here to enforce minimum version for security compliance.
+# Constraint: ^46.0.3 means >=46.0.3, <47.0.0 (Poetry caret notation).
+# Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
+# See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
 cryptography = "^46.0.3"
 jinja2 = "^3.1.6"
 aiofiles = "^23.2.1"

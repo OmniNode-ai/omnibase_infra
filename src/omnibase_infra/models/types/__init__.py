@@ -49,7 +49,7 @@ See Also:
     - Pydantic issue: https://github.com/pydantic/pydantic/issues/3278
 """
 
-from omnibase_core.types import JsonPrimitive
+from omnibase_core.types import JsonPrimitive, JsonType
 
 # JsonDict is a more specific type for functions that work with JSON objects.
 # Use this when you need dict operations like .get(), indexing, or `in` checks.
@@ -66,5 +66,6 @@ JsonValue = object
 __all__ = [
     "JsonDict",
     "JsonPrimitive",
+    "JsonType",
     "JsonValue",
 ]

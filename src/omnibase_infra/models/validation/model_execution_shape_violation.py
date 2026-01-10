@@ -13,10 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums.enum_execution_shape_violation import (
-    EnumExecutionShapeViolation,
-)
-from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
+from omnibase_infra.enums import EnumExecutionShapeViolation, EnumNodeArchetype
 
 
 class ModelExecutionShapeViolationResult(BaseModel):

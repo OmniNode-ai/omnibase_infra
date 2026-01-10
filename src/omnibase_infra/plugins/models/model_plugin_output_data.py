@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from omnibase_infra.mixins import MixinDictLikeAccessors
 
-class ModelPluginOutputData(BaseModel):
+
+class ModelPluginOutputData(MixinDictLikeAccessors, BaseModel):
     """Base Pydantic model for plugin output data.
 
     This model replaces PluginOutputData TypedDict and allows arbitrary
@@ -56,31 +58,5 @@ class ModelPluginOutputData(BaseModel):
         from_attributes=True,  # pytest-xdist compatibility
     )
 
-    def get(self, key: str, default: object = None) -> object:
-        """Get field value by key with optional default.
 
-        Provides dict-like access for backwards compatibility with
-        TypedDict usage patterns.
-
-        Args:
-            key: Field name to retrieve
-            default: Default value if field not found
-
-        Returns:
-            Field value or default
-        """
-        return getattr(self, key, default)
-
-    def __getitem__(self, key: str) -> object:
-        """Get field value by key using bracket notation.
-
-        Raises:
-            KeyError: If field does not exist
-        """
-        if hasattr(self, key):
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def __contains__(self, key: str) -> bool:
-        """Check if field exists in model."""
-        return hasattr(self, key) and getattr(self, key) is not None
+__all__: list[str] = ["ModelPluginOutputData"]

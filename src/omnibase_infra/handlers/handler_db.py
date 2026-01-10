@@ -7,6 +7,11 @@ Transaction support deferred to Beta. Configurable pool size deferred to Beta.
 
 All queries MUST use parameterized statements for SQL injection protection.
 
+Envelope-Based Routing:
+    This handler uses envelope-based operation routing. See CLAUDE.md section
+    "Intent Model Architecture > Envelope-Based Handler Routing" for the full
+    design pattern and how orchestrators translate intents to handler envelopes.
+
 Single-Statement SQL Limitation
 ===============================
 

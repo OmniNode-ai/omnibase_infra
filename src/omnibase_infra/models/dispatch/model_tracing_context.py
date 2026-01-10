@@ -190,6 +190,11 @@ class ModelTracingContext(BaseModel):
         Extracts correlation_id, trace_id, and span_id from the envelope.
         Missing fields are set to nil UUID sentinel.
 
+        Typing Note:
+            Uses ``ModelEventEnvelope[object]`` instead of ``Any`` per CLAUDE.md
+            guidance. This method extracts tracing metadata regardless of payload
+            type; the ``object`` type parameter signals any payload is accepted.
+
         Args:
             envelope: The event envelope to extract tracing info from.
 

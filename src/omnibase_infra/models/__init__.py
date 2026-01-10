@@ -64,8 +64,6 @@ __all__: list[str] = [
     "EnumTopicStandard",
     # Resilience models
     "ModelCircuitBreakerConfig",
-    # SemVer models - REMOVED: Use omnibase_core.models.primitives.model_semver instead
-    # (model_semver.py now raises ImportError on import)
     # Validation models
     "ModelCoverageMetrics",
     "ModelDispatchLogContext",

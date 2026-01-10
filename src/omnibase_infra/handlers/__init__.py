@@ -14,6 +14,7 @@ Available Handlers:
 - HandlerDb: PostgreSQL database handler (MVP: query, execute only)
 - HandlerVault: HashiCorp Vault secret management handler (MVP: KV v2 secrets)
 - HandlerConsul: HashiCorp Consul service discovery handler (MVP: KV, service registration)
+- HandlerFileSystem: Filesystem handler with path whitelisting and size limits
 
 Response Models:
 - ModelDbQueryPayload: Database query result payload
@@ -25,6 +26,7 @@ Response Models:
 
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
+from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
 from omnibase_infra.handlers.handler_http import HttpRestHandler
 from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.handlers.models import (
@@ -38,6 +40,7 @@ from omnibase_infra.handlers.models import (
 __all__: list[str] = [
     "HandlerConsul",
     "HandlerDb",
+    "HandlerFileSystem",
     "HttpRestHandler",
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",

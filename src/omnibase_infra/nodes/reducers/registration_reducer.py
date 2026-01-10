@@ -440,7 +440,7 @@ class ModelValidationResult(BaseModel):
         - None for error_code (unavoidable for Literal type safety)
         - Use ``has_field_name``, ``has_error_message`` to check
 
-    Backwards Compatibility:
+    Constructor API:
         Constructors accept ``None`` for string fields and convert to sentinel.
 
     Attributes:
@@ -464,7 +464,7 @@ class ModelValidationResult(BaseModel):
     @field_validator("field_name", "error_message", mode="before")
     @classmethod
     def _convert_none_to_str_sentinel(cls, v: object) -> str:
-        """Convert None to empty string sentinel for backwards compatibility."""
+        """Convert None to empty string sentinel for API convenience."""
         if v is None:
             return _SENTINEL_STR
         if isinstance(v, str):
@@ -711,8 +711,8 @@ class RegistrationReducer:
     def _is_valid(self, event: ModelNodeIntrospectionEvent) -> bool:
         """Validate introspection event for processing.
 
-        Delegates to _validate_event() for detailed validation. This method
-        is retained for backwards compatibility.
+        Convenience wrapper around _validate_event() that returns a simple bool.
+        Use _validate_event() when detailed error information is needed.
 
         Args:
             event: Introspection event to validate.
@@ -848,7 +848,8 @@ class RegistrationReducer:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelIntent with intent_type="consul.register" and Consul payload.
+            ModelIntent with intent_type="extension" (dual-layer routing).
+            The routing key "consul.register" is in payload.intent_type.
         """
         service_id = f"onex-{event.node_type.value}-{event.node_id}"
         service_name = f"onex-{event.node_type.value}"
@@ -878,7 +879,7 @@ class RegistrationReducer:
 
         # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
-            intent_type="consul.register",
+            intent_type="extension",
             target=f"consul://service/{service_name}",
             payload=consul_payload,
         )
@@ -898,7 +899,8 @@ class RegistrationReducer:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelIntent with intent_type="postgres.upsert_registration" and record payload.
+            ModelIntent with intent_type="extension" (dual-layer routing).
+            The routing key "postgres.upsert_registration" is in payload.intent_type.
         """
         now = datetime.now(UTC)
 
@@ -927,7 +929,7 @@ class RegistrationReducer:
 
         # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
-            intent_type="postgres.upsert_registration",
+            intent_type="extension",
             target=f"postgres://node_registrations/{event.node_id}",
             payload=postgres_payload,
         )
@@ -975,6 +977,12 @@ class RegistrationReducer:
         )
 
     # TODO(OMN-996): Implement reduce_confirmation() using ModelRegistrationConfirmation
+    # Ticket: https://linear.app/omninode/issue/OMN-996
+    # Status: Backlog - Phase 2 of dual registration event flow
+    #
+    # Scope: Process confirmation events from Effect layer (Consul/PostgreSQL)
+    # to complete state transitions: pending -> partial -> complete
+    #
     # The model is now available at:
     #   from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
     #

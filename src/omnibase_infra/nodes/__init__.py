@@ -16,9 +16,9 @@ Available Submodules:
 
 Available Classes:
 - NodeRegistrationReducer: Declarative FSM-driven reducer (ONEX pattern)
-- RegistrationReducer: Pure function reducer (legacy interface)
-- NodeRegistryEffect: Effect node for dual-backend registration execution.
-- NodeRegistrationOrchestrator: Workflow orchestrator for registration.
+- RegistrationReducer: Pure function reducer implementation
+- NodeRegistryEffect: Effect node for dual-backend registration execution
+- NodeRegistrationOrchestrator: Workflow orchestrator for registration
 """
 
 from omnibase_infra.nodes.effects import (

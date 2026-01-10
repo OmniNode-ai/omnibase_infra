@@ -20,6 +20,8 @@ Exports:
     ModelOptionalUUID: Wrapper for optional UUID values
     ModelOptionalCorrelationId: Wrapper for optional correlation ID values
     ModelPolicyTypeFilter: Wrapper for policy type filter values
+    ModelPolicyContext: Structured context model for policy evaluation
+    ModelPolicyResult: Structured result model for policy decisions
     ModelPolicyRegistration: Policy registration parameters model
     ModelPolicyKey: Strongly-typed policy registry key model
     ModelRuntimeTick: Infrastructure event emitted by runtime scheduler
@@ -62,10 +64,12 @@ from omnibase_infra.runtime.models.model_optional_correlation_id import (
 )
 from omnibase_infra.runtime.models.model_optional_string import ModelOptionalString
 from omnibase_infra.runtime.models.model_optional_uuid import ModelOptionalUUID
+from omnibase_infra.runtime.models.model_policy_context import ModelPolicyContext
 from omnibase_infra.runtime.models.model_policy_key import ModelPolicyKey
 from omnibase_infra.runtime.models.model_policy_registration import (
     ModelPolicyRegistration,
 )
+from omnibase_infra.runtime.models.model_policy_result import ModelPolicyResult
 from omnibase_infra.runtime.models.model_policy_type_filter import ModelPolicyTypeFilter
 from omnibase_infra.runtime.models.model_protocol_registration_config import (
     ModelProtocolRegistrationConfig,
@@ -98,8 +102,10 @@ __all__: list[str] = [
     "ModelOptionalCorrelationId",
     "ModelOptionalString",
     "ModelOptionalUUID",
+    "ModelPolicyContext",
     "ModelPolicyKey",
     "ModelPolicyRegistration",
+    "ModelPolicyResult",
     "ModelPolicyTypeFilter",
     "ModelProtocolRegistrationConfig",
     "ModelRuntimeConfig",

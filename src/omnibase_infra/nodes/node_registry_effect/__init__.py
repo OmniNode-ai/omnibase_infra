@@ -44,17 +44,12 @@ Usage:
     effect = NodeRegistryEffect(container)
     ```
 
-Backwards Compatibility:
-    Models are re-exported from omnibase_infra.nodes.effects.models for
-    existing code that imports them from this package.
-
 Related:
     - contract.yaml: Operation routing definition
     - node.py: Declarative node implementation
     - models/: Node-specific models
     - handlers/: Operation handlers
     - registry/: Infrastructure registry
-    - omnibase_infra.nodes.effects.registry_effect: Legacy implementation
 """
 
 from __future__ import annotations
@@ -66,14 +61,6 @@ from omnibase_infra.nodes.node_registry_effect.handlers import (
     HandlerPartialRetry,
     HandlerPostgresDeactivate,
     HandlerPostgresUpsert,
-)
-
-# Re-export models for backwards compatibility
-from omnibase_infra.nodes.node_registry_effect.models import (
-    ModelBackendResult,
-    ModelEffectIdempotencyConfig,
-    ModelRegistryRequest,
-    ModelRegistryResponse,
 )
 
 # Export the declarative node
@@ -95,9 +82,4 @@ __all__: list[str] = [
     "HandlerPartialRetry",
     "HandlerPostgresDeactivate",
     "HandlerPostgresUpsert",
-    # Models (backwards compatibility)
-    "ModelBackendResult",
-    "ModelEffectIdempotencyConfig",
-    "ModelRegistryRequest",
-    "ModelRegistryResponse",
 ]

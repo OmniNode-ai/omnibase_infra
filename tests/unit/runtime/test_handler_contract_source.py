@@ -36,6 +36,9 @@ import pytest
 # - omnibase_spi has ProtocolHandlerSource/ProtocolHandlerDescriptor with different attributes
 # - omnibase_infra has ProtocolContractSource/ProtocolContractDescriptor that match the implementation
 # We use the local protocols and alias them to the names used in tests for clarity.
+from omnibase_infra.models.handlers.model_handler_descriptor import (
+    ModelHandlerDescriptor,
+)
 from omnibase_infra.runtime.protocol_contract_descriptor import (
     ProtocolContractDescriptor as ProtocolHandlerDescriptor,
 )
@@ -316,9 +319,9 @@ class TestHandlerContractSourceDiscovery:
             f"Expected 0 validation errors in strict mode, got {len(result.validation_errors)}"
         )
 
-        # Verify each descriptor is a ProtocolHandlerDescriptor
+        # Verify each descriptor is a ModelHandlerDescriptor
         for descriptor in result.descriptors:
-            assert isinstance(descriptor, ProtocolHandlerDescriptor)
+            assert isinstance(descriptor, ModelHandlerDescriptor)
 
         # Verify the expected handler_ids were discovered
         discovered_ids = {d.handler_id for d in result.descriptors}

@@ -268,14 +268,12 @@ Perform deep contract validation for ONEX compliance.
 ```python
 def validate_infra_contract_deep(
     contract_path: str | Path,
-    contract_type: Literal["effect", "compute", "reducer", "orchestrator"] = "effect",
 ) -> ModelContractValidationResult:
 ```
 
 ### Parameters
 
 - **contract_path** (`str | Path`): Path to the contract YAML file.
-- **contract_type** (`Literal`, optional): Type of contract to validate. Defaults to `"effect"`.
 
 ### Returns
 
@@ -303,7 +301,6 @@ from omnibase_infra.validation import validate_infra_contract_deep
 # Deep validation for code generation
 result = validate_infra_contract_deep(
     contract_path="src/omnibase_infra/nodes/consul_adapter/v1_0_0/contract.yaml",
-    contract_type="effect"
 )
 
 print(f"Validation score: {result.validation_score:.2%}")
