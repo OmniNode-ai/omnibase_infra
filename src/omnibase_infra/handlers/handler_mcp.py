@@ -167,8 +167,12 @@ class HandlerMCP(MixinEnvelopeExtraction):
                 path=str(path_val) if path_val is not None else "/mcp",
                 stateless=bool(stateless_val),
                 json_response=bool(json_response_val),
-                timeout_seconds=float(timeout_val) if isinstance(timeout_val, (int, float, str)) else 30.0,
-                max_tools=int(max_tools_val) if isinstance(max_tools_val, (int, float, str)) else 100,
+                timeout_seconds=float(timeout_val)
+                if isinstance(timeout_val, (int, float, str))
+                else 30.0,
+                max_tools=int(max_tools_val)
+                if isinstance(max_tools_val, (int, float, str))
+                else 100,
             )
 
             # Initialize tool registry (empty until tools are registered)
@@ -380,6 +384,14 @@ class HandlerMCP(MixinEnvelopeExtraction):
 
         except Exception as e:
             execution_time_ms = int((time.perf_counter() - start_time) * 1000)
+            logger.warning(
+                "Tool execution failed",
+                extra={
+                    "tool_name": tool_name,
+                    "error": str(e),
+                    "correlation_id": str(correlation_id),
+                },
+            )
             tool_result = ModelMcpToolResult(
                 success=False,
                 content=str(e),
@@ -489,18 +501,21 @@ class HandlerMCP(MixinEnvelopeExtraction):
             "arguments_received": list(arguments.keys()),
         }
 
-    def register_tool(self, tool: ProtocolMCPToolDefinition) -> None:
+    def register_tool(self, tool: ProtocolMCPToolDefinition) -> bool:
         """Register an MCP tool definition.
 
         Args:
             tool: Tool definition to register.
+
+        Returns:
+            True if tool was registered successfully, False if max tool limit exceeded.
         """
         if self._config and len(self._tool_registry) >= self._config.max_tools:
             logger.warning(
                 "Maximum tool limit reached, tool not registered",
                 extra={"tool_name": tool.name, "max_tools": self._config.max_tools},
             )
-            return
+            return False
 
         self._tool_registry[tool.name] = tool
         logger.info(
@@ -511,6 +526,7 @@ class HandlerMCP(MixinEnvelopeExtraction):
                 "parameter_count": len(tool.parameters),
             },
         )
+        return True
 
     def unregister_tool(self, tool_name: str) -> bool:
         """Unregister an MCP tool.

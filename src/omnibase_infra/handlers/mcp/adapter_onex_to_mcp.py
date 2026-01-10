@@ -54,7 +54,7 @@ class MCPToolParameter:
     constraints: dict[str, object] = field(default_factory=dict)
     examples: list[object] = field(default_factory=list)
 
-    async def validate_parameter(self) -> bool:
+    def validate_parameter(self) -> bool:
         """Validate the parameter definition."""
         return bool(self.name and self.parameter_type)
 
@@ -84,7 +84,7 @@ class MCPToolDefinition:
     tags: list[str] = field(default_factory=list)
     metadata: dict[str, object] = field(default_factory=dict)
 
-    async def validate_tool_definition(self) -> bool:
+    def validate_tool_definition(self) -> bool:
         """Validate the tool definition."""
         return bool(self.name and self.description)
 
@@ -221,11 +221,14 @@ class ONEXToMCPAdapter:
             InfraUnavailableError: If tool not found.
             ProtocolConfigurationError: If node executor not configured.
         """
+        correlation_id = correlation_id or uuid4()
+
         if tool_name not in self._tool_cache:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.MCP,
                 operation="invoke_tool",
                 target_name=tool_name,
+                correlation_id=correlation_id,
             )
             raise InfraUnavailableError(
                 f"Tool '{tool_name}' not found in registry", context=ctx
@@ -235,13 +238,12 @@ class ONEXToMCPAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.MCP,
                 operation="invoke_tool",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Node executor not configured. Cannot invoke tools without executor.",
                 context=ctx,
             )
-
-        correlation_id = correlation_id or uuid4()
 
         logger.info(
             "Invoking MCP tool",
@@ -310,7 +312,12 @@ class ONEXToMCPAdapter:
             if issubclass(model_class, BaseModel):
                 return model_class.model_json_schema()
         except (TypeError, ImportError):
-            pass
+            logger.debug(
+                "Could not generate Pydantic schema, using fallback",
+                extra={
+                    "model_class": getattr(model_class, "__name__", str(model_class))
+                },
+            )
 
         # Fallback for non-Pydantic types
         return {"type": "object"}

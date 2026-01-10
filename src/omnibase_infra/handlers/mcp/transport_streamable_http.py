@@ -151,7 +151,8 @@ class TransportMCPStreamableHttp:
         """
         from mcp.server.fastmcp import FastMCP
 
-        assert isinstance(mcp, FastMCP)
+        if not isinstance(mcp, FastMCP):
+            raise TypeError(f"Expected FastMCP instance, got {type(mcp).__name__}")
 
         # Create a closure that captures the tool name
         tool_name = tool_def.name
@@ -192,7 +193,6 @@ class TransportMCPStreamableHttp:
             return
 
         app = self.create_app(tools, tool_executor)
-        self._running = True
 
         logger.info(
             "Starting MCP streamable HTTP transport",
@@ -203,15 +203,21 @@ class TransportMCPStreamableHttp:
             },
         )
 
-        # Run uvicorn server
-        config = uvicorn.Config(
-            app,
-            host=self._config.host,
-            port=self._config.port,
-            log_level="info",
-        )
-        self._server = uvicorn.Server(config)
-        await self._server.serve()
+        # Run uvicorn server - only set _running after successful server creation
+        try:
+            config = uvicorn.Config(
+                app,
+                host=self._config.host,
+                port=self._config.port,
+                log_level="info",
+            )
+            self._server = uvicorn.Server(config)
+            self._running = True  # Only set after successful server creation
+            await self._server.serve()
+        except Exception:
+            self._running = False
+            self._server = None
+            raise
 
     async def stop(self) -> None:
         """Stop the MCP server."""

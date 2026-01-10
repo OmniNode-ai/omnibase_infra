@@ -33,7 +33,7 @@ descriptor:
     # Reset timeout: 60s = 2x handler timeout_ms
     timeout_ms: 60000
   # Concurrent: MCP supports multiple simultaneous tool calls
-  concurrency_policy: concurrent
+  concurrency_policy: parallel_ok
   isolation_policy: none
   observability_level: standard
 capability_outputs:
