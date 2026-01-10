@@ -736,6 +736,34 @@ pattern_exemptions:
       - CLAUDE.md (Infrastructure Error Patterns)
     ticket: OMN-811
   # ==========================================================================
+  # EventBusRegistryError Exemptions (OMN-1276)
+  # ==========================================================================
+  # Error classes require multiple context parameters for comprehensive error reporting.
+  - file_pattern: 'error_event_bus_registry\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error class requires multiple contextual parameters for debugging: message, bus_kind, bus_class, available_kinds, existing_class, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+      - CLAUDE.md (Infrastructure Error Patterns)
+    ticket: OMN-1276
+  # ==========================================================================
+  # MessageTypeRegistryError Exemptions (OMN-983)
+  # ==========================================================================
+  # Error classes require multiple context parameters for comprehensive error reporting.
+  - file_pattern: 'registry_message_type\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error class requires multiple contextual parameters for debugging: message, message_type, domain, category, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+      - CLAUDE.md (Infrastructure Error Patterns)
+    ticket: OMN-983
+  # ==========================================================================
   # Compute Plugin ID Exemptions (OMN-811)
   # ==========================================================================
   # plugin_id is a semantic identifier (e.g., 'json_normalizer'), NOT a UUID.
@@ -801,6 +829,21 @@ pattern_exemptions:
     documentation:
       - docs/patterns/correlation_id_tracking.md
     ticket: OMN-811
+  # ==========================================================================
+  # MCP Handler Model Exemptions (OMN-1288)
+  # ==========================================================================
+  # tool_name in ModelMcpToolCall is the MCP protocol identifier for the tool
+  # to invoke (e.g., "get_weather", "search_documents"). It is NOT an entity
+  # reference requiring UUID + display_name pattern - it's a protocol-level
+  # identifier defined by the MCP specification.
+  - file_pattern: 'model_mcp_tool_call\.py'
+    violation_pattern: "Field 'tool_name' might reference an entity"
+    reason: >
+      tool_name is an MCP protocol identifier for the tool to invoke (e.g., "get_weather"). This is a protocol-level identifier from the Model Context Protocol specification, not an entity reference.
+
+    documentation:
+      - Model Context Protocol Specification (https://modelcontextprotocol.io/)
+    ticket: OMN-1288
   # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================

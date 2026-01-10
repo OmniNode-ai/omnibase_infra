@@ -15,6 +15,7 @@ Supported transport types:
     - GRPC: gRPC protocol
     - RUNTIME: Runtime host internal transport
     - MCP: Model Context Protocol (AI agent tool interface)
+    - FILESYSTEM: Local filesystem operations
 
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
@@ -22,6 +23,7 @@ Each transport type has a corresponding handler implementation:
     - KafkaEventBus: Event publishing/subscription, consumer groups
     - PostgresConnectionManager: Connection pooling, query execution
     - HandlerMCP: MCP server for exposing ONEX nodes as AI agent tools
+    - HandlerFileSystem: File read/write, directory operations
 """
 
 from enum import Enum
@@ -43,6 +45,7 @@ class EnumInfraTransportType(str, Enum):
         GRPC: gRPC protocol transport
         RUNTIME: Runtime host process internal transport
         MCP: Model Context Protocol transport for AI agent integration
+        FILESYSTEM: Local filesystem transport
     """
 
     HTTP = "http"
@@ -54,6 +57,7 @@ class EnumInfraTransportType(str, Enum):
     GRPC = "grpc"
     RUNTIME = "runtime"
     MCP = "mcp"
+    FILESYSTEM = "filesystem"
 
 
 __all__ = ["EnumInfraTransportType"]

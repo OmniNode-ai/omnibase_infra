@@ -7,7 +7,7 @@ protocol identification, policy classification, dispatch status,
 message categories, topic types, topic standards, chain validation,
 registration states, handler types, handler error types, handler source types,
 node archetypes, introspection reasons, contract types, circuit breaker states, retry error categories,
-any type violations, security validation, and other infrastructure concerns.
+any type violations, security validation, validation severity, and other infrastructure concerns.
 
 Exports:
     EnumAnyTypeViolation: Any type violation categories for strong typing validation
@@ -32,6 +32,7 @@ Exports:
     EnumSecurityRuleId: Security validation rule identifiers for OMN-1098
     EnumTopicStandard: Topic standards (ONEX_KAFKA, ENVIRONMENT_AWARE)
     EnumTopicType: Topic types (EVENTS, COMMANDS, INTENTS, SNAPSHOTS)
+    EnumValidationSeverity: Validation error severity levels (ERROR, CRITICAL, WARNING)
 """
 
 from omnibase_core.enums import EnumTopicType
@@ -59,6 +60,7 @@ from omnibase_infra.enums.enum_registration_state import EnumRegistrationState
 from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
+from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
 
 __all__: list[str] = [
     "EnumAnyTypeViolation",
@@ -83,4 +85,5 @@ __all__: list[str] = [
     "EnumSecurityRuleId",
     "EnumTopicStandard",
     "EnumTopicType",
+    "EnumValidationSeverity",
 ]

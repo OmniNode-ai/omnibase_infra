@@ -57,6 +57,16 @@ class EnumSecurityRuleId(StrEnum):
         ADAPTER_MISSING_DOMAIN_ALLOWLIST: Adapter handler missing required
             domain allowlist in environment requiring explicit allowlists.
             (Registration-time, SECURITY-304)
+        EFFECT_MISSING_SECURITY_METADATA: EFFECT handler missing required
+            security metadata (must have secret_scopes, allowed_domains, or
+            data_classification). (Handler-type validation, SECURITY-305)
+        COMPUTE_HAS_SECURITY_METADATA: COMPUTE handler has security metadata
+            (COMPUTE handlers must not have security metadata).
+            (Handler-type validation, SECURITY-306)
+        INVALID_SECRET_SCOPE: Secret scope is invalid (empty or whitespace-only).
+            (Handler-type validation, SECURITY-307)
+        INVALID_DOMAIN_PATTERN: Domain pattern in allowlist is invalid.
+            (Handler-type validation, SECURITY-308)
         DOMAIN_ACCESS_DENIED: Handler attempted to access domain not in its
             declared allowlist. (Invocation-time, SECURITY-310)
         SECRET_SCOPE_ACCESS_DENIED: Handler attempted to access secret scope
@@ -77,6 +87,12 @@ class EnumSecurityRuleId(StrEnum):
     ADAPTER_REQUESTING_SECRETS = "SECURITY-302"
     ADAPTER_NON_EFFECT_CATEGORY = "SECURITY-303"
     ADAPTER_MISSING_DOMAIN_ALLOWLIST = "SECURITY-304"
+
+    # Handler type security violations (305-309) - OMN-1137
+    EFFECT_MISSING_SECURITY_METADATA = "SECURITY-305"
+    COMPUTE_HAS_SECURITY_METADATA = "SECURITY-306"
+    INVALID_SECRET_SCOPE = "SECURITY-307"
+    INVALID_DOMAIN_PATTERN = "SECURITY-308"
 
     # Invocation-time violations (310-319)
     DOMAIN_ACCESS_DENIED = "SECURITY-310"
