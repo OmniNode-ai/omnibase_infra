@@ -726,18 +726,28 @@ class TestGenerateMigration:
 class TestProtocolCompliance:
     """Test that ProjectorSchemaValidator implements ProtocolProjectorSchemaValidator.
 
-    The protocol is @runtime_checkable, enabling isinstance checks.
-    This verifies duck typing compliance at test time.
+    Protocol compliance is verified via duck-typing (hasattr checks) as per ONEX convention.
+    This approach is preferred over isinstance checks to maintain flexibility.
     """
 
     def test_validator_implements_protocol(self, mock_pool: MagicMock) -> None:
-        """ProjectorSchemaValidator passes runtime protocol check."""
-        from omnibase_infra.protocols import ProtocolProjectorSchemaValidator
-
+        """ProjectorSchemaValidator has all required protocol methods."""
         validator = ProjectorSchemaValidator(db_pool=mock_pool)
 
-        # @runtime_checkable protocol enables isinstance check
-        assert isinstance(validator, ProtocolProjectorSchemaValidator)
+        # Protocol compliance check via duck-typing (ONEX convention)
+        # ProtocolProjectorSchemaValidator requires:
+        # - ensure_schema_exists(schema, correlation_id) -> None
+        # - table_exists(table_name, correlation_id, schema_name=None) -> bool
+        assert hasattr(validator, "ensure_schema_exists"), (
+            "Validator must have ensure_schema_exists method"
+        )
+        assert callable(validator.ensure_schema_exists), (
+            "ensure_schema_exists must be callable"
+        )
+        assert hasattr(validator, "table_exists"), (
+            "Validator must have table_exists method"
+        )
+        assert callable(validator.table_exists), "table_exists must be callable"
 
     def test_validator_has_ensure_schema_exists_method(
         self, mock_pool: MagicMock

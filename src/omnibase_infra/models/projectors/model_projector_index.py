@@ -40,6 +40,7 @@ class ModelProjectorIndex(BaseModel):
         index_type: PostgreSQL index type (btree, gin, hash).
         unique: Whether the index enforces uniqueness (default: False).
         where_clause: Optional partial index predicate (SQL expression).
+        description: Optional human-readable description for documentation.
 
     Example:
         >>> index = ModelProjectorIndex(
@@ -79,8 +80,15 @@ class ModelProjectorIndex(BaseModel):
         description=(
             "Optional partial index predicate (SQL expression). "
             "TRUST BOUNDARY: This field accepts raw SQL and must only come from "
-            "trusted contract.yaml sources. Do NOT populate from user input."
+            "trusted contract.yaml sources. Do NOT populate from user input. "
+            "Line breaks are rejected to prevent multi-statement injection."
         ),
+    )
+
+    description: str | None = Field(
+        default=None,
+        description="Optional human-readable description for documentation purposes",
+        max_length=1024,
     )
 
     model_config = {
@@ -146,6 +154,53 @@ class ModelProjectorIndex(BaseModel):
                     "[A-Za-z_][A-Za-z0-9_]* (letters, digits, underscores only, "
                     "starting with letter or underscore)"
                 )
+        return v
+
+    @field_validator("where_clause")
+    @classmethod
+    def validate_where_clause(cls, v: str | None) -> str | None:
+        """Validate where_clause for SQL safety.
+
+        Prevents multi-statement injection by rejecting line breaks. The where_clause
+        is a trust boundary that accepts raw SQL expressions by design (for partial
+        index predicates), so contract sources must be trusted. This validator
+        prevents accidental line breaks that could enable multi-statement injection.
+
+        Args:
+            v: Where clause to validate.
+
+        Returns:
+            Validated where clause.
+
+        Raises:
+            ValueError: If the where_clause contains line breaks.
+        """
+        if v is None:
+            return v
+        if "\n" in v or "\r" in v:
+            raise ValueError("where_clause must not contain line breaks")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        """Validate description for SQL safety.
+
+        Prevents potential injection by rejecting line breaks in description values.
+
+        Args:
+            v: Description value to validate.
+
+        Returns:
+            Validated description value.
+
+        Raises:
+            ValueError: If the description contains line breaks.
+        """
+        if v is None:
+            return v
+        if "\n" in v or "\r" in v:
+            raise ValueError("description must not contain line breaks")
         return v
 
     def to_sql_definition(self, table_name: str) -> str:

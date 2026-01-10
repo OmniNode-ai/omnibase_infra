@@ -1404,15 +1404,17 @@ pattern_exemptions:
   # ==========================================================================
   # table_name is a standard database identifier, not an entity reference.
   # This pattern is ubiquitous in database-related models.
+  # NOTE: Projector models are temporarily in omnibase_infra until omnibase_core
+  # provides canonical projector model types.
   - file_pattern: 'model_projector_schema\.py'
     violation_pattern: "Field 'table_name' might reference an entity"
     reason: >
-      table_name is a PostgreSQL table identifier (e.g., 'node_registrations'), not an entity reference. Standard database schema pattern.
+      table_name is a PostgreSQL table identifier (e.g., 'node_registrations'), not an entity reference. Standard database schema pattern. Note: Projector models are temporarily located in omnibase_infra until omnibase_core provides canonical projector model types.
 
     documentation:
       - PostgreSQL CREATE TABLE syntax
       - src/omnibase_infra/schemas/schema_registration_projection.sql (example usage)
-      - src/omnibase_infra/models/projectors/model_projector_schema.py (ModelProjectorSchema defines table_name as identifier)
+      - src/omnibase_infra/models/projectors/model_projector_schema.py (ModelProjectorSchema defines table_name as identifier, temporary location in omnibase_infra)
     ticket: OMN-1168
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols

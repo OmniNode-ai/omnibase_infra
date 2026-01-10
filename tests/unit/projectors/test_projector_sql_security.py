@@ -376,6 +376,60 @@ class TestIndexSqlInjection:
         sql = index.to_sql_definition("items")
         assert "WHERE deleted_at IS NULL" in sql
 
+    def test_newline_in_where_clause_rejected(self) -> None:
+        """Test newline in where_clause is rejected (prevents multi-statement)."""
+        with pytest.raises(ValidationError, match="must not contain line breaks"):
+            ModelProjectorIndex(
+                name="idx_partial",
+                columns=["status"],
+                where_clause="deleted_at IS NULL\n; DROP TABLE users;",
+            )
+
+    def test_carriage_return_in_where_clause_rejected(self) -> None:
+        """Test carriage return in where_clause is rejected."""
+        with pytest.raises(ValidationError, match="must not contain line breaks"):
+            ModelProjectorIndex(
+                name="idx_partial",
+                columns=["status"],
+                where_clause="deleted_at IS NULL\r\n; DROP TABLE users;",
+            )
+
+    def test_newline_in_index_description_rejected(self) -> None:
+        """Test newline in index description is rejected."""
+        with pytest.raises(ValidationError, match="must not contain line breaks"):
+            ModelProjectorIndex(
+                name="idx_valid",
+                columns=["col1"],
+                description="Valid start\n-- Injection attempt",
+            )
+
+    def test_carriage_return_in_index_description_rejected(self) -> None:
+        """Test carriage return in index description is rejected."""
+        with pytest.raises(ValidationError, match="must not contain line breaks"):
+            ModelProjectorIndex(
+                name="idx_valid",
+                columns=["col1"],
+                description="Valid start\r\n-- Injection attempt",
+            )
+
+    def test_valid_where_clause_accepted(self) -> None:
+        """Test valid where_clause without line breaks is accepted."""
+        index = ModelProjectorIndex(
+            name="idx_active",
+            columns=["status"],
+            where_clause="status = 'active' AND deleted_at IS NULL",
+        )
+        assert index.where_clause == "status = 'active' AND deleted_at IS NULL"
+
+    def test_valid_description_accepted(self) -> None:
+        """Test valid description without line breaks is accepted."""
+        index = ModelProjectorIndex(
+            name="idx_status",
+            columns=["status"],
+            description="Index for status lookups",
+        )
+        assert index.description == "Index for status lookups"
+
 
 @pytest.mark.unit
 class TestSchemaNameValidation:
