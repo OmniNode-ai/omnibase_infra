@@ -64,10 +64,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_infra.errors import (
-    InfraConnectionError,
-    ProtocolConfigurationError,
-)
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.runtime.model_discovery_error import ModelDiscoveryError
 from omnibase_infra.models.runtime.model_discovery_result import ModelDiscoveryResult
 from omnibase_infra.models.runtime.model_discovery_warning import (
@@ -378,11 +375,12 @@ class ContractHandlerDiscovery:
                                 },
                             )
                         )
-                    except (ImportError, AttributeError, TypeError) as e:
+                    except (ImportError, AttributeError, TypeError, ValueError) as e:
                         # Module/class import failed
                         # ImportError: Module not found or import failure
                         # AttributeError: Class not found in module (from getattr)
                         # TypeError: Path resolved to non-class (from isinstance check)
+                        # ValueError: Invalid class path format (no module separator)
                         # Uses IMPORT_ERROR for consistency with EnumHandlerLoaderError
                         errors.append(
                             ModelDiscoveryError(
@@ -397,11 +395,10 @@ class ContractHandlerDiscovery:
                             )
                         )
                     except Exception as e:
-                        # Catch-all for unexpected registration errors.
-                        # WHY: Individual handler failures must NOT crash the entire discovery
-                        # operation. This enables graceful degradation where some handlers can
-                        # be registered even if others fail unexpectedly. All errors are
-                        # captured in the result for the caller to handle.
+                        # CATCH-ALL: Individual handler failures must NOT crash the entire
+                        # discovery operation. This enables graceful degradation where some
+                        # handlers can be registered even if others fail unexpectedly. All
+                        # errors are captured in the result for the caller to handle.
                         errors.append(
                             ModelDiscoveryError(
                                 error_code="REGISTRATION_UNEXPECTED_ERROR",
@@ -444,29 +441,11 @@ class ContractHandlerDiscovery:
                     )
                 )
 
-            except InfraConnectionError as e:
-                # Handler import errors (module not found, class not found, etc.)
-                error_code = "IMPORT_ERROR"
-                if hasattr(e, "model") and hasattr(e.model, "context"):
-                    context_dict = e.model.context
-                    if isinstance(context_dict, dict):
-                        error_code = context_dict.get("loader_error", error_code)
-
-                errors.append(
-                    ModelDiscoveryError(
-                        error_code=error_code,
-                        message=str(e),
-                        contract_path=path if is_file else None,
-                        details={"exception_type": type(e).__name__},
-                    )
-                )
-
             except Exception as e:
-                # Catch-all for unexpected errors during path processing.
-                # WHY: Discovery must be resilient - a single failing path must NOT crash
-                # the entire discovery operation. This enables processing remaining paths
-                # even if one path encounters unexpected errors (e.g., filesystem race
-                # conditions, corrupted files, unexpected plugin loader exceptions).
+                # CATCH-ALL: Discovery must be resilient - a single failing path must NOT
+                # crash the entire discovery operation. This enables processing remaining
+                # paths even if one path encounters unexpected errors (e.g., filesystem
+                # race conditions, corrupted files, unexpected plugin loader exceptions).
                 # All errors are captured in the result for the caller to handle.
                 #
                 # NOTE: Use stored is_file boolean, NOT path.is_file() call

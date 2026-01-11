@@ -143,6 +143,10 @@ class TestContractHandlerDiscoveryErrorHandling:
         directory loading. Failures are logged as warnings but not captured
         in the result's errors list. This is intentional design - individual
         handler failures should not prevent other handlers from loading.
+
+        IMPORTANT: This test explicitly verifies that errors ARE captured in logs
+        even though result.has_errors is False. This proves the logging is working
+        correctly for observability purposes.
         """
         import logging
 
@@ -163,28 +167,42 @@ class TestContractHandlerDiscoveryErrorHandling:
         # handlers that the loader returned to it
         assert not result.has_errors  # Discovery itself succeeded
 
-        # Verify warnings were logged for the invalid contracts
-        warning_messages = [
-            record.message
-            for record in caplog.records
-            if record.levelno >= logging.WARNING
+        # =================================================================
+        # CRITICAL ASSERTION: Verify errors ARE logged even though has_errors is False
+        # This is the key verification that logging works for observability
+        # =================================================================
+
+        # Collect all warning-level and above log records
+        warning_records = [
+            record for record in caplog.records if record.levelno >= logging.WARNING
         ]
-        assert len(warning_messages) >= 2  # At least 2 invalid contracts should warn
+
+        # There MUST be logged warnings for the invalid contracts
+        assert len(warning_records) >= 2, (
+            f"Expected at least 2 warning logs for invalid contracts, "
+            f"but got {len(warning_records)}. Log records: "
+            f"{[r.getMessage() for r in caplog.records]}"
+        )
 
         # Verify specific error types are logged
+        warning_messages = [record.message for record in warning_records]
         warning_text = " ".join(warning_messages)
         assert "invalid_yaml" in warning_text.lower() or "Invalid YAML" in warning_text
         assert (
             "missing_class" in warning_text.lower() or "Field required" in warning_text
         )
 
-        # CRITICAL: Verify that errors/failures ARE logged even though has_errors is False
-        # This confirms the loader is properly reporting issues via logging while still
-        # allowing partial success. The warning messages should contain error indicators.
-        error_indicators = ["error", "fail", "invalid", "missing"]
+        # Verify that error/failure indicators ARE present in the logs
+        # This proves logging is working correctly for observability purposes
+        error_indicators = ["error", "fail", "invalid", "missing", "cannot", "unable"]
         warning_text_lower = warning_text.lower()
-        assert any(indicator in warning_text_lower for indicator in error_indicators), (
-            f"Expected error indicators in warnings but got: {warning_messages}"
+        matching_indicators = [
+            ind for ind in error_indicators if ind in warning_text_lower
+        ]
+        assert matching_indicators, (
+            f"Expected error indicators {error_indicators} in warning logs but found none. "
+            f"This indicates logging may not be capturing contract failures properly. "
+            f"Warning messages: {warning_messages}"
         )
 
         # Valid handler should be registered despite failures of other contracts
@@ -216,7 +234,7 @@ class TestContractHandlerDiscoveryCorrelationId:
 
         Verifies that:
         1. The discovery operation completes successfully with the provided ID
-        2. The correlation_id appears in log records' extra fields
+        2. The exact correlation_id string appears in log records' extra fields
         3. The ID is propagated to internal operations for tracing
         """
         import logging
@@ -232,23 +250,61 @@ class TestContractHandlerDiscoveryCorrelationId:
 
         assert isinstance(result, ModelDiscoveryResult)
 
-        # Verify correlation_id appears in log records
-        # The ContractHandlerDiscovery logs with extra={"correlation_id": str(correlation_id)}
+        # =================================================================
+        # Robustly verify correlation_id appears in log records
+        # Check multiple possible locations where extra fields may appear
+        # =================================================================
         correlation_id_in_logs = False
+        found_in_location = None
+
         for record in caplog.records:
-            # Check if correlation_id is in the record's extra fields
+            # Method 1: Check if correlation_id is a direct attribute
+            # (set via extra={} in logging call)
             if hasattr(record, "correlation_id"):
-                if record.correlation_id == correlation_id_str:
+                # Use record.__dict__ access for dynamic attribute set via extra={}
+                record_correlation_id = record.__dict__["correlation_id"]
+                if str(record_correlation_id) == correlation_id_str:
                     correlation_id_in_logs = True
+                    found_in_location = "record.correlation_id attribute"
                     break
-            # Also check the message itself (some loggers include it in message)
+
+            # Method 2: Check record.__dict__ for extra fields (fallback)
+            # Some logging configurations store extras here without setting attribute
+            elif "correlation_id" in record.__dict__:
+                record_correlation_id = record.__dict__["correlation_id"]
+                if str(record_correlation_id) == correlation_id_str:
+                    correlation_id_in_logs = True
+                    found_in_location = "record.__dict__['correlation_id']"
+                    break
+
+            # Method 3: Check the formatted message itself
+            # Some loggers embed correlation_id in the message format
             if correlation_id_str in record.getMessage():
                 correlation_id_in_logs = True
+                found_in_location = "log message content"
                 break
 
+            # Method 4: Check args if correlation_id is passed as format arg
+            if record.args and correlation_id_str in str(record.args):
+                correlation_id_in_logs = True
+                found_in_location = "record.args"
+                break
+
+        # Build detailed error message for debugging
+        log_details = []
+        for record in caplog.records:
+            detail: dict[str, object] = {
+                "message": record.getMessage(),
+                "has_correlation_id_attr": hasattr(record, "correlation_id"),
+            }
+            if hasattr(record, "correlation_id"):
+                detail["correlation_id_value"] = record.__dict__["correlation_id"]
+            log_details.append(detail)
+
         assert correlation_id_in_logs, (
-            f"Expected correlation_id {correlation_id_str} to appear in logs. "
-            f"Log messages: {[r.getMessage() for r in caplog.records]}"
+            f"Expected exact correlation_id '{correlation_id_str}' to appear in logs. "
+            f"Found in: {found_in_location}. "
+            f"Log record details: {log_details}"
         )
 
 
@@ -332,26 +388,53 @@ class TestContractHandlerDiscoveryRegistryIntegration:
         assert handler_class is not None
 
     @pytest.mark.asyncio
-    async def test_multiple_discoveries_accumulate_registrations(
+    async def test_multiple_discoveries_idempotent_reregistration(
         self,
         discovery_service: ContractHandlerDiscovery,
         handler_registry: ProtocolBindingRegistry,
         valid_contract_directory: Path,
     ) -> None:
-        """Test that multiple discovery calls accumulate registrations."""
-        # First discovery
+        """Test that multiple discovery calls with same contracts are idempotent.
+
+        This test verifies re-registration behavior:
+        1. First discovery registers handlers
+        2. Second discovery with same contracts re-registers (overwrites) handlers
+        3. Both handlers remain accessible after re-registration
+        4. No errors occur from duplicate registration
+
+        The registry allows re-registration of the same handler name, which
+        overwrites the previous binding. This is idempotent - running discovery
+        twice with the same contracts yields the same final state.
+        """
+        # First discovery - establishes initial registrations
         result1 = await discovery_service.discover_and_register(
             [valid_contract_directory]
         )
+        assert result1.handlers_registered == 2
+        assert handler_registry.is_registered("handler.one")
+        assert handler_registry.is_registered("handler.two")
 
-        # Second discovery with same contracts (should overwrite)
+        # Capture handler classes after first registration
+        handler_one_class_v1 = handler_registry.get("handler.one")
+        handler_two_class_v1 = handler_registry.get("handler.two")
+
+        # Second discovery with same contracts - should succeed (idempotent)
+        # Re-registration overwrites the existing bindings
         result2 = await discovery_service.discover_and_register(
             [valid_contract_directory]
         )
+        assert result2.handlers_registered == 2
+        assert not result2.has_errors  # No errors from re-registration
 
-        # Both handlers should still be registered
+        # Both handlers should still be registered after re-registration
         assert handler_registry.is_registered("handler.one")
         assert handler_registry.is_registered("handler.two")
+
+        # Handler classes should be the same (same contracts, same classes)
+        handler_one_class_v2 = handler_registry.get("handler.one")
+        handler_two_class_v2 = handler_registry.get("handler.two")
+        assert handler_one_class_v1 is handler_one_class_v2
+        assert handler_two_class_v1 is handler_two_class_v2
 
 
 class TestContractHandlerDiscoveryObservability:

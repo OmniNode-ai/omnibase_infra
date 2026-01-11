@@ -36,7 +36,7 @@ Example Usage:
     # Type checking works via Protocol
     discovery: ProtocolHandlerDiscovery = FileSystemHandlerDiscovery()
     result = await discovery.discover_and_register([Path("src/handlers")])
-    print(f"Discovered: {result.discovered_count}, Registered: {result.registered_count}")
+    print(f"Discovered: {result.handlers_discovered}, Registered: {result.handlers_registered}")
     ```
 
 See Also:
@@ -141,12 +141,11 @@ class ProtocolHandlerDiscovery(Protocol):
             ModelDiscoveryResult: Container with discovery operation results
                 including:
 
-                - ``discovered_count``: Number of contract files found
-                - ``registered_count``: Number of handlers successfully registered
-                - ``failed_count``: Number of handlers that failed to load/register
-                - ``errors``: List of error details for failed handlers
-                - ``warnings``: List of non-fatal warnings encountered
-                - ``correlation_id``: The correlation ID used for this operation
+                - ``handlers_discovered``: Number of handlers found during discovery
+                - ``handlers_registered``: Number of handlers successfully registered
+                - ``errors``: List of ModelDiscoveryError for failed handlers
+                - ``warnings``: List of ModelDiscoveryWarning for non-fatal issues
+                - ``discovered_at``: Timestamp when discovery completed
 
         Raises:
             ProtocolConfigurationError: If critical configuration issues prevent
@@ -177,14 +176,13 @@ class ProtocolHandlerDiscovery(Protocol):
                     correlation_id=uuid4(),
                 )
 
-                print(f"Discovered: {result.discovered_count}")
-                print(f"Registered: {result.registered_count}")
-                print(f"Failed: {result.failed_count}")
+                print(f"Discovered: {result.handlers_discovered}")
+                print(f"Registered: {result.handlers_registered}")
 
                 # Check for errors
                 if result.errors:
                     for error in result.errors:
-                        print(f"Error: {error.path} - {error.message}")
+                        print(f"Error: {error.contract_path} - {error.message}")
 
                 # Check for warnings
                 if result.warnings:

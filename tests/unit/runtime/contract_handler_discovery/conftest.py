@@ -94,10 +94,19 @@ class MockValidHandler:
 
 @pytest.fixture
 def handler_registry() -> ProtocolBindingRegistry:
-    """Create a fresh handler registry for testing.
+    """Create a fresh, isolated handler registry for each test.
+
+    This fixture uses pytest's default function scope, meaning each test
+    gets its own fresh ProtocolBindingRegistry instance. This ensures:
+    1. No test pollution - registrations from one test don't affect another
+    2. Predictable state - each test starts with an empty registry
+    3. Isolation - tests can run in any order without side effects
+
+    Note: ProtocolBindingRegistry is NOT a singleton in this test context.
+    Each call creates a new instance with empty registration state.
 
     Returns:
-        A new ProtocolBindingRegistry instance.
+        A new, empty ProtocolBindingRegistry instance.
     """
     return ProtocolBindingRegistry()
 
@@ -119,8 +128,13 @@ def discovery_service(
 ) -> ContractHandlerDiscovery:
     """Create a ContractHandlerDiscovery instance for testing.
 
+    This fixture composes the plugin_loader and handler_registry fixtures,
+    so each test gets a fully isolated discovery service with:
+    - Fresh plugin loader (no cached contracts from other tests)
+    - Fresh handler registry (no registered handlers from other tests)
+
     Returns:
-        A ContractHandlerDiscovery configured with test dependencies.
+        A ContractHandlerDiscovery configured with fresh, isolated dependencies.
     """
     return ContractHandlerDiscovery(
         plugin_loader=plugin_loader,
