@@ -425,3 +425,160 @@ class TestNamespaceAllowlistInitialization:
         """Empty list should be stored as-is (block all)."""
         loader = HandlerPluginLoader(allowed_namespaces=[])
         assert loader._allowed_namespaces == []
+
+
+class TestNamespaceBoundaryBypassPrevention:
+    """Tests to verify namespace matching prevents package-boundary bypass attacks.
+
+    These tests verify that namespace allowlisting properly enforces package
+    boundaries to prevent malicious packages from bypassing the allowlist
+    by using similar-looking package names.
+
+    Security Concern:
+        If "omnibase" is allowed without trailing period, it could accidentally
+        allow "omnibase_evil" or "omnibase_malicious" - packages that are NOT
+        part of the trusted omnibase ecosystem.
+    """
+
+    def test_omnibase_does_not_match_omnibase_evil(self) -> None:
+        """Verify 'omnibase' allowlist does NOT match 'omnibase_evil' package.
+
+        This is a critical security test: allowing "omnibase" should NOT
+        accidentally allow malicious packages like "omnibase_evil".
+        """
+        loader = HandlerPluginLoader(allowed_namespaces=["omnibase"])
+
+        # "omnibase.handlers.Auth" should be allowed (proper package boundary)
+        loader._validate_namespace(
+            "omnibase.handlers.Auth",
+            Path("contract.yaml"),
+        )
+
+        # "omnibase_evil" should be BLOCKED (different package despite similar prefix)
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader._validate_namespace(
+                "omnibase_evil.malicious.Payload",
+                Path("contract.yaml"),
+            )
+        assert (
+            exc_info.value.model.context.get("loader_error")
+            == EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED.value
+        )
+
+    def test_omnibase_does_not_match_omnibase_malicious(self) -> None:
+        """Verify 'omnibase' allowlist does NOT match 'omnibase_malicious'."""
+        loader = HandlerPluginLoader(allowed_namespaces=["omnibase"])
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader._validate_namespace(
+                "omnibase_malicious.backdoor.Handler",
+                Path("contract.yaml"),
+            )
+        assert (
+            exc_info.value.model.context.get("loader_error")
+            == EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED.value
+        )
+
+    def test_mycompany_does_not_match_mycompany_fake(self) -> None:
+        """Verify 'mycompany' allowlist does NOT match 'mycompany_fake'."""
+        loader = HandlerPluginLoader(allowed_namespaces=["mycompany"])
+
+        # Legitimate package should work
+        loader._validate_namespace(
+            "mycompany.auth.Handler",
+            Path("contract.yaml"),
+        )
+
+        # Typosquatting/malicious package should be blocked
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader._validate_namespace(
+                "mycompany_fake.phishing.Handler",
+                Path("contract.yaml"),
+            )
+        assert (
+            exc_info.value.model.context.get("loader_error")
+            == EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED.value
+        )
+
+    def test_trailing_period_is_explicit_boundary(self) -> None:
+        """Verify trailing period explicitly enforces package boundary.
+
+        When allowlist uses "omnibase_infra." (with period), only that exact
+        package and its subpackages should be allowed.
+        """
+        loader = HandlerPluginLoader(allowed_namespaces=["omnibase_infra."])
+
+        # Should allow subpackages
+        loader._validate_namespace(
+            "omnibase_infra.handlers.Auth",
+            Path("contract.yaml"),
+        )
+        loader._validate_namespace(
+            "omnibase_infra.runtime.loader.Handler",
+            Path("contract.yaml"),
+        )
+
+        # Should block similar-named packages
+        with pytest.raises(ProtocolConfigurationError):
+            loader._validate_namespace(
+                "omnibase_infra_evil.Handler",
+                Path("contract.yaml"),
+            )
+
+        # Should block packages that share partial prefix
+        with pytest.raises(ProtocolConfigurationError):
+            loader._validate_namespace(
+                "omnibase_infrastructure.Handler",
+                Path("contract.yaml"),
+            )
+
+    def test_underscore_in_package_name_not_confused_with_boundary(self) -> None:
+        """Verify underscores in package names don't confuse boundary matching.
+
+        Package names like "my_package" should not match "my" or "my_package_extra".
+        """
+        loader = HandlerPluginLoader(allowed_namespaces=["my_package"])
+
+        # Exact package match should work
+        loader._validate_namespace(
+            "my_package.module.Handler",
+            Path("contract.yaml"),
+        )
+
+        # Different package starting with same prefix should fail
+        with pytest.raises(ProtocolConfigurationError):
+            loader._validate_namespace(
+                "my_package_extension.Handler",
+                Path("contract.yaml"),
+            )
+
+        # Shorter package should also fail
+        with pytest.raises(ProtocolConfigurationError):
+            loader._validate_namespace(
+                "my.different.Handler",
+                Path("contract.yaml"),
+            )
+
+    def test_numeric_suffix_in_package_name(self) -> None:
+        """Verify package names with numeric suffixes are handled correctly."""
+        loader = HandlerPluginLoader(allowed_namespaces=["package_v1"])
+
+        # Exact match should work
+        loader._validate_namespace(
+            "package_v1.module.Handler",
+            Path("contract.yaml"),
+        )
+
+        # Different version should fail
+        with pytest.raises(ProtocolConfigurationError):
+            loader._validate_namespace(
+                "package_v2.module.Handler",
+                Path("contract.yaml"),
+            )
+
+        # Extended version should fail
+        with pytest.raises(ProtocolConfigurationError):
+            loader._validate_namespace(
+                "package_v10.module.Handler",
+                Path("contract.yaml"),
+            )

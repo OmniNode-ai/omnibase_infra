@@ -167,12 +167,20 @@ class TestErrorMessageSanitizationInLoader:
 
         error_message = str(exc_info.value)
 
-        # The error message should NOT contain the full path
-        assert str(tmp_path) not in error_message
+        # The error message should NOT contain the full path (negative assertion)
+        assert str(tmp_path) not in error_message, (
+            f"Full temp path should not be exposed in error message: {error_message}"
+        )
 
-        # Should indicate YAML error (either syntax or validation)
-        # The important thing is paths are not exposed
-        assert "yaml" in error_message.lower() or "validation" in error_message.lower()
+        # Verify sanitization occurred - error should indicate YAML error
+        # AND path should be sanitized (both conditions must hold)
+        assert "yaml" in error_message.lower(), (
+            f"Error message should indicate YAML error: {error_message}"
+        )
+        # Verify the error provides useful context without exposing paths
+        assert (
+            "syntax" in error_message.lower() or "invalid" in error_message.lower()
+        ), f"Error message should describe the error type: {error_message}"
 
     def test_file_not_found_shows_only_filename(self, tmp_path: Path) -> None:
         """Test that file not found errors show only the filename, not full path."""

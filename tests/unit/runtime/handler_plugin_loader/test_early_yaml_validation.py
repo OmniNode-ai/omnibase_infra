@@ -265,6 +265,8 @@ class TestYamlValidationErrorDetails:
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         # Create YAML with error on a specific line (line 4)
+        # The unclosed bracket causes a scanner error that YAML parsers
+        # typically report on the line where the problem is detected.
         yaml_content = """handler_name: test
 handler_class: test.Handler
 handler_type: compute
@@ -278,29 +280,34 @@ invalid_line: [unclosed bracket
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             loader._validate_yaml_syntax(yaml_file, raise_on_error=True)
 
-        # Error should contain line information from YAML parser in format "line N"
-        # where N is a digit. The error occurs on line 4 of the YAML content.
         error_message = str(exc_info.value)
 
         # Match YAML parser line format: "line N" where N is a positive integer
-        # This is more specific than checking for "line" substring which could
-        # match words like "inline" or "guideline"
-        line_info_pattern = re.compile(r"\bline\s+\d+\b", re.IGNORECASE)
+        # Pattern requirements:
+        # - Must be word-bounded to avoid matching "inline", "guideline", etc.
+        # - Must have at least one digit after "line"
+        # - Case-insensitive to match both "line 4" and "Line 4"
+        line_info_pattern = re.compile(r"\bline\s+(\d+)\b", re.IGNORECASE)
         match = line_info_pattern.search(error_message)
 
         assert match is not None, (
-            f"Expected YAML error to include line information in format 'line N', "
-            f"but got: {error_message}"
+            f"Expected YAML error to include line information in format 'line N' "
+            f"(where N is a number), but got: {error_message}"
         )
 
-        # Verify the line number points to the error location (line 4) or possibly
-        # line 5 (some YAML parsers report errors at the line where they detect
-        # the problem, which may be the line after the actual error). The error
-        # is the unclosed bracket on line 4 of the YAML content.
-        line_number = int(match.group().split()[-1])
-        assert line_number in (4, 5), (
-            f"Expected line number 4 or 5 for YAML with unclosed bracket on line 4, "
-            f"but got line {line_number}. Error message: {error_message}"
+        # Extract the line number from the capture group for validation
+        line_number = int(match.group(1))
+
+        # The error is the unclosed bracket on line 4.
+        # YAML parsers may report the error on:
+        # - Line 4 (where the unclosed bracket is)
+        # - Line 5 (the next line where they detect the missing closing bracket)
+        # Both are acceptable as they correctly identify the error location.
+        expected_lines = {4, 5}
+        assert line_number in expected_lines, (
+            f"Expected line number to be in {expected_lines} for YAML with "
+            f"unclosed bracket on line 4, but got line {line_number}. "
+            f"Full error message: {error_message}"
         )
 
     def test_file_read_error_uses_correct_error_code(self, tmp_path: Path) -> None:

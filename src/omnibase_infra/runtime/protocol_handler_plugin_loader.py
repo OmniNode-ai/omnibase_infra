@@ -37,6 +37,7 @@ Example Usage:
             self,
             directory: Path,
             correlation_id: UUID | None = None,
+            max_handlers: int | None = None,
         ) -> list[ModelLoadedHandler]:
             # Scan directory for contracts and load all handlers
             ...
@@ -46,6 +47,7 @@ Example Usage:
             patterns: list[str],
             correlation_id: UUID | None = None,
             base_path: Path | None = None,
+            max_handlers: int | None = None,
         ) -> list[ModelLoadedHandler]:
             # Match glob patterns and load discovered handlers
             ...
@@ -122,14 +124,15 @@ class ProtocolHandlerPluginLoader(Protocol):
         """Load a single handler from a contract file.
 
         Parses the contract YAML file at the given path, validates it against
-        the handler contract schema, imports the handler class, and returns
-        a ModelLoadedHandler containing the loaded handler metadata.
+        the handler contract schema, imports the handler class, and returns a
+        ModelLoadedHandler containing the loaded handler metadata.
 
         Args:
-            contract_path: Path to the handler contract YAML file. Must be an
-                absolute or relative path to an existing file with .yaml
-                extension.
-            correlation_id: Optional correlation ID for tracing and error context.
+            contract_path: Path to the handler contract YAML file.
+                Must be an absolute or relative path to an existing file
+                with .yaml extension.
+            correlation_id: Optional correlation ID for tracing and
+                error context. If not provided, a UUID4 is auto-generated.
 
         Returns:
             ModelLoadedHandler: Container with the loaded handler metadata
@@ -147,19 +150,24 @@ class ProtocolHandlerPluginLoader(Protocol):
                 - HANDLER_LOADER_007: Path exists but is not a file (e.g., directory)
                 - HANDLER_LOADER_008: Failed to read contract file (I/O error)
                 - HANDLER_LOADER_009: Failed to stat contract file (I/O error)
+                - HANDLER_LOADER_013: Namespace not allowed (when allowed_namespaces
+                  is configured)
             InfraConnectionError: If the handler class cannot be imported due
                 to module resolution failures or import errors. Error codes:
                 - HANDLER_LOADER_010: Module not found
                 - HANDLER_LOADER_011: Class not found in module
                 - HANDLER_LOADER_012: Import error (syntax/dependency)
-                - HANDLER_LOADER_013: Namespace not allowed (when allowed_namespaces configured)
 
         Example:
             .. code-block:: python
 
+                from pathlib import Path
+                from uuid import uuid4
+
                 loader: ProtocolHandlerPluginLoader = FileSystemHandlerPluginLoader()
                 handler = loader.load_from_contract(
-                    Path("src/handlers/user_handler/contract.yaml")
+                    Path("src/handlers/user_handler/contract.yaml"),
+                    correlation_id=uuid4(),
                 )
                 print(f"Loaded handler: {handler.handler_name}")
         """
@@ -173,9 +181,9 @@ class ProtocolHandlerPluginLoader(Protocol):
     ) -> list[ModelLoadedHandler]:
         """Load all handlers from contract files in a directory.
 
-        Recursively scans the given directory for handler contract files
-        (``handler_contract.yaml`` preferred, or ``contract.yaml``), loads
-        each handler, and returns a list of successfully loaded handlers.
+        Recursively scans the directory for handler contract files
+        (``handler_contract.yaml`` preferred, or ``contract.yaml``),
+        loads each handler, and returns a list of successfully loaded handlers.
 
         Failed loads are logged but do not stop processing of other handlers.
         Use strict mode configuration to change this behavior.
@@ -184,12 +192,12 @@ class ProtocolHandlerPluginLoader(Protocol):
             directory: Path to the directory to scan for contract files.
                 Must be an existing directory. Subdirectories are scanned
                 recursively.
-            correlation_id: Optional correlation ID for tracing and error context.
-            max_handlers: Optional maximum number of handlers to discover and load.
-                If specified, discovery stops after finding this many contract files.
-                A warning is logged when the limit is reached. Set to None (default)
-                for unlimited discovery. This prevents runaway resource usage when
-                scanning directories with unexpectedly large numbers of handlers.
+            correlation_id: Optional correlation ID for tracing and
+                error context. If not provided, a UUID4 is auto-generated.
+            max_handlers: Optional maximum number of handlers to discover
+                and load. If specified, discovery stops after finding this
+                many contract files. A warning is logged when the limit is
+                reached. Set to None (default) for unlimited discovery.
 
         Returns:
             list[ModelLoadedHandler]: List of successfully loaded handlers.
@@ -205,6 +213,8 @@ class ProtocolHandlerPluginLoader(Protocol):
 
         Example:
             .. code-block:: python
+
+                from pathlib import Path
 
                 loader: ProtocolHandlerPluginLoader = FileSystemHandlerPluginLoader()
                 handlers = loader.load_from_directory(
@@ -231,7 +241,7 @@ class ProtocolHandlerPluginLoader(Protocol):
     ) -> list[ModelLoadedHandler]:
         """Discover contracts matching glob patterns and load handlers.
 
-        Searches for contract files matching the given glob patterns,
+        Searches for contract files matching the glob patterns,
         deduplicates matches, loads each handler, and returns a list
         of successfully loaded handlers.
 
@@ -240,8 +250,7 @@ class ProtocolHandlerPluginLoader(Protocol):
             working directory (``Path.cwd()``). This means results may vary
             if the working directory changes between calls. For deterministic
             behavior in environments where cwd may change (e.g., tests,
-            multi-threaded applications), provide an explicit ``base_path``
-            parameter.
+            multi-threaded applications), provide an explicit ``base_path``.
 
         Args:
             patterns: List of glob patterns to match contract files.
@@ -255,16 +264,17 @@ class ProtocolHandlerPluginLoader(Protocol):
                 - ``src/**/contract.yaml`` - all contracts under src
                 - ``handlers/*/contract.yaml`` - direct subdirs only
                 - ``**/*.handler.yaml`` - alternative naming convention
-            correlation_id: Optional correlation ID for tracing and error context.
+
+            correlation_id: Optional correlation ID for tracing and
+                error context. If not provided, a UUID4 is auto-generated.
             base_path: Optional base path for resolving glob patterns.
                 If not provided, defaults to ``Path.cwd()``. Providing an
                 explicit base path ensures deterministic behavior regardless
                 of the current working directory.
-            max_handlers: Optional maximum number of handlers to discover and load.
-                If specified, discovery stops after finding this many contract files.
-                A warning is logged when the limit is reached. Set to None (default)
-                for unlimited discovery. This prevents runaway resource usage when
-                scanning directories with unexpectedly large numbers of handlers.
+            max_handlers: Optional maximum number of handlers to discover
+                and load. If specified, discovery stops after finding this
+                many contract files. A warning is logged when the limit is
+                reached. Set to None (default) for unlimited discovery.
 
         Returns:
             list[ModelLoadedHandler]: List of successfully loaded handlers.
@@ -273,15 +283,19 @@ class ProtocolHandlerPluginLoader(Protocol):
                 loaded only once.
 
         Raises:
-            ProtocolConfigurationError: If patterns list is empty or contains
-                invalid pattern syntax. Error codes:
+            ProtocolConfigurationError: If patterns list is empty. Error codes:
                 - HANDLER_LOADER_030: Empty patterns list
-                - HANDLER_LOADER_031: Invalid glob pattern syntax
-            TypeError: If correlation_id is provided but is not a valid UUID instance.
-                The correlation_id parameter must be either None or a UUID object.
+
+        Note:
+            Invalid glob patterns (HANDLER_LOADER_031) are logged as warnings but
+            do not raise exceptions - the pattern is skipped and discovery continues
+            with remaining patterns. This allows graceful handling of partial pattern
+            failures during discovery operations.
 
         Example:
             .. code-block:: python
+
+                from pathlib import Path
 
                 loader: ProtocolHandlerPluginLoader = FileSystemHandlerPluginLoader()
 
@@ -293,13 +307,13 @@ class ProtocolHandlerPluginLoader(Protocol):
 
                 # Using explicit base path for deterministic behavior
                 handlers = loader.discover_and_load(
-                    ["src/**/contract.yaml"],
+                    patterns=["src/**/contract.yaml"],
                     base_path=Path("/app/project"),
                 )
 
                 # Limit discovery to prevent runaway resource usage
                 handlers = loader.discover_and_load(
-                    ["**/*.yaml"],
+                    patterns=["**/*.yaml"],
                     max_handlers=50,
                 )
 

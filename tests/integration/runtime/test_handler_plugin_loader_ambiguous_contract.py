@@ -8,11 +8,15 @@ design, this is an ambiguous configuration that raises ProtocolConfigurationErro
 with error code AMBIGUOUS_CONTRACT_CONFIGURATION (HANDLER_LOADER_040).
 
 Test Coverage:
-- Ambiguous contract detection in load_from_directory()
-- Ambiguous contract detection in discover_and_load()
+- TestAmbiguousContractDetectionIntegration: Ambiguous contract detection via load_from_directory()
+- TestDiscoverAndLoadWithMultipleContractTypes: discover_and_load() behavior with multiple contract types
 - Error code and message verification
 - Correlation ID propagation in error context
-- Verify neither file is loaded when ambiguity detected
+- Verify neither file is loaded when ambiguity detected (load_from_directory only)
+
+Note: discover_and_load() does NOT detect ambiguous contracts. It uses glob patterns to find
+specific files and loads whatever matches. Ambiguity detection is only performed by
+load_from_directory() which scans directories comprehensively.
 
 Related:
     - OMN-1132: Handler Plugin Loader implementation
@@ -443,3 +447,162 @@ class TestAmbiguousContractWithMaxHandlersLimit:
         assert exc_info.value.model.context.get("loader_error") == (
             EnumHandlerLoaderError.AMBIGUOUS_CONTRACT_CONFIGURATION.value
         )
+
+
+class TestDiscoverAndLoadWithMultipleContractTypes:
+    """Tests for discover_and_load behavior with multiple contract types.
+
+    Note: discover_and_load() uses glob patterns to find specific files and
+    does NOT perform directory-level ambiguity detection like load_from_directory().
+    This is by design - discover_and_load is for targeted file discovery, while
+    load_from_directory is for comprehensive directory scanning with validation.
+    """
+
+    def test_discover_and_load_loads_both_contracts_when_patterns_match_both(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that discover_and_load loads both files when patterns match both.
+
+        Unlike load_from_directory which raises an error for ambiguous configs,
+        discover_and_load will load whatever files match the patterns. This is
+        expected behavior since discover_and_load is file-based, not directory-based.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        # Create directory with BOTH contract types
+        handler_dir = tmp_path / "handler"
+        handler_dir.mkdir(parents=True)
+
+        (handler_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            HANDLER_CONTRACT_YAML_TEMPLATE.format(
+                handler_name="handler.from.handler_contract"
+            )
+        )
+        (handler_dir / CONTRACT_YAML_FILENAME).write_text(
+            HANDLER_CONTRACT_YAML_TEMPLATE.format(handler_name="handler.from.contract")
+        )
+
+        loader = HandlerPluginLoader()
+
+        # discover_and_load with patterns matching both files loads both
+        # (no ambiguity error - that's only for load_from_directory)
+        handlers = loader.discover_and_load(
+            ["**/handler_contract.yaml", "**/contract.yaml"],
+            base_path=tmp_path,
+        )
+
+        # Both handlers are loaded
+        assert len(handlers) == 2
+        handler_names = {h.handler_name for h in handlers}
+        assert handler_names == {
+            "handler.from.handler_contract",
+            "handler.from.contract",
+        }
+
+    def test_discover_and_load_with_single_pattern_loads_matched_file_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that single pattern only loads matching files.
+
+        Even when both contract types exist in same directory, discover_and_load
+        with a single pattern only loads the files that match that pattern.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        # Create directory with both contract types
+        handler_dir = tmp_path / "handlers" / "auth"
+        handler_dir.mkdir(parents=True)
+
+        (handler_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            HANDLER_CONTRACT_YAML_TEMPLATE.format(handler_name="auth.handler.v1")
+        )
+        (handler_dir / CONTRACT_YAML_FILENAME).write_text(
+            HANDLER_CONTRACT_YAML_TEMPLATE.format(handler_name="auth.handler.v2")
+        )
+
+        loader = HandlerPluginLoader()
+
+        # Single pattern only matches handler_contract.yaml
+        handlers = loader.discover_and_load(
+            ["**/handler_contract.yaml"],
+            base_path=tmp_path,
+        )
+
+        # Only the handler from handler_contract.yaml is loaded
+        assert len(handlers) == 1
+        assert handlers[0].handler_name == "auth.handler.v1"
+
+    def test_discover_and_load_succeeds_with_separate_directories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that discover_and_load succeeds when contract types are separate.
+
+        When handler_contract.yaml and contract.yaml are in different directories,
+        discover_and_load should work normally.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        # Directory 1: uses handler_contract.yaml
+        dir1 = tmp_path / "handler1"
+        dir1.mkdir()
+        (dir1 / HANDLER_CONTRACT_FILENAME).write_text(
+            HANDLER_CONTRACT_YAML_TEMPLATE.format(handler_name="handler.one")
+        )
+
+        # Directory 2: uses contract.yaml (different directory)
+        dir2 = tmp_path / "handler2"
+        dir2.mkdir()
+        (dir2 / CONTRACT_YAML_FILENAME).write_text(
+            HANDLER_CONTRACT_YAML_TEMPLATE.format(handler_name="handler.two")
+        )
+
+        loader = HandlerPluginLoader()
+
+        # Should succeed
+        handlers = loader.discover_and_load(
+            ["**/handler_contract.yaml", "**/contract.yaml"],
+            base_path=tmp_path,
+        )
+
+        assert len(handlers) == 2
+        handler_names = {h.handler_name for h in handlers}
+        assert handler_names == {"handler.one", "handler.two"}
+
+    def test_discover_and_load_includes_correlation_id(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that correlation_id is used in discover_and_load operations."""
+        from uuid import uuid4
+
+        monkeypatch.chdir(tmp_path)
+
+        handler_dir = tmp_path / "handler"
+        handler_dir.mkdir()
+        (handler_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            HANDLER_CONTRACT_YAML_TEMPLATE.format(handler_name="handler.one")
+        )
+
+        loader = HandlerPluginLoader()
+        test_correlation_id = uuid4()
+
+        with caplog.at_level(logging.INFO):
+            handlers = loader.discover_and_load(
+                ["**/handler_contract.yaml"],
+                base_path=tmp_path,
+                correlation_id=test_correlation_id,
+            )
+
+        # Handler should be loaded successfully
+        assert len(handlers) == 1
+        assert handlers[0].handler_name == "handler.one"
+
+        # Correlation ID should appear in logs (for observability)
+        summary_logs = [
+            r for r in caplog.records if "Handler load complete" in r.message
+        ]
+        if summary_logs:
+            assert hasattr(summary_logs[0], "correlation_id")
+            assert summary_logs[0].correlation_id == str(test_correlation_id)

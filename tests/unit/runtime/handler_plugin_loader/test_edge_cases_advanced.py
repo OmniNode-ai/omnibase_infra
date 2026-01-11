@@ -841,8 +841,6 @@ class TestRaceConditions:
         loader = HandlerPluginLoader()
 
         # Mock the file open to simulate deletion mid-load
-        original_open = Path.open
-
         def delayed_open(self: Path, *args: object, **kwargs: object) -> object:
             # Delete the file after validation but before reading
             if self == contract_file and contract_file.exists():

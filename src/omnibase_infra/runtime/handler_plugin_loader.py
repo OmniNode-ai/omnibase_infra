@@ -42,9 +42,15 @@ Error Codes:
     **Pattern Errors (HANDLER_LOADER_030 - HANDLER_LOADER_031)**:
         - ``HANDLER_LOADER_030`` (EMPTY_PATTERNS_LIST): Patterns list cannot be empty
         - ``HANDLER_LOADER_031`` (INVALID_GLOB_PATTERN): Invalid glob pattern syntax
+          (logged only, not raised - pattern is skipped and discovery continues)
+
+    **Configuration Errors (HANDLER_LOADER_040)**:
+        - ``HANDLER_LOADER_040`` (AMBIGUOUS_CONTRACT_CONFIGURATION): Both contract types
+          exist in the same directory
 
     Error codes are accessible via ``error.model.context.get("loader_error")`` on
-    raised exceptions.
+    raised exceptions. Note: HANDLER_LOADER_031 is logged but not raised as an
+    exception to allow graceful continuation during discovery operations.
 
 Concurrency Notes:
     The loader is stateless and reentrant - each load operation is independent:
@@ -278,8 +284,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
                 Each prefix should end with a period for explicit package boundary
                 matching (e.g., "omnibase_infra." not "omnibase_infra"). Prefixes
-                without a trailing period are still validated at package boundaries
-                (e.g., "omnibase" matches "omnibase.handlers" but NOT "omnibase_other").
+                without a trailing period are validated at package boundaries to
+                prevent unintended matches (e.g., "omnibase" matches "omnibase" or
+                "omnibase.handlers" but NOT "omnibase_other").
 
                 If None (default), no namespace restriction is applied and any
                 importable module can be loaded.
@@ -597,8 +604,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 correlation_id=correlation_id,
             )
             sanitized_msg = _sanitize_exception_message(e)
+            # FILE_STAT_ERROR is used here because path resolution involves
+            # filesystem metadata access similar to stat operations
             raise ProtocolConfigurationError(
-                f"Failed to resolve contract path: {sanitized_msg}",
+                f"Failed to access contract file during path resolution: {sanitized_msg}",
                 context=context,
                 loader_error=EnumHandlerLoaderError.FILE_STAT_ERROR.value,
                 contract_path=str(contract_path),
@@ -997,7 +1006,28 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     )
                     break
 
-                if path.is_file():
+                # path.is_file() can raise OSError for:
+                # - Permission denied when stat'ing the file
+                # - File deleted between glob discovery and is_file() check
+                # - Filesystem errors (unmounted volumes, network failures)
+                try:
+                    is_file = path.is_file()
+                except OSError as e:
+                    sanitized_msg = _sanitize_exception_message(e)
+                    logger.warning(
+                        "Failed to check if path is file %s: %s",
+                        path.name,
+                        sanitized_msg,
+                        extra={
+                            "path": str(path),
+                            "error": sanitized_msg,
+                            "error_code": EnumHandlerLoaderError.FILE_STAT_ERROR.value,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    continue
+
+                if is_file:
                     # Early size validation to skip oversized files before expensive operations
                     if (
                         self._validate_file_size(
@@ -1771,13 +1801,68 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         # same directory, we fail fast with AMBIGUOUS_CONTRACT_CONFIGURATION error
         # after discovery (see ambiguity check below).
         valid_filenames = {HANDLER_CONTRACT_FILENAME, CONTRACT_YAML_FILENAME}
-        for path in directory.rglob("*.yaml"):
-            # Check if we've reached the max_handlers limit
-            if max_handlers is not None and len(contract_files) >= max_handlers:
-                limit_reached = True
-                break
 
-            if path.name in valid_filenames and path.is_file():
+        # directory.rglob() can raise OSError for:
+        # - Permission denied when accessing the directory or subdirectories
+        # - Filesystem errors (unmounted volumes, network failures)
+        # - Directory deleted or becomes inaccessible during iteration
+        try:
+            rglob_iterator = directory.rglob("*.yaml")
+        except OSError as e:
+            # If we can't even start iterating, log warning and return empty list
+            # This is graceful degradation - the caller can handle empty results
+            sanitized_msg = _sanitize_exception_message(e)
+            logger.warning(
+                "Failed to scan directory %s for contracts: %s",
+                directory.name,
+                sanitized_msg,
+                extra={
+                    "directory": str(directory),
+                    "error": sanitized_msg,
+                    "error_code": EnumHandlerLoaderError.PERMISSION_DENIED.value,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
+            )
+            return []
+
+        # Iterate over discovered paths, handling per-path errors gracefully
+        try:
+            for path in rglob_iterator:
+                # Check if we've reached the max_handlers limit
+                if max_handlers is not None and len(contract_files) >= max_handlers:
+                    limit_reached = True
+                    break
+
+                # Filter by filename first (cheap string comparison)
+                if path.name not in valid_filenames:
+                    continue
+
+                # path.is_file() can raise OSError for:
+                # - Permission denied when stat'ing the file
+                # - File deleted between rglob discovery and is_file() check
+                # - Filesystem errors (unmounted volumes, network failures)
+                try:
+                    is_file = path.is_file()
+                except OSError as e:
+                    sanitized_msg = _sanitize_exception_message(e)
+                    logger.warning(
+                        "Failed to check if path is file %s: %s",
+                        path.name,
+                        sanitized_msg,
+                        extra={
+                            "path": str(path),
+                            "error": sanitized_msg,
+                            "error_code": EnumHandlerLoaderError.FILE_STAT_ERROR.value,
+                            "correlation_id": str(correlation_id)
+                            if correlation_id
+                            else None,
+                        },
+                    )
+                    continue
+
+                if not is_file:
+                    continue
+
                 # Early size validation to skip oversized files before expensive operations
                 if (
                     self._validate_file_size(
@@ -1788,6 +1873,23 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     continue
 
                 contract_files.append(path)
+        except OSError as e:
+            # Handle errors that occur during iteration (e.g., directory becomes
+            # inaccessible mid-scan). Return what we've collected so far.
+            sanitized_msg = _sanitize_exception_message(e)
+            logger.warning(
+                "Error during directory scan of %s: %s (returning %d files found so far)",
+                directory.name,
+                sanitized_msg,
+                len(contract_files),
+                extra={
+                    "directory": str(directory),
+                    "error": sanitized_msg,
+                    "error_code": EnumHandlerLoaderError.PERMISSION_DENIED.value,
+                    "files_found": len(contract_files),
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
+            )
 
         # Log warning if limit was reached
         if limit_reached:

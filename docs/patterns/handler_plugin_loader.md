@@ -487,6 +487,7 @@ For environments requiring additional validation beyond namespace prefixes, you 
 ```python
 from pathlib import Path
 from typing import Final
+from uuid import UUID
 
 import yaml
 
@@ -509,7 +510,7 @@ class SecurityError(Exception):
 def secure_load_from_contract(
     loader: HandlerPluginLoader,
     path: Path,
-    correlation_id: str | None = None,
+    correlation_id: UUID | None = None,
 ) -> ModelLoadedHandler:
     """Load handler with additional custom validation.
 
@@ -708,6 +709,8 @@ The loader prioritizes flexibility and loose coupling, placing security responsi
 
 ```python
 from pathlib import Path
+from uuid import uuid4
+
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
 loader = HandlerPluginLoader()
@@ -715,7 +718,7 @@ loader = HandlerPluginLoader()
 # Load single handler
 handler = loader.load_from_contract(
     Path("src/handlers/auth/handler_contract.yaml"),
-    correlation_id="request-123",
+    correlation_id=uuid4(),
 )
 
 print(f"Loaded: {handler.handler_name}")
@@ -729,7 +732,7 @@ print(f"Class: {handler.handler_class}")
 # Load all handlers from a directory tree
 handlers = loader.load_from_directory(
     Path("src/handlers"),
-    correlation_id="discovery-456",
+    correlation_id=uuid4(),
 )
 
 print(f"Discovered {len(handlers)} handlers")
@@ -746,7 +749,7 @@ handlers = loader.discover_and_load(
         "src/**/handler_contract.yaml",
         "plugins/**/contract.yaml",
     ],
-    correlation_id="glob-789",
+    correlation_id=uuid4(),
     base_path=Path("/app/project"),  # Optional: explicit base for deterministic results
 )
 ```
