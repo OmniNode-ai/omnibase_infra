@@ -418,7 +418,7 @@ class TestCorrelationIdInErrors:
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         non_existent_path = tmp_path / "does_not_exist.yaml"
-        test_correlation_id = str(uuid4())  # Use valid UUID string
+        test_correlation_id = uuid4()
 
         loader = HandlerPluginLoader()
 
@@ -432,7 +432,7 @@ class TestCorrelationIdInErrors:
         # The correlation_id is stored in the model's context or as a top-level attribute
         assert error.model.correlation_id is not None
         # Verify the correlation_id matches what was provided
-        assert str(error.model.correlation_id) == test_correlation_id
+        assert error.model.correlation_id == test_correlation_id
 
     def test_not_a_file_includes_correlation_id(self, tmp_path: Path) -> None:
         """Test that NOT_A_FILE error includes correlation_id."""
@@ -443,7 +443,7 @@ class TestCorrelationIdInErrors:
 
         directory_path = tmp_path / "handlers"
         directory_path.mkdir()
-        test_correlation_id = str(uuid4())  # Use valid UUID string
+        test_correlation_id = uuid4()
 
         loader = HandlerPluginLoader()
 
@@ -456,7 +456,7 @@ class TestCorrelationIdInErrors:
         error = exc_info.value
         assert error.model.correlation_id is not None
         # Verify the correlation_id matches what was provided
-        assert str(error.model.correlation_id) == test_correlation_id
+        assert error.model.correlation_id == test_correlation_id
 
     def test_auto_generated_correlation_id_when_not_provided(
         self, tmp_path: Path

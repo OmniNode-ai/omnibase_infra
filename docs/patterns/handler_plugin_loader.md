@@ -371,15 +371,46 @@ A class **fails validation** if any of these 5 methods are missing, preventing l
 
 ---
 
+### Optional Security Controls
+
+The loader provides namespace allowlisting as an **optional built-in security control**:
+
+| Control | Implementation | Mitigates | Status |
+|---------|----------------|-----------|--------|
+| **Namespace allowlisting** | `allowed_namespaces` constructor parameter | Untrusted module imports, path sandboxing | **IMPLEMENTED (OPTIONAL)** |
+
+**Namespace Allowlisting Usage:**
+```python
+from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+# Restrict imports to trusted namespaces only (recommended for production)
+loader = HandlerPluginLoader(
+    allowed_namespaces=["omnibase_infra.", "omnibase_core.", "mycompany.handlers."]
+)
+
+# This succeeds (handler_class: omnibase_infra.handlers.AuthHandler):
+handler = loader.load_from_contract(Path("auth_contract.yaml"))
+
+# This fails with NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013):
+# (handler_class: malicious_pkg.EvilHandler)
+handler = loader.load_from_contract(Path("malicious_contract.yaml"))
+```
+
+**Security Trade-offs:**
+
+| Configuration | Behavior | Use Case |
+|---------------|----------|----------|
+| `allowed_namespaces=None` (default) | All namespaces allowed | Development, trusted environments |
+| `allowed_namespaces=["omnibase_.", "myapp."]` | Only specified prefixes allowed | Production deployments |
+| `allowed_namespaces=[]` | ALL namespaces blocked | Effectively disables loader |
+
 ### What the Loader Does NOT Protect Against
 
-**CRITICAL**: The following protections are NOT built into the loader and must be implemented at the deployment level:
+**CRITICAL**: The following protections require deployment-level mitigation:
 
 | Gap | Description | Recommended Mitigation |
 |-----|-------------|------------------------|
-| **Path sandboxing** | Any module on `sys.path` can be imported | Application-level allowlist (see below) |
 | **Module signature verification** | No cryptographic validation of handler code | Use signed container images |
-| **Namespace restriction** | No built-in restriction on allowed module paths | Implement allowlist wrapper |
 | **Import hook filtering** | No interception of `importlib` calls | Add custom `MetaPathFinder` |
 | **Runtime isolation** | Handlers run in same process as loader | Use subprocess isolation for untrusted code |
 | **Mutation prevention** | Loaded modules can modify global state | Run in separate process or container |
@@ -431,9 +462,27 @@ All production deployments MUST implement:
 
 For elevated security requirements, implement additional controls:
 
-##### Path Allowlisting (Recommended)
+##### Namespace Allowlisting (Built-in - Recommended)
 
-Implement an application-level wrapper that validates module paths before loading:
+Use the built-in `allowed_namespaces` parameter (see [Optional Security Controls](#optional-security-controls) above):
+
+```python
+from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+# Recommended for production: restrict to trusted namespaces
+loader = HandlerPluginLoader(
+    allowed_namespaces=[
+        "omnibase_infra.handlers.",     # First-party handlers
+        "omnibase_core.handlers.",      # Core handlers
+        "myapp.handlers.",              # Application handlers
+        "approved_plugins.",            # Vetted third-party
+    ]
+)
+```
+
+##### Legacy Wrapper Pattern (for custom validation)
+
+For environments requiring additional validation beyond namespace prefixes, you can wrap the loader:
 
 ```python
 from pathlib import Path
@@ -462,7 +511,10 @@ def secure_load_from_contract(
     path: Path,
     correlation_id: str | None = None,
 ) -> ModelLoadedHandler:
-    """Load handler with module path validation.
+    """Load handler with additional custom validation.
+
+    Note: The built-in `allowed_namespaces` parameter is preferred
+    as it validates BEFORE any import occurs.
 
     Args:
         loader: The handler plugin loader
@@ -487,6 +539,8 @@ def secure_load_from_contract(
             f"Handler module path '{handler_class}' not in allowlist. "
             f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}"
         )
+
+    # Additional custom validation can go here
 
     # Path validated, proceed with loading
     return loader.load_from_contract(path, correlation_id)
@@ -638,10 +692,12 @@ The loader prioritizes flexibility and loose coupling, placing security responsi
 | HANDLER_LOADER_010 | `MODULE_NOT_FOUND` | Handler module not found |
 | HANDLER_LOADER_011 | `CLASS_NOT_FOUND` | Class not found in module |
 | HANDLER_LOADER_012 | `IMPORT_ERROR` | Module import failed |
+| HANDLER_LOADER_013 | `NAMESPACE_NOT_ALLOWED` | Handler module namespace not in allowlist |
 | HANDLER_LOADER_020 | `DIRECTORY_NOT_FOUND` | Directory not found |
 | HANDLER_LOADER_021 | `PERMISSION_DENIED` | Permission denied |
 | HANDLER_LOADER_022 | `NOT_A_DIRECTORY` | Path is not a directory |
 | HANDLER_LOADER_030 | `EMPTY_PATTERNS_LIST` | Glob patterns list empty |
+| HANDLER_LOADER_040 | `AMBIGUOUS_CONTRACT_CONFIGURATION` | Both contract types in same directory |
 
 ---
 

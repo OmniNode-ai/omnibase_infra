@@ -174,20 +174,82 @@ class TestNamespacePrefixMatching:
             Path("contract.yaml"),
         )
 
-    def test_prefix_without_period_matches_unintended_packages(self) -> None:
-        """Prefix without trailing period may match unintended packages."""
+    def test_prefix_without_period_enforces_package_boundary(self) -> None:
+        """Prefix without trailing period should enforce package boundary.
+
+        The namespace allowlist now enforces proper package boundaries. When
+        a namespace like "foo" is allowed (without trailing period), it will:
+        - Match "foo.handlers.Auth" (followed by ".")
+        - Match "foo" exactly (though unlikely for class paths)
+        - NOT match "foobar.malicious.Handler" (no boundary after "foo")
+
+        This prevents package-boundary bypass vulnerabilities where allowing
+        "omnibase" would accidentally also allow "omnibase_other".
+        """
         loader = HandlerPluginLoader(allowed_namespaces=["omnibase"])
 
-        # This matches (expected)
+        # This should match - "omnibase" followed by "."
         loader._validate_namespace(
-            "omnibase_infra.handlers.HandlerAuth",
+            "omnibase.handlers.HandlerAuth",
             Path("contract.yaml"),
         )
 
-        # This also matches! (potentially unexpected)
+        # This should NOT match - "omnibase_infra" is a different package
+        # "omnibase" is a prefix but not at a package boundary
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader._validate_namespace(
+                "omnibase_infra.handlers.HandlerAuth",
+                Path("contract.yaml"),
+            )
+        assert (
+            exc_info.value.model.context.get("loader_error")
+            == EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED.value
+        )
+
+        # This should also NOT match - "omnibase_other" is a different package
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader._validate_namespace(
+                "omnibase_other.malicious.Handler",
+                Path("contract.yaml"),
+            )
+        assert (
+            exc_info.value.model.context.get("loader_error")
+            == EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED.value
+        )
+
+    def test_prefix_with_underscore_boundary_not_confused(self) -> None:
+        """Package names with underscores should not be confused.
+
+        "foo_bar" allowlist should not match "foo_baz" or "foo_bar_extra".
+        """
+        loader = HandlerPluginLoader(allowed_namespaces=["foo_bar"])
+
+        # This should match - "foo_bar" followed by "."
         loader._validate_namespace(
-            "omnibase_other.malicious.Handler",
+            "foo_bar.handlers.Handler",
             Path("contract.yaml"),
+        )
+
+        # This should NOT match - "foo_baz" is a different package
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader._validate_namespace(
+                "foo_baz.handlers.Handler",
+                Path("contract.yaml"),
+            )
+        assert (
+            exc_info.value.model.context.get("loader_error")
+            == EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED.value
+        )
+
+        # This should NOT match - "foo_bar_extra" is a different package
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader._validate_namespace(
+                "foo_bar_extra.handlers.Handler",
+                Path("contract.yaml"),
+            )
+        assert (
+            exc_info.value.model.context.get("loader_error")
+            == EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED.value
         )
 
     def test_multiple_allowed_namespaces(self) -> None:

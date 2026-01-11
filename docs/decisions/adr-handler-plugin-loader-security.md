@@ -90,16 +90,42 @@ The `_sanitize_exception_message()` function strips filesystem paths from except
 
 This prevents information disclosure about internal directory structures.
 
-### 3. What the Loader Does NOT Protect Against
+### 3. Optional Security Controls
 
-**CRITICAL**: The following protections are NOT built into the loader:
+The loader provides the following **optional** security controls that must be explicitly enabled:
+
+| Control | Implementation | Mitigates | Status |
+|---------|----------------|-----------|--------|
+| **Namespace allowlisting** | `allowed_namespaces` constructor parameter | Untrusted module imports, path traversal | **IMPLEMENTED (OPTIONAL)** |
+
+**Namespace Allowlisting Usage:**
+```python
+# Restrict imports to trusted namespaces only
+loader = HandlerPluginLoader(
+    allowed_namespaces=["omnibase_infra.", "omnibase_core.", "mycompany.handlers."]
+)
+
+# This succeeds:
+loader.load_from_contract(Path("valid.yaml"))  # handler_class: omnibase_infra.handlers.Auth
+
+# This fails with NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013):
+loader.load_from_contract(Path("bad.yaml"))  # handler_class: malicious_pkg.EvilHandler
+```
+
+**Security Trade-off:**
+- **Default (None)**: No namespace restriction - any importable module can be loaded. Suitable for trusted environments with strict file access controls.
+- **Explicit allowlist**: Only modules starting with specified prefixes can be loaded. Recommended for production deployments.
+- **Empty list**: Blocks ALL namespaces - effectively disables the loader.
+
+### 4. What the Loader Does NOT Protect Against
+
+**CRITICAL**: The following protections require deployment-level mitigation:
 
 | Gap | Risk Level | Description | Required Mitigation |
 |-----|------------|-------------|---------------------|
-| **Arbitrary code execution** | CRITICAL | Any module on `sys.path` can be imported and executed | Namespace allowlisting (deployment) |
-| **Path traversal** | HIGH | No validation of module path structure | Namespace allowlisting (deployment) |
+| **Arbitrary code execution** | CRITICAL | Any module on `sys.path` can be imported (unless namespace allowlisting is enabled) | Enable `allowed_namespaces` OR deployment-level file access controls |
+| **Path traversal** | HIGH | No validation of module path structure (unless namespace allowlisting is enabled) | Enable `allowed_namespaces` |
 | **Module signature verification** | HIGH | No cryptographic validation of handler code | Signed container images |
-| **Namespace restriction** | HIGH | No built-in restriction on allowed module prefixes | Application-level wrapper |
 | **Import hook filtering** | MEDIUM | No interception of `importlib` calls | Custom `MetaPathFinder` |
 | **Runtime isolation** | MEDIUM | Handlers run in same process as loader | Subprocess isolation |
 | **Mutation prevention** | MEDIUM | Loaded modules can modify global state | Process/container isolation |
@@ -113,10 +139,10 @@ This prevents information disclosure about internal directory structures.
 | 1 | **YAML deserialization attack** | Malicious YAML constructs like `!!python/object` execute arbitrary code | CRITICAL | **MITIGATED** | `yaml.safe_load()` blocks unsafe tags |
 | 2 | **Memory exhaustion** | Oversized contract files consume memory, causing DoS | HIGH | **MITIGATED** | 10MB file size limit enforced before parsing |
 | 3 | **Arbitrary class loading** | Contract specifies class that doesn't implement handler protocol | HIGH | **MITIGATED** | Protocol validation requires 5 methods |
-| 4 | **Malicious contract injection** | Attacker writes contract pointing to malicious module | CRITICAL | **NOT MITIGATED** | Requires deployment-level file access controls |
-| 5 | **Module path manipulation** | Contract specifies path to unintended system module | CRITICAL | **NOT MITIGATED** | Requires namespace allowlisting |
-| 6 | **Import-time code execution** | Module-level code executes during `import_module()` | CRITICAL | **NOT MITIGATED** | Any imported module's top-level code runs |
-| 7 | **Handler instantiation exploits** | Malicious `__init__` runs when handler is instantiated | HIGH | **NOT MITIGATED** | Instantiation happens after loading |
+| 4 | **Malicious contract injection** | Attacker writes contract pointing to malicious module | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` OR deployment-level file access controls |
+| 5 | **Module path manipulation** | Contract specifies path to unintended system module | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` parameter |
+| 6 | **Import-time code execution** | Module-level code executes during `import_module()` | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict to trusted modules |
+| 7 | **Handler instantiation exploits** | Malicious `__init__` runs when handler is instantiated | HIGH | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict to trusted modules |
 | 8 | **Path information disclosure** | Exception messages expose filesystem paths | MEDIUM | **MITIGATED** | `_sanitize_exception_message()` strips paths |
 | 9 | **Non-class object loading** | Contract points to function/variable, not class | MEDIUM | **MITIGATED** | `isinstance(handler_class, type)` check |
 | 10 | **Probing attacks** | Attacker submits contracts to discover installed modules | LOW | **PARTIALLY MITIGATED** | Error codes reveal module existence; requires log monitoring |
@@ -214,9 +240,9 @@ All production deployments MUST complete these items:
 
 For elevated security requirements, also complete:
 
-- [ ] **7. Namespace Allowlisting Implemented**
-  - Application wrapper validates `handler_class` against allowed prefixes
-  - See [Path Allowlisting](#path-allowlisting) section below
+- [ ] **7. Namespace Allowlisting Enabled**
+  - Use the built-in `allowed_namespaces` parameter (see below)
+  - Validates `handler_class` against allowed prefixes BEFORE import
 
 - [ ] **8. Import Audit Hook Installed**
   - Custom `MetaPathFinder` logs all dynamic imports
@@ -232,9 +258,47 @@ For elevated security requirements, also complete:
 
 ## High-Security Mitigations
 
-### Path Allowlisting
+### Namespace Allowlisting (Built-in)
 
-Implement an application-level wrapper that validates module paths before loading:
+The loader has **built-in namespace allowlisting** via the `allowed_namespaces` constructor parameter.
+This is the recommended approach for production deployments:
+
+```python
+from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+# Define trusted namespace prefixes
+ALLOWED_NAMESPACES = [
+    "omnibase_infra.handlers.",     # First-party handlers
+    "omnibase_core.handlers.",      # Core handlers
+    "myapp.handlers.",              # Application handlers
+    "approved_plugins.",            # Vetted third-party
+]
+
+# Create loader with namespace restriction
+loader = HandlerPluginLoader(allowed_namespaces=ALLOWED_NAMESPACES)
+
+# This succeeds (handler_class: omnibase_infra.handlers.AuthHandler):
+handler = loader.load_from_contract(Path("auth_contract.yaml"))
+
+# This fails with NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013):
+# (handler_class: malicious_pkg.EvilHandler)
+handler = loader.load_from_contract(Path("malicious_contract.yaml"))
+```
+
+**Error Code**: `HANDLER_LOADER_013` (`NAMESPACE_NOT_ALLOWED`) is raised when a handler module
+path does not start with any of the allowed namespace prefixes.
+
+**Security Trade-offs:**
+
+| Configuration | Behavior | Use Case |
+|---------------|----------|----------|
+| `allowed_namespaces=None` (default) | All namespaces allowed | Development, trusted environments |
+| `allowed_namespaces=["omnibase_.", "myapp."]` | Only specified prefixes allowed | Production deployments |
+| `allowed_namespaces=[]` | ALL namespaces blocked | Effectively disables loader |
+
+**Legacy Wrapper Pattern** (for environments needing custom validation logic):
+
+For environments requiring additional validation beyond namespace prefixes, you can wrap the loader:
 
 ```python
 from pathlib import Path
@@ -263,7 +327,7 @@ def secure_load_from_contract(
     path: Path,
     correlation_id: str | None = None,
 ) -> ModelLoadedHandler:
-    """Load handler with module path validation."""
+    """Load handler with additional custom validation."""
     with open(path) as f:
         contract_data = yaml.safe_load(f)
 
@@ -274,8 +338,12 @@ def secure_load_from_contract(
             f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}"
         )
 
+    # Additional custom validation can go here
     return loader.load_from_contract(path, correlation_id)
 ```
+
+**Note**: The built-in `allowed_namespaces` parameter is preferred over wrapper functions
+as it validates BEFORE any import occurs, providing defense-in-depth.
 
 ### Import Hook Monitoring
 

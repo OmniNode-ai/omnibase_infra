@@ -152,6 +152,7 @@ class ProtocolHandlerPluginLoader(Protocol):
                 - HANDLER_LOADER_010: Module not found
                 - HANDLER_LOADER_011: Class not found in module
                 - HANDLER_LOADER_012: Import error (syntax/dependency)
+                - HANDLER_LOADER_013: Namespace not allowed (when allowed_namespaces configured)
 
         Example:
             .. code-block:: python
@@ -173,8 +174,8 @@ class ProtocolHandlerPluginLoader(Protocol):
         """Load all handlers from contract files in a directory.
 
         Recursively scans the given directory for handler contract files
-        (contract.yaml), loads each handler, and returns a list of
-        successfully loaded handlers.
+        (``handler_contract.yaml`` preferred, or ``contract.yaml``), loads
+        each handler, and returns a list of successfully loaded handlers.
 
         Failed loads are logged but do not stop processing of other handlers.
         Use strict mode configuration to change this behavior.

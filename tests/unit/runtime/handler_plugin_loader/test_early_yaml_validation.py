@@ -103,7 +103,7 @@ class TestValidateYamlSyntaxMethod:
         yaml_file.write_text(INVALID_YAML_SYNTAX)
 
         loader = HandlerPluginLoader()
-        test_correlation_id = str(uuid4())
+        test_correlation_id = uuid4()
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             loader._validate_yaml_syntax(
@@ -111,7 +111,7 @@ class TestValidateYamlSyntaxMethod:
             )
 
         error = exc_info.value
-        assert str(error.model.correlation_id) == test_correlation_id
+        assert error.model.correlation_id == test_correlation_id
 
     def test_various_yaml_syntax_errors(self, tmp_path: Path) -> None:
         """Test detection of various YAML syntax errors."""
@@ -293,12 +293,14 @@ invalid_line: [unclosed bracket
             f"but got: {error_message}"
         )
 
-        # Additionally verify the line number is reasonable (lines 1-5 for this content)
-        # The error is on line 4 where the unclosed bracket is
+        # Verify the line number points to the error location (line 4) or possibly
+        # line 5 (some YAML parsers report errors at the line where they detect
+        # the problem, which may be the line after the actual error). The error
+        # is the unclosed bracket on line 4 of the YAML content.
         line_number = int(match.group().split()[-1])
-        assert 1 <= line_number <= 5, (
-            f"Expected line number between 1-5 for 4-line YAML with error on line 4, "
-            f"but got line {line_number}"
+        assert line_number in (4, 5), (
+            f"Expected line number 4 or 5 for YAML with unclosed bracket on line 4, "
+            f"but got line {line_number}. Error message: {error_message}"
         )
 
     def test_file_read_error_uses_correct_error_code(self, tmp_path: Path) -> None:

@@ -54,14 +54,21 @@ class TestSanitizeExceptionMessage:
         result = _sanitize_exception_message(exc)
 
         # Verify sensitive Windows path components are removed (negative assertions)
+        # All path components must be absent - using AND logic for each assertion
         assert "C:\\Users" not in result, (
             f"Windows path prefix should be sanitized: {result}"
         )
         assert "admin\\secrets" not in result, (
             f"Windows path should be fully sanitized: {result}"
         )
-        assert "config.yaml" not in result or "<path>" in result, (
-            f"Path should be replaced with placeholder: {result}"
+        # Filename is part of the path and should also be sanitized
+        assert "config.yaml" not in result, (
+            f"Filename should be sanitized as part of path: {result}"
+        )
+
+        # Verify sanitized placeholder is present (positive assertion)
+        assert "<path>" in result, (
+            f"Expected <path> placeholder in sanitized result: {result}"
         )
 
         # Verify the non-path content is preserved
@@ -253,7 +260,7 @@ handler_type: compute
         from omnibase_infra.errors import ProtocolConfigurationError
 
         nonexistent = tmp_path / "handler_contract.yaml"
-        correlation_id = str(uuid4())
+        correlation_id = uuid4()
 
         loader = HandlerPluginLoader()
 
@@ -263,7 +270,7 @@ handler_type: compute
         # Correlation ID should be preserved in error model
         error = exc_info.value
         assert error.model.correlation_id is not None
-        assert str(error.model.correlation_id) == correlation_id
+        assert error.model.correlation_id == correlation_id
 
 
 class TestErrorCodePresenceInSanitizedErrors:

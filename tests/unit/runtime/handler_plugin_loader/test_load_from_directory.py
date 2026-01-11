@@ -131,15 +131,14 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         from omnibase_infra.errors import ProtocolConfigurationError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
-        # Use a valid UUID string that can be parsed by ModelInfraErrorContext
+        # Use a valid UUID - the public API expects UUID type, not string
         test_correlation_id = UUID("12345678-1234-5678-1234-567812345678")
-        correlation_id_str = str(test_correlation_id)
 
         loader = HandlerPluginLoader()
 
         # Part 1: Verify happy path - handlers load successfully with correlation_id
         handlers = loader.load_from_directory(
-            valid_contract_directory, correlation_id=correlation_id_str
+            valid_contract_directory, correlation_id=test_correlation_id
         )
         assert len(handlers) == 3
 
@@ -149,7 +148,7 @@ class TestHandlerPluginLoaderLoadFromDirectory:
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             loader.load_from_directory(
-                nonexistent_dir, correlation_id=correlation_id_str
+                nonexistent_dir, correlation_id=test_correlation_id
             )
 
         # Verify the correlation_id was propagated to the error
@@ -180,7 +179,6 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         )
 
         test_correlation_id = UUID("abcdef12-3456-7890-abcd-ef1234567890")
-        correlation_id_str = str(test_correlation_id)
 
         loader = HandlerPluginLoader()
 
@@ -193,7 +191,7 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         contract_path.write_text(HANDLER_CONTRACT_WITHOUT_NAME)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
-            loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
+            loader.load_from_contract(contract_path, correlation_id=test_correlation_id)
 
         assert exc_info.value.model.correlation_id == test_correlation_id
         # Verify error is about missing name field (Pydantic uses alias "name")
@@ -208,7 +206,7 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         contract_path.write_text(HANDLER_CONTRACT_WITHOUT_CLASS)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
-            loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
+            loader.load_from_contract(contract_path, correlation_id=test_correlation_id)
 
         assert exc_info.value.model.correlation_id == test_correlation_id
         # Verify error is about missing handler_class
@@ -227,7 +225,7 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         )
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
-            loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
+            loader.load_from_contract(contract_path, correlation_id=test_correlation_id)
 
         assert exc_info.value.model.correlation_id == test_correlation_id
         # Verify error is about missing handler_type
@@ -248,7 +246,6 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         from .conftest import MINIMAL_HANDLER_CONTRACT_YAML
 
         test_correlation_id = UUID("fedcba98-7654-3210-fedc-ba9876543210")
-        correlation_id_str = str(test_correlation_id)
 
         loader = HandlerPluginLoader()
 
@@ -264,7 +261,7 @@ class TestHandlerPluginLoaderLoadFromDirectory:
         )
 
         with pytest.raises(InfraConnectionError) as exc_info:
-            loader.load_from_contract(contract_path, correlation_id=correlation_id_str)
+            loader.load_from_contract(contract_path, correlation_id=test_correlation_id)
 
         assert exc_info.value.model.correlation_id == test_correlation_id
         # Verify error is about module not found (from _import_handler_class)

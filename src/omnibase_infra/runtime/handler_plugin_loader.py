@@ -305,6 +305,39 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         """
         self._allowed_namespaces: list[str] | None = allowed_namespaces
 
+    def _validate_correlation_id(
+        self,
+        correlation_id: UUID | None,
+        operation: str,
+    ) -> None:
+        """Validate correlation_id is a UUID or None at runtime.
+
+        Provides runtime type validation for correlation_id parameters at public
+        API entry points. While type hints provide static checking, runtime
+        validation catches cases where callers bypass type checking (e.g.,
+        dynamically constructed calls, JSON deserialization without validation).
+
+        Args:
+            correlation_id: The correlation ID to validate. Must be UUID or None.
+            operation: Name of the calling operation (for error context).
+
+        Raises:
+            TypeError: If correlation_id is not a UUID instance or None.
+                The error message includes the actual type received and the
+                operation name for debugging.
+
+        Example:
+            >>> loader = HandlerPluginLoader()
+            >>> loader._validate_correlation_id(UUID("..."), "load_from_contract")  # OK
+            >>> loader._validate_correlation_id(None, "load_from_contract")  # OK
+            >>> loader._validate_correlation_id("not-a-uuid", "load_from_contract")  # TypeError
+        """
+        if correlation_id is not None and not isinstance(correlation_id, UUID):
+            raise TypeError(
+                f"correlation_id must be UUID or None, got {type(correlation_id).__name__} "
+                f"in {operation}(). Convert string IDs using uuid.UUID(your_string)."
+            )
+
     def load_from_contract(
         self,
         contract_path: Path,
@@ -347,7 +380,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - HANDLER_LOADER_010: Module not found
                 - HANDLER_LOADER_011: Class not found in module
                 - HANDLER_LOADER_012: Import error (syntax/dependency)
+            TypeError: If correlation_id is not a UUID or None.
         """
+        # Validate correlation_id type at entry point (runtime type check)
+        self._validate_correlation_id(correlation_id, "load_from_contract")
+
         # Auto-generate correlation_id if not provided (per ONEX guidelines)
         correlation_id = correlation_id or uuid4()
 
@@ -580,7 +617,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - HANDLER_LOADER_020: Directory not found
                 - HANDLER_LOADER_021: Permission denied
                 - HANDLER_LOADER_022: Not a directory
+            TypeError: If correlation_id is not a UUID or None.
         """
+        # Validate correlation_id type at entry point (runtime type check)
+        self._validate_correlation_id(correlation_id, "load_from_directory")
+
         # Auto-generate correlation_id if not provided (per ONEX guidelines)
         correlation_id = correlation_id or uuid4()
 
@@ -598,7 +639,27 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         )
 
         # Validate directory exists
-        if not directory.exists():
+        # directory.exists() and directory.is_dir() can raise OSError for:
+        # - Permission denied when accessing the path
+        # - Filesystem errors (unmounted volumes, network failures)
+        # - Broken symlinks where the target cannot be resolved
+        try:
+            dir_exists = directory.exists()
+        except OSError as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_directory",
+                correlation_id=correlation_id,
+            )
+            sanitized_msg = _sanitize_exception_message(e)
+            raise ProtocolConfigurationError(
+                f"Failed to access directory: {sanitized_msg}",
+                context=context,
+                loader_error=EnumHandlerLoaderError.PERMISSION_DENIED.value,
+                directory=str(directory),
+            ) from e
+
+        if not dir_exists:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_directory",
@@ -611,7 +672,23 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 directory=str(directory),
             )
 
-        if not directory.is_dir():
+        try:
+            is_directory = directory.is_dir()
+        except OSError as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_directory",
+                correlation_id=correlation_id,
+            )
+            sanitized_msg = _sanitize_exception_message(e)
+            raise ProtocolConfigurationError(
+                f"Failed to access directory: {sanitized_msg}",
+                context=context,
+                loader_error=EnumHandlerLoaderError.PERMISSION_DENIED.value,
+                directory=str(directory),
+            ) from e
+
+        if not is_directory:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_directory",
@@ -741,6 +818,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             ProtocolConfigurationError: If patterns list is empty.
                 Error codes:
                 - HANDLER_LOADER_030: Empty patterns list
+            TypeError: If correlation_id is not a UUID or None.
 
         Example:
             >>> # Using default cwd-based resolution
@@ -752,6 +830,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             ...     base_path=Path("/app/project"),
             ... )
         """
+        # Validate correlation_id type at entry point (runtime type check)
+        self._validate_correlation_id(correlation_id, "discover_and_load")
+
         # Auto-generate correlation_id if not provided (per ONEX guidelines)
         correlation_id = correlation_id or uuid4()
 
@@ -787,18 +868,53 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         # Use explicit base_path if provided, otherwise fall back to cwd
         # Note: Using cwd can produce different results if the working directory
         # changes between calls. For deterministic behavior, provide base_path.
-        glob_base = base_path if base_path is not None else Path.cwd()
+        # Path.cwd() can raise OSError if:
+        # - Current working directory has been deleted
+        # - Permission denied accessing current directory
+        if base_path is not None:
+            glob_base = base_path
+        else:
+            try:
+                glob_base = Path.cwd()
+            except OSError as e:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="discover_and_load",
+                    correlation_id=correlation_id,
+                )
+                sanitized_msg = _sanitize_exception_message(e)
+                raise ProtocolConfigurationError(
+                    f"Failed to access current working directory: {sanitized_msg}",
+                    context=context,
+                    loader_error=EnumHandlerLoaderError.PERMISSION_DENIED.value,
+                ) from e
 
         for pattern in patterns:
             if limit_reached:
                 break
 
-            # Path.glob() can raise OSError for:
-            # - Permission denied when traversing directories
-            # - Filesystem errors (unmounted volumes, network failures)
-            # - Invalid path components in the pattern base
+            # Path.glob() can raise:
+            # - OSError: Permission denied, filesystem errors, invalid path components
+            # - ValueError: Invalid glob pattern syntax (e.g., ** not at path segment boundary)
             try:
                 matched_paths = list(glob_base.glob(pattern))
+            except ValueError as e:
+                # ValueError indicates invalid glob pattern syntax
+                # Example: "foo**bar" - ** must be at path segment boundaries
+                sanitized_msg = _sanitize_exception_message(e)
+                logger.warning(
+                    "Invalid glob pattern syntax '%s': %s",
+                    pattern,
+                    sanitized_msg,
+                    extra={
+                        "pattern": pattern,
+                        "base_path": str(glob_base),
+                        "error": sanitized_msg,
+                        "error_code": EnumHandlerLoaderError.INVALID_GLOB_PATTERN.value,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                continue  # Skip to next pattern
             except OSError as e:
                 sanitized_msg = _sanitize_exception_message(e)
                 logger.warning(
@@ -1328,10 +1444,19 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         if self._allowed_namespaces is None:
             return
 
-        # Check if class_path starts with any allowed namespace
+        # Check if class_path starts with any allowed namespace with proper
+        # package boundary validation. This prevents "foo" from matching "foobar.module".
         for namespace in self._allowed_namespaces:
             if class_path.startswith(namespace):
-                return
+                # If namespace ends with ".", we've already matched a package boundary
+                if namespace.endswith("."):
+                    return
+                # Otherwise, ensure we're at a package boundary (next char is ".")
+                # This prevents "foo" from matching "foobar.module" - only exact
+                # matches or matches followed by "." are valid.
+                remaining = class_path[len(namespace) :]
+                if remaining == "" or remaining.startswith("."):
+                    return
 
         # Namespace not in allowed list - raise error
         context = ModelInfraErrorContext(

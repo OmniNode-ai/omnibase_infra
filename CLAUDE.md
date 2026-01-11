@@ -652,20 +652,19 @@ The loader recognizes two contract file names:
 | `handler_contract.yaml` | Dedicated handler contract (preferred) |
 | `contract.yaml` | General ONEX contract with handler fields |
 
-**WARNING: No Automatic Precedence Between Contract Types**
+**FAIL-FAST: Ambiguous Contract Configuration**
 
-When **both** `handler_contract.yaml` **and** `contract.yaml` exist in the **same directory**, the loader will load **BOTH** files as separate handlers. There is **no precedence** - both are treated as valid, independent handler contracts.
+When **both** `handler_contract.yaml` **and** `contract.yaml` exist in the **same directory**, the loader **raises an error** (error code: `AMBIGUOUS_CONTRACT_CONFIGURATION` / `HANDLER_LOADER_040`). This fail-fast behavior prevents:
 
-This can lead to:
 - Duplicate handler registrations if both files define similar handlers
 - Confusion about which contract is the "source of truth"
 - Unexpected runtime behavior if handlers conflict
 
-A warning is logged when this configuration is detected:
+**Error raised when ambiguous configuration detected:**
 ```
-WARNING: AMBIGUOUS CONTRACT CONFIGURATION: Directory '/app/handlers/auth' contains
-both handler_contract.yaml and contract.yaml. BOTH files will be loaded as separate
-handlers. This may cause duplicate handler registrations or unexpected behavior.
+ProtocolConfigurationError: Ambiguous contract configuration in 'auth':
+Found both 'handler_contract.yaml' and 'contract.yaml'.
+Use only ONE contract file per handler directory to avoid conflicts.
 ```
 
 **Best Practice**: Use only **ONE** contract file per handler directory.
@@ -676,15 +675,15 @@ nodes/auth/
     handler_contract.yaml   # Preferred: dedicated handler contract
     handler_auth.py
 
-# INCORRECT: Both contract types in same directory (will log warning)
+# INCORRECT: Both contract types in same directory (raises error)
 nodes/auth/
-    handler_contract.yaml   # Loaded as handler #1
-    contract.yaml          # Loaded as handler #2 (potential conflict!)
+    handler_contract.yaml   # Conflict detected!
+    contract.yaml          # ProtocolConfigurationError raised
 ```
 
-**Why No Automatic Precedence**: The loader intentionally does not implement automatic precedence because:
-1. **Explicit is better than implicit**: Silent precedence could mask configuration errors
-2. **Fail-fast philosophy**: The warning alerts operators to potential issues early
+**Why Fail-Fast Over Warning**: The loader raises an error instead of warning because:
+1. **Explicit is better than implicit**: Silent loading of both could mask configuration errors
+2. **Fail-fast philosophy**: Early error detection prevents production issues
 3. **No assumptions**: The loader cannot know which file the user intends to be authoritative
 
 **See**: `docs/patterns/handler_plugin_loader.md#contract-file-precedence` for full resolution rules.
@@ -698,9 +697,9 @@ nodes/auth/
 | YAML deserialization attacks | **MITIGATED** | `yaml.safe_load()` blocks `!!python/object` tags |
 | Memory exhaustion | **MITIGATED** | 10MB file size limit enforced |
 | Arbitrary class loading | **MITIGATED** | Protocol validation requires 5 `ProtocolHandler` methods |
-| Arbitrary code execution | **NOT MITIGATED** | Any module on `sys.path` can be imported |
-| Path traversal in module paths | **NOT MITIGATED** | No path validation in loader |
-| Untrusted namespace imports | **NOT MITIGATED** | No built-in allowlist enforcement |
+| Arbitrary code execution | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict imports |
+| Path traversal in module paths | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict imports |
+| Untrusted namespace imports | **OPTIONALLY MITIGATED** | Use `allowed_namespaces` parameter |
 
 **Built-in Security Controls** (implemented in loader):
 - **YAML safe loading**: `yaml.safe_load()` prevents deserialization attacks
@@ -708,18 +707,26 @@ nodes/auth/
 - **Protocol validation**: Classes must implement all 5 `ProtocolHandler` methods
 - **Error containment**: Single bad contract doesn't crash the system
 - **Correlation tracking**: All load operations logged with UUID correlation IDs
+- **Namespace allowlisting** (optional): Use `allowed_namespaces` constructor parameter to restrict imports
 
-**NOT Implemented** (must be added at deployment level):
-- Namespace allowlisting (e.g., only `omnibase_*` packages)
-- Module path validation (no `..` or path traversal checks)
-- Import hook filtering
-- Runtime isolation
+**Optional Security Control - Namespace Allowlisting:**
+```python
+# Restrict to trusted namespaces only (recommended for production)
+loader = HandlerPluginLoader(
+    allowed_namespaces=["omnibase_infra.", "omnibase_core.", "myapp.handlers."]
+)
+# Untrusted modules will fail with NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)
+```
+
+**NOT Implemented** (deployment-level controls):
+- Import hook filtering (custom `MetaPathFinder`)
+- Runtime isolation (subprocess/container isolation)
 
 **Secure Deployment Checklist:**
 1. **File permissions**: Contract directories readable only by runtime user
 2. **Write protection**: Mount contract directories as read-only at runtime
 3. **Source validation**: Contracts from version-controlled, reviewed sources only
-4. **Namespace allowlisting**: Implement application-level wrapper for high-security environments
+4. **Namespace allowlisting**: Enable `allowed_namespaces` parameter (recommended for production)
 5. **Audit logging**: Enable INFO-level logging for handler loader
 6. **Contract validation**: Run `onex validate` in CI to catch malformed contracts
 
@@ -727,6 +734,8 @@ nodes/auth/
 - `MODULE_NOT_FOUND` (HANDLER_LOADER_010) - Handler module not found
 - `CLASS_NOT_FOUND` (HANDLER_LOADER_011) - Class not found in module
 - `IMPORT_ERROR` (HANDLER_LOADER_012) - Module import failed (syntax/dependency)
+- `NAMESPACE_NOT_ALLOWED` (HANDLER_LOADER_013) - Handler module namespace not in allowlist
+- `AMBIGUOUS_CONTRACT_CONFIGURATION` (HANDLER_LOADER_040) - Both contract types in same directory
 - `PROTOCOL_NOT_IMPLEMENTED` (HANDLER_LOADER_006) - Class missing required `ProtocolHandler` methods
 
 **See**: `docs/patterns/handler_plugin_loader.md` and `docs/decisions/adr-handler-plugin-loader-security.md` for complete security documentation.
