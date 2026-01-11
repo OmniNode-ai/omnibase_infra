@@ -88,8 +88,8 @@ class ContractHandlerDiscovery:
     """Discovers and registers handlers from contracts automatically.
 
     This class bridges the HandlerPluginLoader (which loads handler metadata from
-    contracts) with the BindingRegistry (which tracks handler classes for runtime
-    instantiation).
+    contracts) with the ProtocolBindingRegistry (which tracks handler classes for
+    runtime instantiation).
 
     Pattern: Stateless service that coordinates between plugin loader and registry.
 
@@ -103,6 +103,10 @@ class ContractHandlerDiscovery:
     Attributes:
         _plugin_loader: Loader for reading handler contracts from filesystem.
         _handler_registry: Registry for storing discovered handler classes.
+        _last_discovery_result: Cached result from the most recent discovery operation.
+            Populated after each call to ``discover_and_register()``. Enables
+            observability tools to query what was discovered without re-running
+            discovery. Initially None until first discovery completes.
 
     Example:
         >>> from pathlib import Path
@@ -133,6 +137,33 @@ class ContractHandlerDiscovery:
         """
         self._plugin_loader = plugin_loader
         self._handler_registry = handler_registry
+        self._last_discovery_result: ModelDiscoveryResult | None = None
+
+    @property
+    def last_discovery_result(self) -> ModelDiscoveryResult | None:
+        """Return cached discovery result for observability.
+
+        This property provides access to the result of the most recent
+        ``discover_and_register()`` call. Useful for observability tools,
+        monitoring dashboards, and debugging without re-running discovery.
+
+        Returns:
+            The cached ModelDiscoveryResult from the last discovery operation,
+            or None if discovery has not been run yet.
+
+        Example:
+            >>> discovery = ContractHandlerDiscovery(loader, registry)
+            >>> # Before any discovery
+            >>> discovery.last_discovery_result is None
+            True
+            >>> # After discovery
+            >>> await discovery.discover_and_register([Path("nodes/")])
+            >>> discovery.last_discovery_result.handlers_registered
+            5
+
+        .. versionadded:: 0.7.0
+        """
+        return self._last_discovery_result
 
     async def discover_and_register(
         self,
@@ -204,6 +235,14 @@ class ContractHandlerDiscovery:
             This method is stateless and can be called concurrently from multiple
             threads or coroutines. The underlying plugin_loader and handler_registry
             are responsible for their own thread safety.
+
+        Note:
+            This method performs synchronous file I/O and module imports despite
+            being declared async. This is intentional for simplicity since discovery
+            is typically performed at application startup when blocking is acceptable.
+            For high-concurrency scenarios where blocking the event loop is problematic,
+            consider wrapping this call with ``asyncio.to_thread()`` or running it
+            in a dedicated thread pool executor.
 
         .. versionadded:: 0.7.0
         """
@@ -332,8 +371,11 @@ class ContractHandlerDiscovery:
                                 },
                             )
                         )
-                    except ImportError as e:
+                    except (ImportError, AttributeError, TypeError) as e:
                         # Module/class import failed
+                        # ImportError: Module not found or import failure
+                        # AttributeError: Class not found in module (from getattr)
+                        # TypeError: Path resolved to non-class (from isinstance check)
                         errors.append(
                             ModelDiscoveryError(
                                 error_code="IMPORT_FAILED",
@@ -409,11 +451,13 @@ class ContractHandlerDiscovery:
 
             except Exception as e:
                 # Unexpected errors during path processing
+                # NOTE: Use stored is_file boolean, NOT path.is_file() call
+                # which could raise OSError while already handling an exception
                 errors.append(
                     ModelDiscoveryError(
                         error_code="UNEXPECTED_ERROR",
                         message=f"Unexpected error during discovery: {e}",
-                        contract_path=path if path.is_file() else None,
+                        contract_path=path if is_file else None,
                         details={"exception_type": type(e).__name__},
                     )
                 )
@@ -424,6 +468,9 @@ class ContractHandlerDiscovery:
             errors=errors,
             warnings=warnings,
         )
+
+        # Cache result for observability (enables monitoring/debugging without re-running)
+        self._last_discovery_result = result
 
         # Log at appropriate level based on error count
         log_level = logging.WARNING if result.has_errors else logging.INFO

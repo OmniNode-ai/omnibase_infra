@@ -128,19 +128,50 @@ class TestContractHandlerDiscoveryErrorHandling:
         discovery_service: ContractHandlerDiscovery,
         handler_registry: ProtocolBindingRegistry,
         mixed_valid_invalid_directory: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that valid handlers are registered even when some fail."""
-        result = await discovery_service.discover_and_register(
-            [mixed_valid_invalid_directory]
-        )
+        """Test that valid handlers are registered even when some fail.
 
-        # Should have discovered some handlers but have errors
+        Note: The HandlerPluginLoader filters out failed contracts during
+        directory loading. Failures are logged as warnings but not captured
+        in the result's errors list. This is intentional design - individual
+        handler failures should not prevent other handlers from loading.
+        """
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            result = await discovery_service.discover_and_register(
+                [mixed_valid_invalid_directory]
+            )
+
+        # Should have discovered and registered only the valid handler
         assert result.handlers_discovered == 1  # Only the valid one
         assert result.handlers_registered == 1
-        # There may be errors from the invalid contracts
-        # (the exact behavior depends on whether they're counted as discovered)
 
-        # Valid handler should be registered
+        # Invalid contracts produce warnings in the loader, not errors in result
+        # This is by design: HandlerPluginLoader filters failures during load
+        # and only returns successful handlers to ContractHandlerDiscovery
+        # Note: has_errors is False because the discovery operation succeeded
+        # from the ContractHandlerDiscovery perspective - it registered all
+        # handlers that the loader returned to it
+        assert not result.has_errors  # Discovery itself succeeded
+
+        # Verify warnings were logged for the invalid contracts
+        warning_messages = [
+            record.message
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+        ]
+        assert len(warning_messages) >= 2  # At least 2 invalid contracts should warn
+
+        # Verify specific error types are logged
+        warning_text = " ".join(warning_messages)
+        assert "invalid_yaml" in warning_text.lower() or "Invalid YAML" in warning_text
+        assert (
+            "missing_class" in warning_text.lower() or "Field required" in warning_text
+        )
+
+        # Valid handler should be registered despite failures of other contracts
         assert handler_registry.is_registered("valid.handler")
 
 
@@ -273,3 +304,70 @@ class TestContractHandlerDiscoveryRegistryIntegration:
         # Both handlers should still be registered
         assert handler_registry.is_registered("handler.one")
         assert handler_registry.is_registered("handler.two")
+
+
+class TestContractHandlerDiscoveryObservability:
+    """Tests for observability features (last_discovery_result caching)."""
+
+    def test_last_discovery_result_initially_none(
+        self,
+        discovery_service: ContractHandlerDiscovery,
+    ) -> None:
+        """Test that last_discovery_result is None before any discovery."""
+        assert discovery_service.last_discovery_result is None
+
+    @pytest.mark.asyncio
+    async def test_last_discovery_result_cached_after_discovery(
+        self,
+        discovery_service: ContractHandlerDiscovery,
+        valid_contract_path: Path,
+    ) -> None:
+        """Test that last_discovery_result is populated after discovery."""
+        result = await discovery_service.discover_and_register([valid_contract_path])
+
+        cached = discovery_service.last_discovery_result
+        assert cached is not None
+        assert cached is result  # Should be the same object
+        assert cached.handlers_discovered == result.handlers_discovered
+        assert cached.handlers_registered == result.handlers_registered
+
+    @pytest.mark.asyncio
+    async def test_last_discovery_result_updated_on_each_discovery(
+        self,
+        discovery_service: ContractHandlerDiscovery,
+        valid_contract_path: Path,
+        empty_directory: Path,
+    ) -> None:
+        """Test that last_discovery_result is updated on each discovery call."""
+        # First discovery
+        result1 = await discovery_service.discover_and_register([valid_contract_path])
+        cached1 = discovery_service.last_discovery_result
+        assert cached1 is result1
+        assert cached1.handlers_discovered == 1
+
+        # Second discovery (different path)
+        result2 = await discovery_service.discover_and_register([empty_directory])
+        cached2 = discovery_service.last_discovery_result
+        assert cached2 is result2
+        assert cached2 is not cached1  # Different object
+        assert cached2.handlers_discovered == 0
+
+    @pytest.mark.asyncio
+    async def test_last_discovery_result_enables_observability_queries(
+        self,
+        discovery_service: ContractHandlerDiscovery,
+        valid_contract_directory: Path,
+    ) -> None:
+        """Test that cached result can be queried for observability purposes."""
+        await discovery_service.discover_and_register([valid_contract_directory])
+
+        # Simulate observability tool querying the discovery state
+        cached = discovery_service.last_discovery_result
+        assert cached is not None
+
+        # Can inspect discovery metrics without re-running
+        assert cached.handlers_discovered >= 0
+        assert cached.handlers_registered >= 0
+        assert cached.discovered_at is not None
+        assert hasattr(cached, "has_errors")
+        assert hasattr(cached, "has_warnings")
