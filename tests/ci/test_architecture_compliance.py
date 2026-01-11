@@ -706,6 +706,12 @@ class TestArchitectureCompliance:
     These tests enforce the separation between omnibase_core (pure, no I/O)
     and omnibase_infra (infrastructure, owns all I/O). The core package
     should never import infrastructure-specific libraries directly.
+
+    SYNC REQUIREMENT:
+        The forbidden imports list in this class MUST be kept in sync with:
+        - scripts/check_architecture.sh (FORBIDDEN_IMPORTS array)
+
+        When adding or removing imports, update BOTH locations.
     """
 
     CORE_PACKAGE = "omnibase_core"
