@@ -585,15 +585,14 @@ For complete isolation, run handlers in separate processes:
 
 ```python
 import multiprocessing
-from typing import Any
 
 
 def run_handler_isolated(
     handler_module: str,
     handler_class: str,
     method: str,
-    args: tuple[Any, ...],
-) -> Any:
+    args: tuple[object, ...],
+) -> object:
     """Execute handler method in isolated subprocess.
 
     The subprocess has its own memory space, so malicious code

@@ -379,16 +379,19 @@ class TestMaxHandlersEdgeCases:
         # were discovered (order is not guaranteed by filesystem). The important
         # thing is that we stopped discovery at 7 files.
         #
-        # NOTE: This assertion is intentionally weak because filesystem ordering
-        # varies by platform and filesystem type. We cannot predict exactly which
-        # 7 of the 10 contracts will be discovered first. The test verifies that:
-        # 1. Discovery respects the max_handlers limit (at most 7 discovered)
-        # 2. Only valid contracts among those 7 are successfully loaded
-        assert len(handlers) <= 7
-        # Verify at least some handlers loaded (unlikely to discover only invalid)
-        # This is probabilistic - with 5 valid and 5 invalid, discovering 7 means
-        # at least 2 valid should be found in the average case
-        assert len(handlers) >= 0  # Weak bound - just ensures no negative count
+        # With 5 valid and 5 invalid contracts, when discovering 7:
+        # - Maximum valid discovered: min(7, 5) = 5 (if all valid are discovered first)
+        # - Minimum valid discovered: 7 - 5 = 2 (if all 5 invalid are discovered first)
+        #
+        # Therefore, the number of successfully loaded handlers must be between 2 and 5
+        # (inclusive), regardless of filesystem ordering.
+        assert len(handlers) <= 7, (
+            f"Discovery should respect max_handlers limit of 7, got {len(handlers)}"
+        )
+        assert len(handlers) >= 2, (
+            f"With 5 valid and 5 invalid contracts, discovering 7 must include "
+            f"at least 2 valid (since there are only 5 invalid), got {len(handlers)}"
+        )
 
 
 class TestMaxHandlersBackwardsCompatibility:

@@ -1439,6 +1439,24 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 class_path=class_path,
                 contract_path=str(contract_path),
             ) from e
+        except SyntaxError as e:
+            # SyntaxError can occur during import if the handler module has syntax errors.
+            # This is a subclass of Exception, not ImportError, so must be caught separately.
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="import_handler_class",
+                correlation_id=correlation_id,
+            )
+            # Sanitize exception message to prevent path disclosure
+            sanitized_msg = _sanitize_exception_message(e)
+            raise InfraConnectionError(
+                f"Syntax error in module {module_path}: {sanitized_msg}",
+                context=context,
+                loader_error=EnumHandlerLoaderError.IMPORT_ERROR.value,
+                module_path=module_path,
+                class_path=class_path,
+                contract_path=str(contract_path),
+            ) from e
 
         # Get the class from the module
         if not hasattr(module, class_name):

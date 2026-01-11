@@ -1115,16 +1115,18 @@ class Other:
                 if key.startswith("circular_module"):
                     del sys.modules[key]
 
-    def test_syntax_error_in_handler_module_propagates(self, tmp_path: Path) -> None:
-        """Test that syntax errors in handler modules propagate as SyntaxError.
+    def test_syntax_error_in_handler_module_raises_import_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that syntax errors in handler modules raise IMPORT_ERROR.
 
-        If the handler module has a Python syntax error, the error propagates
-        directly since SyntaxError is not a subclass of ImportError.
-
-        Note: This tests the current behavior where SyntaxError is not caught
-        by the loader. The loader catches ImportError and ModuleNotFoundError,
-        but SyntaxError is a separate exception hierarchy.
+        If the handler module has a Python syntax error, the loader catches
+        it and wraps it in InfraConnectionError with HANDLER_LOADER_012
+        (IMPORT_ERROR) error code. This ensures consistent error handling
+        and prevents raw SyntaxError from leaking to callers.
         """
+        from omnibase_infra.enums import EnumHandlerLoaderError
+        from omnibase_infra.errors import InfraConnectionError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         # Create a module with syntax error
@@ -1151,9 +1153,21 @@ class SyntaxErrorHandler(
 
             loader = HandlerPluginLoader()
 
-            # SyntaxError propagates directly - it's not a subclass of ImportError
-            with pytest.raises(SyntaxError):
+            # SyntaxError is now caught and wrapped in InfraConnectionError
+            with pytest.raises(InfraConnectionError) as exc_info:
                 loader.load_from_contract(contract_file)
+
+            # Verify the error code is IMPORT_ERROR (HANDLER_LOADER_012)
+            error = exc_info.value
+            assert (
+                error.model.context.get("loader_error")
+                == EnumHandlerLoaderError.IMPORT_ERROR.value
+            ), f"Expected IMPORT_ERROR, got: {error.model.context.get('loader_error')}"
+
+            # Verify the error message indicates a syntax error
+            assert "syntax error" in str(error).lower(), (
+                f"Expected 'syntax error' in message: {error}"
+            )
 
         finally:
             sys.path.remove(str(tmp_path))
