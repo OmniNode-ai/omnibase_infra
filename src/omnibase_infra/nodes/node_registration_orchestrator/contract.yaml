@@ -352,6 +352,17 @@ handler_routing:
         valid_from_states:
           - "AWAITING_ACK"
         target_state: "ACTIVE"
+    # ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat
+    # Heartbeat processing - updates liveness tracking for active nodes.
+    - event_model:
+        name: "ModelNodeHeartbeatEvent"
+        module: "omnibase_infra.models.registration.model_node_heartbeat_event"
+      handler:
+        name: "HandlerNodeHeartbeat"
+        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_heartbeat"
+      output_events: []
+      direct_handler: true
+      description: "Updates node liveness tracking via heartbeat"
   # Handler initialization configuration
   # All handlers share the same projection reader dependency
   handler_dependencies:

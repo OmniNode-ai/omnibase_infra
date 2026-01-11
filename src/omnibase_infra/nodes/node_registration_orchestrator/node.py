@@ -68,12 +68,19 @@ if TYPE_CHECKING:
 def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
     """Create handler routing subcontract from contract.yaml configuration.
 
+    TODO(tech-debt): This function hardcodes the handler routing configuration.
+    Ideally, this should be loaded directly from contract.yaml at runtime.
+    See PR #141 review comments for context.
+
     This function creates the handler routing configuration that matches
-    the contract.yaml handler_routing section. Eventually this should be
-    loaded directly from the YAML contract.
+    the contract.yaml handler_routing section.
 
     Returns:
-        ModelHandlerRoutingSubcontract with routing entries for:
+        ModelHandlerRoutingSubcontract with routing entries using:
+        - routing_key: Event model class name (e.g., "ModelNodeIntrospectionEvent")
+        - handler_key: Handler identifier (e.g., "handler-node-introspected")
+
+        Mappings:
         - ModelNodeIntrospectionEvent -> handler-node-introspected
         - ModelRuntimeTick -> handler-runtime-tick
         - ModelNodeRegistrationAcked -> handler-node-registration-acked
@@ -169,6 +176,19 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
         The runtime uses RegistryInfraNodeRegistrationOrchestrator.create_registry()
         to create the handler registry and calls _init_handler_routing() on
         the orchestrator instance.
+
+    Runtime Initialization:
+        Handler routing is initialized by RuntimeHostProcess, not by this class.
+        The runtime performs the following sequence:
+
+        1. Creates handler registry via
+           RegistryInfraNodeRegistrationOrchestrator.create_registry()
+        2. Creates handler routing subcontract via
+           _create_handler_routing_subcontract()
+        3. Calls orchestrator._init_handler_routing(subcontract, registry)
+
+        This separation ensures the orchestrator remains purely declarative
+        with no custom initialization logic.
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:

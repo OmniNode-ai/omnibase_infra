@@ -133,18 +133,19 @@ class TestHandlerRoutingContract:
             )
 
     def test_expected_handler_count(self, contract_data: dict) -> None:
-        """Verify contract defines exactly 3 handlers.
+        """Verify contract defines exactly 4 handlers.
 
         The registration orchestrator routes:
         1. ModelNodeIntrospectionEvent -> HandlerNodeIntrospected
         2. ModelRuntimeTick -> HandlerRuntimeTick
         3. ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked
+        4. ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat
         """
         handler_routing = contract_data.get("handler_routing", {})
         handlers = handler_routing.get("handlers", [])
 
-        assert len(handlers) == 3, (
-            f"Expected exactly 3 handler entries, found {len(handlers)}. "
+        assert len(handlers) == 4, (
+            f"Expected exactly 4 handler entries, found {len(handlers)}. "
             f"Events: {[h.get('event_model', {}).get('name', 'unknown') for h in handlers]}"
         )
 
@@ -157,6 +158,7 @@ class TestHandlerRoutingContract:
             "ModelNodeIntrospectionEvent",
             "ModelRuntimeTick",
             "ModelNodeRegistrationAcked",
+            "ModelNodeHeartbeatEvent",
         }
 
         actual_event_models = {
@@ -180,6 +182,7 @@ class TestHandlerRoutingContract:
             "HandlerNodeIntrospected",
             "HandlerRuntimeTick",
             "HandlerNodeRegistrationAcked",
+            "HandlerNodeHeartbeat",
         }
 
         actual_handlers = {
@@ -397,6 +400,7 @@ class TestHandlerRoutingModulePaths:
             "ModelNodeIntrospectionEvent": "omnibase_infra.models.registration",
             "ModelRuntimeTick": "omnibase_infra.runtime.models",
             "ModelNodeRegistrationAcked": "omnibase_infra.models.registration.commands",
+            "ModelNodeHeartbeatEvent": "omnibase_infra.models.registration",
         }
 
         for handler_entry in handlers:
@@ -612,8 +616,6 @@ class TestOrchestratorInstantiation:
         Returns:
             MagicMock configured with minimal container.config attribute.
         """
-        from unittest.mock import MagicMock
-
         container = MagicMock()
         container.config = MagicMock()
         return container
@@ -953,7 +955,11 @@ class TestHandlerRoutingContractCodeConsistency:
         subcontract = _create_handler_routing_subcontract()
         subcontract_routing_keys = {entry.routing_key for entry in subcontract.handlers}
 
-        # All contract event models should be in subcontract routing keys
+        # Use subset check (<=) because subcontract may include conditional handlers
+        # that are not in contract.yaml. For example, the heartbeat handler is only
+        # registered when a projector is available, so it appears in subcontract
+        # but not in the base contract. Contract entries are always required;
+        # subcontract may have additional optional/conditional entries.
         assert contract_event_models <= subcontract_routing_keys, (
             f"Contract event models not in subcontract: "
             f"{contract_event_models - subcontract_routing_keys}"
@@ -1030,16 +1036,25 @@ class TestHandlerRoutingContractCodeConsistency:
 # Module Exports
 # =============================================================================
 
+# NOTE: __all__ must include ALL test classes defined in this module.
+# When adding a new test class, add it here to ensure proper discovery
+# and documentation. The list is ordered by test category:
+# 1. Contract validation tests (TestHandlerRouting*)
+# 2. Subcontract/instantiation tests (TestOrchestrator*, TestRoute*, TestValidate*)
+# 3. Consistency tests (TestHandlerRoutingContractCodeConsistency)
 __all__ = [
+    # Contract validation tests
     "TestHandlerRoutingContract",
     "TestHandlerRoutingMappings",
     "TestHandlerRoutingModuleImports",
     "TestHandlerRoutingModulePaths",
     "TestHandlerRoutingOutputEvents",
     "TestHandlerDependencies",
+    # Subcontract/instantiation tests
     "TestOrchestratorInstantiation",
     "TestHandlerRoutingInitialization",
     "TestRouteToHandlers",
     "TestValidateHandlerRouting",
+    # Consistency tests
     "TestHandlerRoutingContractCodeConsistency",
 ]

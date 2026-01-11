@@ -6,6 +6,13 @@
 
 ---
 
+> **Scope Note**: This document covers OMN-1293 (MixinHandlerRouting integration into
+> omnibase_core). For the OMN-1102 declarative refactor of NodeRegistrationOrchestrator,
+> see the `node.py` module docstring in
+> `src/omnibase_infra/nodes/node_registration_orchestrator/node.py`.
+
+---
+
 ## Executive Summary
 
 **UPDATE (2026-01-11)**: **OMN-1293 is NOW COMPLETE**. The `MixinHandlerRouting` mixin is implemented in omnibase_core and integrated into `NodeOrchestrator`. The `RegistryInfraNodeRegistrationOrchestrator` registry is fully implemented with handler adapters. Contract-driven handler routing is now functional.

@@ -571,8 +571,11 @@ class RegistryInfraNodeRegistrationOrchestrator:
 
             reader = self._container.service_registry.get(ProjectionReaderRegistration)
             if reader is not None:
-                # Type assertion: service registry returns the registered type
-                assert isinstance(reader, ProjectionReaderRegistration)
+                # Type guard: service registry returns the registered type
+                if not isinstance(reader, ProjectionReaderRegistration):
+                    raise TypeError(
+                        f"Expected ProjectionReaderRegistration, got {type(reader).__name__}"
+                    )
                 return reader
 
         # Fallback: Create new instance (requires container to have DB config)
