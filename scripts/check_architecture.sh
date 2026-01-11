@@ -34,7 +34,7 @@
 # FOR COMPREHENSIVE ANALYSIS, use the Python tests instead:
 #     pytest tests/ci/test_architecture_compliance.py
 #
-# The Python tests use AST parsing and detect ALL imports including inline ones.
+# The Python tests use line-by-line regex scanning and detect ALL imports including inline ones.
 #
 # =============================================================================
 #
@@ -62,16 +62,14 @@ set -euo pipefail
 # This list MUST match the Python tests in tests/ci/test_architecture_compliance.py.
 # Both tools check the same forbidden imports for consistency.
 #
-# The Python tests have two sources:
-#   1. test_no_infra_import_in_core() - Parametrized tests for each import
-#   2. test_comprehensive_infra_scan() - Bulk scan for all imports
+# Python test locations (keep in sync when updating):
+#   - tests/ci/test_architecture_compliance.py:733-746 (parametrized tests)
+#   - tests/ci/test_architecture_compliance.py:809-821 (comprehensive scan)
 #
-# aiohttp and redis have xfail markers in Python (tracked by Linear tickets)
-# but are still enforced here to catch violations early.
-#
-# When adding/removing imports, update BOTH:
-#   - This array (FORBIDDEN_IMPORTS)
-#   - tests/ci/test_architecture_compliance.py (both test methods)
+# When adding/removing imports, update ALL THREE LOCATIONS:
+#   1. This array (FORBIDDEN_IMPORTS, lines 77-89)
+#   2. tests/ci/test_architecture_compliance.py parametrized list (lines 733-746)
+#   3. tests/ci/test_architecture_compliance.py comprehensive list (lines 809-821)
 #
 # NOTE: All imports listed here will cause a hard failure if detected.
 # For known issues tracked in Linear, see KNOWN_ISSUES below.
@@ -80,19 +78,20 @@ FORBIDDEN_IMPORTS=(
     "kafka"              # Event streaming client
     "httpx"              # HTTP client library
     "asyncpg"            # PostgreSQL async driver
-    "aiohttp"            # Known issue: OMN-1015 (xfail in Python tests)
-    "redis"              # Known issue: OMN-1295 (xfail in Python tests)
+    "aiohttp"            # Async HTTP client (OMN-1015 - tracked in Linear)
+    "redis"              # Redis client (OMN-1295 - tracked in Linear)
     "psycopg"            # PostgreSQL driver (v3)
     "psycopg2"           # PostgreSQL driver (v2)
-    "consul"             # Consul client library
+    "consul"             # Consul client (OMN-1015 - TYPE_CHECKING import)
     "hvac"               # Vault client library
     "aiokafka"           # Async Kafka client
     "confluent_kafka"    # Confluent Kafka client
 )
 
 # Known issues with Linear ticket references
-# These are included in FORBIDDEN_IMPORTS for completeness, but have
-# corresponding xfail markers in the Python test suite.
+# These are included in FORBIDDEN_IMPORTS for completeness and are tracked
+# in Linear for future resolution. When ONLY known issues are detected,
+# the script exits with code 0 (pass) to avoid blocking CI unnecessarily.
 # Format: "import_name|ticket_id|description"
 #
 # NOTE: This array is intentionally defined for documentation purposes and
@@ -445,12 +444,13 @@ LIMITATIONS:
 
        These are detected and reported, but exit code is 0 (pass).
 
-    RECOMMENDED: For comprehensive AST-based analysis, use:
+    RECOMMENDED: For comprehensive import detection, use:
         pytest tests/ci/test_architecture_compliance.py
 
     The Python tests provide:
-       - Proper AST parsing of ALL imports (including inline)
-       - Multiline docstring handling
+       - Line-by-line regex scanning that detects ALL imports (including inline)
+       - Proper multiline docstring handling
+       - TYPE_CHECKING block awareness
        - xfail markers for known issues
        - More accurate detection with fewer false positives
 
