@@ -46,6 +46,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -80,6 +81,9 @@ if TYPE_CHECKING:
         ProtocolIdempotencyStore,
     )
     from omnibase_infra.nodes.architecture_validator import ProtocolArchitectureRule
+    from omnibase_infra.runtime.contract_handler_discovery import (
+        ContractHandlerDiscovery,
+    )
 
 from omnibase_infra.models.types import JsonDict
 
@@ -177,6 +181,7 @@ class RuntimeHostProcess:
         config: dict[str, object] | None = None,
         handler_registry: ProtocolBindingRegistry | None = None,
         architecture_rules: tuple[ProtocolArchitectureRule, ...] | None = None,
+        contract_paths: list[str] | None = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -277,6 +282,46 @@ class RuntimeHostProcess:
                     )
                     await process.start()  # Validates architecture first
                     ```
+
+            contract_paths: Optional list of paths to scan for handler contracts.
+                Type: list[str] | None
+
+                Purpose:
+                    Enables contract-based handler discovery. When provided, the runtime
+                    will auto-discover and register handlers from these paths during
+                    start() instead of using wire_default_handlers().
+
+                    Paths can be:
+                    - Directories: Recursively scanned for handler contracts
+                    - Files: Directly loaded as contract files
+
+                Behavior:
+                    - If contract_paths is provided: Uses ContractHandlerDiscovery
+                      to auto-discover and register handlers from the specified paths.
+                    - If contract_paths is None or empty: Falls back to the existing
+                      wire_default_handlers() behavior.
+
+                Error Handling:
+                    Discovery errors are logged but do not block startup. This enables
+                    graceful degradation where some handlers can be registered even
+                    if others fail to load.
+
+                Example:
+                    ```python
+                    # Contract-based handler discovery
+                    process = RuntimeHostProcess(
+                        contract_paths=["src/nodes/handlers", "plugins/"]
+                    )
+                    await process.start()
+
+                    # Or with explicit file paths
+                    process = RuntimeHostProcess(
+                        contract_paths=[
+                            "handlers/auth/handler_contract.yaml",
+                            "handlers/db/handler_contract.yaml",
+                        ]
+                    )
+                    ```
         """
         # Store container reference for dependency resolution
         self._container: ModelONEXContainer | None = container
@@ -287,6 +332,15 @@ class RuntimeHostProcess:
         self._architecture_rules: tuple[ProtocolArchitectureRule, ...] = (
             architecture_rules or ()
         )
+
+        # Contract paths for handler discovery (OMN-1133)
+        # Convert strings to Path objects for consistent filesystem operations
+        self._contract_paths: list[Path] = (
+            [Path(p) for p in contract_paths] if contract_paths else []
+        )
+
+        # Handler discovery service (lazy-created if contract_paths provided)
+        self._handler_discovery: ContractHandlerDiscovery | None = None
 
         # Create or use provided event bus
         self._event_bus: InMemoryEventBus | KafkaEventBus = (
@@ -445,6 +499,8 @@ class RuntimeHostProcess:
                 "drain_timeout_seconds": self._drain_timeout_seconds,
                 "has_container": self._container is not None,
                 "has_handler_registry": self._handler_registry is not None,
+                "has_contract_paths": len(self._contract_paths) > 0,
+                "contract_path_count": len(self._contract_paths),
             },
         )
 
@@ -591,7 +647,9 @@ class RuntimeHostProcess:
         Performs the following steps:
         1. Validate architecture compliance (if rules configured) - OMN-1138
         2. Start event bus (if not already started)
-        3. Wire handlers via wiring module (registers handler classes to singleton)
+        3. Discover/wire handlers:
+           - If contract_paths provided: Auto-discover handlers from contracts (OMN-1133)
+           - Otherwise: Wire default handlers via wiring module
         4. Populate self._handlers from singleton registry (instantiate and initialize)
         5. Subscribe to input topic
 
@@ -605,6 +663,14 @@ class RuntimeHostProcess:
             ERROR severity violations block startup by raising
             ArchitectureViolationError. WARNING/INFO violations are logged
             but don't block startup.
+
+        Contract-Based Handler Discovery (OMN-1133):
+            If contract_paths were provided at init, the runtime will auto-discover
+            handlers from these paths instead of using wire_default_handlers().
+
+            Discovery errors are logged but do not block startup, enabling
+            graceful degradation where some handlers can be registered even
+            if others fail to load.
 
         This method is idempotent - calling start() on an already started
         process is safe and has no effect.
@@ -623,6 +689,7 @@ class RuntimeHostProcess:
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
                 "group_id": self._group_id,
+                "has_contract_paths": len(self._contract_paths) > 0,
             },
         )
 
@@ -634,12 +701,13 @@ class RuntimeHostProcess:
         # Step 2: Start event bus
         await self._event_bus.start()
 
-        # Step 3: Wire handlers via wiring module
-        # This registers default handler CLASSES with the singleton registry
-        wire_handlers()
+        # Step 3: Discover/wire handlers (OMN-1133)
+        # If contract_paths provided, use ContractHandlerDiscovery to auto-discover
+        # handlers from contract files. Otherwise, fall back to wire_default_handlers().
+        await self._discover_or_wire_handlers()
 
         # Step 4: Populate self._handlers from singleton registry
-        # The wiring module registers handler classes, so we need to:
+        # The wiring/discovery step registers handler classes, so we need to:
         # - Get each registered handler class from the singleton registry
         # - Instantiate the handler class
         # - Call initialize() on each handler instance with config
@@ -820,6 +888,117 @@ class RuntimeHostProcess:
         self._is_running = False
 
         logger.info("RuntimeHostProcess stopped successfully")
+
+    async def _discover_or_wire_handlers(self) -> None:
+        """Discover handlers from contracts or wire default handlers.
+
+        This method implements the handler discovery/wiring step (Step 3) of the
+        start() sequence. It supports two modes:
+
+        Contract-Based Discovery (OMN-1133):
+            If contract_paths were provided at init, uses ContractHandlerDiscovery
+            to auto-discover and register handlers from the specified paths.
+
+            Discovery errors are logged but do not block startup, enabling
+            graceful degradation where some handlers can be registered even
+            if others fail to load.
+
+        Default Handler Wiring (Fallback):
+            If no contract_paths were provided, falls back to wire_default_handlers()
+            which registers the standard set of handlers (HTTP, DB, Consul, Vault).
+
+        The discovery/wiring step registers handler CLASSES with the handler registry.
+        The subsequent _populate_handlers_from_registry() step instantiates and
+        initializes these handler classes.
+        """
+        if self._contract_paths:
+            # Contract-based handler discovery (OMN-1133)
+            await self._discover_handlers_from_contracts()
+        else:
+            # Fallback to default handler wiring (existing behavior)
+            wire_handlers()
+
+    async def _discover_handlers_from_contracts(self) -> None:
+        """Discover and register handlers from contract files.
+
+        This method implements contract-based handler discovery as part of OMN-1133.
+        It creates a ContractHandlerDiscovery service, discovers handlers from the
+        configured contract_paths, and registers them with the handler registry.
+
+        Error Handling:
+            Discovery errors are logged but do not block startup. This enables
+            graceful degradation where some handlers can be registered even if
+            others fail to load.
+
+        The discovery service tracks:
+            - handlers_discovered: Number of handlers found in contracts
+            - handlers_registered: Number successfully registered
+            - errors: List of individual discovery/registration failures
+
+        Related:
+            - ContractHandlerDiscovery: Discovery service implementation
+            - HandlerPluginLoader: Contract file parsing and validation
+            - ModelDiscoveryResult: Result model with error tracking
+        """
+        from omnibase_infra.runtime.contract_handler_discovery import (
+            ContractHandlerDiscovery,
+        )
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+        from omnibase_infra.runtime.handler_registry import get_handler_registry
+
+        logger.info(
+            "Starting contract-based handler discovery",
+            extra={
+                "contract_paths": [str(p) for p in self._contract_paths],
+                "path_count": len(self._contract_paths),
+            },
+        )
+
+        # Create handler discovery service if not already created
+        # Uses the handler_registry from init or falls back to singleton
+        handler_registry = await self._get_handler_registry()
+
+        self._handler_discovery = ContractHandlerDiscovery(
+            plugin_loader=HandlerPluginLoader(),
+            handler_registry=handler_registry,
+        )
+
+        # Discover and register handlers from contract paths
+        discovery_result = await self._handler_discovery.discover_and_register(
+            contract_paths=self._contract_paths,
+        )
+
+        # Log discovery results
+        if discovery_result.has_errors:
+            logger.warning(
+                "Handler discovery completed with errors",
+                extra={
+                    "handlers_discovered": discovery_result.handlers_discovered,
+                    "handlers_registered": discovery_result.handlers_registered,
+                    "error_count": len(discovery_result.errors),
+                },
+            )
+            # Log individual errors for debugging
+            for error in discovery_result.errors:
+                logger.error(
+                    "Handler discovery error: %s",
+                    error.message,
+                    extra={
+                        "error_code": error.error_code,
+                        "handler_name": error.handler_name,
+                        "contract_path": str(error.contract_path)
+                        if error.contract_path
+                        else None,
+                    },
+                )
+        else:
+            logger.info(
+                "Handler discovery completed successfully",
+                extra={
+                    "handlers_discovered": discovery_result.handlers_discovered,
+                    "handlers_registered": discovery_result.handlers_registered,
+                },
+            )
 
     async def _populate_handlers_from_registry(self) -> None:
         """Populate self._handlers from handler registry (container or singleton).

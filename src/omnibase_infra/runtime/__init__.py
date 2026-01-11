@@ -154,6 +154,14 @@ from omnibase_infra.runtime.protocol_handler_plugin_loader import (
     ProtocolHandlerPluginLoader,
 )
 
+# Handler discovery protocol and implementation (OMN-1133)
+from omnibase_infra.runtime.protocol_handler_discovery import (
+    ProtocolHandlerDiscovery,
+)
+from omnibase_infra.runtime.contract_handler_discovery import (
+    ContractHandlerDiscovery,
+)
+
 # Projector plugin loading and schema validation (OMN-1168)
 from omnibase_infra.runtime.projector_plugin_loader import (
     ProjectorPluginLoader,
@@ -275,6 +283,9 @@ __all__: list[str] = [
     "HandlerPluginLoader",
     "MAX_CONTRACT_SIZE",
     "ProtocolHandlerPluginLoader",
+    # Handler discovery protocol and implementation (OMN-1133)
+    "ContractHandlerDiscovery",
+    "ProtocolHandlerDiscovery",
     # Projector schema validation (OMN-1168)
     "ProjectorSchemaError",
     "ProjectorPluginLoader",
