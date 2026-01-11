@@ -39,7 +39,7 @@ def mock_registry() -> ProtocolBindingRegistry:
         async def handle(
             self,
             envelope: dict[str, object],
-            correlation_id: str | None = None,
+            correlation_id: UUID | None = None,
         ) -> dict[str, object]:
             """Handle envelope - mock implementation for unit tests."""
             return {"handled": True}

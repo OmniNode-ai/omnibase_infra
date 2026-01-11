@@ -78,6 +78,7 @@ def _is_docker_available() -> bool:
             text=True,
             timeout=10,
             check=False,
+            shell=False,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -97,6 +98,7 @@ def _is_buildkit_available() -> bool:
             text=True,
             timeout=10,
             check=False,
+            shell=False,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -268,6 +270,7 @@ def built_test_image(
         timeout=600,  # 10 minute timeout for build
         env=env,
         check=False,
+        shell=False,
     )
 
     if result.returncode != 0:
@@ -281,6 +284,7 @@ def built_test_image(
         capture_output=True,
         timeout=60,
         check=False,
+        shell=False,
     )
 
 
@@ -337,6 +341,7 @@ def run_container(
             text=True,
             timeout=60,
             check=False,
+            shell=False,
         )
 
         if result.returncode != 0:
@@ -354,6 +359,7 @@ def run_container(
                 capture_output=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
             if remove_on_exit:
                 # Remove container
@@ -362,6 +368,7 @@ def run_container(
                     capture_output=True,
                     timeout=30,
                     check=False,
+                    shell=False,
                 )
 
 
@@ -405,6 +412,7 @@ def wait_for_healthy(
             text=True,
             timeout=10,
             check=False,
+            shell=False,
         )
 
         if result.returncode == 0:
@@ -443,6 +451,7 @@ def wait_for_log_message(
             text=True,
             timeout=10,
             check=False,
+            shell=False,
         )
 
         if message in result.stdout or message in result.stderr:

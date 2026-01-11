@@ -208,6 +208,8 @@ def run_security_scan(policy_class: type) -> tuple[bool, list[str]]:
             ["bandit", "-f", "json", str(temp_path)],
             capture_output=True,
             text=True,
+            check=False,
+            shell=False,  # Explicit for security - prevents shell injection
         )
         if bandit_result.returncode != 0:
             issues.append(f"Bandit: {bandit_result.stdout}")
@@ -217,6 +219,8 @@ def run_security_scan(policy_class: type) -> tuple[bool, list[str]]:
             ["semgrep", "--config=p/security-audit", "--json", str(temp_path)],
             capture_output=True,
             text=True,
+            check=False,
+            shell=False,  # Explicit for security - prevents shell injection
         )
         if semgrep_result.returncode != 0:
             issues.append(f"Semgrep: {semgrep_result.stdout}")
@@ -478,6 +482,28 @@ tenant_b.use_registry(global_registry)  # Security boundary violated
 - [Container Dependency Injection](./container_dependency_injection.md) - How to properly inject PolicyRegistry
 - [Error Handling Patterns](./error_handling_patterns.md) - PolicyRegistryError usage
 - [Correlation ID Tracking](./correlation_id_tracking.md) - Tracing policy evaluations
+
+## Architecture Layer Enforcement
+
+PolicyRegistry operates within the `omnibase_infra` layer. The architecture layer
+validation ensures proper separation between `omnibase_core` (pure, no I/O) and
+`omnibase_infra` (infrastructure, owns all I/O).
+
+**CI Enforcement:**
+- Pre-push hook: `onex-validate-architecture-layers` in `.pre-commit-config.yaml`
+- GitHub Actions: `ONEX Validators` job in `.github/workflows/test.yml`
+- Python tests: `tests/ci/test_architecture_compliance.py`
+
+**Known Issues Tracking:**
+Known violations are tracked with Linear ticket references and use pytest.mark.xfail
+markers. See `scripts/validate.py` for the KNOWN_ISSUES registry.
+
+**Validation Limitations:**
+The regex-based validators cannot detect inline imports inside functions. For
+comprehensive AST-based analysis, use the Python tests directly:
+```bash
+pytest tests/ci/test_architecture_compliance.py -v
+```
 
 ## See Also
 

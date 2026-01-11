@@ -143,6 +143,26 @@ from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 
+# Handler plugin loader (OMN-1132)
+from omnibase_infra.runtime.handler_plugin_loader import (
+    CONTRACT_YAML_FILENAME,
+    HANDLER_CONTRACT_FILENAME,
+    HandlerPluginLoader,
+    MAX_CONTRACT_SIZE,
+)
+from omnibase_infra.runtime.protocol_handler_plugin_loader import (
+    ProtocolHandlerPluginLoader,
+)
+
+# Projector plugin loading and schema validation (OMN-1168)
+from omnibase_infra.runtime.projector_plugin_loader import (
+    ProjectorPluginLoader,
+)
+from omnibase_infra.runtime.projector_schema_manager import (
+    ProjectorSchemaError,
+    ProjectorSchemaValidator,
+)
+
 # Invocation security enforcer (OMN-1098)
 from omnibase_infra.runtime.invocation_security_enforcer import (
     InvocationSecurityEnforcer,
@@ -249,6 +269,16 @@ __all__: list[str] = [
     "DispatcherNodeRegistrationAcked",
     # Introspection event router (PR #101)
     "IntrospectionEventRouter",
+    # Handler plugin loader (OMN-1132)
+    "CONTRACT_YAML_FILENAME",
+    "HANDLER_CONTRACT_FILENAME",
+    "HandlerPluginLoader",
+    "MAX_CONTRACT_SIZE",
+    "ProtocolHandlerPluginLoader",
+    # Projector schema validation (OMN-1168)
+    "ProjectorSchemaError",
+    "ProjectorPluginLoader",
+    "ProjectorSchemaValidator",
     # Invocation security enforcer (OMN-1098)
     "InvocationSecurityEnforcer",
     "SecurityViolationError",

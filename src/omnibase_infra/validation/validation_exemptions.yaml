@@ -216,6 +216,20 @@ pattern_exemptions:
       - CLAUDE.md (Infrastructure Patterns - Adapter Pattern)
     ticket: OMN-1092
   # ==========================================================================
+  # Projector Schema Model Exemptions (OMN-1168)
+  # ==========================================================================
+  # ModelProjectorSchema requires multiple methods for SQL generation, validation,
+  # and schema introspection operations.
+  - file_pattern: 'model_projector_schema\.py'
+    class_pattern: "Class 'ModelProjectorSchema'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Schema model requires SQL generation methods (to_create_table_sql, to_full_migration_sql), schema introspection (get_column_names, get_primary_key_columns), validation methods, and identifier quoting for complete projector schema management.
+
+    documentation:
+      - src/omnibase_infra/models/projectors/model_projector_schema.py (class docstring)
+    ticket: OMN-1168
+  # ==========================================================================
   # Execution Shape Validator Exemptions (OMN-958)
   # ==========================================================================
   - file_pattern: 'enum_handler_type\.py'
@@ -830,6 +844,21 @@ pattern_exemptions:
       - docs/patterns/correlation_id_tracking.md
     ticket: OMN-811
   # ==========================================================================
+  # MCP Handler Model Exemptions (OMN-1288)
+  # ==========================================================================
+  # tool_name in ModelMcpToolCall is the MCP protocol identifier for the tool
+  # to invoke (e.g., "get_weather", "search_documents"). It is NOT an entity
+  # reference requiring UUID + display_name pattern - it's a protocol-level
+  # identifier defined by the MCP specification.
+  - file_pattern: 'model_mcp_tool_call\.py'
+    violation_pattern: "Field 'tool_name' might reference an entity"
+    reason: >
+      tool_name is an MCP protocol identifier for the tool to invoke (e.g., "get_weather"). This is a protocol-level identifier from the Model Context Protocol specification, not an entity reference.
+
+    documentation:
+      - Model Context Protocol Specification (https://modelcontextprotocol.io/)
+    ticket: OMN-1288
+  # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================
   # These models use builder patterns with many convenience methods.
@@ -1073,6 +1102,75 @@ pattern_exemptions:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1097
+  # ==========================================================================
+  # Handler Plugin Loader Exemptions (OMN-1132)
+  # ==========================================================================
+  # HandlerPluginLoader discovers and loads ONEX handlers from contract YAML files.
+  # The "Handler" in the name refers to ONEX handler contracts being loaded,
+  # not an anti-pattern manager/helper class.
+  - file_pattern: 'handler_plugin_loader\.py'
+    class_pattern: "Class name 'HandlerPluginLoader'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerPluginLoader loads ONEX handler contracts from YAML files. The "Handler" refers to ONEX handler contracts being discovered and loaded, not an anti-pattern manager class. This is legitimate handler infrastructure code.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-1132
+  - file_pattern: 'handler_plugin_loader\.py'
+    class_pattern: "Class 'HandlerPluginLoader'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Plugin loader pattern requires multiple discovery methods (load_from_contract, load_from_directory, discover_and_load), security validation (_validate_namespace, _validate_file_security), contract parsing (_load_contract, _import_handler_class), and error handling methods. This is the standard plugin loader pattern consistent with ProjectorPluginLoader.
+
+    documentation:
+      - docs/patterns/handler_plugin_loader.md
+      - CLAUDE.md (Handler Plugin Loader Patterns)
+    ticket: OMN-1132
+  - file_pattern: 'protocol_handler_plugin_loader\.py'
+    class_pattern: "Class name 'ProtocolHandlerPluginLoader'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ProtocolHandlerPluginLoader defines the interface for handler plugin loading. The "Handler" refers to ONEX handler contracts, consistent with HandlerPluginLoader.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_loaded_handler\.py'
+    class_pattern: "Class name 'ModelLoadedHandler'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelLoadedHandler represents metadata about a loaded ONEX handler contract. The "Handler" refers to ONEX handler concepts, not an anti-pattern.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_handler_contract\.py'
+    class_pattern: "Class name 'ModelHandlerContract'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelHandlerContract is the Pydantic schema for handler contract YAML files. The "Handler" refers to ONEX handler contracts, consistent with HandlerPluginLoader and ModelLoadedHandler.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_handler_contract\.py'
+    violation_pattern: "Field 'handler_name' might reference an entity"
+    reason: >
+      handler_name is a human-readable identifier from the contract YAML (e.g., "auth-handler"). It's a semantic identifier, not an entity reference. Consistent with ModelLoadedHandler.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers)
+    ticket: OMN-1132
+  - file_pattern: 'model_loaded_handler\.py'
+    violation_pattern: "Field 'handler_name' might reference an entity"
+    reason: >
+      handler_name is a human-readable identifier for the handler from the contract (e.g., "auth-handler"). It's a semantic identifier, not an entity reference.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers)
+    ticket: OMN-1132
   - file_pattern: 'model_handler_descriptor\.py'
     violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
@@ -1354,28 +1452,65 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
     ticket: OMN-1263
   # ==========================================================================
-  # Architecture Validator OMN-1099 Exemptions (AST Visitor Pattern)
+  # ProjectorValidationError Exemptions (OMN-1168)
   # ==========================================================================
-  # OMN-1099 validators (no-direct-dispatch, no-handler-publishing, no-orchestrator-fsm)
-  # use Python AST visitor pattern which requires visit_* method names per Python stdlib.
-  # NOTE: model_architecture_violation.py exemptions for rule_id/rule_name are defined earlier
-  # in the "Architecture Violation Model Exemptions (OMN-1099)" section.
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Class name .* contains anti-pattern 'Handler'"
+  # Validation error class requires multiple context parameters for complete
+  # error information: error_type, contract_path, message, remediation_hint,
+  # and correlation_id. These are distinct required contexts for error reporting.
+  - file_pattern: 'model_projector_validation_error\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
     reason: >
-      HandlerPublishingVisitor is an AST visitor class that detects handler publishing patterns. The name correctly describes its purpose: visiting AST nodes to find handlers that incorrectly publish events.
+      Validation error class requires multiple contextual parameters for debugging: error_type, contract_path, message, remediation_hint, correlation_id. These are distinct error context fields needed for comprehensive error reporting and graceful mode error collection.
 
     documentation:
-      - Python ast module (NodeVisitor pattern)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_.*\.py'
-    violation_pattern: "Function name 'visit_.*' should use snake_case"
+      - docs/patterns/error_handling_patterns.md
+      - CLAUDE.md (Infrastructure Error Patterns)
+    ticket: OMN-1168
+  # ==========================================================================
+  # ProjectorPluginLoader Exemptions (OMN-1168)
+  # ==========================================================================
+  # Plugin loader pattern requires multiple discovery methods:
+  # - load_from_contract, load_from_directory, discover_and_load
+  # - Security validation methods (_validate_file_security, _sanitize_path)
+  # - Contract parsing (_load_contract, _parse_yaml)
+  # - Error handling (discover_with_errors, graceful mode support)
+  - file_pattern: 'projector_plugin_loader\.py'
+    class_pattern: "Class 'ProjectorPluginLoader'"
+    violation_pattern: 'has \d+ methods'
     reason: >
-      AST visitor methods must follow Python's ast.NodeVisitor naming convention. visit_ClassDef, visit_FunctionDef, etc. are required method names for the AST visitor pattern from Python stdlib.
+      Plugin loader pattern requires multiple discovery methods (load_from_contract, load_from_directory, discover_and_load), security validation, contract parsing, and error handling methods. Mirrors handler_contract_source.py pattern.
 
     documentation:
-      - Python ast module documentation (NodeVisitor.visit_* methods)
-    ticket: OMN-1099
+      - src/omnibase_infra/runtime/handler_contract_source.py (reference pattern)
+    ticket: OMN-1168
+  # ==========================================================================
+  # Projector Schema Model Exemptions (OMN-1168)
+  # ==========================================================================
+  # table_name is a standard database identifier, not an entity reference.
+  # This pattern is ubiquitous in database-related models.
+  # NOTE: Projector models are temporarily in omnibase_infra until omnibase_core
+  # provides canonical projector model types.
+  - file_pattern: 'model_projector_schema\.py'
+    violation_pattern: "Field 'table_name' might reference an entity"
+    reason: >
+      table_name is a PostgreSQL table identifier (e.g., 'node_registrations'), not an entity reference. Standard database schema pattern. Note: Projector models are temporarily located in omnibase_infra until omnibase_core provides canonical projector model types.
+
+    documentation:
+      - PostgreSQL CREATE TABLE syntax
+      - src/omnibase_infra/schemas/schema_registration_projection.sql (example usage)
+      - src/omnibase_infra/models/projectors/model_projector_schema.py (ModelProjectorSchema defines table_name as identifier, temporary location in omnibase_infra)
+    ticket: OMN-1168
+  # ModelProjectorValidationError __init__ requires 6 parameters for complete error context
+  - file_pattern: 'model_projector_validation_error\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error model requires multiple context parameters for complete error reporting: error_type, contract_path, message, remediation_hint, correlation_id. These are distinct required contexts for debugging projector validation failures.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+    ticket: OMN-1168
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

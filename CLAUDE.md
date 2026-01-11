@@ -9,6 +9,7 @@
 - `circuit_breaker_implementation.md` - Circuit breaker details
 - `dispatcher_resilience.md` - Dispatcher-owned resilience pattern
 - `security_patterns.md` - Node introspection security, input validation, secrets
+- `handler_plugin_loader.md` - Plugin-based handler loading, security trade-offs
 
 ---
 
@@ -604,6 +605,140 @@ The `MixinNodeIntrospection` mixin uses Python reflection for service discovery.
 - Configure Kafka topic ACLs for introspection topics
 
 **See**: `docs/patterns/security_patterns.md#introspection-security` for complete threat model and deployment checklist
+
+### Handler Plugin Loader Patterns
+
+The runtime uses a **plugin-based handler loading** system instead of hardcoded registries. Handlers are discovered and loaded dynamically from YAML contracts.
+
+**Why Plugin Pattern Over Hardcoded Registry:**
+
+| Approach | Trade-off |
+|----------|-----------|
+| Hardcoded registry | Compile-time safety, but tight coupling and requires code changes to add handlers |
+| Plugin pattern | Loose coupling, runtime discovery, but requires path validation |
+
+**Benefits of Plugin Architecture:**
+- **Contract-driven**: Handler configuration lives in `contract.yaml`, not Python code
+- **Loose coupling**: Orchestrators don't import handler modules directly
+- **Runtime discovery**: New handlers can be added without modifying orchestrator code
+- **Testability**: Mock handlers can be injected via contract configuration
+
+**Why YAML Contracts Over Python Decorators:**
+
+| Aspect | YAML Contracts | Python Decorators |
+|--------|---------------|-------------------|
+| Tooling | Machine-readable, lintable, diffable | Requires AST parsing |
+| Auditability | Changes visible in git, reviewable | Scattered across codebase |
+| Non-Python access | CI/CD, dashboards can read contracts | Requires Python runtime |
+| Separation of concerns | Configuration separate from logic | Mixes config with code |
+
+**Contract-Based Handler Declaration:**
+```yaml
+# contract.yaml
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model: "ModelNodeIntrospectionEvent"
+      handler_class: "HandlerNodeIntrospected"
+      handler_module: "omnibase_infra.handlers.handler_node_introspected"
+```
+
+**Handler Resolution Precedence:**
+
+The loader recognizes two contract file names:
+
+| Filename | Purpose |
+|----------|---------|
+| `handler_contract.yaml` | Dedicated handler contract (preferred) |
+| `contract.yaml` | General ONEX contract with handler fields |
+
+**FAIL-FAST: Ambiguous Contract Configuration**
+
+When **both** `handler_contract.yaml` **and** `contract.yaml` exist in the **same directory**, the loader **raises an error** (error code: `AMBIGUOUS_CONTRACT_CONFIGURATION` / `HANDLER_LOADER_040`). This fail-fast behavior prevents:
+
+- Duplicate handler registrations if both files define similar handlers
+- Confusion about which contract is the "source of truth"
+- Unexpected runtime behavior if handlers conflict
+
+**Error raised when ambiguous configuration detected:**
+```
+ProtocolConfigurationError: Ambiguous contract configuration in 'auth':
+Found both 'handler_contract.yaml' and 'contract.yaml'.
+Use only ONE contract file per handler directory to avoid conflicts.
+```
+
+**Best Practice**: Use only **ONE** contract file per handler directory.
+
+```
+# CORRECT: One contract per directory
+nodes/auth/
+    handler_contract.yaml   # Preferred: dedicated handler contract
+    handler_auth.py
+
+# INCORRECT: Both contract types in same directory (raises error)
+nodes/auth/
+    handler_contract.yaml   # Conflict detected!
+    contract.yaml          # ProtocolConfigurationError raised
+```
+
+**Why Fail-Fast Over Warning**: The loader raises an error instead of warning because:
+1. **Explicit is better than implicit**: Silent loading of both could mask configuration errors
+2. **Fail-fast philosophy**: Early error detection prevents production issues
+3. **No assumptions**: The loader cannot know which file the user intends to be authoritative
+
+**See**: `docs/patterns/handler_plugin_loader.md#contract-file-precedence` for full resolution rules.
+
+**Security Model:**
+
+**CRITICAL**: YAML contracts are treated as **executable code**, not mere configuration. Dynamic imports via `importlib.import_module()` execute module-level code during import.
+
+| Risk | Status | Description |
+|------|--------|-------------|
+| YAML deserialization attacks | **MITIGATED** | `yaml.safe_load()` blocks `!!python/object` tags |
+| Memory exhaustion | **MITIGATED** | 10MB file size limit enforced |
+| Arbitrary class loading | **MITIGATED** | Protocol validation requires 5 `ProtocolHandler` methods |
+| Arbitrary code execution | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict imports |
+| Path traversal in module paths | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict imports |
+| Untrusted namespace imports | **OPTIONALLY MITIGATED** | Use `allowed_namespaces` parameter |
+
+**Built-in Security Controls** (implemented in loader):
+- **YAML safe loading**: `yaml.safe_load()` prevents deserialization attacks
+- **File size limits**: Contracts exceeding 10MB are rejected
+- **Protocol validation**: Classes must implement all 5 `ProtocolHandler` methods
+- **Error containment**: Single bad contract doesn't crash the system
+- **Correlation tracking**: All load operations logged with UUID correlation IDs
+- **Namespace allowlisting** (optional): Use `allowed_namespaces` constructor parameter to restrict imports
+
+**Optional Security Control - Namespace Allowlisting:**
+```python
+# Restrict to trusted namespaces only (recommended for production)
+loader = HandlerPluginLoader(
+    allowed_namespaces=["omnibase_infra.", "omnibase_core.", "myapp.handlers."]
+)
+# Untrusted modules will fail with NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)
+```
+
+**NOT Implemented** (deployment-level controls):
+- Import hook filtering (custom `MetaPathFinder`)
+- Runtime isolation (subprocess/container isolation)
+
+**Secure Deployment Checklist:**
+1. **File permissions**: Contract directories readable only by runtime user
+2. **Write protection**: Mount contract directories as read-only at runtime
+3. **Source validation**: Contracts from version-controlled, reviewed sources only
+4. **Namespace allowlisting**: Enable `allowed_namespaces` parameter (recommended for production)
+5. **Audit logging**: Enable INFO-level logging for handler loader
+6. **Contract validation**: Run `onex validate` in CI to catch malformed contracts
+
+**Error Codes:**
+- `MODULE_NOT_FOUND` (HANDLER_LOADER_010) - Handler module not found
+- `CLASS_NOT_FOUND` (HANDLER_LOADER_011) - Class not found in module
+- `IMPORT_ERROR` (HANDLER_LOADER_012) - Module import failed (syntax/dependency)
+- `NAMESPACE_NOT_ALLOWED` (HANDLER_LOADER_013) - Handler module namespace not in allowlist
+- `AMBIGUOUS_CONTRACT_CONFIGURATION` (HANDLER_LOADER_040) - Both contract types in same directory
+- `PROTOCOL_NOT_IMPLEMENTED` (HANDLER_LOADER_006) - Class missing required `ProtocolHandler` methods
+
+**See**: `docs/patterns/handler_plugin_loader.md` and `docs/decisions/adr-handler-plugin-loader-security.md` for complete security documentation.
 
 ### Service Integration Architecture
 - **Adapter Pattern** - External services wrapped in ONEX adapters

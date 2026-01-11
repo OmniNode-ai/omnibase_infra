@@ -7,6 +7,7 @@ Note:
     Import it from there for new code.
 """
 
+from omnibase_infra.models.discovery.model_dependency_spec import ModelDependencySpec
 from omnibase_infra.models.discovery.model_discovered_capabilities import (
     ModelDiscoveredCapabilities,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "INVALID_TOPIC_CHARS",
     "TOPIC_PATTERN",
     "VERSION_SUFFIX_PATTERN",
+    "ModelDependencySpec",
     "ModelDiscoveredCapabilities",
     "ModelIntrospectionConfig",
     "ModelIntrospectionPerformanceMetrics",

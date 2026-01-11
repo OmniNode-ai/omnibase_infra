@@ -22,6 +22,7 @@ Example:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import UUID
 
 if TYPE_CHECKING:
     from omnibase_infra.enums import EnumRegistrationState
@@ -100,7 +101,10 @@ class ProtocolCapabilityProjection(Protocol):
     """
 
     async def get_by_capability_tag(
-        self, tag: str, state: EnumRegistrationState | None = None
+        self,
+        tag: str,
+        state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find all registrations with the specified capability tag.
 
@@ -109,6 +113,7 @@ class ProtocolCapabilityProjection(Protocol):
         Args:
             tag: The capability tag to search for (e.g., "postgres.storage")
             state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            correlation_id: Optional correlation ID for distributed tracing
 
         Returns:
             List of matching registration projections
@@ -121,7 +126,10 @@ class ProtocolCapabilityProjection(Protocol):
         ...
 
     async def get_by_intent_type(
-        self, intent_type: str, state: EnumRegistrationState | None = None
+        self,
+        intent_type: str,
+        state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find all registrations that handle the specified intent type.
 
@@ -130,6 +138,7 @@ class ProtocolCapabilityProjection(Protocol):
         Args:
             intent_type: The intent type to search for (e.g., "postgres.upsert")
             state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            correlation_id: Optional correlation ID for distributed tracing
 
         Returns:
             List of matching registration projections
@@ -142,7 +151,10 @@ class ProtocolCapabilityProjection(Protocol):
         ...
 
     async def get_by_protocol(
-        self, protocol_name: str, state: EnumRegistrationState | None = None
+        self,
+        protocol_name: str,
+        state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find all registrations implementing the specified protocol.
 
@@ -151,6 +163,7 @@ class ProtocolCapabilityProjection(Protocol):
         Args:
             protocol_name: The protocol name (e.g., "ProtocolDatabaseAdapter")
             state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            correlation_id: Optional correlation ID for distributed tracing
 
         Returns:
             List of matching registration projections
@@ -162,7 +175,10 @@ class ProtocolCapabilityProjection(Protocol):
         ...
 
     async def get_by_contract_type(
-        self, contract_type: ContractType, state: EnumRegistrationState | None = None
+        self,
+        contract_type: ContractType,
+        state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find all registrations of the specified contract type.
 
@@ -172,6 +188,7 @@ class ProtocolCapabilityProjection(Protocol):
             contract_type: The contract type. Must be one of: "effect", "compute",
                 "reducer", or "orchestrator"
             state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            correlation_id: Optional correlation ID for distributed tracing
 
         Returns:
             List of matching registration projections
@@ -183,7 +200,10 @@ class ProtocolCapabilityProjection(Protocol):
         ...
 
     async def get_by_capability_tags_all(
-        self, tags: list[str], state: EnumRegistrationState | None = None
+        self,
+        tags: list[str],
+        state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find registrations with ALL specified capability tags.
 
@@ -192,6 +212,7 @@ class ProtocolCapabilityProjection(Protocol):
         Args:
             tags: List of capability tags that must all be present
             state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            correlation_id: Optional correlation ID for distributed tracing
 
         Returns:
             List of matching registration projections
@@ -204,7 +225,10 @@ class ProtocolCapabilityProjection(Protocol):
         ...
 
     async def get_by_capability_tags_any(
-        self, tags: list[str], state: EnumRegistrationState | None = None
+        self,
+        tags: list[str],
+        state: EnumRegistrationState | None = None,
+        correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
         """Find registrations with ANY of the specified capability tags.
 
@@ -213,6 +237,7 @@ class ProtocolCapabilityProjection(Protocol):
         Args:
             tags: List of capability tags, at least one must be present
             state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            correlation_id: Optional correlation ID for distributed tracing
 
         Returns:
             List of matching registration projections

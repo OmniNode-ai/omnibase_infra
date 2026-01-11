@@ -38,6 +38,11 @@ from omnibase_infra.models.projection import (
     ModelSequenceInfo,
     ModelSnapshotTopicConfig,
 )
+from omnibase_infra.models.projectors import (
+    ModelProjectorColumn,
+    ModelProjectorIndex,
+    ModelProjectorSchema,
+)
 from omnibase_infra.models.registration import (
     ModelIntrospectionMetrics,
     ModelNodeCapabilities,
@@ -47,6 +52,7 @@ from omnibase_infra.models.registration import (
     ModelNodeRegistration,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.models.runtime import ModelLoadedHandler
 from omnibase_infra.models.security import (
     ModelEnvironmentPolicy,
     ModelHandlerSecurityPolicy,
@@ -83,6 +89,8 @@ __all__: list[str] = [
     "ModelHealthCheckResult",
     # Registration models
     "ModelIntrospectionMetrics",
+    # Runtime models
+    "ModelLoadedHandler",
     # Logging models
     "ModelLogContext",
     "ModelNodeCapabilities",
@@ -93,6 +101,10 @@ __all__: list[str] = [
     "ModelParsedTopic",
     # Projection models
     "ModelRegistrationProjection",
+    # Projector schema models
+    "ModelProjectorColumn",
+    "ModelProjectorIndex",
+    "ModelProjectorSchema",
     "ModelRegistrationSnapshot",
     # Retry models
     "ModelRetryErrorClassification",

@@ -46,6 +46,10 @@ Available Utilities:
         - minimum_sample_size_for_tolerance: Calculate required sample size
         - run_with_warmup: Async operation timing with warmup
         - run_with_warmup_sync: Sync operation timing with warmup
+
+    Mock Utilities:
+        - MockStatResult: NamedTuple matching os.stat_result for file stat mocking
+        - create_mock_stat_result: Factory for creating MockStatResult with overrides
 """
 
 from tests.helpers.ast_analysis import (
@@ -63,6 +67,7 @@ from tests.helpers.chaos_utils import (
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 from tests.helpers.log_helpers import filter_handler_warnings, get_warning_messages
+from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
 from tests.helpers.replay_utils import (
     EventFactory,
     EventSequenceEntry,
@@ -128,4 +133,7 @@ __all__ = [
     "minimum_sample_size_for_tolerance",
     "run_with_warmup",
     "run_with_warmup_sync",
+    # Mock utilities
+    "MockStatResult",
+    "create_mock_stat_result",
 ]

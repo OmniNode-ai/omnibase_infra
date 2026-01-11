@@ -181,6 +181,27 @@ jobs:
             exit 1
           }
 
+      # Architecture layer verification - run separately for clear visibility
+      # This check ensures omnibase_core doesn't import infrastructure packages
+      # like kafka, httpx, asyncpg, etc.
+      - name: Run architecture layer check
+        run: |
+          echo "================================================================"
+          echo "Architecture Layer Verification (OMN-255)"
+          echo "================================================================"
+          echo ""
+          echo "This check verifies that omnibase_core maintains proper layer"
+          echo "separation by not importing infrastructure-specific packages."
+          echo ""
+          echo "LIMITATION: The bash script uses grep-based matching and CANNOT"
+          echo "detect inline imports inside functions. For comprehensive AST-based"
+          echo "analysis, see tests/ci/test_architecture_compliance.py"
+          echo ""
+          echo "================================================================"
+          # Run via validate.py for consistent exit code handling
+          poetry run python scripts/validate.py architecture_layers --verbose
+
+      # Run all remaining ONEX validators
       - name: Run ONEX validators
         run: |
           poetry run python scripts/validate.py all --verbose

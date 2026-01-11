@@ -931,6 +931,130 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 context=ctx,
             ) from e
 
+    async def get_by_intent_types(
+        self,
+        intent_types: list[str],
+        state: EnumRegistrationState | None = None,
+        domain: str = "registration",
+        limit: int = 100,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelRegistrationProjection]:
+        """Find all registrations that handle ANY of the specified intent types.
+
+        Bulk query method that retrieves nodes matching any intent type in a single
+        database call using the && (array overlap) operator. This is more efficient
+        than calling get_by_intent_type repeatedly for each intent type.
+
+        Performance Note:
+            This method reduces N database queries to 1 query when resolving
+            dependencies with multiple intent types. For N intent types, the
+            previous approach required N separate database calls; this method
+            uses a single query with SQL array overlap.
+
+        Args:
+            intent_types: List of intent types to search for (e.g.,
+                ["postgres.upsert", "postgres.query", "postgres.delete"]).
+                At least one must be present in the node's intent_types.
+            state: Optional state filter (e.g., EnumRegistrationState.ACTIVE)
+            domain: Domain namespace (default: "registration")
+            limit: Maximum results to return (default: 100)
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            List of matching registration projections (deduplicated by entity_id)
+
+        Raises:
+            ProtocolConfigurationError: If intent_types list is empty
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> # Find nodes that handle any postgres intent
+            >>> handlers = await reader.get_by_intent_types(
+            ...     ["postgres.query", "postgres.upsert", "postgres.delete"],
+            ...     state=EnumRegistrationState.ACTIVE,
+            ... )
+            >>> for handler in handlers:
+            ...     print(f"Can handle postgres intents: {handler.entity_id}")
+        """
+        if not intent_types:
+            raise ProtocolConfigurationError(
+                "intent_types list cannot be empty for get_by_intent_types - "
+                "use get_by_state() to query all registrations",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="get_by_intent_types",
+                    target_name="projection_reader.registration",
+                    correlation_id=correlation_id or uuid4(),
+                ),
+            )
+
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_by_intent_types",
+            target_name="projection_reader.registration",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_by_intent_types", corr_id)
+
+        # Use && (array overlap) operator to find nodes matching ANY intent type
+        if state is not None:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND intent_types && $2::text[]
+                  AND current_state = $3
+                ORDER BY updated_at DESC
+                LIMIT $4
+            """
+            params = [domain, intent_types, state.value, limit]
+        else:
+            query_sql = """
+                SELECT * FROM registration_projections
+                WHERE domain = $1
+                  AND intent_types && $2::text[]
+                ORDER BY updated_at DESC
+                LIMIT $3
+            """
+            params = [domain, intent_types, limit]
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return [self._row_to_projection(row) for row in rows]
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_intent_types", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for intent types query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_intent_types", corr_id)
+            raise InfraTimeoutError(
+                "Intent types query timed out",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_intent_types", corr_id)
+            raise RuntimeHostError(
+                f"Failed to query by intent types: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
     async def get_by_protocol(
         self,
         protocol_name: str,

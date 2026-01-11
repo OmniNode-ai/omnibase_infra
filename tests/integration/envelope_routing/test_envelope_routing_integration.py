@@ -82,7 +82,7 @@ def handler_registry() -> ProtocolBindingRegistry:
         async def handle(
             self,
             envelope: dict[str, object],
-            correlation_id: str | None = None,
+            correlation_id: UUID | None = None,
         ) -> dict[str, object]:
             """Handle the envelope and return response.
 
@@ -90,7 +90,7 @@ def handler_registry() -> ProtocolBindingRegistry:
 
             Args:
                 envelope: The envelope dictionary containing operation and payload.
-                correlation_id: Optional correlation ID for tracing.
+                correlation_id: Optional correlation ID for tracing (UUID type).
 
             Returns:
                 Response dictionary with status and processed data.
@@ -99,7 +99,9 @@ def handler_registry() -> ProtocolBindingRegistry:
                 "status": "handled",
                 "operation": envelope.get("operation"),
                 "payload": envelope.get("payload"),
-                "correlation_id": correlation_id or envelope.get("correlation_id"),
+                "correlation_id": str(correlation_id)
+                if correlation_id
+                else envelope.get("correlation_id"),
             }
 
         async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
