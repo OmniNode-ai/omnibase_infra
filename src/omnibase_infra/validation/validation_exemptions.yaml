@@ -1102,6 +1102,75 @@ pattern_exemptions:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1097
+  # ==========================================================================
+  # Handler Plugin Loader Exemptions (OMN-1132)
+  # ==========================================================================
+  # HandlerPluginLoader discovers and loads ONEX handlers from contract YAML files.
+  # The "Handler" in the name refers to ONEX handler contracts being loaded,
+  # not an anti-pattern manager/helper class.
+  - file_pattern: 'handler_plugin_loader\.py'
+    class_pattern: "Class name 'HandlerPluginLoader'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerPluginLoader loads ONEX handler contracts from YAML files. The "Handler" refers to ONEX handler contracts being discovered and loaded, not an anti-pattern manager class. This is legitimate handler infrastructure code.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-1132
+  - file_pattern: 'handler_plugin_loader\.py'
+    class_pattern: "Class 'HandlerPluginLoader'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Plugin loader pattern requires multiple discovery methods (load_from_contract, load_from_directory, discover_and_load), security validation (_validate_namespace, _validate_file_security), contract parsing (_load_contract, _import_handler_class), and error handling methods. This is the standard plugin loader pattern consistent with ProjectorPluginLoader.
+
+    documentation:
+      - docs/patterns/handler_plugin_loader.md
+      - CLAUDE.md (Handler Plugin Loader Patterns)
+    ticket: OMN-1132
+  - file_pattern: 'protocol_handler_plugin_loader\.py'
+    class_pattern: "Class name 'ProtocolHandlerPluginLoader'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ProtocolHandlerPluginLoader defines the interface for handler plugin loading. The "Handler" refers to ONEX handler contracts, consistent with HandlerPluginLoader.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_loaded_handler\.py'
+    class_pattern: "Class name 'ModelLoadedHandler'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelLoadedHandler represents metadata about a loaded ONEX handler contract. The "Handler" refers to ONEX handler concepts, not an anti-pattern.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_handler_contract\.py'
+    class_pattern: "Class name 'ModelHandlerContract'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelHandlerContract is the Pydantic schema for handler contract YAML files. The "Handler" refers to ONEX handler contracts, consistent with HandlerPluginLoader and ModelLoadedHandler.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1132
+  - file_pattern: 'model_handler_contract\.py'
+    violation_pattern: "Field 'handler_name' might reference an entity"
+    reason: >
+      handler_name is a human-readable identifier from the contract YAML (e.g., "auth-handler"). It's a semantic identifier, not an entity reference. Consistent with ModelLoadedHandler.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers)
+    ticket: OMN-1132
+  - file_pattern: 'model_loaded_handler\.py'
+    violation_pattern: "Field 'handler_name' might reference an entity"
+    reason: >
+      handler_name is a human-readable identifier for the handler from the contract (e.g., "auth-handler"). It's a semantic identifier, not an entity reference.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions - semantic identifiers)
+    ticket: OMN-1132
   - file_pattern: 'model_handler_descriptor\.py'
     violation_pattern: "Field 'handler_id' should use UUID"
     reason: >
@@ -1415,6 +1484,16 @@ pattern_exemptions:
       - PostgreSQL CREATE TABLE syntax
       - src/omnibase_infra/schemas/schema_registration_projection.sql (example usage)
       - src/omnibase_infra/models/projectors/model_projector_schema.py (ModelProjectorSchema defines table_name as identifier, temporary location in omnibase_infra)
+    ticket: OMN-1168
+  # ModelProjectorValidationError __init__ requires 6 parameters for complete error context
+  - file_pattern: 'model_projector_validation_error\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error model requires multiple context parameters for complete error reporting: error_type, contract_path, message, remediation_hint, correlation_id. These are distinct required contexts for debugging projector validation failures.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
     ticket: OMN-1168
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
