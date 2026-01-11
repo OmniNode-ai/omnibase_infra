@@ -205,8 +205,21 @@ def _get_package_source_path(package_name: str) -> Path | None:
         packages span multiple directories and cannot be represented by a
         single source path. This is a known limitation - architecture checks
         for namespace packages would require different handling.
+
+    Note:
+        This function also returns None for malformed package names or when
+        importlib raises exceptions (ModuleNotFoundError, ImportError, ValueError).
+        This provides defensive handling for edge cases without propagating
+        exceptions to callers.
     """
-    spec = importlib.util.find_spec(package_name)
+    try:
+        spec = importlib.util.find_spec(package_name)
+    except (ModuleNotFoundError, ImportError, ValueError):
+        # ModuleNotFoundError: Package not installed
+        # ImportError: Various import-related errors
+        # ValueError: Malformed package name (e.g., empty string, relative import)
+        return None
+
     if spec is None or spec.origin is None:
         # spec is None: package not found
         # spec.origin is None: namespace package (PEP 420) with no __init__.py
@@ -484,12 +497,22 @@ def _find_multiline_state_after_line(
         - New delimiter (if in multiline)
         - Content to check for imports (code outside strings)
     """
+    # Define valid delimiters for defensive validation
+    _VALID_DELIMITERS = ('"""', "'''")
+
     if current_in_multiline:
         # Defensive handling: if we're supposedly in a multiline but have no delimiter,
         # treat this as a corrupted state and return to normal parsing mode.
         # This handles edge cases where state tracking may have become inconsistent.
         if current_delimiter is None:
             return False, None, line
+
+        # Defensive handling: validate delimiter is actually a valid triple-quote.
+        # This prevents unexpected behavior if an invalid delimiter somehow got set.
+        if current_delimiter not in _VALID_DELIMITERS:
+            # Invalid delimiter state - recover by returning to normal parsing mode
+            return False, None, line
+
         closing_pos = line.find(current_delimiter)
         if closing_pos == -1:
             # Still inside multiline, no code to check
@@ -707,12 +730,20 @@ def _scan_file_for_imports(
             # Note: u cannot combine with other prefixes in Python 3
             # The regex anchors to start and requires the delimiter to follow immediately
             # This strict pattern rejects invalid prefixes like 'xy', 'ub', 'fu', etc.
+            #
+            # IMPORTANT: The regex uses a non-capturing group (?:...) with explicit
+            # alternation of valid prefixes. The order matters for correct matching:
+            # two-char prefixes first (greedy), then single-char, then empty string.
+            # This prevents partial matches where e.g., 'rf' would only match 'r'.
             string_prefix_pattern = (
-                r"^("
-                r"[rR][fF]|[fF][rR]|"  # Raw f-strings: rf, rF, Rf, RF, fr, fR, Fr, FR
-                r"[rR][bB]|[bB][rR]|"  # Raw bytes: rb, rB, Rb, RB, br, bR, Br, BR
-                r"[rRfFbBuU]"  # Single prefixes: r, R, f, F, b, B, u, U
-                r")?"
+                r"^(?:"
+                r"[rR][fF]|"  # Raw f-strings: rf, rF, Rf, RF
+                r"[fF][rR]|"  # f-string raw: fr, fR, Fr, FR
+                r"[rR][bB]|"  # Raw bytes: rb, rB, Rb, RB
+                r"[bB][rR]|"  # Bytes raw: br, bR, Br, BR
+                r"[rRfFbBuU]|"  # Single prefixes: r, R, f, F, b, B, u, U
+                r""  # Empty string (no prefix) - must be last
+                r")"
             )
             found_docstring = True
             while found_docstring:
@@ -1383,6 +1414,67 @@ import kafka
             assert result.exists(), f"Package path should exist: {result}"
         else:
             assert result is None, f"Expected package not found: {package_name}"
+
+    def test_get_package_source_path_namespace_package(self) -> None:
+        """Verify _get_package_source_path returns None for namespace packages.
+
+        Namespace packages (PEP 420) have spec.origin set to None because they
+        don't have a single __init__.py file. The function should return None
+        rather than raising an exception.
+
+        This test uses unittest.mock to simulate a namespace package since
+        real namespace packages are rare in standard environments.
+        """
+        from unittest.mock import MagicMock, patch
+
+        # Create a mock spec with origin=None (namespace package behavior)
+        mock_spec = MagicMock()
+        mock_spec.origin = None
+
+        with patch("importlib.util.find_spec", return_value=mock_spec):
+            result = _get_package_source_path("fake_namespace_package")
+            assert result is None, (
+                "Expected None for namespace package (spec.origin is None)"
+            )
+
+    def test_get_package_source_path_spec_none(self) -> None:
+        """Verify _get_package_source_path returns None when spec is None.
+
+        When a package cannot be found at all, importlib.util.find_spec returns
+        None. The function should handle this gracefully and return None.
+
+        This test uses unittest.mock to ensure the edge case is explicitly tested.
+        """
+        from unittest.mock import patch
+
+        with patch("importlib.util.find_spec", return_value=None):
+            result = _get_package_source_path("completely_missing_package")
+            assert result is None, "Expected None when spec is None (package not found)"
+
+    def test_get_package_source_path_handles_importlib_exceptions(self) -> None:
+        """Verify _get_package_source_path handles importlib exceptions gracefully.
+
+        The importlib.util.find_spec function may raise various exceptions
+        (ModuleNotFoundError, ImportError, ValueError) for malformed package
+        names or corrupt packages. The function catches these exceptions and
+        returns None rather than propagating them to callers.
+
+        This test verifies that the function handles malformed package names
+        without raising exceptions.
+        """
+        # Test with known invalid package names that cause importlib exceptions
+        # The function should return None for all of these without raising
+        invalid_names = [
+            "",  # Empty string - raises ValueError
+            ".",  # Just a dot - raises ValueError
+            "..",  # Double dot - raises ValueError
+            "..invalid",  # Relative import syntax - raises ValueError
+        ]
+
+        for name in invalid_names:
+            result = _get_package_source_path(name)
+            # Function should return None without raising exceptions
+            assert result is None, f"Expected None for invalid package name: {name!r}"
 
     # --- Tests for _scan_package_for_forbidden_imports ---
 
@@ -2317,6 +2409,35 @@ more content
         assert delim is None
         assert content == "some line content"
 
+    def test_find_multiline_state_after_line_invalid_delimiter(self) -> None:
+        """Verify _find_multiline_state_after_line handles invalid delimiter gracefully.
+
+        This tests the defensive handling for the edge case where we're supposedly
+        in a multiline string but have an invalid delimiter (not ''' or \"\"\").
+        Instead of causing undefined behavior, the function should recover by
+        returning to normal parsing mode.
+        """
+        # Corrupted state: in_multiline=True but delimiter is invalid
+        # Should recover gracefully by returning to normal mode
+        in_ml, delim, content = _find_multiline_state_after_line(
+            "some line content",
+            True,
+            "invalid",  # Corrupted: invalid delimiter
+        )
+        assert in_ml is False
+        assert delim is None
+        assert content == "some line content"
+
+        # Also test with single quote (not triple)
+        in_ml, delim, content = _find_multiline_state_after_line(
+            "some other content",
+            True,
+            '"',  # Corrupted: single quote instead of triple
+        )
+        assert in_ml is False
+        assert delim is None
+        assert content == "some other content"
+
     def test_is_in_type_checking_block_outside(self) -> None:
         """Verify _is_in_type_checking_block returns False when outside."""
         lines = [
@@ -2844,3 +2965,380 @@ x = 1
         line = "\"\"\"unbalanced ''' after"
         count = _count_delimiter_outside_balanced(line, "'''", '"""')
         assert count == 1
+
+    # --- Parametrized TYPE_CHECKING scenario tests ---
+
+    @pytest.mark.parametrize(
+        ("content", "expected_violations", "description"),
+        [
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import kafka
+""",
+                0,
+                "basic TYPE_CHECKING block",
+                id="basic-type-checking",
+            ),
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import kafka
+    from kafka import Producer
+    from kafka.consumer import Consumer
+""",
+                0,
+                "multiple imports in TYPE_CHECKING",
+                id="multiple-imports-type-checking",
+            ),
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import kafka
+
+import httpx  # Not in TYPE_CHECKING
+""",
+                1,
+                "mixed TYPE_CHECKING and regular imports",
+                id="mixed-type-checking-regular",
+            ),
+            pytest.param(
+                """\
+import kafka  # Before TYPE_CHECKING
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kafka import Producer
+""",
+                1,
+                "regular import before TYPE_CHECKING",
+                id="regular-before-type-checking",
+            ),
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+class MyClass:
+    if TYPE_CHECKING:
+        import kafka
+
+    def method(self):
+        pass
+""",
+                0,
+                "TYPE_CHECKING inside class body",
+                id="type-checking-in-class",
+            ),
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import kafka
+else:
+    import httpx
+""",
+                1,
+                "TYPE_CHECKING with else block",
+                id="type-checking-with-else",
+            ),
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+
+    import kafka
+
+    from kafka import Producer
+
+x = 1
+""",
+                0,
+                "TYPE_CHECKING with empty lines",
+                id="type-checking-empty-lines",
+            ),
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+# if TYPE_CHECKING:
+#     import kafka
+
+import kafka  # Real import, should be flagged
+""",
+                1,
+                "commented out TYPE_CHECKING",
+                id="commented-type-checking",
+            ),
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import kafka
+
+def my_func():
+    if TYPE_CHECKING:
+        from kafka import Producer
+""",
+                0,
+                "multiple TYPE_CHECKING blocks",
+                id="multiple-type-checking-blocks",
+            ),
+            pytest.param(
+                """\
+from typing import TYPE_CHECKING
+
+if   TYPE_CHECKING  :
+    import kafka
+""",
+                0,
+                "TYPE_CHECKING with extra whitespace",
+                id="type-checking-extra-whitespace",
+            ),
+        ],
+    )
+    def test_scan_type_checking_parametrized_scenarios(
+        self, tmp_path: Path, content: str, expected_violations: int, description: str
+    ) -> None:
+        """Verify TYPE_CHECKING detection across various scenarios.
+
+        This parametrized test covers multiple TYPE_CHECKING patterns to ensure
+        robust detection of type-only imports vs runtime imports.
+
+        Args:
+            tmp_path: Pytest fixture for temporary directory.
+            content: The Python file content to test.
+            expected_violations: Expected number of violations.
+            description: Human-readable description of the test scenario.
+        """
+        test_file = tmp_path / "type_checking_scenario.py"
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka", "httpx"])
+        assert len(violations) == expected_violations, (
+            f"Expected {expected_violations} violations for '{description}', "
+            f"got {len(violations)}: {violations}"
+        )
+
+    # --- Additional docstring edge case tests ---
+
+    @pytest.mark.parametrize(
+        ("content", "expected_violations", "description"),
+        [
+            pytest.param(
+                '"""unclosed multiline\nimport kafka',
+                0,
+                "unclosed multiline at EOF (double quotes)",
+                id="unclosed-double-eof",
+            ),
+            pytest.param(
+                "'''unclosed multiline\nimport kafka",
+                0,
+                "unclosed multiline at EOF (single quotes)",
+                id="unclosed-single-eof",
+            ),
+            pytest.param(
+                '"""starts here\nimport kafka\nmore content',
+                0,
+                "file entirely inside unclosed multiline",
+                id="entire-file-unclosed",
+            ),
+            pytest.param(
+                '"""closed""" import kafka',
+                1,
+                "import on same line after closing delimiter",
+                id="import-same-line-after-close",
+            ),
+            pytest.param(
+                '"""closed"""import kafka',
+                1,
+                "import immediately after closing (no space)",
+                id="import-no-space-after-close",
+            ),
+            pytest.param(
+                '"""a"""; """b"""; import kafka',
+                0,
+                "import after multiple balanced strings (known limitation: not detected)",
+                id="import-after-multiple-balanced",
+            ),
+        ],
+    )
+    def test_scan_docstring_unclosed_and_same_line_parametrized(
+        self, tmp_path: Path, content: str, expected_violations: int, description: str
+    ) -> None:
+        """Verify docstring edge cases: unclosed at EOF and same-line imports.
+
+        This parametrized test covers edge cases for:
+        - Files ending inside unclosed multiline strings
+        - Imports appearing on the same line after closing delimiters
+
+        Args:
+            tmp_path: Pytest fixture for temporary directory.
+            content: The Python file content to test.
+            expected_violations: Expected number of violations.
+            description: Human-readable description of the test scenario.
+        """
+        test_file = tmp_path / "docstring_edge_case.py"
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == expected_violations, (
+            f"Expected {expected_violations} violations for '{description}', "
+            f"got {len(violations)}: {violations}"
+        )
+
+    @pytest.mark.parametrize(
+        ("content", "expected_violations", "description"),
+        [
+            pytest.param(
+                '"""contains \'\'\' inside"""\nimport kafka',
+                1,
+                "triple-single inside triple-double",
+                id="single-inside-double",
+            ),
+            pytest.param(
+                "'''contains \"\"\" inside'''\nimport kafka",
+                1,
+                "triple-double inside triple-single",
+                id="double-inside-single",
+            ),
+            pytest.param(
+                '"""outer has \'\'\' and """more""" """',
+                0,
+                "complex nested delimiters",
+                id="complex-nested",
+            ),
+            pytest.param(
+                "'''a''' \"\"\"b\"\"\" '''c''' import kafka",
+                1,
+                "alternating delimiter types on same line",
+                id="alternating-delimiters",
+            ),
+        ],
+    )
+    def test_scan_nested_delimiters_parametrized(
+        self, tmp_path: Path, content: str, expected_violations: int, description: str
+    ) -> None:
+        """Verify nested delimiter handling across various patterns.
+
+        This parametrized test covers cases where one delimiter type
+        appears inside strings of the other delimiter type.
+
+        Args:
+            tmp_path: Pytest fixture for temporary directory.
+            content: The Python file content to test.
+            expected_violations: Expected number of violations.
+            description: Human-readable description of the test scenario.
+        """
+        test_file = tmp_path / "nested_delimiters.py"
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == expected_violations, (
+            f"Expected {expected_violations} violations for '{description}', "
+            f"got {len(violations)}: {violations}"
+        )
+
+    @pytest.mark.parametrize(
+        ("content", "expected_violations", "description"),
+        [
+            pytest.param(
+                '""""""\nimport kafka',
+                1,
+                "empty double-quoted multiline",
+                id="empty-double-multiline",
+            ),
+            pytest.param(
+                "''''''\nimport kafka",
+                1,
+                "empty single-quoted multiline",
+                id="empty-single-multiline",
+            ),
+            pytest.param(
+                '"""""""import kafka',
+                0,
+                "7 quotes (empty string + start new)",
+                id="seven-quotes",
+            ),
+            pytest.param(
+                '"""x""""""y"""\nimport kafka',
+                1,
+                "adjacent strings with content",
+                id="adjacent-strings",
+            ),
+        ],
+    )
+    def test_scan_empty_multiline_strings_parametrized(
+        self, tmp_path: Path, content: str, expected_violations: int, description: str
+    ) -> None:
+        """Verify empty multiline string handling.
+
+        This parametrized test covers edge cases for empty multiline
+        strings (6 consecutive quotes) and adjacent string patterns.
+
+        Args:
+            tmp_path: Pytest fixture for temporary directory.
+            content: The Python file content to test.
+            expected_violations: Expected number of violations.
+            description: Human-readable description of the test scenario.
+        """
+        test_file = tmp_path / "empty_multiline.py"
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == expected_violations, (
+            f"Expected {expected_violations} violations for '{description}', "
+            f"got {len(violations)}: {violations}"
+        )
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            pytest.param("r", id="r-raw"),
+            pytest.param("R", id="R-raw-upper"),
+            pytest.param("f", id="f-fstring"),
+            pytest.param("F", id="F-fstring-upper"),
+            pytest.param("b", id="b-bytes"),
+            pytest.param("B", id="B-bytes-upper"),
+            pytest.param("u", id="u-unicode"),
+            pytest.param("U", id="U-unicode-upper"),
+            pytest.param("rf", id="rf-raw-fstring"),
+            pytest.param("fr", id="fr-fstring-raw"),
+            pytest.param("RF", id="RF-raw-fstring-upper"),
+            pytest.param("FR", id="FR-fstring-raw-upper"),
+            pytest.param("rb", id="rb-raw-bytes"),
+            pytest.param("br", id="br-bytes-raw"),
+            pytest.param("RB", id="RB-raw-bytes-upper"),
+            pytest.param("BR", id="BR-bytes-raw-upper"),
+        ],
+    )
+    def test_scan_string_prefixes_parametrized(
+        self, tmp_path: Path, prefix: str
+    ) -> None:
+        """Verify all valid Python string prefixes are recognized.
+
+        This parametrized test ensures that all valid Python 3 string
+        prefixes (r, f, b, u and their combinations) are properly
+        recognized and don't cause false positives.
+
+        Args:
+            tmp_path: Pytest fixture for temporary directory.
+            prefix: The string prefix to test.
+        """
+        test_file = tmp_path / "string_prefix.py"
+        content = f'{prefix}"""This string mentions import kafka"""\nx = 1\n'
+        test_file.write_text(content)
+
+        violations = _scan_file_for_imports(test_file, ["kafka"])
+        assert len(violations) == 0, (
+            f"String with prefix '{prefix}' should not trigger violation"
+        )

@@ -16,9 +16,10 @@ Exports (in __all__):
         - MixinNodeIntrospection: Node capability introspection
         - MixinRetryExecution: Retry logic with exponential backoff
 
-    Protocols:
-        - ProtocolCircuitBreakerAware: Interface for circuit breaker capability
-          (tightly coupled to MixinAsyncCircuitBreaker, co-located here)
+    Protocols (co-located with their tightly-coupled mixins):
+        - ProtocolCircuitBreakerAware: Interface for circuit breaker capability.
+          Co-located here because it is tightly coupled to MixinAsyncCircuitBreaker.
+          This is the ONLY protocol exported from this module.
 
     Enums:
         - EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
@@ -31,15 +32,15 @@ Exports (in __all__):
     TypedDicts:
         - TypedDictPerformanceMetricsCache: Performance metrics cache structure
 
-NOT Exported (import from canonical locations):
-    - ProtocolEventBusLike: General-purpose event bus protocol.
-      Import from: omnibase_infra.protocols
+NOT Exported - import from canonical locations instead:
+    - ProtocolEventBusLike: Import from ``omnibase_infra.protocols``
+      (general-purpose event bus protocol, NOT co-located here)
 
-    - ModelIntrospectionConfig, ModelIntrospectionTaskConfig: Introspection settings.
-      Import from: omnibase_infra.models.discovery
+    - ModelIntrospectionConfig, ModelIntrospectionTaskConfig:
+      Import from ``omnibase_infra.models.discovery``
 
-    - ModelIntrospectionPerformanceMetrics, ModelDiscoveredCapabilities: Discovery models.
-      Import from: omnibase_infra.models.discovery
+    - ModelIntrospectionPerformanceMetrics, ModelDiscoveredCapabilities:
+      Import from ``omnibase_infra.models.discovery``
 """
 
 from omnibase_infra.enums import EnumCircuitState, EnumRetryErrorCategory
