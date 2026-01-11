@@ -61,15 +61,8 @@ from omnibase_core.models.contracts.subcontracts.model_handler_routing_subcontra
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
-from omnibase_infra.nodes.node_registration_orchestrator.registry import (
-    RegistryInfraNodeRegistrationOrchestrator,
-)
-
 if TYPE_CHECKING:
     from omnibase_core.models.container import ModelONEXContainer
-    from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
-
-    from omnibase_infra.projectors import ProjectionReaderRegistration
 
 
 def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
@@ -166,85 +159,25 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
         orchestrator = NodeRegistrationOrchestrator(container)
 
         # Workflow definition loaded from contract.yaml by runtime
+        # Handler routing initialized via runtime using registry factory
         # Process input
         result = await orchestrator.process(input_data)
         ```
 
-    Handler Routing Initialization:
-        The orchestrator initializes handler routing via MixinHandlerRouting:
-        1. Creates ModelHandlerRoutingSubcontract from contract config
-        2. Creates ServiceHandlerRegistry via RegistryInfraNodeRegistrationOrchestrator
-        3. Calls _init_handler_routing() to wire routing table
+    Handler Routing:
+        Handler routing is initialized by the runtime, not by this class.
+        The runtime uses RegistryInfraNodeRegistrationOrchestrator.create_registry()
+        to create the handler registry and calls _init_handler_routing() on
+        the orchestrator instance.
     """
 
-    def __init__(
-        self,
-        container: ModelONEXContainer,
-        projection_reader: ProjectionReaderRegistration | None = None,
-    ) -> None:
-        """Initialize with container dependency injection and handler routing.
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize with container dependency injection.
 
         Args:
             container: ONEX dependency injection container.
-            projection_reader: Optional projection reader for handler dependencies.
-                If None, handler routing initialization is deferred until
-                projection_reader is available via initialize_handler_routing().
         """
         super().__init__(container)
-
-        # Store projection reader for deferred initialization
-        self._projection_reader = projection_reader
-
-        # Initialize handler routing if projection_reader is available
-        if projection_reader is not None:
-            self._initialize_handler_routing(projection_reader)
-
-    def _initialize_handler_routing(
-        self, projection_reader: ProjectionReaderRegistration
-    ) -> None:
-        """Initialize handler routing with the given projection reader.
-
-        Creates the handler registry and initializes the routing table
-        from the contract configuration.
-
-        Args:
-            projection_reader: Projection reader for handler dependencies.
-        """
-        # Create handler routing subcontract from contract config
-        handler_routing = _create_handler_routing_subcontract()
-
-        # Create registry with handlers via static factory
-        # Note: projector and consul_handler are None - heartbeat handler won't be registered
-        registry: ServiceHandlerRegistry = (
-            RegistryInfraNodeRegistrationOrchestrator.create_registry(
-                projection_reader=projection_reader,
-                projector=None,
-                consul_handler=None,
-            )
-        )
-
-        # Initialize routing via MixinHandlerRouting from base class
-        # The registry is already frozen by create_registry()
-        self._init_handler_routing(handler_routing, registry)
-
-    def initialize_handler_routing(
-        self, projection_reader: ProjectionReaderRegistration
-    ) -> None:
-        """Initialize handler routing with deferred projection reader.
-
-        Call this method after construction if projection_reader was not
-        available at construction time.
-
-        Args:
-            projection_reader: Projection reader for handler dependencies.
-
-        Raises:
-            RuntimeError: If handler routing is already initialized.
-        """
-        if self.is_routing_initialized:
-            raise RuntimeError("Handler routing is already initialized")
-        self._projection_reader = projection_reader
-        self._initialize_handler_routing(projection_reader)
 
 
 __all__ = ["NodeRegistrationOrchestrator"]

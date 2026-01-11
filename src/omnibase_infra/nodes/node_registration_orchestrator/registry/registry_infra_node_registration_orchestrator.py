@@ -55,6 +55,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -130,8 +131,6 @@ class AdapterNodeIntrospected:
         Returns:
             ModelHandlerOutput containing emitted events.
         """
-        import time
-
         start_time = time.perf_counter()
 
         # Extract from envelope
@@ -211,8 +210,6 @@ class AdapterRuntimeTick:
         Returns:
             ModelHandlerOutput containing emitted events.
         """
-        import time
-
         start_time = time.perf_counter()
 
         # Extract from envelope
@@ -292,8 +289,6 @@ class AdapterNodeRegistrationAcked:
         Returns:
             ModelHandlerOutput containing emitted events.
         """
-        import time
-
         start_time = time.perf_counter()
 
         # Extract from envelope
@@ -377,8 +372,6 @@ class AdapterNodeHeartbeat:
         Returns:
             ModelHandlerOutput with result containing ModelHeartbeatHandlerResult.
         """
-        import time
-
         start_time = time.perf_counter()
 
         # Extract from envelope

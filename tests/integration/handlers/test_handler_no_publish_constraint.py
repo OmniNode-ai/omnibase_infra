@@ -1102,7 +1102,7 @@ class TestOrchestratorBusAccessVerification:
 
     This is the intended architectural pattern:
     1. Orchestrator receives container (DI)
-    2. Orchestrator receives coordinators with bus access (setter injection)
+    2. Orchestrator uses contract-driven handler routing (declarative)
     3. Coordinator delegates to services with event_bus (composition)
     4. Services publish to event bus (actual publishing)
 
@@ -1193,7 +1193,7 @@ class TestOrchestratorBusAccessVerification:
 
         This test explicitly documents the architectural difference:
         - Handlers: Direct DI of domain dependencies, NO bus access
-        - Orchestrators: Container + setter injection for coordinators with bus
+        - Orchestrators: Container + contract-driven handler routing (declarative)
 
         The container pattern enables orchestrators to resolve bus-related
         dependencies through the ONEX dependency injection system.

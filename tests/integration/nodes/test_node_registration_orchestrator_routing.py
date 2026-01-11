@@ -4,7 +4,12 @@
 
 These tests verify that the NodeRegistrationOrchestrator's handler_routing
 configuration in contract.yaml is correct, that all referenced handlers
-and event models are importable, and that runtime routing works correctly.
+and event models are importable, and that the subcontract is properly configured.
+
+Note: The orchestrator is now pure declarative with only container injection.
+Handler routing initialization is performed by the runtime, not the orchestrator.
+Tests that previously tested runtime routing behavior now validate the
+subcontract configuration directly via _create_handler_routing_subcontract().
 
 Test Categories (Contract Validation):
     - TestHandlerRoutingContract: Contract handler_routing section validation
@@ -14,12 +19,12 @@ Test Categories (Contract Validation):
     - TestHandlerRoutingOutputEvents: Handler output_events configuration
     - TestHandlerDependencies: Handler dependency configuration
 
-Test Categories (Runtime Routing):
-    - TestOrchestratorInstantiation: Orchestrator creation tests
-    - TestHandlerRoutingInitialization: Deferred initialization tests
-    - TestRouteToHandlers: route_to_handlers() method verification
-    - TestValidateHandlerRouting: validate_handler_routing() method tests
-    - TestHandlerRoutingContractCodeConsistency: Contract/code alignment
+Test Categories (Subcontract/Instantiation):
+    - TestOrchestratorInstantiation: Orchestrator creation tests (container-only)
+    - TestHandlerRoutingInitialization: Subcontract configuration tests
+    - TestRouteToHandlers: Subcontract routing entry verification
+    - TestValidateHandlerRouting: Subcontract structure validation
+    - TestHandlerRoutingContractCodeConsistency: Contract/subcontract alignment
 
 The handler_routing section defines:
     - routing_strategy: "payload_type_match" - Route based on event model type
@@ -32,7 +37,7 @@ Handler ID Mapping:
     - handler-node-introspected -> ModelNodeIntrospectionEvent
     - handler-runtime-tick -> ModelRuntimeTick
     - handler-node-registration-acked -> ModelNodeRegistrationAcked
-    - handler-node-heartbeat -> ModelNodeHeartbeatEvent (requires projector)
+    - handler-node-heartbeat -> ModelNodeHeartbeatEvent
 
 Running Tests:
     # Run all handler routing tests:
@@ -44,24 +49,16 @@ Running Tests:
     # Run specific test class:
     pytest tests/integration/nodes/test_node_registration_orchestrator_routing.py::TestHandlerRoutingContract
 
-    # Run only runtime routing tests:
-    pytest tests/integration/nodes/test_node_registration_orchestrator_routing.py -k "Route or Validate or Initialization"
+    # Run only subcontract tests:
+    pytest tests/integration/nodes/test_node_registration_orchestrator_routing.py -k "subcontract"
 """
 
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_registration_orchestrator.node import (
-        NodeRegistrationOrchestrator,
-    )
-
 
 # =============================================================================
 # TestHandlerRoutingContract
@@ -602,6 +599,10 @@ class TestOrchestratorInstantiation:
 
     These tests verify that the orchestrator can be created with proper
     dependency injection via ModelONEXContainer.
+
+    Note: The orchestrator is now pure declarative with only container
+    injection. Handler routing initialization is done by the runtime,
+    not by the orchestrator itself.
     """
 
     @pytest.fixture
@@ -617,27 +618,11 @@ class TestOrchestratorInstantiation:
         container.config = MagicMock()
         return container
 
-    @pytest.fixture
-    def mock_projection_reader(self) -> MagicMock:
-        """Create a mock projection reader for testing.
+    def test_orchestrator_instantiation(self, mock_container: MagicMock) -> None:
+        """Verify orchestrator can be instantiated with container only.
 
-        Returns:
-            MagicMock configured as a ProjectionReaderRegistration.
-        """
-        from unittest.mock import AsyncMock, MagicMock
-
-        reader = MagicMock()
-        reader.get_entity_state = AsyncMock(return_value=None)
-        reader.list_entities_by_status = AsyncMock(return_value=[])
-        return reader
-
-    def test_orchestrator_instantiation_without_projection_reader(
-        self, mock_container: MagicMock
-    ) -> None:
-        """Verify orchestrator can be instantiated without projection_reader.
-
-        When projection_reader is None, handler routing is deferred until
-        initialize_handler_routing() is called.
+        The orchestrator is pure declarative - it only requires a container.
+        Handler routing initialization is handled by the runtime.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
             NodeRegistrationOrchestrator,
@@ -646,29 +631,23 @@ class TestOrchestratorInstantiation:
         orchestrator = NodeRegistrationOrchestrator(mock_container)
 
         assert orchestrator is not None
-        # Handler routing should NOT be initialized yet
-        assert not orchestrator.is_routing_initialized
 
-    def test_orchestrator_instantiation_with_projection_reader(
-        self, mock_container: MagicMock, mock_projection_reader: MagicMock
+    def test_orchestrator_has_container_attribute(
+        self, mock_container: MagicMock
     ) -> None:
-        """Verify orchestrator can be instantiated with projection_reader.
+        """Verify orchestrator stores container reference.
 
-        When projection_reader is provided, handler routing is initialized
-        immediately during construction.
+        The container is used for dependency injection throughout
+        the orchestrator lifecycle.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
             NodeRegistrationOrchestrator,
         )
 
-        orchestrator = NodeRegistrationOrchestrator(
-            mock_container,
-            projection_reader=mock_projection_reader,
-        )
+        orchestrator = NodeRegistrationOrchestrator(mock_container)
 
-        assert orchestrator is not None
-        # Handler routing should be initialized
-        assert orchestrator.is_routing_initialized
+        # Orchestrator should have access to container (via base class)
+        assert orchestrator.container is mock_container
 
 
 # =============================================================================
@@ -677,88 +656,73 @@ class TestOrchestratorInstantiation:
 
 
 class TestHandlerRoutingInitialization:
-    """Integration tests for handler routing initialization.
+    """Integration tests for handler routing configuration.
 
-    These tests verify that handler routing can be initialized both at
-    construction time and via deferred initialization.
+    These tests verify that the handler routing subcontract is properly
+    configured. The orchestrator is now pure declarative - handler routing
+    initialization is performed by the runtime, not the orchestrator.
+
+    Note: Tests that previously tested deferred initialization or double
+    initialization have been removed as the orchestrator no longer owns
+    the initialization lifecycle.
     """
 
-    @pytest.fixture
-    def mock_container(self) -> MagicMock:
-        """Create a mock ONEX container for testing."""
-        from unittest.mock import MagicMock
-
-        container = MagicMock()
-        container.config = MagicMock()
-        return container
-
-    @pytest.fixture
-    def mock_projection_reader(self) -> MagicMock:
-        """Create a mock projection reader for testing."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        reader = MagicMock()
-        reader.get_entity_state = AsyncMock(return_value=None)
-        reader.list_entities_by_status = AsyncMock(return_value=[])
-        return reader
-
-    def test_deferred_handler_routing_initialization(
-        self, mock_container: MagicMock, mock_projection_reader: MagicMock
-    ) -> None:
-        """Verify handler routing can be initialized via deferred method.
-
-        This tests the initialize_handler_routing() method which is called
-        after construction when projection_reader is not available at init.
-        """
-        from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
-        )
-
-        # Create without projection_reader
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
-        assert not orchestrator.is_routing_initialized
-
-        # Initialize routing later
-        orchestrator.initialize_handler_routing(mock_projection_reader)
-        assert orchestrator.is_routing_initialized
-
-    def test_double_initialization_raises_error(
-        self, mock_container: MagicMock, mock_projection_reader: MagicMock
-    ) -> None:
-        """Verify double initialization raises RuntimeError.
-
-        Calling initialize_handler_routing() twice should fail.
-        """
-        from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
-        )
-
-        # Create with projection_reader (initializes immediately)
-        orchestrator = NodeRegistrationOrchestrator(
-            mock_container, projection_reader=mock_projection_reader
-        )
-        assert orchestrator.is_routing_initialized
-
-        # Attempt to initialize again should raise
-        with pytest.raises(RuntimeError, match="already initialized"):
-            orchestrator.initialize_handler_routing(mock_projection_reader)
-
-    def test_routing_strategy_is_payload_type_match(
-        self, mock_container: MagicMock, mock_projection_reader: MagicMock
-    ) -> None:
-        """Verify routing strategy is set to payload_type_match.
+    def test_routing_strategy_is_payload_type_match_in_subcontract(self) -> None:
+        """Verify routing strategy is set to payload_type_match in subcontract.
 
         The contract.yaml specifies 'payload_type_match' as the routing strategy.
+        This is reflected in the _create_handler_routing_subcontract() function.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
+            _create_handler_routing_subcontract,
         )
 
-        orchestrator = NodeRegistrationOrchestrator(
-            mock_container, projection_reader=mock_projection_reader
+        subcontract = _create_handler_routing_subcontract()
+
+        assert subcontract.routing_strategy == "payload_type_match"
+
+    def test_subcontract_has_expected_handlers(self) -> None:
+        """Verify subcontract defines expected handler entries.
+
+        The subcontract should include entries for:
+        - ModelNodeIntrospectionEvent -> handler-node-introspected
+        - ModelRuntimeTick -> handler-runtime-tick
+        - ModelNodeRegistrationAcked -> handler-node-registration-acked
+        - ModelNodeHeartbeatEvent -> handler-node-heartbeat
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
         )
 
-        assert orchestrator.routing_strategy == "payload_type_match"
+        subcontract = _create_handler_routing_subcontract()
+
+        expected_mappings = {
+            "ModelNodeIntrospectionEvent": "handler-node-introspected",
+            "ModelRuntimeTick": "handler-runtime-tick",
+            "ModelNodeRegistrationAcked": "handler-node-registration-acked",
+            "ModelNodeHeartbeatEvent": "handler-node-heartbeat",
+        }
+
+        actual_mappings = {
+            entry.routing_key: entry.handler_key for entry in subcontract.handlers
+        }
+
+        assert actual_mappings == expected_mappings, (
+            f"Handler mapping mismatch.\n"
+            f"Expected: {expected_mappings}\n"
+            f"Actual: {actual_mappings}"
+        )
+
+    def test_subcontract_version_is_set(self) -> None:
+        """Verify subcontract has a valid version."""
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
+        )
+
+        subcontract = _create_handler_routing_subcontract()
+
+        assert subcontract.version is not None
+        assert subcontract.version.major >= 1
 
 
 # =============================================================================
@@ -767,116 +731,116 @@ class TestHandlerRoutingInitialization:
 
 
 class TestRouteToHandlers:
-    """Integration tests for route_to_handlers() method.
+    """Integration tests for handler routing configuration.
 
-    These tests verify that events are routed to the correct handlers
-    based on the payload type matching strategy.
+    These tests verify that the handler routing configuration is correct
+    by examining the subcontract. The actual route_to_handlers() method
+    is provided by MixinHandlerRouting and is initialized by the runtime.
+
+    Note: Tests for actual routing behavior (route_to_handlers method)
+    require runtime initialization which is no longer owned by the
+    orchestrator. These tests now validate the subcontract configuration.
     """
 
-    @pytest.fixture
-    def mock_container(self) -> MagicMock:
-        """Create a mock ONEX container for testing."""
-        from unittest.mock import MagicMock
-
-        container = MagicMock()
-        container.config = MagicMock()
-        return container
-
-    @pytest.fixture
-    def mock_projection_reader(self) -> MagicMock:
-        """Create a mock projection reader for testing."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        reader = MagicMock()
-        reader.get_entity_state = AsyncMock(return_value=None)
-        reader.list_entities_by_status = AsyncMock(return_value=[])
-        return reader
-
-    @pytest.fixture
-    def initialized_orchestrator(
-        self, mock_container: MagicMock, mock_projection_reader: MagicMock
-    ) -> NodeRegistrationOrchestrator:
-        """Create an orchestrator with handler routing initialized."""
+    def test_subcontract_routes_introspection_event(self) -> None:
+        """Verify ModelNodeIntrospectionEvent maps to handler-node-introspected."""
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
+            _create_handler_routing_subcontract,
         )
 
-        return NodeRegistrationOrchestrator(
-            mock_container, projection_reader=mock_projection_reader
+        subcontract = _create_handler_routing_subcontract()
+
+        # Find the entry for ModelNodeIntrospectionEvent
+        entry = next(
+            (
+                e
+                for e in subcontract.handlers
+                if e.routing_key == "ModelNodeIntrospectionEvent"
+            ),
+            None,
         )
 
-    def test_route_introspection_event_to_handler(
-        self, initialized_orchestrator: NodeRegistrationOrchestrator
-    ) -> None:
-        """Verify ModelNodeIntrospectionEvent routes to handler-node-introspected."""
-        from omnibase_core.enums import EnumMessageCategory
+        assert entry is not None, "No routing entry for ModelNodeIntrospectionEvent"
+        assert entry.handler_key == "handler-node-introspected"
 
-        handlers = initialized_orchestrator.route_to_handlers(
-            routing_key="ModelNodeIntrospectionEvent",
-            category=EnumMessageCategory.EVENT,
+    def test_subcontract_routes_runtime_tick(self) -> None:
+        """Verify ModelRuntimeTick maps to handler-runtime-tick."""
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
         )
 
-        assert len(handlers) == 1
-        assert handlers[0].handler_id == "handler-node-introspected"
+        subcontract = _create_handler_routing_subcontract()
 
-    def test_route_runtime_tick_to_handler(
-        self, initialized_orchestrator: NodeRegistrationOrchestrator
-    ) -> None:
-        """Verify ModelRuntimeTick routes to handler-runtime-tick."""
-        from omnibase_core.enums import EnumMessageCategory
-
-        handlers = initialized_orchestrator.route_to_handlers(
-            routing_key="ModelRuntimeTick",
-            category=EnumMessageCategory.EVENT,
+        entry = next(
+            (e for e in subcontract.handlers if e.routing_key == "ModelRuntimeTick"),
+            None,
         )
 
-        assert len(handlers) == 1
-        assert handlers[0].handler_id == "handler-runtime-tick"
+        assert entry is not None, "No routing entry for ModelRuntimeTick"
+        assert entry.handler_key == "handler-runtime-tick"
 
-    def test_route_registration_acked_to_handler(
-        self, initialized_orchestrator: NodeRegistrationOrchestrator
-    ) -> None:
-        """Verify ModelNodeRegistrationAcked routes to handler-node-registration-acked."""
-        from omnibase_core.enums import EnumMessageCategory
-
-        handlers = initialized_orchestrator.route_to_handlers(
-            routing_key="ModelNodeRegistrationAcked",
-            category=EnumMessageCategory.COMMAND,
+    def test_subcontract_routes_registration_acked(self) -> None:
+        """Verify ModelNodeRegistrationAcked maps to handler-node-registration-acked."""
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
         )
 
-        assert len(handlers) == 1
-        assert handlers[0].handler_id == "handler-node-registration-acked"
+        subcontract = _create_handler_routing_subcontract()
 
-    def test_route_unknown_event_returns_empty(
-        self, initialized_orchestrator: NodeRegistrationOrchestrator
-    ) -> None:
-        """Verify unknown event types return empty handler list."""
-        from omnibase_core.enums import EnumMessageCategory
-
-        handlers = initialized_orchestrator.route_to_handlers(
-            routing_key="UnknownEventModel",
-            category=EnumMessageCategory.EVENT,
+        entry = next(
+            (
+                e
+                for e in subcontract.handlers
+                if e.routing_key == "ModelNodeRegistrationAcked"
+            ),
+            None,
         )
 
-        assert len(handlers) == 0
+        assert entry is not None, "No routing entry for ModelNodeRegistrationAcked"
+        assert entry.handler_key == "handler-node-registration-acked"
 
-    def test_routing_table_contains_expected_mappings(
-        self, initialized_orchestrator: NodeRegistrationOrchestrator
-    ) -> None:
-        """Verify routing table contains all expected event-to-handler mappings."""
-        routing_table = initialized_orchestrator.get_routing_table()
+    def test_subcontract_routes_heartbeat_event(self) -> None:
+        """Verify ModelNodeHeartbeatEvent maps to handler-node-heartbeat."""
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
+        )
+
+        subcontract = _create_handler_routing_subcontract()
+
+        entry = next(
+            (
+                e
+                for e in subcontract.handlers
+                if e.routing_key == "ModelNodeHeartbeatEvent"
+            ),
+            None,
+        )
+
+        assert entry is not None, "No routing entry for ModelNodeHeartbeatEvent"
+        assert entry.handler_key == "handler-node-heartbeat"
+
+    def test_subcontract_contains_expected_routing_keys(self) -> None:
+        """Verify subcontract contains all expected event-to-handler mappings."""
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
+        )
+
+        subcontract = _create_handler_routing_subcontract()
 
         # Expected routing keys
         expected_keys = {
             "ModelNodeIntrospectionEvent",
             "ModelRuntimeTick",
             "ModelNodeRegistrationAcked",
+            "ModelNodeHeartbeatEvent",
         }
 
-        actual_keys = set(routing_table.keys())
+        actual_keys = {entry.routing_key for entry in subcontract.handlers}
 
-        assert expected_keys <= actual_keys, (
-            f"Missing routing keys: {expected_keys - actual_keys}"
+        assert expected_keys == actual_keys, (
+            f"Routing key mismatch.\n"
+            f"Missing: {expected_keys - actual_keys}\n"
+            f"Extra: {actual_keys - expected_keys}"
         )
 
 
@@ -886,86 +850,69 @@ class TestRouteToHandlers:
 
 
 class TestValidateHandlerRouting:
-    """Integration tests for validate_handler_routing() method.
+    """Integration tests for handler routing subcontract validation.
 
-    These tests verify that the handler routing configuration is valid
-    and all referenced handlers are registered.
+    These tests verify that the handler routing subcontract configuration
+    is structurally valid. The actual validate_handler_routing() method
+    requires runtime initialization which is now handled externally.
+
+    Note: Tests that validated runtime state (validate_handler_routing method)
+    have been replaced with subcontract structure validation tests.
     """
 
-    @pytest.fixture
-    def mock_container(self) -> MagicMock:
-        """Create a mock ONEX container for testing."""
-        from unittest.mock import MagicMock
-
-        container = MagicMock()
-        container.config = MagicMock()
-        return container
-
-    @pytest.fixture
-    def mock_projection_reader(self) -> MagicMock:
-        """Create a mock projection reader for testing."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        reader = MagicMock()
-        reader.get_entity_state = AsyncMock(return_value=None)
-        reader.list_entities_by_status = AsyncMock(return_value=[])
-        return reader
-
-    @pytest.fixture
-    def initialized_orchestrator(
-        self, mock_container: MagicMock, mock_projection_reader: MagicMock
-    ) -> NodeRegistrationOrchestrator:
-        """Create an orchestrator with handler routing initialized."""
+    def test_subcontract_handlers_have_valid_routing_keys(self) -> None:
+        """Verify all handler entries have non-empty routing keys."""
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
+            _create_handler_routing_subcontract,
         )
 
-        return NodeRegistrationOrchestrator(
-            mock_container, projection_reader=mock_projection_reader
-        )
+        subcontract = _create_handler_routing_subcontract()
 
-    def test_validate_handler_routing_returns_expected_errors(
-        self, initialized_orchestrator: NodeRegistrationOrchestrator
-    ) -> None:
-        """Verify validate_handler_routing() returns expected errors.
+        for entry in subcontract.handlers:
+            assert entry.routing_key, f"Handler entry has empty routing_key: {entry}"
+            assert isinstance(entry.routing_key, str), (
+                f"routing_key must be a string: {entry.routing_key}"
+            )
 
-        The subcontract includes handler-node-heartbeat which is only registered
-        when a projector is provided. Since we use None projector, this handler
-        is not registered, and validation will report it as missing.
-
-        This is expected behavior - heartbeat handler requires a projector
-        for state persistence, so it's conditionally registered.
-        """
-        errors = initialized_orchestrator.validate_handler_routing()
-
-        # Expect exactly one error about missing heartbeat handler
-        assert len(errors) == 1, f"Expected 1 error, got {len(errors)}: {errors}"
-        assert "handler-node-heartbeat" in errors[0], (
-            f"Expected error about handler-node-heartbeat, got: {errors[0]}"
-        )
-
-    def test_validate_before_initialization_raises_error(
-        self, mock_container: MagicMock
-    ) -> None:
-        """Verify validation before initialization raises ModelOnexError.
-
-        When handler routing is not initialized, calling validate_handler_routing()
-        raises a ModelOnexError with error code ONEX_CORE_086_INVALID_STATE.
-        """
-        from omnibase_core.models.errors import ModelOnexError
-
+    def test_subcontract_handlers_have_valid_handler_keys(self) -> None:
+        """Verify all handler entries have non-empty handler keys."""
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
+            _create_handler_routing_subcontract,
         )
 
-        orchestrator = NodeRegistrationOrchestrator(mock_container)
-        assert not orchestrator.is_routing_initialized
+        subcontract = _create_handler_routing_subcontract()
 
-        # Validation before initialization raises an exception
-        with pytest.raises(ModelOnexError) as exc_info:
-            orchestrator.validate_handler_routing()
+        for entry in subcontract.handlers:
+            assert entry.handler_key, f"Handler entry has empty handler_key: {entry}"
+            assert isinstance(entry.handler_key, str), (
+                f"handler_key must be a string: {entry.handler_key}"
+            )
 
-        assert "not initialized" in str(exc_info.value).lower()
+    def test_subcontract_handler_keys_follow_naming_convention(self) -> None:
+        """Verify handler keys follow the 'handler-<name>' convention."""
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
+        )
+
+        subcontract = _create_handler_routing_subcontract()
+
+        for entry in subcontract.handlers:
+            assert entry.handler_key.startswith("handler-"), (
+                f"Handler key should start with 'handler-': {entry.handler_key}"
+            )
+
+    def test_subcontract_routing_keys_follow_model_naming_convention(self) -> None:
+        """Verify routing keys follow the 'Model<Name>' convention."""
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
+        )
+
+        subcontract = _create_handler_routing_subcontract()
+
+        for entry in subcontract.handlers:
+            assert entry.routing_key.startswith("Model"), (
+                f"Routing key should start with 'Model': {entry.routing_key}"
+            )
 
 
 # =============================================================================
@@ -977,45 +924,20 @@ class TestHandlerRoutingContractCodeConsistency:
     """Integration tests for consistency between contract.yaml and code.
 
     These tests verify that the handler_routing configuration in contract.yaml
-    matches the actual handler IDs used in the registry.
+    matches the subcontract configuration in the node module.
     """
 
-    @pytest.fixture
-    def mock_container(self) -> MagicMock:
-        """Create a mock ONEX container for testing."""
-        from unittest.mock import MagicMock
-
-        container = MagicMock()
-        container.config = MagicMock()
-        return container
-
-    @pytest.fixture
-    def mock_projection_reader(self) -> MagicMock:
-        """Create a mock projection reader for testing."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        reader = MagicMock()
-        reader.get_entity_state = AsyncMock(return_value=None)
-        reader.list_entities_by_status = AsyncMock(return_value=[])
-        return reader
-
-    def test_contract_event_models_match_routing_table_keys(
+    def test_contract_event_models_match_subcontract_routing_keys(
         self,
         contract_data: dict,
-        mock_container: MagicMock,
-        mock_projection_reader: MagicMock,
     ) -> None:
-        """Verify contract event models match routing table keys.
+        """Verify contract event models match subcontract routing keys.
 
         The event model names in contract.yaml should match the routing keys
-        used in the orchestrator's routing table.
+        defined in _create_handler_routing_subcontract().
         """
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
-        )
-
-        orchestrator = NodeRegistrationOrchestrator(
-            mock_container, projection_reader=mock_projection_reader
+            _create_handler_routing_subcontract,
         )
 
         # Extract event model names from contract
@@ -1027,50 +949,81 @@ class TestHandlerRoutingContractCodeConsistency:
             if "event_model" in h and "name" in h["event_model"]
         }
 
-        # Get routing table keys from orchestrator
-        routing_table = orchestrator.get_routing_table()
-        routing_table_keys = set(routing_table.keys())
+        # Get routing keys from subcontract
+        subcontract = _create_handler_routing_subcontract()
+        subcontract_routing_keys = {entry.routing_key for entry in subcontract.handlers}
 
-        # All contract event models should be in routing table
-        assert contract_event_models <= routing_table_keys, (
-            f"Contract event models not in routing table: "
-            f"{contract_event_models - routing_table_keys}"
+        # All contract event models should be in subcontract routing keys
+        assert contract_event_models <= subcontract_routing_keys, (
+            f"Contract event models not in subcontract: "
+            f"{contract_event_models - subcontract_routing_keys}"
         )
 
-    def test_handler_ids_are_consistent(
-        self,
-        mock_container: MagicMock,
-        mock_projection_reader: MagicMock,
-    ) -> None:
-        """Verify handler IDs match between subcontract and registry adapters.
+    def test_handler_ids_are_consistent(self) -> None:
+        """Verify handler IDs in subcontract follow expected naming.
 
         The handler_key values in _create_handler_routing_subcontract() must
-        match the handler_id properties of the registered adapter classes.
+        follow the 'handler-<name>' naming convention.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
             _create_handler_routing_subcontract,
         )
 
         # Get expected handler keys from subcontract
         subcontract = _create_handler_routing_subcontract()
-        expected_handler_keys = {entry.handler_key for entry in subcontract.handlers}
+        handler_keys = {entry.handler_key for entry in subcontract.handlers}
 
-        # Create orchestrator to get actual handler IDs
-        orchestrator = NodeRegistrationOrchestrator(
-            mock_container, projection_reader=mock_projection_reader
+        # Expected handler IDs based on contract
+        expected_handler_ids = {
+            "handler-node-introspected",
+            "handler-runtime-tick",
+            "handler-node-registration-acked",
+            "handler-node-heartbeat",
+        }
+
+        assert handler_keys == expected_handler_ids, (
+            f"Handler ID mismatch.\n"
+            f"Missing: {expected_handler_ids - handler_keys}\n"
+            f"Extra: {handler_keys - expected_handler_ids}"
         )
 
-        # Get routing table and extract handler IDs
-        routing_table = orchestrator.get_routing_table()
-        actual_handler_ids = set()
-        for handler_keys in routing_table.values():
-            actual_handler_ids.update(handler_keys)
+    def test_contract_handler_names_map_to_subcontract_handler_keys(
+        self,
+        contract_data: dict,
+    ) -> None:
+        """Verify contract handler class names can be mapped to subcontract keys.
 
-        # All expected handler keys should be registered
-        assert expected_handler_keys <= actual_handler_ids, (
-            f"Missing handler IDs: {expected_handler_keys - actual_handler_ids}"
+        The handler class names in contract.yaml should correspond to the
+        handler_key values in the subcontract via a consistent naming convention.
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.node import (
+            _create_handler_routing_subcontract,
         )
+
+        # Extract handler class names from contract
+        handler_routing = contract_data.get("handler_routing", {})
+        handlers = handler_routing.get("handlers", [])
+        contract_handler_names = {
+            h["handler"]["name"]
+            for h in handlers
+            if "handler" in h and "name" in h["handler"]
+        }
+
+        # Get handler keys from subcontract
+        subcontract = _create_handler_routing_subcontract()
+        subcontract_handler_keys = {entry.handler_key for entry in subcontract.handlers}
+
+        # Contract handler names should correspond to subcontract keys
+        # (e.g., HandlerNodeIntrospected -> handler-node-introspected)
+        for handler_name in contract_handler_names:
+            # Convert CamelCase to kebab-case
+            import re
+
+            kebab_name = re.sub(r"(?<!^)(?=[A-Z])", "-", handler_name).lower()
+            assert kebab_name in subcontract_handler_keys, (
+                f"Handler '{handler_name}' (as '{kebab_name}') not found in "
+                f"subcontract keys: {subcontract_handler_keys}"
+            )
 
 
 # =============================================================================
