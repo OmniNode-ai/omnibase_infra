@@ -272,6 +272,13 @@ class ContractHandlerDiscovery:
                 # path.is_dir() and path.is_file() can raise OSError for:
                 # - Permission denied when accessing the path
                 # - Filesystem errors (unmounted volumes, network failures)
+                #
+                # Initialize before try block to ensure these variables are always
+                # defined, even if an unexpected (non-OSError) exception occurs.
+                # This prevents NameError in the outer exception handlers that
+                # reference is_file (lines 430, 448, 460).
+                is_directory = False
+                is_file = False
                 try:
                     is_directory = path.is_dir()
                     is_file = path.is_file()
@@ -376,9 +383,10 @@ class ContractHandlerDiscovery:
                         # ImportError: Module not found or import failure
                         # AttributeError: Class not found in module (from getattr)
                         # TypeError: Path resolved to non-class (from isinstance check)
+                        # Uses IMPORT_ERROR for consistency with EnumHandlerLoaderError
                         errors.append(
                             ModelDiscoveryError(
-                                error_code="IMPORT_FAILED",
+                                error_code="IMPORT_ERROR",
                                 message=f"Failed to import handler class: {e}",
                                 contract_path=loaded.contract_path,
                                 handler_name=loaded.handler_name,
@@ -389,7 +397,11 @@ class ContractHandlerDiscovery:
                             )
                         )
                     except Exception as e:
-                        # Catch-all for unexpected registration errors
+                        # Catch-all for unexpected registration errors.
+                        # WHY: Individual handler failures must NOT crash the entire discovery
+                        # operation. This enables graceful degradation where some handlers can
+                        # be registered even if others fail unexpectedly. All errors are
+                        # captured in the result for the caller to handle.
                         errors.append(
                             ModelDiscoveryError(
                                 error_code="REGISTRATION_UNEXPECTED_ERROR",
@@ -450,9 +462,15 @@ class ContractHandlerDiscovery:
                 )
 
             except Exception as e:
-                # Unexpected errors during path processing
+                # Catch-all for unexpected errors during path processing.
+                # WHY: Discovery must be resilient - a single failing path must NOT crash
+                # the entire discovery operation. This enables processing remaining paths
+                # even if one path encounters unexpected errors (e.g., filesystem race
+                # conditions, corrupted files, unexpected plugin loader exceptions).
+                # All errors are captured in the result for the caller to handle.
+                #
                 # NOTE: Use stored is_file boolean, NOT path.is_file() call
-                # which could raise OSError while already handling an exception
+                # which could raise OSError while already handling an exception.
                 errors.append(
                     ModelDiscoveryError(
                         error_code="UNEXPECTED_ERROR",

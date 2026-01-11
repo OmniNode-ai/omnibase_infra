@@ -130,7 +130,14 @@ class TestContractHandlerDiscoveryErrorHandling:
         mixed_valid_invalid_directory: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that valid handlers are registered even when some fail.
+        """Test that valid handlers are registered even when some contracts fail to load.
+
+        This test verifies the partial success behavior where:
+        1. Valid contracts are discovered and registered successfully
+        2. Invalid contracts (bad YAML, missing fields) are filtered out by the loader
+        3. Failures are logged as warnings/errors but don't prevent successful handlers
+        4. The result.has_errors is False because ContractHandlerDiscovery only sees
+           the filtered (successful) handlers from the loader
 
         Note: The HandlerPluginLoader filters out failed contracts during
         directory loading. Failures are logged as warnings but not captured
@@ -171,6 +178,15 @@ class TestContractHandlerDiscoveryErrorHandling:
             "missing_class" in warning_text.lower() or "Field required" in warning_text
         )
 
+        # CRITICAL: Verify that errors/failures ARE logged even though has_errors is False
+        # This confirms the loader is properly reporting issues via logging while still
+        # allowing partial success. The warning messages should contain error indicators.
+        error_indicators = ["error", "fail", "invalid", "missing"]
+        warning_text_lower = warning_text.lower()
+        assert any(indicator in warning_text_lower for indicator in error_indicators), (
+            f"Expected error indicators in warnings but got: {warning_messages}"
+        )
+
         # Valid handler should be registered despite failures of other contracts
         assert handler_registry.is_registered("valid.handler")
 
@@ -194,14 +210,46 @@ class TestContractHandlerDiscoveryCorrelationId:
         self,
         discovery_service: ContractHandlerDiscovery,
         empty_directory: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that provided correlation ID is used."""
+        """Test that provided correlation ID is preserved and used in logging.
+
+        Verifies that:
+        1. The discovery operation completes successfully with the provided ID
+        2. The correlation_id appears in log records' extra fields
+        3. The ID is propagated to internal operations for tracing
+        """
+        import logging
+
         correlation_id = uuid4()
-        result = await discovery_service.discover_and_register(
-            [empty_directory],
-            correlation_id=correlation_id,
-        )
+        correlation_id_str = str(correlation_id)
+
+        with caplog.at_level(logging.DEBUG):
+            result = await discovery_service.discover_and_register(
+                [empty_directory],
+                correlation_id=correlation_id,
+            )
+
         assert isinstance(result, ModelDiscoveryResult)
+
+        # Verify correlation_id appears in log records
+        # The ContractHandlerDiscovery logs with extra={"correlation_id": str(correlation_id)}
+        correlation_id_in_logs = False
+        for record in caplog.records:
+            # Check if correlation_id is in the record's extra fields
+            if hasattr(record, "correlation_id"):
+                if record.correlation_id == correlation_id_str:
+                    correlation_id_in_logs = True
+                    break
+            # Also check the message itself (some loggers include it in message)
+            if correlation_id_str in record.getMessage():
+                correlation_id_in_logs = True
+                break
+
+        assert correlation_id_in_logs, (
+            f"Expected correlation_id {correlation_id_str} to appear in logs. "
+            f"Log messages: {[r.getMessage() for r in caplog.records]}"
+        )
 
 
 class TestContractHandlerDiscoveryMixedPaths:
