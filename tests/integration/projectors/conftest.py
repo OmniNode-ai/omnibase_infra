@@ -67,6 +67,7 @@ def _check_docker_available() -> bool:
             text=True,
             timeout=10,
             check=False,
+            shell=False,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

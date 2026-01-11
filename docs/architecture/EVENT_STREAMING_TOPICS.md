@@ -744,7 +744,7 @@ The `ModelIntrospectionConfig` class provides typed configuration validation usi
 ```python
 from uuid import uuid4
 
-from omnibase_infra.mixins import ModelIntrospectionConfig
+from omnibase_infra.models.discovery import ModelIntrospectionConfig
 from pydantic import ValidationError
 
 # Valid configuration
@@ -843,7 +843,8 @@ The node code reads the contract and initializes `MixinNodeIntrospection` using 
 # node.py - Initializing MixinNodeIntrospection with configuration
 from uuid import uuid4
 
-from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
+from omnibase_infra.mixins import MixinNodeIntrospection
+from omnibase_infra.models.discovery import ModelIntrospectionConfig
 from omnibase_infra.event_bus import KafkaEventBus
 
 class RegistryEffectNode(MixinNodeIntrospection):

@@ -1452,6 +1452,22 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - Handler Validation)
     ticket: OMN-1263
   # ==========================================================================
+  # ProjectorValidationError Exemptions (OMN-1168)
+  # ==========================================================================
+  # Validation error class requires multiple context parameters for complete
+  # error information: error_type, contract_path, message, remediation_hint,
+  # and correlation_id. These are distinct required contexts for error reporting.
+  - file_pattern: 'model_projector_validation_error\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Validation error class requires multiple contextual parameters for debugging: error_type, contract_path, message, remediation_hint, correlation_id. These are distinct error context fields needed for comprehensive error reporting and graceful mode error collection.
+
+    documentation:
+      - docs/patterns/error_handling_patterns.md
+      - CLAUDE.md (Infrastructure Error Patterns)
+    ticket: OMN-1168
+  # ==========================================================================
   # ProjectorPluginLoader Exemptions (OMN-1168)
   # ==========================================================================
   # Plugin loader pattern requires multiple discovery methods:

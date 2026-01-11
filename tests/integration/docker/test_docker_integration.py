@@ -135,6 +135,7 @@ class TestDockerBuild:
                 timeout=BUILD_TIMEOUT,
                 env=env,
                 check=False,
+                shell=False,
             )
 
             # Build should succeed for public dependencies
@@ -151,6 +152,7 @@ class TestDockerBuild:
                 capture_output=True,
                 timeout=60,
                 check=False,
+                shell=False,
             )
 
     @pytest.mark.slow
@@ -195,6 +197,7 @@ class TestDockerBuild:
                 timeout=BUILD_TIMEOUT,
                 env=env,
                 check=False,
+                shell=False,
             )
 
             assert first_result.returncode == 0, "First build failed"
@@ -210,6 +213,7 @@ class TestDockerBuild:
                 capture_output=True,
                 timeout=60,
                 check=False,
+                shell=False,
             )
 
     @pytest.mark.slow
@@ -239,6 +243,7 @@ class TestDockerBuild:
             text=True,
             timeout=30,
             check=False,
+            shell=False,
         )
 
         assert result.returncode == 0, "Failed to inspect image"
@@ -297,6 +302,7 @@ class TestDockerSecurity:
             text=True,
             timeout=60,
             check=False,
+            shell=False,
         )
 
         assert result.returncode == 0, f"whoami failed: {result.stderr}"
@@ -333,6 +339,7 @@ class TestDockerSecurity:
             text=True,
             timeout=60,
             check=False,
+            shell=False,
         )
 
         assert result.returncode == 0, f"id command failed: {result.stderr}"
@@ -360,6 +367,7 @@ class TestDockerSecurity:
             text=True,
             timeout=60,
             check=False,
+            shell=False,
         )
 
         assert result.returncode == 0, "docker history failed"
@@ -415,6 +423,7 @@ class TestDockerSecurity:
                 text=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
 
             # test -e returns 0 if file exists, 1 if not
@@ -473,6 +482,7 @@ class TestDockerRuntime:
                 text=True,
                 timeout=60,
                 check=False,
+                shell=False,
             )
 
             assert result.returncode == 0, f"Container start failed: {result.stderr}"
@@ -493,6 +503,7 @@ class TestDockerRuntime:
                 text=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
 
             is_running = inspect_result.stdout.strip() == "true"
@@ -504,12 +515,14 @@ class TestDockerRuntime:
                 capture_output=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
             subprocess.run(
                 ["docker", "rm", "-f", container_name],
                 capture_output=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
 
     @pytest.mark.slow
@@ -543,6 +556,7 @@ class TestDockerRuntime:
             text=True,
             timeout=60,
             check=False,
+            shell=False,
         )
 
         assert result.returncode == 0
@@ -587,6 +601,7 @@ class TestDockerRuntime:
                 capture_output=True,
                 timeout=60,
                 check=False,
+                shell=False,
             )
 
             time.sleep(3)  # Allow initialization
@@ -600,6 +615,7 @@ class TestDockerRuntime:
                 text=True,
                 timeout=120,
                 check=False,
+                shell=False,
             )
 
             # Should stop gracefully within timeout (not killed)
@@ -618,6 +634,7 @@ class TestDockerRuntime:
                 text=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
 
             exit_code = int(inspect_result.stdout.strip())
@@ -651,6 +668,7 @@ class TestDockerRuntime:
                 capture_output=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
 
 
@@ -700,6 +718,7 @@ class TestDockerHealthCheck:
                 capture_output=True,
                 timeout=60,
                 check=False,
+                shell=False,
             )
 
             # Wait for container to be ready
@@ -726,6 +745,7 @@ class TestDockerHealthCheck:
                         text=True,
                         timeout=30,
                         check=False,
+                        shell=False,
                     )
                     pytest.fail(
                         f"Health endpoint not accessible after {max_retries} attempts.\n"
@@ -738,12 +758,14 @@ class TestDockerHealthCheck:
                 capture_output=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
             subprocess.run(
                 ["docker", "rm", "-f", container_name],
                 capture_output=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
 
     @pytest.mark.slow
@@ -784,6 +806,7 @@ class TestDockerHealthCheck:
                 capture_output=True,
                 timeout=60,
                 check=False,
+                shell=False,
             )
 
             # Wait for health check to be configured
@@ -802,6 +825,7 @@ class TestDockerHealthCheck:
                 text=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
 
             initial_status = initial_result.stdout.strip()
@@ -825,6 +849,7 @@ class TestDockerHealthCheck:
                     text=True,
                     timeout=30,
                     check=False,
+                    shell=False,
                 )
 
                 status = result.stdout.strip()
@@ -845,6 +870,7 @@ class TestDockerHealthCheck:
                         text=True,
                         timeout=30,
                         check=False,
+                        shell=False,
                     )
                     pytest.fail(f"Container became unhealthy: {inspect.stdout}")
 
@@ -860,12 +886,14 @@ class TestDockerHealthCheck:
                 capture_output=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
             subprocess.run(
                 ["docker", "rm", "-f", container_name],
                 capture_output=True,
                 timeout=30,
                 check=False,
+                shell=False,
             )
 
 
@@ -1011,6 +1039,7 @@ class TestDockerComposeProfiles:
             env=env,
             cwd=str(compose_file_path.parent),
             check=False,
+            shell=False,
         )
 
         assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
@@ -1046,6 +1075,7 @@ class TestDockerImageLabels:
             text=True,
             timeout=30,
             check=False,
+            shell=False,
         )
 
         assert result.returncode == 0, "Failed to inspect image labels"
@@ -1086,6 +1116,7 @@ class TestDockerImageLabels:
             text=True,
             timeout=30,
             check=False,
+            shell=False,
         )
 
         assert result.returncode == 0
