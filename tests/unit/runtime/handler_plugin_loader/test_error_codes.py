@@ -12,6 +12,7 @@ Error Code Ranges:
     - 010-019: Import errors (handler class loading)
     - 020-029: Directory-level errors (load_from_directory)
     - 030-039: Pattern errors (discover_and_load)
+    - 040-049: Configuration errors (ambiguous configurations)
 """
 
 from __future__ import annotations
@@ -271,6 +272,139 @@ class TestEnumProperties:
         # Non-pattern errors should return False
         assert not EnumHandlerLoaderError.FILE_NOT_FOUND.is_pattern_error
         assert not EnumHandlerLoaderError.DIRECTORY_NOT_FOUND.is_pattern_error
+
+    def test_configuration_error_property(self) -> None:
+        """Test is_configuration_error property returns True for configuration errors."""
+        from omnibase_infra.enums import EnumHandlerLoaderError
+
+        # All configuration errors (040-049) should return True
+        assert EnumHandlerLoaderError.AMBIGUOUS_CONTRACT_CONFIGURATION.is_configuration_error
+
+        # Non-configuration errors should return False
+        assert not EnumHandlerLoaderError.FILE_NOT_FOUND.is_configuration_error
+        assert not EnumHandlerLoaderError.DIRECTORY_NOT_FOUND.is_configuration_error
+        assert not EnumHandlerLoaderError.EMPTY_PATTERNS_LIST.is_configuration_error
+
+
+class TestAmbiguousContractConfigurationError:
+    """Tests for AMBIGUOUS_CONTRACT_CONFIGURATION error code (040).
+
+    This error is raised when both handler_contract.yaml and contract.yaml
+    exist in the same directory, which is an ambiguous configuration that
+    could lead to duplicate handler registrations.
+    """
+
+    def test_ambiguous_contract_uses_040_error_code(self, tmp_path: Path) -> None:
+        """Test that ambiguous contract configuration uses HANDLER_LOADER_040."""
+        from omnibase_infra.enums import EnumHandlerLoaderError
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        # Create directory with BOTH contract types (ambiguous)
+        ambiguous_dir = tmp_path / "ambiguous"
+        ambiguous_dir.mkdir()
+
+        (ambiguous_dir / "handler_contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.one",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+        (ambiguous_dir / "contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.two",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+
+        loader = HandlerPluginLoader()
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_directory(tmp_path)
+
+        # Verify error code is AMBIGUOUS_CONTRACT_CONFIGURATION
+        error = exc_info.value
+        assert (
+            error.model.context.get("loader_error")
+            == EnumHandlerLoaderError.AMBIGUOUS_CONTRACT_CONFIGURATION.value
+        )
+        assert (
+            EnumHandlerLoaderError.AMBIGUOUS_CONTRACT_CONFIGURATION.value
+            == "HANDLER_LOADER_040"
+        )
+
+    def test_ambiguous_contract_includes_correlation_id(self, tmp_path: Path) -> None:
+        """Test that AMBIGUOUS_CONTRACT_CONFIGURATION error includes correlation_id."""
+        from uuid import UUID
+
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        # Create directory with BOTH contract types (ambiguous)
+        ambiguous_dir = tmp_path / "ambiguous"
+        ambiguous_dir.mkdir()
+
+        (ambiguous_dir / "handler_contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.one",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+        (ambiguous_dir / "contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.two",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+
+        test_correlation_id = UUID("12345678-1234-5678-1234-567812345678")
+        loader = HandlerPluginLoader()
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_directory(tmp_path, correlation_id=test_correlation_id)
+
+        # Verify correlation_id is in error
+        error = exc_info.value
+        assert error.model.correlation_id == test_correlation_id
+
+    def test_ambiguous_contract_error_message_is_actionable(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that error message explains the problem and solution."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+        # Create directory with BOTH contract types (ambiguous)
+        ambiguous_dir = tmp_path / "ambiguous"
+        ambiguous_dir.mkdir()
+
+        (ambiguous_dir / "handler_contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.one",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+        (ambiguous_dir / "contract.yaml").write_text(
+            MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_name="handler.two",
+                handler_class="tests.unit.runtime.handler_plugin_loader.conftest.MockValidHandler",
+            )
+        )
+
+        loader = HandlerPluginLoader()
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            loader.load_from_directory(tmp_path)
+
+        error_message = str(exc_info.value)
+
+        # Error should explain what was detected
+        assert "handler_contract.yaml" in error_message
+        assert "contract.yaml" in error_message
+        assert "ambiguous" in error_message.lower()
+
+        # Error should explain how to fix
+        assert "ONE contract file" in error_message
 
 
 class TestCorrelationIdInErrors:

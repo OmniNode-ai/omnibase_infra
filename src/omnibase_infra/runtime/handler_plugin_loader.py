@@ -28,10 +28,11 @@ Error Codes:
         - ``HANDLER_LOADER_008`` (FILE_READ_ERROR): Failed to read contract file (I/O)
         - ``HANDLER_LOADER_009`` (FILE_STAT_ERROR): Failed to stat contract file (I/O)
 
-    **Import Errors (HANDLER_LOADER_010 - HANDLER_LOADER_012)**:
+    **Import Errors (HANDLER_LOADER_010 - HANDLER_LOADER_013)**:
         - ``HANDLER_LOADER_010`` (MODULE_NOT_FOUND): Handler module not found
         - ``HANDLER_LOADER_011`` (CLASS_NOT_FOUND): Handler class not found in module
         - ``HANDLER_LOADER_012`` (IMPORT_ERROR): Import error (syntax/dependency)
+        - ``HANDLER_LOADER_013`` (NAMESPACE_NOT_ALLOWED): Handler module namespace not allowed
 
     **Directory Errors (HANDLER_LOADER_020 - HANDLER_LOADER_022)**:
         - ``HANDLER_LOADER_020`` (DIRECTORY_NOT_FOUND): Directory does not exist
@@ -81,7 +82,23 @@ Security Considerations:
     - Only load contracts from trusted sources
     - Validate contract file permissions in production environments
     - Be aware that module side effects execute during import
-    - Consider allowlisting import paths in high-security environments
+    - Use the ``allowed_namespaces`` parameter to restrict imports to trusted packages
+
+    Namespace Allowlisting:
+        The loader supports namespace-based import restrictions via the
+        ``allowed_namespaces`` parameter. When configured, only handler modules
+        whose fully-qualified path starts with one of the allowed namespace
+        prefixes will be imported. This provides defense-in-depth against
+        malicious contract files attempting to load untrusted code.
+
+        Example:
+            >>> loader = HandlerPluginLoader(
+            ...     allowed_namespaces=["omnibase_infra.", "omnibase_core.", "mycompany."]
+            ... )
+            >>> # This would succeed:
+            >>> loader.load_from_contract(Path("contract.yaml"))  # handler_class: omnibase_infra.handlers.HandlerAuth
+            >>> # This would fail with NAMESPACE_NOT_ALLOWED:
+            >>> loader.load_from_contract(Path("malicious.yaml"))  # handler_class: malicious_pkg.EvilHandler
 
     **Error Message Sanitization**:
         Error messages are designed to be safe for end users and prevent
@@ -249,12 +266,44 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         Created as part of OMN-1132 handler plugin loader implementation.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, allowed_namespaces: list[str] | None = None) -> None:
         """Initialize the handler plugin loader.
 
-        The loader is stateless and does not require any configuration.
-        All operations are performed on-demand based on provided paths.
+        Args:
+            allowed_namespaces: Optional list of allowed namespace prefixes for
+                handler module imports. When provided, only handler modules whose
+                fully-qualified class path starts with one of these prefixes will
+                be loaded. This provides defense-in-depth security by restricting
+                which packages can be dynamically imported.
+
+                Each prefix should end with a period to match package boundaries
+                (e.g., "omnibase_infra." not "omnibase_infra"). If a prefix does
+                not end with a period, it will still work but may match unintended
+                packages (e.g., "omnibase" would match "omnibase_other").
+
+                If None (default), no namespace restriction is applied and any
+                importable module can be loaded.
+
+                If an empty list is provided, NO namespaces are allowed, effectively
+                blocking all handler imports.
+
+        Example:
+            >>> # Restrict to trusted packages
+            >>> loader = HandlerPluginLoader(
+            ...     allowed_namespaces=["omnibase_infra.", "omnibase_core.", "mycompany.handlers."]
+            ... )
+            >>>
+            >>> # No restriction (default)
+            >>> loader = HandlerPluginLoader()
+            >>>
+            >>> # Block all imports (empty list)
+            >>> loader = HandlerPluginLoader(allowed_namespaces=[])
+
+        Security Note:
+            Namespace validation occurs BEFORE ``importlib.import_module()`` is
+            called, preventing any module-level side effects from untrusted packages.
         """
+        self._allowed_namespaces: list[str] | None = allowed_namespaces
 
     def load_from_contract(
         self,
@@ -290,6 +339,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - HANDLER_LOADER_007: Path exists but is not a file (e.g., directory)
                 - HANDLER_LOADER_008: Failed to read contract file (I/O error)
                 - HANDLER_LOADER_009: Failed to stat contract file (I/O error)
+            ProtocolConfigurationError: If namespace validation fails (when
+                allowed_namespaces is configured).
+                - HANDLER_LOADER_013: Namespace not allowed
             InfraConnectionError: If the handler class cannot be imported.
                 Error codes:
                 - HANDLER_LOADER_010: Module not found
@@ -1115,6 +1167,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     ) -> type:
         """Dynamically import handler class from fully qualified path.
 
+        This method validates the namespace (if allowed_namespaces is configured)
+        BEFORE calling ``importlib.import_module()``, preventing any module-level
+        side effects from untrusted packages.
+
         Args:
             class_path: Fully qualified class path (e.g., 'myapp.handlers.AuthHandler').
             contract_path: Path to the contract file (for error context).
@@ -1124,8 +1180,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             The imported class type.
 
         Raises:
+            ProtocolConfigurationError: If namespace validation fails.
+                - HANDLER_LOADER_013 (NAMESPACE_NOT_ALLOWED): When the class path
+                  does not start with any of the allowed namespace prefixes.
             InfraConnectionError: If the module or class cannot be imported.
                 Error codes include correlation_id when provided for traceability.
+                - HANDLER_LOADER_010 (MODULE_NOT_FOUND): Handler module not found
+                - HANDLER_LOADER_011 (CLASS_NOT_FOUND): Handler class not found in module
+                - HANDLER_LOADER_012 (IMPORT_ERROR): Import error (syntax/dependency)
         """
         # Split class path into module and class name
         if "." not in class_path:
@@ -1144,6 +1206,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             )
 
         module_path, class_name = class_path.rsplit(".", 1)
+
+        # Validate namespace BEFORE importing (defense-in-depth)
+        # This prevents any module-level side effects from untrusted packages
+        self._validate_namespace(class_path, contract_path, correlation_id)
 
         # Import the module
         try:
@@ -1214,6 +1280,81 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             )
 
         return handler_class
+
+    def _validate_namespace(
+        self,
+        class_path: str,
+        contract_path: Path,
+        correlation_id: UUID | None = None,
+    ) -> None:
+        """Validate handler class path against allowed namespaces.
+
+        Checks whether the handler's fully-qualified class path starts with one
+        of the allowed namespace prefixes. This validation occurs BEFORE the
+        module is imported, preventing any module-level side effects from
+        untrusted packages.
+
+        Args:
+            class_path: Fully qualified class path (e.g., 'myapp.handlers.AuthHandler').
+            contract_path: Path to the contract file (for error context).
+            correlation_id: Optional correlation ID for tracing and error context.
+
+        Raises:
+            ProtocolConfigurationError: If namespace validation fails.
+                - HANDLER_LOADER_013 (NAMESPACE_NOT_ALLOWED): When the class path
+                  does not start with any of the allowed namespace prefixes.
+
+        Note:
+            This method is a no-op when ``allowed_namespaces`` is None, allowing
+            any namespace. When ``allowed_namespaces`` is an empty list, ALL
+            namespaces are blocked.
+
+        Example:
+            >>> loader = HandlerPluginLoader(
+            ...     allowed_namespaces=["omnibase_infra.", "mycompany."]
+            ... )
+            >>> # This passes validation:
+            >>> loader._validate_namespace(
+            ...     "omnibase_infra.handlers.HandlerAuth",
+            ...     Path("contract.yaml"),
+            ... )
+            >>> # This raises ProtocolConfigurationError:
+            >>> loader._validate_namespace(
+            ...     "malicious_pkg.EvilHandler",
+            ...     Path("malicious.yaml"),
+            ... )
+        """
+        # If no namespace restriction is configured, allow all
+        if self._allowed_namespaces is None:
+            return
+
+        # Check if class_path starts with any allowed namespace
+        for namespace in self._allowed_namespaces:
+            if class_path.startswith(namespace):
+                return
+
+        # Namespace not in allowed list - raise error
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="validate_namespace",
+            correlation_id=correlation_id,
+        )
+
+        # Format allowed namespaces for error message
+        if self._allowed_namespaces:
+            allowed_str = ", ".join(repr(ns) for ns in self._allowed_namespaces)
+        else:
+            allowed_str = "(none - empty allowlist)"
+
+        raise ProtocolConfigurationError(
+            f"Handler namespace not allowed: '{class_path}' does not start with "
+            f"any of the allowed namespaces: {allowed_str}",
+            context=context,
+            loader_error=EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED.value,
+            class_path=class_path,
+            contract_path=str(contract_path),
+            allowed_namespaces=list(self._allowed_namespaces),
+        )
 
     def _validate_yaml_syntax(
         self,
@@ -1417,17 +1558,17 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         Files exceeding MAX_CONTRACT_SIZE are skipped during discovery
         to fail fast before expensive path resolution and loading.
 
-        Contract File Precedence:
-            **WARNING**: When BOTH ``handler_contract.yaml`` AND ``contract.yaml``
-            exist in the same directory, BOTH files are loaded as separate handlers.
-            This is intentional to support different use cases:
+        Ambiguous Contract Detection (Fail-Fast):
+            When BOTH ``handler_contract.yaml`` AND ``contract.yaml`` exist in the
+            same directory, this method raises ``ProtocolConfigurationError`` with
+            error code ``AMBIGUOUS_CONTRACT_CONFIGURATION``. This fail-fast behavior
+            prevents:
 
-            - ``handler_contract.yaml``: Dedicated handler contract (preferred)
-            - ``contract.yaml``: General ONEX contract that may also define handlers
+            - Duplicate handler registrations
+            - Confusion about which contract is authoritative
+            - Unexpected runtime behavior from conflicting configurations
 
-            If this behavior causes confusion or duplicate handler registrations,
-            a warning is logged to alert operators. Best practice is to use only
-            ONE contract file per handler directory to avoid ambiguity.
+            Best practice: Use only ONE contract file per handler directory.
 
             See: docs/patterns/handler_plugin_loader.md#contract-file-precedence
 
@@ -1440,6 +1581,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         Returns:
             List of paths to contract files that pass size validation.
+
+        Raises:
+            ProtocolConfigurationError: If both handler_contract.yaml and contract.yaml
+                exist in the same directory. Error code: AMBIGUOUS_CONTRACT_CONFIGURATION
+                (HANDLER_LOADER_040).
         """
         contract_files: list[Path] = []
         # Track if max_handlers limit was reached
@@ -1447,9 +1593,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         # Search for valid contract filenames in a single scan
         # This consolidates two rglob() calls into one for better performance
-        # WARNING: Both handler_contract.yaml and contract.yaml are loaded if present
-        # in the same directory. This may lead to duplicate handler registrations
-        # if both files define handlers. See docstring for details.
+        # NOTE: If both handler_contract.yaml and contract.yaml are found in the
+        # same directory, we fail fast with AMBIGUOUS_CONTRACT_CONFIGURATION error
+        # after discovery (see ambiguity check below).
         valid_filenames = {HANDLER_CONTRACT_FILENAME, CONTRACT_YAML_FILENAME}
         for path in directory.rglob("*.yaml"):
             # Check if we've reached the max_handlers limit
@@ -1482,7 +1628,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 },
             )
 
-        # Detect directories with both contract types and warn about ambiguity
+        # Detect directories with both contract types and fail fast on ambiguity
         # This is an O(n) check after discovery, not during, to avoid overhead
         # on every file. Build a map of parent_dir -> set of contract filenames.
         dir_to_contract_types: dict[Path, set[str]] = {}
@@ -1492,26 +1638,22 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 dir_to_contract_types[parent] = set()
             dir_to_contract_types[parent].add(path.name)
 
-        # Warn for each directory that has both contract types
+        # Fail fast if any directory has both contract types (ambiguous configuration)
         for parent_dir, filenames in dir_to_contract_types.items():
             if len(filenames) > 1:
-                logger.warning(
-                    "AMBIGUOUS CONTRACT CONFIGURATION: Directory '%s' contains both "
-                    "%s and %s. BOTH files will be loaded as separate handlers. "
-                    "This may cause duplicate handler registrations or unexpected behavior. "
-                    "Best practice: Use only ONE contract file per handler directory. "
-                    "See: docs/patterns/handler_plugin_loader.md#contract-file-precedence",
-                    parent_dir,
-                    HANDLER_CONTRACT_FILENAME,
-                    CONTRACT_YAML_FILENAME,
-                    extra={
-                        "directory": str(parent_dir),
-                        "contract_files": sorted(filenames),
-                        "correlation_id": str(correlation_id)
-                        if correlation_id
-                        else None,
-                        "severity": "configuration_warning",
-                    },
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="find_contract_files",
+                    correlation_id=correlation_id,
+                )
+                raise ProtocolConfigurationError(
+                    f"Ambiguous contract configuration in '{parent_dir.name}': "
+                    f"Found both '{HANDLER_CONTRACT_FILENAME}' and '{CONTRACT_YAML_FILENAME}'. "
+                    f"Use only ONE contract file per handler directory to avoid conflicts.",
+                    context=context,
+                    loader_error=EnumHandlerLoaderError.AMBIGUOUS_CONTRACT_CONFIGURATION.value,
+                    directory=str(parent_dir),
+                    contract_files=sorted(filenames),
                 )
 
         # Deduplicate by resolved path

@@ -116,18 +116,18 @@ nodes/authentication/
 
 ## Contract File Precedence
 
-> **WARNING: No Automatic Precedence Between Contract Types**
+> **FAIL-FAST: Ambiguous Contract Configuration Raises Error**
 >
 > When **both** `handler_contract.yaml` **and** `contract.yaml` exist in the **same directory**,
-> the loader will load **BOTH** files as separate handlers. There is **no precedence** -
-> both are treated as valid, independent handler contracts.
+> the loader raises a `ProtocolConfigurationError` with error code `AMBIGUOUS_CONTRACT_CONFIGURATION`
+> (HANDLER_LOADER_040). The loader does NOT load either file in this case.
 >
-> This behavior can lead to:
-> - Duplicate handler registrations if both files define similar handlers
-> - Confusion about which contract is the "source of truth"
-> - Unexpected runtime behavior if handlers conflict
+> This fail-fast behavior prevents:
+> - Duplicate handler registrations
+> - Confusion about which contract is authoritative
+> - Unexpected runtime behavior from conflicting configurations
 >
-> **Best Practice**: Use only **ONE** contract file per handler directory.
+> **Solution**: Use only **ONE** contract file per handler directory.
 
 ### Discovery Rules
 
@@ -135,38 +135,40 @@ When scanning a directory, the loader discovers contracts following these rules:
 
 1. **Both filenames searched**: `handler_contract.yaml` and `contract.yaml` are both valid
 2. **No precedence between files**: Both files in different directories are loaded
-3. **BOTH loaded if in same directory**: No file takes priority over the other
+3. **FAIL-FAST if both in same directory**: Raises `ProtocolConfigurationError` immediately
 4. **Deduplication by resolved path**: Same file via different paths is loaded once
 5. **Sorted processing**: Discovered paths are sorted for deterministic order
 
 ### Same Directory Behavior (Ambiguous Configuration)
 
 If both `handler_contract.yaml` and `contract.yaml` exist in the same directory,
-**both are loaded** as separate contracts. A warning is logged to alert operators:
+the loader **fails fast** with an error:
 
 ```
-WARNING: AMBIGUOUS CONTRACT CONFIGURATION: Directory '/app/handlers/auth' contains
-both handler_contract.yaml and contract.yaml. BOTH files will be loaded as separate
-handlers. This may cause duplicate handler registrations or unexpected behavior.
+ProtocolConfigurationError: Ambiguous contract configuration in 'auth':
+Found both 'handler_contract.yaml' and 'contract.yaml'.
+Use only ONE contract file per handler directory to avoid conflicts.
 ```
 
+**Error Code**: `HANDLER_LOADER_040` (AMBIGUOUS_CONTRACT_CONFIGURATION)
+
 ```
-# Directory structure (AVOID THIS)
+# Directory structure (CAUSES ERROR)
 handlers/
-    handler_contract.yaml   # Loaded as handler #1
-    contract.yaml          # Loaded as handler #2 (if valid)
+    handler_contract.yaml   # Found
+    contract.yaml          # Also found = ERROR!
 
-# Result: 2 handlers loaded - potentially causing conflicts!
+# Result: ProtocolConfigurationError raised - no handlers loaded
 ```
 
-### Why No Automatic Precedence?
+### Why Fail-Fast Instead of Precedence?
 
-The loader intentionally does **not** implement automatic precedence because:
+The loader intentionally raises an error instead of implementing precedence because:
 
 1. **Explicit is better than implicit**: Silent precedence could mask configuration errors
-2. **Different use cases**: Some projects may legitimately use both file types
-3. **Fail-fast philosophy**: The warning alerts operators to potential issues early
-4. **No assumptions**: The loader cannot know which file the user intends to be authoritative
+2. **Fail-fast philosophy**: Errors are caught early at startup, not at runtime
+3. **No assumptions**: The loader cannot know which file the user intends to be authoritative
+4. **Clear resolution**: Error message tells exactly what to do
 
 ### Correct Configuration (Recommended)
 
@@ -183,7 +185,7 @@ nodes/validate/
     handler_validate.py
 ```
 
-### Incorrect Configuration (Avoid)
+### Incorrect Configuration (Causes Error)
 
 ```
 # INCORRECT: Both contract types in same directory
@@ -193,19 +195,19 @@ nodes/auth/
     handler_auth.py
 
 # This will:
-# 1. Log a warning about ambiguous configuration
-# 2. Load BOTH handlers (may cause duplicate registration errors)
-# 3. Potentially cause runtime conflicts
+# 1. Raise ProtocolConfigurationError with AMBIGUOUS_CONTRACT_CONFIGURATION
+# 2. Stop handler loading immediately (fail-fast)
+# 3. Provide actionable error message explaining how to fix
 ```
 
 ### Resolving Ambiguous Configurations
 
-If you see the "AMBIGUOUS CONTRACT CONFIGURATION" warning:
+If you encounter the `AMBIGUOUS_CONTRACT_CONFIGURATION` error:
 
 1. **Identify the intended contract**: Decide which file should be authoritative
 2. **Remove or rename the other**: Delete the unused contract or rename it (e.g., `contract.yaml.bak`)
 3. **Consolidate if needed**: Merge handler definitions into a single contract file
-4. **Verify after changes**: Re-run the loader and confirm no warnings appear
+4. **Verify after changes**: Re-run the loader and confirm no errors occur
 
 ---
 

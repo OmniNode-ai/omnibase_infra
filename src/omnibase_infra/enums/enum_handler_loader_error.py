@@ -11,6 +11,7 @@ Error Code Ranges:
     - 010-019: Import errors (handler class loading)
     - 020-029: Directory-level errors (load_from_directory)
     - 030-039: Pattern errors (discover_and_load)
+    - 040-049: Configuration errors (ambiguous configurations)
 
 Usage:
     >>> from omnibase_infra.enums import EnumHandlerLoaderError
@@ -89,6 +90,12 @@ class EnumHandlerLoaderError(str, Enum):
             The module exists but failed to import due to syntax errors,
             missing dependencies, or circular imports.
 
+        NAMESPACE_NOT_ALLOWED: Handler module namespace not in allowed list.
+            The handler module's namespace (package prefix) is not in the
+            configured allowed_namespaces list. This is a security control to
+            prevent loading handlers from untrusted packages. Add the module's
+            namespace prefix to allowed_namespaces or remove the restriction.
+
     Directory Errors (020-029):
         DIRECTORY_NOT_FOUND: Directory does not exist.
             The specified directory path does not exist on the filesystem.
@@ -105,6 +112,12 @@ class EnumHandlerLoaderError(str, Enum):
 
         INVALID_GLOB_PATTERN: Invalid glob pattern syntax.
             The provided glob pattern has invalid syntax.
+
+    Configuration Errors (040-049):
+        AMBIGUOUS_CONTRACT_CONFIGURATION: Both handler_contract.yaml and contract.yaml
+            exist in the same directory. This is an ambiguous configuration that could
+            lead to duplicate handler registrations or unexpected behavior. Use only
+            ONE contract file per handler directory to avoid this error.
     """
 
     # File-level errors (001-009)
@@ -122,6 +135,7 @@ class EnumHandlerLoaderError(str, Enum):
     MODULE_NOT_FOUND = "HANDLER_LOADER_010"
     CLASS_NOT_FOUND = "HANDLER_LOADER_011"
     IMPORT_ERROR = "HANDLER_LOADER_012"
+    NAMESPACE_NOT_ALLOWED = "HANDLER_LOADER_013"
 
     # Directory errors (020-029)
     DIRECTORY_NOT_FOUND = "HANDLER_LOADER_020"
@@ -131,6 +145,9 @@ class EnumHandlerLoaderError(str, Enum):
     # Pattern errors (030-039)
     EMPTY_PATTERNS_LIST = "HANDLER_LOADER_030"
     INVALID_GLOB_PATTERN = "HANDLER_LOADER_031"
+
+    # Configuration errors (040-049)
+    AMBIGUOUS_CONTRACT_CONFIGURATION = "HANDLER_LOADER_040"
 
     @property
     def is_file_error(self) -> bool:
@@ -151,6 +168,11 @@ class EnumHandlerLoaderError(str, Enum):
     def is_pattern_error(self) -> bool:
         """Check if this is a pattern error (030-039)."""
         return self.value.startswith("HANDLER_LOADER_03")
+
+    @property
+    def is_configuration_error(self) -> bool:
+        """Check if this is a configuration error (040-049)."""
+        return self.value.startswith("HANDLER_LOADER_04")
 
 
 __all__ = ["EnumHandlerLoaderError"]
