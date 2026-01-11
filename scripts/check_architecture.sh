@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
+# shellcheck enable=require-variable-braces
 # Architecture Invariant Verification Script
 # OMN-255: Verify omnibase_core does not contain infrastructure dependencies
 #
@@ -11,30 +13,57 @@
 #
 # This script uses grep-based pattern matching which has inherent limitations:
 #
-# 1. INLINE IMPORTS NOT DETECTED:
+# DETECTION SUMMARY:
+# ------------------
+# DETECTED (grep CAN find):
+#   - Top-level imports at line start: `import kafka`
+#   - Top-level from imports: `from kafka import Producer`
+#   - Module imports: `import kafka.producer`
+#
+# NOT DETECTED (grep CANNOT find):
+#   - INLINE IMPORTS inside functions/methods (critical - see below)
+#   - Dynamically constructed imports (__import__, importlib)
+#   - Imports hidden in conditional blocks (if/else)
+#   - String-based import references in configuration
+#   - Multiline import statements (imports split across lines)
+#
+# 1. INLINE IMPORTS NOT DETECTED (CRITICAL LIMITATION):
 #    Imports inside functions or methods are NOT detected by this script:
 #
 #        def my_function():
 #            import kafka          # NOT DETECTED!
 #            from httpx import X   # NOT DETECTED!
 #
-#    This is a fundamental limitation of line-based grep matching - it cannot
-#    understand Python code structure or scope.
+#        class MyClass:
+#            def method(self):
+#                import asyncpg    # NOT DETECTED!
+#
+#    WHY: The grep pattern matches lines starting with whitespace + import/from,
+#    but grep cannot understand Python's semantic structure to determine if an
+#    import is inside a function, class, or at module level.
+#
+#    IMPACT: Code using inline imports to circumvent architecture rules will
+#    NOT be detected by this script.
 #
 # 2. FALSE NEGATIVES (may miss):
 #    - Imports constructed with __import__() or importlib.import_module()
-#    - Imports hidden behind conditional logic (if/else)
+#    - Imports hidden behind conditional logic (if/else at top level)
 #    - String-based import references in configuration files
+#    - Multiline imports with backslash continuation or parentheses
 #
 # 3. FALSE POSITIVES (may incorrectly flag):
-#    - Commented imports (partially mitigated by regex)
-#    - Imports mentioned in docstrings (partially mitigated)
-#    - Variable names matching import patterns (e.g., kafka_topic)
+#    - Commented imports (partially mitigated by regex anchoring)
+#    - Imports mentioned in docstrings (grep cannot parse multiline strings)
+#    - Variable names matching import patterns (e.g., kafka_topic = "topic")
 #
 # FOR COMPREHENSIVE ANALYSIS, use the Python tests instead:
 #     pytest tests/ci/test_architecture_compliance.py
 #
-# The Python tests use line-by-line regex scanning and detect ALL imports including inline ones.
+# The Python tests use line-by-line regex scanning with:
+#   - Inline import detection (ALL imports detected regardless of scope)
+#   - Proper multiline docstring handling (state machine for ''' and """)
+#   - TYPE_CHECKING block awareness (type-only imports exempted)
+#   - Better accuracy with fewer false positives
 #
 # =============================================================================
 #
@@ -63,13 +92,13 @@ set -euo pipefail
 # Both tools check the same forbidden imports for consistency.
 #
 # Python test locations (keep in sync when updating):
-#   - tests/ci/test_architecture_compliance.py:733-746 (parametrized tests)
-#   - tests/ci/test_architecture_compliance.py:809-821 (comprehensive scan)
+#   - tests/ci/test_architecture_compliance.py:761-797 (parametrized tests)
+#   - tests/ci/test_architecture_compliance.py:861-873 (comprehensive scan)
 #
 # When adding/removing imports, update ALL THREE LOCATIONS:
-#   1. This array (FORBIDDEN_IMPORTS, lines 77-89)
-#   2. tests/ci/test_architecture_compliance.py parametrized list (lines 733-746)
-#   3. tests/ci/test_architecture_compliance.py comprehensive list (lines 809-821)
+#   1. This array (FORBIDDEN_IMPORTS below)
+#   2. tests/ci/test_architecture_compliance.py parametrized list (~lines 761-797)
+#   3. tests/ci/test_architecture_compliance.py comprehensive list (~lines 861-873)
 #
 # NOTE: All imports listed here will cause a hard failure if detected.
 # For known issues tracked in Linear, see KNOWN_ISSUES below.
@@ -131,6 +160,55 @@ EXCLUDE_DIRS=(
     "venv"
     "node_modules"
 )
+
+# =============================================================================
+# Sync Verification
+# =============================================================================
+# This function verifies the FORBIDDEN_IMPORTS array matches the Python tests.
+# Used with --verify-sync to detect drift between the two implementations.
+
+verify_sync_with_python_tests() {
+    local test_file="${1:-tests/ci/test_architecture_compliance.py}"
+
+    if [[ ! -f "${test_file}" ]]; then
+        echo "ERROR: Python test file not found: ${test_file}" >&2
+        return 2
+    fi
+
+    # Extract forbidden_patterns from Python comprehensive scan
+    # Pattern: Look for the forbidden_patterns = [ ... ] block
+    # Note: Pattern includes [a-z0-9_] to match imports like psycopg2
+    local python_imports
+    python_imports=$(sed -n '/forbidden_patterns = \[/,/\]/p' "${test_file}" | \
+        grep -E '^\s+"[a-z0-9_]+"' | \
+        sed 's/.*"\([^"]*\)".*/\1/' | \
+        sort)
+
+    local bash_imports
+    bash_imports=$(printf '%s\n' "${FORBIDDEN_IMPORTS[@]}" | sort)
+
+    # Compare the lists
+    local diff_result
+    diff_result=$(diff <(echo "${bash_imports}") <(echo "${python_imports}") 2>/dev/null) || true
+
+    if [[ -n "${diff_result}" ]]; then
+        echo "SYNC MISMATCH DETECTED"
+        echo ""
+        echo "Bash script imports:"
+        printf '  - %s\n' "${FORBIDDEN_IMPORTS[@]}"
+        echo ""
+        echo "Python test imports:"
+        echo "${python_imports}" | sed 's/^/  - /'
+        echo ""
+        echo "Diff (< = bash only, > = python only):"
+        echo "${diff_result}"
+        return 1
+    else
+        echo "SYNC OK: Bash and Python forbidden imports lists match"
+        echo "Total imports checked: ${#FORBIDDEN_IMPORTS[@]}"
+        return 0
+    fi
+}
 
 # =============================================================================
 # Color Output
@@ -332,6 +410,7 @@ OPTIONS:
     --path PATH     Specify custom omnibase_core path (default: auto-detect)
     --no-color      Disable colored output
     --json          Output results in JSON format (useful for CI integration)
+    --verify-sync   Verify forbidden imports match Python tests and exit
 
 FORBIDDEN IMPORTS:
     - kafka           (Kafka client library - belongs in infra layer)
@@ -405,6 +484,9 @@ EXAMPLES:
 
     # Run with JSON output for programmatic consumption
     ./scripts/check_architecture.sh --json
+
+    # Verify bash and Python forbidden imports lists are in sync
+    ./scripts/check_architecture.sh --verify-sync
 
 LIMITATIONS:
     This script uses grep-based pattern matching, which has significant
@@ -709,6 +791,14 @@ main() {
                 USE_COLOR=false
                 shift
                 ;;
+            --verify-sync)
+                # Verify forbidden imports match Python tests and exit
+                if verify_sync_with_python_tests; then
+                    exit 0
+                else
+                    exit 1
+                fi
+                ;;
             *)
                 echo "ERROR: Unknown option: $1" >&2
                 echo "Use --help for usage information" >&2
@@ -749,6 +839,7 @@ main() {
     if [[ "${file_count}" -eq 0 ]]; then
         print_skip "No Python files found in target directory: ${core_path}"
         print_skip "Reason: Directory may be empty or contain no .py files"
+        print_skip "Action: This is OK if omnibase_core is not installed in this environment"
         if [[ "${OUTPUT_JSON}" == "true" ]]; then
             JSON_EXIT_CODE=0
             output_json
@@ -760,7 +851,9 @@ main() {
     # This helps diagnose issues where expected files are not being scanned
     print_skip "Excluding file patterns: ${EXCLUDE_PATTERNS[*]}"
     print_skip "Excluding directories: ${EXCLUDE_DIRS[*]}"
+    print_skip "Reason: Config files and non-Python files are allowed to reference infra packages"
     print_info "Checking ${#FORBIDDEN_IMPORTS[@]} forbidden import patterns"
+    print_skip "Note: Inline imports inside functions are NOT detected (grep limitation)"
 
     if [[ "${verbose}" == "true" ]]; then
         print_info "Verbose mode enabled - showing all check details"

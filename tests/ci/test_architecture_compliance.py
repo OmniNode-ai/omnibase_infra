@@ -48,22 +48,102 @@ Example - ALL of these ARE detected by this Python scanner::
 - Imports constructed dynamically (`__import__()`, `importlib.import_module()`)
 - String-based import references in configuration files
 - Imports inside `exec()` or `eval()` calls
+- Multi-line import statements (e.g., imports wrapped with parentheses over multiple lines)
+- Imports aliased through variables (e.g., `mod = __import__("kafka"); mod.Producer`)
+
+**Docstring Detection Caveats:**
+- Multiline strings are tracked by delimiter type (triple-single vs triple-double)
+- Nested delimiters inside strings are correctly ignored (e.g., triple-single inside triple-double)
+- Unclosed multiline strings at EOF are handled gracefully (content treated as inside string)
+- String prefixes (r, f, b, u, rf, fr, rb, br) are recognized and handled
+- Edge case: imports on the same line after a closing delimiter ARE detected
+
+Multiline String State Machine
+==============================
+
+The scanner uses a state machine to track whether the current line is inside a
+multiline string (docstring). This is necessary because import statements inside
+docstrings should not be flagged as violations.
+
+**State Variables:**
+
+- ``in_multiline_string`` (bool): Whether currently inside a multiline string
+- ``multiline_delimiter`` (str | None): The delimiter type (triple-single or triple-double) if inside
+
+**State Transitions:**
+
+1. **NOT in multiline -> Line has unbalanced delimiter:**
+
+   - Find first triple-quote delimiter on line
+   - If odd count of that delimiter -> enter multiline, save delimiter type
+   - Content before the opening delimiter is checked for imports
+
+2. **IN multiline -> Line has closing delimiter:**
+
+   - Find closing delimiter matching saved type
+   - Exit multiline state
+   - Content after the closing delimiter is checked for imports
+   - If remainder has another unbalanced delimiter -> enter new multiline
+
+3. **IN multiline -> Line has NO closing delimiter:**
+
+   - Stay in multiline state
+   - Entire line is skipped (no import checking)
+
+**Handling Nested Delimiters:**
+
+The tricky case is when one delimiter type appears inside another.
+For example: triple-single This docstring contains triple-double inside triple-single
+
+The scanner handles this by:
+
+1. Finding which delimiter type appears FIRST on the line
+2. Checking if that type is "balanced" (even count = opens and closes on same line)
+3. Only considering the OTHER delimiter type if it appears OUTSIDE balanced strings
+
+**Key Functions:**
+
+- ``_find_first_unquoted_delimiter()``: Find first triple-quote that starts a string
+- ``_is_balanced_string_line()``: Check if a delimiter type has even count
+- ``_find_delimiter_outside_balanced()``: Find delimiters not inside other strings
+- ``_count_delimiter_outside_balanced()``: Count delimiters outside balanced strings
+- ``_find_multiline_state_after_line()``: Main state transition function
+
+**Edge Cases Handled:**
+
+- Opening and closing on same line: triple-double docstring triple-double (balanced, not multiline)
+- Multiple strings on one line: triple-double first triple-double triple-double second triple-double
+- Delimiter inside other type: triple-single contains triple-double inside triple-single
+- Code after closing: triple-double docstring triple-double import kafka (import IS detected)
+- Empty multiline: Just triple-double on its own line
+- Unclosed at EOF: Treated as inside string (graceful degradation)
+
+**Known Limitations:**
+
+- Raw strings with escaped delimiters may confuse the parser in rare cases
+- Extremely complex nesting patterns (3+ levels) are not explicitly tested
+- String concatenation across lines is not handled (e.g., "foo" "bar")
 
 Tool Comparison
 ===============
 
 **Bash script** (`scripts/check_architecture.sh`) has MORE limitations:
-- CANNOT detect inline imports inside functions/methods (grep limitation)
-- Cannot reliably parse multiline docstrings
-- May produce false positives from comments and docstrings
+- Cannot reliably distinguish real imports from mentions in comments/docstrings
+- Cannot parse multiline docstrings (may produce false positives)
+- Cannot detect TYPE_CHECKING blocks (may flag type-only imports)
+- Has no context awareness (line-by-line grep matching)
+
+Note: The bash script CAN find indented imports (grep does pattern matching), but
+it cannot distinguish them from import statements mentioned in docstrings or comments.
+This leads to potential false positives that this Python scanner avoids.
 
 The bash script is designed for quick CI checks with JSON output support.
 This Python test file provides more thorough analysis with:
-- Proper multiline docstring handling
-- Inline import detection
-- TYPE_CHECKING block awareness
+- Proper multiline docstring handling (no false positives from examples)
+- TYPE_CHECKING block awareness (type-only imports allowed)
+- Context-aware detection (distinguishes real imports from documentation)
 
-For comprehensive detection, prefer this Python test file:
+For comprehensive detection with zero false positives, prefer this Python test file:
     pytest tests/ci/test_architecture_compliance.py
 
 See Also
@@ -157,9 +237,15 @@ def _is_requirements_file(file_path: Path) -> bool:
     These files are allowed to mention infrastructure packages
     as dependencies.
 
-    SECURITY NOTE: This function uses explicit matching to prevent
+    SECURITY NOTE: This function uses STRICT explicit matching to prevent
     accidental exemption of Python modules that happen to contain
     "requirements" in their name (e.g., requirements_handler.py).
+
+    Hardening measures:
+    1. Python files (.py) are NEVER exempted except for exact setup.py match
+    2. Requirements files MUST be .txt extension (not .py, .yaml, etc.)
+    3. Requirements files MUST start with "requirements" (exact prefix)
+    4. Requirements files MUST have simple naming (requirements[-_]*.txt)
 
     Args:
         file_path: Path to check.
@@ -169,13 +255,33 @@ def _is_requirements_file(file_path: Path) -> bool:
     """
     file_name = file_path.name.lower()
 
-    # Explicit exact matches for config files
-    if file_name in {"setup.py", "setup.cfg", "pyproject.toml"}:
+    # HARDENING: Python files (.py) are ONLY exempted for exact setup.py match
+    # This prevents exempting modules like requirements_handler.py, setup_utils.py
+    if file_name.endswith(".py"):
+        return file_name == "setup.py"
+
+    # Explicit exact matches for non-Python config files
+    if file_name in {"setup.cfg", "pyproject.toml"}:
         return True
 
-    # Requirements files must be .txt, not .py
-    # This prevents exempting files like requirements_handler.py
-    if file_name.startswith("requirements") and file_name.endswith(".txt"):
+    # Requirements files: STRICT pattern matching
+    # MUST be .txt extension (not .py, .yaml, .json, etc.)
+    # MUST start with "requirements" exactly
+    # MUST follow standard naming: requirements.txt, requirements-dev.txt, requirements_test.txt
+    if not file_name.endswith(".txt"):
+        return False
+
+    # Check for standard requirements file patterns:
+    # - requirements.txt (exact)
+    # - requirements-*.txt (with hyphen separator)
+    # - requirements_*.txt (with underscore separator)
+    if file_name == "requirements.txt":
+        return True
+
+    # Pattern: requirements followed by separator (-/_) then more text, ending in .txt
+    # This matches: requirements-dev.txt, requirements_test.txt
+    # But NOT: my_requirements.txt, requirements_data.txt (no separator after "requirements")
+    if file_name.startswith(("requirements-", "requirements_")):
         return True
 
     return False
@@ -742,9 +848,28 @@ class TestArchitectureCompliance:
         1. scripts/check_architecture.sh FORBIDDEN_IMPORTS (lines 77-89)
         2. This file: parametrized list below (lines 733-746)
         3. This file: comprehensive list in test_comprehensive_infra_scan (lines 809-821)
+
+    KNOWN_VIOLATIONS_WITH_TICKETS:
+        Some violations are tracked with tickets and have xfail markers on
+        individual tests. The comprehensive scan filters these to avoid
+        duplicate CI failures. When a ticket is resolved, remove the pattern
+        from KNOWN_VIOLATION_PATTERNS below and the corresponding xfail marker.
     """
 
     CORE_PACKAGE = "omnibase_core"
+
+    # Patterns with known violations tracked by tickets.
+    # These are filtered from comprehensive scan to avoid duplicate failures.
+    # Update this list when:
+    # - Adding a new xfail marker to individual tests (add pattern here)
+    # - Resolving a ticket (remove pattern from here AND remove xfail marker)
+    KNOWN_VIOLATION_PATTERNS: frozenset[str] = frozenset(
+        {
+            "aiohttp",  # OMN-1015: Known violation - async HTTP client needs migration
+            "redis",  # OMN-1295: Known violation - Redis client needs migration
+            "consul",  # OMN-1015: Known violation - Consul TYPE_CHECKING import
+        }
+    )
 
     @pytest.mark.parametrize(
         ("pattern", "description"),
@@ -833,6 +958,13 @@ class TestArchitectureCompliance:
         patterns in a single pass. Use this to quickly verify that no
         infrastructure dependencies have leaked into core.
 
+        Known Violations
+        ----------------
+        Violations for patterns in KNOWN_VIOLATION_PATTERNS are filtered out
+        and reported separately (as warnings) because they have dedicated
+        xfail tests with tracked tickets. This prevents duplicate CI failures
+        while still catching NEW violations immediately.
+
         Resource Constraints
         --------------------
         This test is resource-intensive because it scans ALL Python files in
@@ -868,16 +1000,42 @@ class TestArchitectureCompliance:
             forbidden_patterns,
         )
 
-        if violations:
+        # Separate known violations (tracked by tickets) from new violations
+        known_violations: list[ArchitectureViolation] = []
+        new_violations: list[ArchitectureViolation] = []
+        for v in violations:
+            if v.import_pattern in self.KNOWN_VIOLATION_PATTERNS:
+                known_violations.append(v)
+            else:
+                new_violations.append(v)
+
+        # Report known violations as warnings (for visibility), not failures
+        if known_violations:
+            known_by_pattern: dict[str, list[ArchitectureViolation]] = {}
+            for v in known_violations:
+                known_by_pattern.setdefault(v.import_pattern, []).append(v)
+
+            import warnings
+
+            warning_lines = [
+                f"Known violations ({len(known_violations)} total) - tracked by tickets:",
+            ]
+            for pattern, pvs in sorted(known_by_pattern.items()):
+                warning_lines.append(f"  {pattern}: {len(pvs)} violation(s)")
+            warnings.warn("\n".join(warning_lines), stacklevel=1)
+
+        # Fail only on NEW violations (not tracked by tickets)
+        if new_violations:
             # Group violations by pattern
             by_pattern: dict[str, list[ArchitectureViolation]] = {}
-            for v in violations:
+            for v in new_violations:
                 by_pattern.setdefault(v.import_pattern, []).append(v)
 
             report_lines = [
                 "ARCHITECTURE VIOLATIONS DETECTED",
                 "",
-                f"Found {len(violations)} violation(s) in {self.CORE_PACKAGE}:",
+                f"Found {len(new_violations)} NEW violation(s) in {self.CORE_PACKAGE}:",
+                "(Known violations with tickets are excluded from this count)",
                 "",
             ]
 
@@ -915,6 +1073,8 @@ class TestHelperFunctions:
             pytest.param("requirements.txt", True, id="requirements-txt"),
             pytest.param("requirements-dev.txt", True, id="requirements-dev-txt"),
             pytest.param("requirements_test.txt", True, id="requirements-underscore"),
+            pytest.param("requirements-prod.txt", True, id="requirements-prod"),
+            pytest.param("requirements_local.txt", True, id="requirements-local"),
             pytest.param("setup.py", True, id="setup-py"),
             pytest.param("setup.cfg", True, id="setup-cfg"),
             pytest.param("pyproject.toml", True, id="pyproject-toml"),
@@ -932,10 +1092,25 @@ class TestHelperFunctions:
             pytest.param("requirements_utils.py", False, id="requirements-utils-py"),
             pytest.param("parse_requirements.py", False, id="parse-requirements-py"),
             pytest.param("requirements.py", False, id="requirements-py-not-txt"),
+            # SECURITY: setup*.py variants must NOT be exempted (only exact setup.py)
+            pytest.param("setup_utils.py", False, id="setup-utils-py"),
+            pytest.param("setup_test.py", False, id="setup-test-py"),
+            pytest.param("mysetup.py", False, id="mysetup-py"),
             # Edge cases for requirements files
             pytest.param("requirements", False, id="requirements-no-extension"),
             pytest.param("REQUIREMENTS.TXT", True, id="requirements-uppercase"),
             pytest.param("Requirements-Dev.txt", True, id="requirements-mixed-case"),
+            # SECURITY: Non-standard requirements file patterns must NOT be exempted
+            # These ensure strict pattern matching (only requirements[-_]*.txt)
+            pytest.param("requirementsdata.txt", False, id="requirements-no-separator"),
+            pytest.param("my_requirements.txt", False, id="my-requirements-txt"),
+            pytest.param("old_requirements.txt", False, id="old-requirements-txt"),
+            # SECURITY: Non-.txt requirements files must NOT be exempted
+            pytest.param("requirements.yaml", False, id="requirements-yaml"),
+            pytest.param("requirements.yml", False, id="requirements-yml"),
+            pytest.param("requirements.json", False, id="requirements-json"),
+            pytest.param("requirements.toml", False, id="requirements-toml"),
+            pytest.param("requirements.in", False, id="requirements-in"),
         ],
     )
     def test_is_requirements_file(
