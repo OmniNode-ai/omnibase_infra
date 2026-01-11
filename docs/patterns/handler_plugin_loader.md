@@ -697,6 +697,7 @@ The loader prioritizes flexibility and loose coupling, placing security responsi
 | HANDLER_LOADER_021 | `PERMISSION_DENIED` | Permission denied |
 | HANDLER_LOADER_022 | `NOT_A_DIRECTORY` | Path is not a directory |
 | HANDLER_LOADER_030 | `EMPTY_PATTERNS_LIST` | Glob patterns list empty |
+| HANDLER_LOADER_031 | `INVALID_GLOB_PATTERN` | Invalid glob pattern syntax |
 | HANDLER_LOADER_040 | `AMBIGUOUS_CONTRACT_CONFIGURATION` | Both contract types in same directory |
 
 ---

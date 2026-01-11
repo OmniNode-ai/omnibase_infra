@@ -119,13 +119,13 @@ class TestAmbiguousContractDetectionIntegration:
         assert "directory" in error.model.context
         assert "contract_files" in error.model.context
 
-    def test_discover_and_load_raises_error_on_ambiguous_contracts(
+    def test_load_from_directory_raises_error_on_nested_ambiguous_contracts(
         self, tmp_path: Path
     ) -> None:
-        """Test that discover_and_load raises error when both contract types exist.
+        """Test that load_from_directory raises error for nested ambiguous contracts.
 
-        Verifies the same fail-fast behavior applies when using glob pattern
-        discovery as when using directory loading.
+        Verifies the same fail-fast behavior applies when ambiguous contracts
+        are in a nested subdirectory structure.
         """
         # Create directory with BOTH contract types
         ambiguous_dir = tmp_path / "handlers" / "auth"

@@ -276,10 +276,10 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 be loaded. This provides defense-in-depth security by restricting
                 which packages can be dynamically imported.
 
-                Each prefix should end with a period to match package boundaries
-                (e.g., "omnibase_infra." not "omnibase_infra"). If a prefix does
-                not end with a period, it will still work but may match unintended
-                packages (e.g., "omnibase" would match "omnibase_other").
+                Each prefix should end with a period for explicit package boundary
+                matching (e.g., "omnibase_infra." not "omnibase_infra"). Prefixes
+                without a trailing period are still validated at package boundaries
+                (e.g., "omnibase" matches "omnibase.handlers" but NOT "omnibase_other").
 
                 If None (default), no namespace restriction is applied and any
                 importable module can be loaded.
@@ -322,20 +322,30 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             operation: Name of the calling operation (for error context).
 
         Raises:
-            TypeError: If correlation_id is not a UUID instance or None.
-                The error message includes the actual type received and the
-                operation name for debugging.
+            ProtocolConfigurationError: If correlation_id is not a UUID instance
+                or None. The error message includes the actual type received and
+                the operation name for debugging, along with guidance on how to
+                convert string IDs to UUID.
 
         Example:
             >>> loader = HandlerPluginLoader()
             >>> loader._validate_correlation_id(UUID("..."), "load_from_contract")  # OK
             >>> loader._validate_correlation_id(None, "load_from_contract")  # OK
-            >>> loader._validate_correlation_id("not-a-uuid", "load_from_contract")  # TypeError
+            >>> loader._validate_correlation_id("not-a-uuid", "load_from_contract")
+            ProtocolConfigurationError: correlation_id must be UUID or None...
         """
         if correlation_id is not None and not isinstance(correlation_id, UUID):
-            raise TypeError(
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation=operation,
+                correlation_id=None,  # Cannot use invalid correlation_id in context
+            )
+            raise ProtocolConfigurationError(
                 f"correlation_id must be UUID or None, got {type(correlation_id).__name__} "
-                f"in {operation}(). Convert string IDs using uuid.UUID(your_string)."
+                f"in {operation}(). Convert string IDs using uuid.UUID(your_string).",
+                context=context,
+                loader_error="INVALID_CORRELATION_ID_TYPE",
+                received_type=type(correlation_id).__name__,
             )
 
     def load_from_contract(
@@ -380,7 +390,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - HANDLER_LOADER_010: Module not found
                 - HANDLER_LOADER_011: Class not found in module
                 - HANDLER_LOADER_012: Import error (syntax/dependency)
-            TypeError: If correlation_id is not a UUID or None.
+            ProtocolConfigurationError: If correlation_id is not a UUID or None.
+                Error code: INVALID_CORRELATION_ID_TYPE
         """
         # Validate correlation_id type at entry point (runtime type check)
         self._validate_correlation_id(correlation_id, "load_from_contract")
@@ -401,7 +412,27 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         )
 
         # Validate contract path exists
-        if not contract_path.exists():
+        # contract_path.exists() and contract_path.is_file() can raise OSError for:
+        # - Permission denied when accessing the path
+        # - Filesystem errors (unmounted volumes, network failures)
+        # - Broken symlinks where the target cannot be resolved
+        try:
+            path_exists = contract_path.exists()
+        except OSError as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_contract",
+                correlation_id=correlation_id,
+            )
+            sanitized_msg = _sanitize_exception_message(e)
+            raise ProtocolConfigurationError(
+                f"Failed to access contract path: {sanitized_msg}",
+                context=context,
+                loader_error=EnumHandlerLoaderError.FILE_STAT_ERROR.value,
+                contract_path=str(contract_path),
+            ) from e
+
+        if not path_exists:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
@@ -414,7 +445,23 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 contract_path=str(contract_path),
             )
 
-        if not contract_path.is_file():
+        try:
+            is_file = contract_path.is_file()
+        except OSError as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_contract",
+                correlation_id=correlation_id,
+            )
+            sanitized_msg = _sanitize_exception_message(e)
+            raise ProtocolConfigurationError(
+                f"Failed to access contract path: {sanitized_msg}",
+                context=context,
+                loader_error=EnumHandlerLoaderError.FILE_STAT_ERROR.value,
+                contract_path=str(contract_path),
+            ) from e
+
+        if not is_file:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="load_from_contract",
@@ -617,7 +664,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - HANDLER_LOADER_020: Directory not found
                 - HANDLER_LOADER_021: Permission denied
                 - HANDLER_LOADER_022: Not a directory
-            TypeError: If correlation_id is not a UUID or None.
+            ProtocolConfigurationError: If correlation_id is not a UUID or None.
+                Error code: INVALID_CORRELATION_ID_TYPE
         """
         # Validate correlation_id type at entry point (runtime type check)
         self._validate_correlation_id(correlation_id, "load_from_directory")
@@ -818,7 +866,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             ProtocolConfigurationError: If patterns list is empty.
                 Error codes:
                 - HANDLER_LOADER_030: Empty patterns list
-            TypeError: If correlation_id is not a UUID or None.
+            ProtocolConfigurationError: If correlation_id is not a UUID or None.
+                Error code: INVALID_CORRELATION_ID_TYPE
 
         Example:
             >>> # Using default cwd-based resolution

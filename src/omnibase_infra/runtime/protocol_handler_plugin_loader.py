@@ -277,6 +277,8 @@ class ProtocolHandlerPluginLoader(Protocol):
                 invalid pattern syntax. Error codes:
                 - HANDLER_LOADER_030: Empty patterns list
                 - HANDLER_LOADER_031: Invalid glob pattern syntax
+            TypeError: If correlation_id is provided but is not a valid UUID instance.
+                The correlation_id parameter must be either None or a UUID object.
 
         Example:
             .. code-block:: python
