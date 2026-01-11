@@ -352,7 +352,11 @@ def _find_multiline_state_after_line(
         - Content to check for imports (code outside strings)
     """
     if current_in_multiline:
-        assert current_delimiter is not None
+        # Defensive handling: if we're supposedly in a multiline but have no delimiter,
+        # treat this as a corrupted state and return to normal parsing mode.
+        # This handles edge cases where state tracking may have become inconsistent.
+        if current_delimiter is None:
+            return False, None, line
         closing_pos = line.find(current_delimiter)
         if closing_pos == -1:
             # Still inside multiline, no code to check
@@ -716,6 +720,12 @@ class TestArchitectureCompliance:
             pytest.param("redis", "cache", id="no-redis"),
             pytest.param("psycopg", "PostgreSQL driver (v3)", id="no-psycopg"),
             pytest.param("psycopg2", "PostgreSQL driver (v2)", id="no-psycopg2"),
+            pytest.param("consul", "service discovery client", id="no-consul"),
+            pytest.param("hvac", "Vault client", id="no-hvac"),
+            pytest.param("aiokafka", "async Kafka client", id="no-aiokafka"),
+            pytest.param(
+                "confluent_kafka", "Confluent Kafka client", id="no-confluent-kafka"
+            ),
         ],
     )
     def test_no_infra_import_in_core(self, pattern: str, description: str) -> None:
@@ -2015,6 +2025,24 @@ more content
         assert in_ml is True
         assert delim == '"""'
         assert content == ""
+
+    def test_find_multiline_state_after_line_corrupted_state(self) -> None:
+        """Verify _find_multiline_state_after_line handles corrupted state gracefully.
+
+        This tests the defensive handling for the edge case where we're supposedly
+        in a multiline string but have no delimiter. Instead of crashing with an
+        AssertionError, the function should recover by returning to normal mode.
+        """
+        # Corrupted state: in_multiline=True but delimiter=None
+        # Should recover gracefully by returning to normal mode
+        in_ml, delim, content = _find_multiline_state_after_line(
+            "some line content",
+            True,
+            None,  # Corrupted: no delimiter
+        )
+        assert in_ml is False
+        assert delim is None
+        assert content == "some line content"
 
     def test_is_in_type_checking_block_outside(self) -> None:
         """Verify _is_in_type_checking_block returns False when outside."""
