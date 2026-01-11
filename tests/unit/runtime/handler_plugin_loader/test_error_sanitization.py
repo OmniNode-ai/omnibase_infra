@@ -35,23 +35,55 @@ class TestSanitizeExceptionMessage:
         exc = OSError("Permission denied: '/etc/secrets/key.pem'")
         result = _sanitize_exception_message(exc)
 
+        # Verify sensitive path is removed (negative assertion)
         assert "/etc/secrets/key.pem" not in result
-        assert "<path>" in result or "'<path>'" in result
+        assert "/etc/secrets" not in result
+        assert "/etc" not in result
+
+        # Verify sanitized placeholder is present (positive assertion)
+        assert "<path>" in result, (
+            f"Expected <path> placeholder in sanitized result: {result}"
+        )
+
+        # Verify the non-path content is preserved
+        assert "Permission denied" in result
 
     def test_sanitizes_windows_paths(self) -> None:
         """Test that Windows paths are replaced with <path>."""
         exc = OSError("Access denied: C:\\Users\\admin\\secrets\\config.yaml")
         result = _sanitize_exception_message(exc)
 
-        # Windows path should be sanitized
-        assert "C:\\Users" not in result
+        # Verify sensitive Windows path components are removed (negative assertions)
+        assert "C:\\Users" not in result, (
+            f"Windows path prefix should be sanitized: {result}"
+        )
+        assert "admin\\secrets" not in result, (
+            f"Windows path should be fully sanitized: {result}"
+        )
+        assert "config.yaml" not in result or "<path>" in result, (
+            f"Path should be replaced with placeholder: {result}"
+        )
+
+        # Verify the non-path content is preserved
+        assert "Access denied" in result
 
     def test_sanitizes_relative_paths(self) -> None:
         """Test that relative paths are replaced with <path>."""
         exc = FileNotFoundError("File not found: ./config/secrets.yaml")
         result = _sanitize_exception_message(exc)
 
-        assert "./config/secrets.yaml" not in result or "<path>" in result
+        # Verify sensitive path is removed (negative assertion)
+        assert "./config/secrets.yaml" not in result, (
+            f"Relative path should be sanitized but was found in: {result}"
+        )
+
+        # Verify sanitized placeholder is present (positive assertion)
+        assert "<path>" in result, (
+            f"Expected <path> placeholder in sanitized result: {result}"
+        )
+
+        # Verify the non-path content is preserved
+        assert "File not found" in result
 
     def test_sanitizes_paths_in_nested_directories(self) -> None:
         """Test that deeply nested paths are sanitized."""
@@ -148,12 +180,20 @@ class TestErrorMessageSanitizationInLoader:
 
         error_message = str(exc_info.value)
 
-        # Should show only filename in error message
-        assert "handler_contract.yaml" in error_message
+        # Positive assertion: Should show the filename in error message
+        assert "handler_contract.yaml" in error_message, (
+            f"Expected filename in error message: {error_message}"
+        )
 
-        # Should NOT expose directory structure in the message text
+        # Negative assertions: Should NOT expose directory structure in the message text
         # (Note: full path may be in context for debugging, but not in the message)
-        assert "deep/nested" not in error_message or str(tmp_path) not in error_message
+        # Using AND logic: ALL sensitive path components must be absent
+        assert "deep/nested" not in error_message, (
+            f"Directory structure 'deep/nested' should not be exposed in: {error_message}"
+        )
+        assert str(tmp_path) not in error_message, (
+            f"Full temp path should not be exposed in: {error_message}"
+        )
 
     def test_error_context_contains_full_path_for_debugging(
         self, tmp_path: Path
@@ -265,10 +305,3 @@ class TestErrorCodePresenceInSanitizedErrors:
             error.model.context.get("loader_error")
             == EnumHandlerLoaderError.INVALID_YAML_SYNTAX.value
         )
-
-
-__all__: list[str] = [
-    "TestSanitizeExceptionMessage",
-    "TestErrorMessageSanitizationInLoader",
-    "TestErrorCodePresenceInSanitizedErrors",
-]

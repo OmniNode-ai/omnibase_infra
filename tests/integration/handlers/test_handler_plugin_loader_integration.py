@@ -26,7 +26,9 @@ Note:
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -557,8 +559,6 @@ class TestProtocolComplianceOfRealHandlers:
         Returns:
             The imported class type.
         """
-        import importlib
-
         module_path, class_name = class_path.rsplit(".", 1)
         module = importlib.import_module(module_path)
         return getattr(module, class_name)
@@ -593,8 +593,6 @@ class TestRealHandlerInstantiation:
         After loading a handler contract, we should be able to import
         the handler class and create an instance.
         """
-        import importlib
-
         # Create and load contract
         contract_dir = tmp_path / handler_name.replace(".", "_")
         contract_dir.mkdir(parents=True)
@@ -631,8 +629,6 @@ class TestRealHandlerInstantiation:
         The describe() method should return handler metadata as a dict
         without requiring initialization.
         """
-        import importlib
-
         result = loader.load_from_contract(http_handler_contract_path)
 
         # Import and instantiate
@@ -654,7 +650,7 @@ class TestCorrelationIdTracking:
         self, loader: HandlerPluginLoader, http_handler_contract_path: Path
     ) -> None:
         """Verify correlation_id parameter is accepted and doesn't break loading."""
-        correlation_id = "test-correlation-123"
+        correlation_id = UUID("12345678-1234-5678-1234-567812345678")
 
         # Should not raise - correlation_id is used for logging/tracing
         result = loader.load_from_contract(
@@ -667,7 +663,7 @@ class TestCorrelationIdTracking:
         self, loader: HandlerPluginLoader, all_real_handlers_directory: Path
     ) -> None:
         """Verify correlation_id propagates through directory loading."""
-        correlation_id = "test-correlation-456"
+        correlation_id = UUID("23456789-2345-6789-2345-678923456789")
 
         results = loader.load_from_directory(
             all_real_handlers_directory, correlation_id=correlation_id
@@ -679,7 +675,7 @@ class TestCorrelationIdTracking:
         self, loader: HandlerPluginLoader, all_real_handlers_directory: Path
     ) -> None:
         """Verify correlation_id propagates through discovery and loading."""
-        correlation_id = "test-correlation-789"
+        correlation_id = UUID("34567890-3456-7890-3456-789034567890")
 
         results = loader.discover_and_load(
             patterns=[f"**/{HANDLER_CONTRACT_FILENAME}"],
@@ -688,13 +684,3 @@ class TestCorrelationIdTracking:
         )
 
         assert len(results) == 4
-
-
-__all__: list[str] = [
-    "TestLoadFromContractWithRealHandlers",
-    "TestLoadFromDirectoryWithRealHandlers",
-    "TestDiscoverAndLoadWithRealHandlers",
-    "TestProtocolComplianceOfRealHandlers",
-    "TestRealHandlerInstantiation",
-    "TestCorrelationIdTracking",
-]

@@ -20,6 +20,7 @@ Background:
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -171,7 +172,7 @@ class TestHandlerPluginLoaderExplicitBasePath:
         pattern = "**/handler_contract.yaml"
         handlers = loader.discover_and_load(
             [pattern],
-            correlation_id="test-correlation-explicit-base",
+            correlation_id=uuid4(),
             base_path=valid_contract_directory,
         )
 

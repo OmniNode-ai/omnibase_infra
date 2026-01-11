@@ -189,58 +189,26 @@ CONTRACT_YAML_FILENAME = "contract.yaml"
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
-# Correlation ID Design Decision: String Type
+# Correlation ID Design Decision: UUID Type
 # ---------------------------------------------------------------------------
-# The correlation_id parameter is typed as `str` rather than `UUID` because:
+# The correlation_id parameter is typed as `UUID | None` to comply with ONEX
+# standards requiring typed models rather than primitives. This aligns with:
 #
-# 1. **External System Compatibility**: Upstream systems (API gateways, message
-#    brokers, distributed tracing tools) may provide correlation IDs in various
-#    formats - not all are valid UUIDs. Accepting strings allows seamless
-#    propagation of externally-generated IDs.
+# 1. **ONEX Protocol Conventions**: All other protocols in the codebase use
+#    `correlation_id: UUID | None` (see ProtocolIdempotencyStore,
+#    ProtocolServiceDiscoveryHandler, etc.).
 #
-# 2. **Flexibility for Tracing Standards**: OpenTelemetry trace IDs, Zipkin
-#    span IDs, and custom correlation schemes use different formats. String
-#    type accommodates all without forcing UUID conversion at boundaries.
+# 2. **Type Safety**: UUID type ensures valid correlation IDs at compile time.
 #
-# 3. **Graceful Degradation**: When a UUID is required (e.g., for observability
-#    models that expect UUID type), the `_parse_correlation_id_to_uuid` helper
-#    converts valid UUIDs and generates new ones for non-UUID strings. This
-#    ensures observability infrastructure functions while preserving the
-#    original ID in log extra fields for debugging.
+# 3. **Auto-Generation Pattern**: Methods auto-generate correlation IDs via
+#    `uuid4()` when not provided, ensuring all operations are traceable.
 #
-# 4. **Auto-Generation Pattern**: Methods auto-generate correlation IDs via
-#    `str(uuid4())` when not provided, ensuring all operations are traceable.
-#    Using string type makes this pattern consistent throughout.
+# For external system compatibility (OpenTelemetry, Zipkin, etc.), convert
+# string-based correlation IDs to UUID at the call boundary, or use
+# uuid.UUID(external_id) if the external ID is UUID-compatible.
 #
 # See: ONEX correlation ID conventions in omnibase_core.
 # ---------------------------------------------------------------------------
-
-
-def _parse_correlation_id_to_uuid(correlation_id: str) -> UUID:
-    """Convert correlation_id string to UUID for observability models.
-
-    ONEX observability models (like ModelPluginLoadContext) require UUID type
-    for correlation_id to ensure consistent distributed tracing. This helper
-    gracefully handles both valid UUID strings and arbitrary correlation strings.
-
-    Args:
-        correlation_id: The correlation ID string to convert.
-
-    Returns:
-        UUID: Either the parsed UUID if the string is valid UUID format,
-            or a newly generated UUID if parsing fails.
-
-    Note:
-        When parsing fails, the original correlation_id is still available
-        in log extra fields for debugging. The generated UUID ensures
-        observability infrastructure continues to function.
-    """
-    try:
-        return UUID(correlation_id)
-    except ValueError:
-        # Non-UUID correlation_id provided; generate one for observability models.
-        # The original string is preserved in log extra fields for debugging.
-        return uuid4()
 
 
 class HandlerPluginLoader(ProtocolHandlerPluginLoader):
@@ -291,7 +259,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     def load_from_contract(
         self,
         contract_path: Path,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> ModelLoadedHandler:
         """Load a single handler from a contract file.
 
@@ -329,14 +297,17 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - HANDLER_LOADER_012: Import error (syntax/dependency)
         """
         # Auto-generate correlation_id if not provided (per ONEX guidelines)
-        correlation_id = correlation_id or str(uuid4())
+        correlation_id = correlation_id or uuid4()
+
+        # Convert UUID to string for logging and error context
+        correlation_id_str = str(correlation_id)
 
         logger.debug(
             "Loading handler from contract: %s",
             contract_path,
             extra={
                 "contract_path": str(contract_path),
-                "correlation_id": correlation_id,
+                "correlation_id": correlation_id_str,
             },
         )
 
@@ -475,6 +446,28 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 missing_methods=missing_methods,
             )
 
+        # Resolve the contract path, handling potential filesystem errors
+        # path.resolve() can raise OSError for:
+        # - Broken symlinks: symlink target no longer exists
+        # - Race conditions: file deleted between validation and resolution
+        # - Permission issues: lacking read permission on parent directories
+        # - Filesystem errors: unmounted volumes, network filesystem failures
+        try:
+            resolved_contract_path = contract_path.resolve()
+        except OSError as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_contract",
+                correlation_id=correlation_id,
+            )
+            sanitized_msg = _sanitize_exception_message(e)
+            raise ProtocolConfigurationError(
+                f"Failed to resolve contract path: {sanitized_msg}",
+                context=context,
+                loader_error=EnumHandlerLoaderError.FILE_STAT_ERROR.value,
+                contract_path=str(contract_path),
+            ) from e
+
         logger.info(
             "Successfully loaded handler from contract: %s -> %s",
             handler_name,
@@ -483,8 +476,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 "handler_name": handler_name,
                 "handler_class": handler_class_path,
                 "handler_type": handler_type.value,
-                "contract_path": str(contract_path),
-                "correlation_id": correlation_id,
+                "contract_path": str(resolved_contract_path),
+                "correlation_id": correlation_id_str,
             },
         )
 
@@ -492,7 +485,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             handler_name=handler_name,
             handler_type=handler_type,
             handler_class=handler_class_path,
-            contract_path=contract_path.resolve(),
+            contract_path=resolved_contract_path,
             capability_tags=capability_tags,
             loaded_at=datetime.now(UTC),
         )
@@ -500,7 +493,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     def load_from_directory(
         self,
         directory: Path,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
         max_handlers: int | None = None,
     ) -> list[ModelLoadedHandler]:
         """Load all handlers from contract files in a directory.
@@ -537,7 +530,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 - HANDLER_LOADER_022: Not a directory
         """
         # Auto-generate correlation_id if not provided (per ONEX guidelines)
-        correlation_id = correlation_id or str(uuid4())
+        correlation_id = correlation_id or uuid4()
 
         # Start timing for observability
         start_time = time.perf_counter()
@@ -547,7 +540,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             directory,
             extra={
                 "directory": str(directory),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
                 "max_handlers": max_handlers,
             },
         )
@@ -591,7 +584,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             extra={
                 "directory": str(directory),
                 "contract_count": len(contract_files),
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -625,7 +618,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                         "contract_path": str(contract_path),
                         "error": str(e),
                         "error_code": error_code,
-                        "correlation_id": correlation_id,
+                        "correlation_id": str(correlation_id),
                     },
                 )
                 continue
@@ -641,8 +634,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 handlers=handlers,
                 failed_plugins=failed_handlers,
                 duration_seconds=duration_seconds,
-                correlation_id=_parse_correlation_id_to_uuid(correlation_id),
-                caller_correlation_string=correlation_id,
+                correlation_id=correlation_id,
+                caller_correlation_string=str(correlation_id),
             )
         )
 
@@ -651,7 +644,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     def discover_and_load(
         self,
         patterns: list[str],
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
         base_path: Path | None = None,
         max_handlers: int | None = None,
     ) -> list[ModelLoadedHandler]:
@@ -708,7 +701,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             ... )
         """
         # Auto-generate correlation_id if not provided (per ONEX guidelines)
-        correlation_id = correlation_id or str(uuid4())
+        correlation_id = correlation_id or uuid4()
 
         # Start timing for observability
         start_time = time.perf_counter()
@@ -718,7 +711,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             patterns,
             extra={
                 "patterns": patterns,
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
                 "max_handlers": max_handlers,
             },
         )
@@ -748,7 +741,27 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             if limit_reached:
                 break
 
-            matched_paths = list(glob_base.glob(pattern))
+            # Path.glob() can raise OSError for:
+            # - Permission denied when traversing directories
+            # - Filesystem errors (unmounted volumes, network failures)
+            # - Invalid path components in the pattern base
+            try:
+                matched_paths = list(glob_base.glob(pattern))
+            except OSError as e:
+                sanitized_msg = _sanitize_exception_message(e)
+                logger.warning(
+                    "Failed to evaluate glob pattern '%s': %s",
+                    pattern,
+                    sanitized_msg,
+                    extra={
+                        "pattern": pattern,
+                        "base_path": str(glob_base),
+                        "error": sanitized_msg,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                continue  # Skip to next pattern
+
             for path in matched_paths:
                 # Check if we've reached the limit
                 if max_handlers is not None and len(discovered_paths) >= max_handlers:
@@ -762,7 +775,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                             "discovered_count": len(discovered_paths),
                             "max_handlers": max_handlers,
                             "patterns": patterns,
-                            "correlation_id": correlation_id,
+                            "correlation_id": str(correlation_id),
                         },
                     )
                     break
@@ -785,7 +798,27 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     ):
                         continue
 
-                    resolved = path.resolve()
+                    # path.resolve() can raise OSError for:
+                    # - Broken symlinks: symlink target no longer exists
+                    # - Race conditions: file deleted between glob discovery and resolution
+                    # - Permission issues: lacking read permission on parent directories
+                    # - Filesystem errors: unmounted volumes, network filesystem failures
+                    try:
+                        resolved = path.resolve()
+                    except OSError as e:
+                        sanitized_msg = _sanitize_exception_message(e)
+                        logger.warning(
+                            "Failed to resolve path %s: %s",
+                            path.name,
+                            sanitized_msg,
+                            extra={
+                                "path": str(path),
+                                "error": sanitized_msg,
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+                        continue  # Skip to next path
+
                     discovered_paths.add(resolved)
 
         logger.debug(
@@ -796,7 +829,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 "patterns": patterns,
                 "discovered_count": len(discovered_paths),
                 "limit_reached": limit_reached,
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -830,7 +863,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                         "contract_path": str(contract_path),
                         "error": str(e),
                         "error_code": error_code,
-                        "correlation_id": correlation_id,
+                        "correlation_id": str(correlation_id),
                     },
                 )
                 continue
@@ -849,8 +882,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 handlers=handlers,
                 failed_plugins=failed_handlers,
                 duration_seconds=duration_seconds,
-                correlation_id=_parse_correlation_id_to_uuid(correlation_id),
-                caller_correlation_string=correlation_id,
+                correlation_id=correlation_id,
+                caller_correlation_string=str(correlation_id),
             )
         )
 
@@ -1078,7 +1111,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         self,
         class_path: str,
         contract_path: Path,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> type:
         """Dynamically import handler class from fully qualified path.
 
@@ -1185,7 +1218,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     def _validate_yaml_syntax(
         self,
         path: Path,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
         raise_on_error: bool = True,
     ) -> bool:
         """Validate YAML syntax of a contract file for early fail-fast behavior.
@@ -1245,7 +1278,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 extra={
                     "path": str(path),
                     "error": sanitized_msg,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
             return False
@@ -1271,7 +1304,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 extra={
                     "path": str(path),
                     "error": sanitized_msg,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
             return False
@@ -1281,7 +1314,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     def _validate_file_size(
         self,
         path: Path,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
         operation: str = "load_from_contract",
         raise_on_error: bool = True,
     ) -> int | None:
@@ -1334,7 +1367,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 extra={
                     "path": str(path),
                     "error": sanitized_msg,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
             return None
@@ -1365,7 +1398,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     "path": str(path),
                     "file_size": file_size,
                     "max_size": MAX_CONTRACT_SIZE,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
             return None
@@ -1375,7 +1408,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
     def _find_contract_files(
         self,
         directory: Path,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
         max_handlers: int | None = None,
     ) -> list[Path]:
         """Find all handler contract files under a directory.
@@ -1445,7 +1478,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 extra={
                     "max_handlers": max_handlers,
                     "directory": str(directory),
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
 
@@ -1474,7 +1507,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     extra={
                         "directory": str(parent_dir),
                         "contract_files": sorted(filenames),
-                        "correlation_id": correlation_id,
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
                         "severity": "configuration_warning",
                     },
                 )
@@ -1500,7 +1535,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                     extra={
                         "path": str(path),
                         "error": sanitized_msg,
-                        "correlation_id": correlation_id,
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
                     },
                 )
                 continue

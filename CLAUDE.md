@@ -643,6 +643,52 @@ handler_routing:
       handler_module: "omnibase_infra.handlers.handler_node_introspected"
 ```
 
+**Handler Resolution Precedence:**
+
+The loader recognizes two contract file names:
+
+| Filename | Purpose |
+|----------|---------|
+| `handler_contract.yaml` | Dedicated handler contract (preferred) |
+| `contract.yaml` | General ONEX contract with handler fields |
+
+**WARNING: No Automatic Precedence Between Contract Types**
+
+When **both** `handler_contract.yaml` **and** `contract.yaml` exist in the **same directory**, the loader will load **BOTH** files as separate handlers. There is **no precedence** - both are treated as valid, independent handler contracts.
+
+This can lead to:
+- Duplicate handler registrations if both files define similar handlers
+- Confusion about which contract is the "source of truth"
+- Unexpected runtime behavior if handlers conflict
+
+A warning is logged when this configuration is detected:
+```
+WARNING: AMBIGUOUS CONTRACT CONFIGURATION: Directory '/app/handlers/auth' contains
+both handler_contract.yaml and contract.yaml. BOTH files will be loaded as separate
+handlers. This may cause duplicate handler registrations or unexpected behavior.
+```
+
+**Best Practice**: Use only **ONE** contract file per handler directory.
+
+```
+# CORRECT: One contract per directory
+nodes/auth/
+    handler_contract.yaml   # Preferred: dedicated handler contract
+    handler_auth.py
+
+# INCORRECT: Both contract types in same directory (will log warning)
+nodes/auth/
+    handler_contract.yaml   # Loaded as handler #1
+    contract.yaml          # Loaded as handler #2 (potential conflict!)
+```
+
+**Why No Automatic Precedence**: The loader intentionally does not implement automatic precedence because:
+1. **Explicit is better than implicit**: Silent precedence could mask configuration errors
+2. **Fail-fast philosophy**: The warning alerts operators to potential issues early
+3. **No assumptions**: The loader cannot know which file the user intends to be authoritative
+
+**See**: `docs/patterns/handler_plugin_loader.md#contract-file-precedence` for full resolution rules.
+
 **Security Model:**
 
 **CRITICAL**: YAML contracts are treated as **executable code**, not mere configuration. Dynamic imports via `importlib.import_module()` execute module-level code during import.

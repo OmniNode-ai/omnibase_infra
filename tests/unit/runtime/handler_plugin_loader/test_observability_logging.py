@@ -12,8 +12,10 @@ Part of OMN-1132: Handler Plugin Loader implementation.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from unittest.mock import patch
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -87,8 +89,13 @@ class TestHandlerPluginLoaderObservabilityLogging:
         assert len(summary_logs) == 1
 
         summary_record = summary_logs[0]
-        # Timing should be in the message (ms, us, or s suffix)
-        assert any(suffix in summary_record.message for suffix in ["ms", "us", "s"])
+        # Timing should be in the message with proper duration format (e.g., "123.45ms")
+        # NOTE: Using regex to avoid false positives - checking "s" in message would
+        # always pass due to words like "handlers", "successfully", etc.
+        duration_pattern = r"\d+(\.\d+)?\s*(ms|us|s)\b"
+        assert re.search(duration_pattern, summary_record.message), (
+            f"Duration format not found in message: {summary_record.message}"
+        )
 
         # Extra data should include duration_seconds
         assert hasattr(summary_record, "duration_seconds")
@@ -101,7 +108,7 @@ class TestHandlerPluginLoaderObservabilityLogging:
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         loader = HandlerPluginLoader()
-        test_correlation_id = "test-correlation-12345"
+        test_correlation_id = uuid4()
 
         with caplog.at_level(logging.INFO):
             loader.load_from_directory(
@@ -115,7 +122,8 @@ class TestHandlerPluginLoaderObservabilityLogging:
 
         summary_record = summary_logs[0]
         assert hasattr(summary_record, "correlation_id")
-        assert summary_record.correlation_id == test_correlation_id
+        # The log extra stores correlation_id as a string representation
+        assert summary_record.correlation_id == str(test_correlation_id)
 
     def test_load_from_directory_logs_failed_handlers(
         self, mixed_valid_invalid_directory: Path, caplog: pytest.LogCaptureFixture

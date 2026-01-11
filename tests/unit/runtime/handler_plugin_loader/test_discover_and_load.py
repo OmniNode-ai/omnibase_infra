@@ -8,6 +8,7 @@ Part of OMN-1132: Handler Plugin Loader implementation.
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -116,9 +117,7 @@ class TestHandlerPluginLoaderDiscoverAndLoad:
         loader = HandlerPluginLoader()
 
         pattern = "**/handler_contract.yaml"
-        handlers = loader.discover_and_load(
-            [pattern], correlation_id="test-correlation-789"
-        )
+        handlers = loader.discover_and_load([pattern], correlation_id=uuid4())
 
         # Should find all 3 handlers
         assert len(handlers) == 3

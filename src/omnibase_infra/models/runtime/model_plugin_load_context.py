@@ -46,7 +46,6 @@ class ModelPluginLoadContext(BaseModel):
 
     model_config = ConfigDict(
         extra="forbid",
-        arbitrary_types_allowed=True,
     )
 
     operation: str = Field(

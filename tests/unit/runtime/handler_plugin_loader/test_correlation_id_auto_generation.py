@@ -73,7 +73,7 @@ class TestCorrelationIdAutoGeneration:
         loader = HandlerPluginLoader()
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
-            loader.load_from_contract(nonexistent_path, correlation_id=str(provided_id))
+            loader.load_from_contract(nonexistent_path, correlation_id=provided_id)
 
         # Verify provided correlation_id was preserved
         assert exc_info.value.model.correlation_id == provided_id
@@ -121,7 +121,7 @@ class TestCorrelationIdAutoGeneration:
         loader = HandlerPluginLoader()
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
-            loader.load_from_directory(nonexistent_dir, correlation_id=str(provided_id))
+            loader.load_from_directory(nonexistent_dir, correlation_id=provided_id)
 
         # Verify provided correlation_id was preserved
         assert exc_info.value.model.correlation_id == provided_id
@@ -167,7 +167,7 @@ class TestCorrelationIdAutoGeneration:
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             # Call with empty patterns list (triggers error) with correlation_id
-            loader.discover_and_load([], correlation_id=str(provided_id))
+            loader.discover_and_load([], correlation_id=provided_id)
 
         # Verify provided correlation_id was preserved
         assert exc_info.value.model.correlation_id == provided_id
@@ -210,7 +210,7 @@ class TestCorrelationIdPropagation:
         # but the correlation_id should be propagated
         # Since load_from_directory catches errors gracefully, we need to
         # verify via logging or use a contract that will definitely fail
-        handlers = loader.load_from_directory(tmp_path, correlation_id=str(provided_id))
+        handlers = loader.load_from_directory(tmp_path, correlation_id=provided_id)
 
         # No handlers should be loaded (all failed due to import error)
         assert len(handlers) == 0
@@ -243,7 +243,7 @@ class TestCorrelationIdPropagation:
         # discover_and_load should propagate the correlation_id
         handlers = loader.discover_and_load(
             ["**/handler_contract.yaml"],
-            correlation_id=str(provided_id),
+            correlation_id=provided_id,
             base_path=tmp_path,
         )
 

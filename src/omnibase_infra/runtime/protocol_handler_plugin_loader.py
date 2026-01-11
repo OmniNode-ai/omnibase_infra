@@ -17,6 +17,7 @@ Thread Safety:
 Example Usage:
     ```python
     from pathlib import Path
+    from uuid import UUID
     from omnibase_infra.runtime.protocol_handler_plugin_loader import (
         ProtocolHandlerPluginLoader,
     )
@@ -27,7 +28,7 @@ Example Usage:
         def load_from_contract(
             self,
             contract_path: Path,
-            correlation_id: str | None = None,
+            correlation_id: UUID | None = None,
         ) -> ModelLoadedHandler:
             # Parse contract YAML and load handler class
             ...
@@ -35,7 +36,7 @@ Example Usage:
         def load_from_directory(
             self,
             directory: Path,
-            correlation_id: str | None = None,
+            correlation_id: UUID | None = None,
         ) -> list[ModelLoadedHandler]:
             # Scan directory for contracts and load all handlers
             ...
@@ -43,7 +44,7 @@ Example Usage:
         def discover_and_load(
             self,
             patterns: list[str],
-            correlation_id: str | None = None,
+            correlation_id: UUID | None = None,
             base_path: Path | None = None,
         ) -> list[ModelLoadedHandler]:
             # Match glob patterns and load discovered handlers
@@ -67,6 +68,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import UUID
 
 if TYPE_CHECKING:
     from omnibase_infra.models.runtime import ModelLoadedHandler
@@ -115,7 +117,7 @@ class ProtocolHandlerPluginLoader(Protocol):
     def load_from_contract(
         self,
         contract_path: Path,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> ModelLoadedHandler:
         """Load a single handler from a contract file.
 
@@ -125,8 +127,8 @@ class ProtocolHandlerPluginLoader(Protocol):
 
         Args:
             contract_path: Path to the handler contract YAML file. Must be an
-                absolute or relative path to an existing file with .yaml or
-                .yml extension.
+                absolute or relative path to an existing file with .yaml
+                extension.
             correlation_id: Optional correlation ID for tracing and error context.
 
         Returns:
@@ -165,14 +167,14 @@ class ProtocolHandlerPluginLoader(Protocol):
     def load_from_directory(
         self,
         directory: Path,
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
         max_handlers: int | None = None,
     ) -> list[ModelLoadedHandler]:
         """Load all handlers from contract files in a directory.
 
         Recursively scans the given directory for handler contract files
-        (contract.yaml or contract.yml), loads each handler, and returns
-        a list of successfully loaded handlers.
+        (contract.yaml), loads each handler, and returns a list of
+        successfully loaded handlers.
 
         Failed loads are logged but do not stop processing of other handlers.
         Use strict mode configuration to change this behavior.
@@ -222,7 +224,7 @@ class ProtocolHandlerPluginLoader(Protocol):
     def discover_and_load(
         self,
         patterns: list[str],
-        correlation_id: str | None = None,
+        correlation_id: UUID | None = None,
         base_path: Path | None = None,
         max_handlers: int | None = None,
     ) -> list[ModelLoadedHandler]:

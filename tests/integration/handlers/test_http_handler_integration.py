@@ -27,9 +27,11 @@ from uuid import uuid4
 
 import pytest
 
-# Skip entire module if werkzeug is not installed (optional dependency via pytest-httpserver)
-werkzeug = pytest.importorskip("werkzeug")
-Response = werkzeug.Response
+# Skip entire module if pytest-httpserver is not installed (required for HTTP integration tests)
+pytest.importorskip("pytest_httpserver")
+
+# werkzeug is a transitive dependency of pytest-httpserver, used for Response handling
+from werkzeug import Response
 
 from omnibase_infra.errors import InfraTimeoutError, InfraUnavailableError
 from omnibase_infra.handlers import HttpRestHandler

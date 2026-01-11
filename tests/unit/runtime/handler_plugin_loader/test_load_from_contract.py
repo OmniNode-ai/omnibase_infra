@@ -8,6 +8,7 @@ Part of OMN-1132: Handler Plugin Loader implementation.
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -284,9 +285,7 @@ class TestHandlerPluginLoaderLoadFromContract:
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         loader = HandlerPluginLoader()
-        result = loader.load_from_contract(
-            valid_contract_path, correlation_id="test-correlation-123"
-        )
+        result = loader.load_from_contract(valid_contract_path, correlation_id=uuid4())
 
         # Should load successfully
         assert result.handler_name == "test.valid.handler"
