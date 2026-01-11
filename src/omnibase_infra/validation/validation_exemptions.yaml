@@ -653,6 +653,24 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-1270
+  - file_pattern: 'service_capability_query\.py'
+    class_pattern: "Class name 'ServiceCapabilityQuery'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-1135
+  - file_pattern: 'service_node_selector\.py'
+    class_pattern: "Class name 'ServiceNodeSelector'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-1135
   - file_pattern: 'service_health\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
@@ -1163,6 +1181,31 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Registry Naming Conventions - semantic identifiers)
     ticket: OMN-1132
+  # ==========================================================================
+  # Contract Handler Discovery Exemptions (OMN-1133)
+  # ==========================================================================
+  # ContractHandlerDiscovery bridges HandlerPluginLoader with the BindingRegistry
+  # for automatic handler discovery from contracts. The "Handler" in the name
+  # refers to ONEX handler contracts being discovered, not an anti-pattern.
+  - file_pattern: 'contract_handler_discovery\.py'
+    class_pattern: "Class name 'ContractHandlerDiscovery'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ContractHandlerDiscovery discovers ONEX handler contracts and registers them with the runtime. The "Handler" refers to ONEX handler contracts being discovered, consistent with HandlerPluginLoader.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (Handler Plugin Loader Patterns)
+    ticket: OMN-1133
+  - file_pattern: 'protocol_handler_discovery\.py'
+    class_pattern: "Class name 'ProtocolHandlerDiscovery'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ProtocolHandlerDiscovery defines the interface for handler discovery services. The "Handler" refers to ONEX handler contracts, consistent with ProtocolHandlerPluginLoader.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1133
   - file_pattern: 'model_loaded_handler\.py'
     violation_pattern: "Field 'handler_name' might reference an entity"
     reason: >

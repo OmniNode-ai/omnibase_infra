@@ -9,6 +9,9 @@ and related runtime components.
     Created as part of OMN-1132 Plugin Loader implementation.
 """
 
+from omnibase_infra.models.runtime.model_discovery_error import ModelDiscoveryError
+from omnibase_infra.models.runtime.model_discovery_result import ModelDiscoveryResult
+from omnibase_infra.models.runtime.model_discovery_warning import ModelDiscoveryWarning
 from omnibase_infra.models.runtime.model_failed_plugin_load import (
     ModelFailedPluginLoad,
 )
@@ -22,6 +25,9 @@ from omnibase_infra.models.runtime.model_plugin_load_summary import (
 )
 
 __all__ = [
+    "ModelDiscoveryError",
+    "ModelDiscoveryResult",
+    "ModelDiscoveryWarning",
     "ModelFailedPluginLoad",
     "ModelHandlerContract",
     "ModelLoadedHandler",
