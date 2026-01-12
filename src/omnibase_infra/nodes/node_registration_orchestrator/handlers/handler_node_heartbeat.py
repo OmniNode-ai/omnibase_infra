@@ -25,15 +25,12 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
-    InfraAuthenticationError,
-    InfraConnectionError,
-    InfraTimeoutError,
-    InfraUnavailableError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -356,23 +353,12 @@ class HandlerNodeHeartbeat:
                 timestamp=now,
             )
 
-        except (
-            InfraConnectionError,
-            InfraTimeoutError,
-            InfraAuthenticationError,
-            InfraUnavailableError,
-        ):
-            # Re-raise specific infrastructure errors directly (preserves error type)
-            # These are the expected error types from database operations:
-            # - InfraConnectionError: Database connection failures
-            # - InfraTimeoutError: Query/operation timeout exceeded
-            # - InfraAuthenticationError: Database auth/authz failures
-            # - InfraUnavailableError: Database temporarily unavailable
-            # Callers can catch these specific types for differentiated handling
-            raise
-        except RuntimeHostError:
-            # Re-raise any other RuntimeHostError subclasses directly
-            # This catches future infrastructure error types without wrapping them
+        except ModelOnexError:
+            # Re-raise all ONEX errors directly (preserves error type)
+            # This includes:
+            # - RuntimeHostError and all its subclasses (InfraConnectionError, etc.)
+            # - ModelOnexError raised directly by other ONEX components
+            # Callers can catch specific types for differentiated handling
             raise
         except Exception as e:
             # Wrap only non-infrastructure errors in RuntimeHostError

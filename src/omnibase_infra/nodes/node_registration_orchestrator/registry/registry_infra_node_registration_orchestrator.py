@@ -58,6 +58,8 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 
+from omnibase_infra.errors import ProtocolConfigurationError
+
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
@@ -236,9 +238,9 @@ class RegistryInfraNodeRegistrationOrchestrator:
             reader = self._container.service_registry.get(ProjectionReaderRegistration)
             if reader is not None:
                 # Duck typing: verify required projection reader capabilities
-                if not hasattr(reader, "read_projection"):
-                    raise TypeError(
-                        f"Expected object with read_projection method, got {type(reader).__name__}"
+                if not hasattr(reader, "get_entity_state"):
+                    raise ProtocolConfigurationError(
+                        f"Expected object with get_entity_state method, got {type(reader).__name__}"
                     )
                 return reader  # type: ignore[no-any-return]
 
@@ -314,7 +316,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 - projector: For persistence (required for heartbeat updates)
 
         Raises:
-            ValueError: If no projector is configured. HandlerNodeHeartbeat
+            ProtocolConfigurationError: If no projector is configured. HandlerNodeHeartbeat
                 requires a projector to persist heartbeat timestamp updates.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
@@ -322,7 +324,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
         )
 
         if self._projector is None:
-            raise ValueError(
+            raise ProtocolConfigurationError(
                 "HandlerNodeHeartbeat requires a projector for heartbeat updates. "
                 "Configure the registry with a ProjectorRegistration instance."
             )

@@ -8,6 +8,8 @@ handler operation execution with exponential backoff.
 
 from __future__ import annotations
 
+import time
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -124,8 +126,6 @@ class ModelRetryState(BaseModel):
             >>> next_state.delay_seconds  # 1.0 * 2.0 = 2.0
             2.0
         """
-        import time
-
         new_delay = min(
             self.delay_seconds * self.backoff_multiplier,
             max_delay_seconds,

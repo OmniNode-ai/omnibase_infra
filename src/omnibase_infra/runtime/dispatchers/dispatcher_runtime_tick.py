@@ -240,12 +240,18 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             # Get current time for handler
             now = datetime.now(UTC)
 
-            # Delegate to wrapped handler
-            output_events = await self._handler.handle(
-                tick=payload,
-                now=now,
+            # Create envelope for handler (ProtocolMessageHandler signature)
+            handler_envelope: ModelEventEnvelope[ModelRuntimeTick] = ModelEventEnvelope(
+                envelope_id=uuid4(),
+                payload=payload,
+                envelope_timestamp=now,
                 correlation_id=correlation_id,
+                source=self.dispatcher_id,
             )
+
+            # Delegate to wrapped handler
+            handler_output = await self._handler.handle(handler_envelope)
+            output_events = list(handler_output.events)
 
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
