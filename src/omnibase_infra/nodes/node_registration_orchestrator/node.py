@@ -27,8 +27,10 @@ Handler Routing:
     - routing_strategy: "payload_type_match"
     - handlers: mapping of event_model to handler_class
 
-    Handler routing is initialized via MixinHandlerRouting._init_handler_routing()
-    using the registry created by RegistryInfraNodeRegistrationOrchestrator.
+    Handler routing is initialized by the RUNTIME (not this module) via
+    MixinHandlerRouting._init_handler_routing(), using the registry created
+    by RegistryInfraNodeRegistrationOrchestrator. This module only provides
+    the helper function _create_handler_routing_subcontract() for the runtime.
 
 Design Decisions:
     - 100% Contract-Driven: All workflow logic in YAML, not Python
@@ -68,19 +70,53 @@ if TYPE_CHECKING:
 def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
     """Create handler routing subcontract from contract.yaml configuration.
 
-    TODO(tech-debt): This function hardcodes the handler routing configuration.
-    Ideally, this should be loaded directly from contract.yaml at runtime.
-    See PR #141 review comments for context.
+    TODO(OMN-1102): Replace hardcoded routing with contract.yaml loading.
+        This function hardcodes the handler routing configuration which duplicates
+        what is already declared in contract.yaml. Per the Handler Plugin Loader
+        pattern (see CLAUDE.md), routing should be loaded directly from contract.yaml
+        at runtime using the plugin-based handler loading system.
+
+        Desired approach:
+            1. Load handler_routing section from contract.yaml
+            2. Use HandlerPluginLoader to resolve handler classes
+            3. Build ModelHandlerRoutingSubcontract from loaded config
+
+        This function may also need relocation to a runtime/loader module rather
+        than living in the node module itself (see PR #141 nitpick).
+
+        References:
+            - PR #141 review comments
+            - CLAUDE.md "Handler Plugin Loader Patterns" section
+            - docs/patterns/handler_plugin_loader.md
 
     This function creates the handler routing configuration that matches
     the contract.yaml handler_routing section.
 
-    Returns:
-        ModelHandlerRoutingSubcontract with routing entries using:
-        - routing_key: Event model class name (e.g., "ModelNodeIntrospectionEvent")
-        - handler_key: Handler identifier (e.g., "handler-node-introspected")
+    Note:
+        The contract.yaml uses a nested structure::
 
-        Mappings:
+            handlers:
+              - event_model:
+                  name: "ModelNodeIntrospectionEvent"
+                  module: "omnibase_infra.models..."
+                handler:
+                  name: "HandlerNodeIntrospected"
+                  module: "omnibase_infra.nodes..."
+
+        While ModelHandlerRoutingEntry uses flat fields::
+
+            ModelHandlerRoutingEntry(
+                routing_key="ModelNodeIntrospectionEvent",  # from event_model.name
+                handler_key="handler-node-introspected",    # adapter ID in registry
+            )
+
+        The ``routing_key`` maps to ``event_model.name`` from contract.yaml.
+        The ``handler_key`` is the handler's adapter ID in ServiceHandlerRegistry,
+        NOT the class name from ``handler.name``.
+
+    Returns:
+        ModelHandlerRoutingSubcontract with entries mapping event models to handlers:
+
         - ModelNodeIntrospectionEvent -> handler-node-introspected
         - ModelRuntimeTick -> handler-runtime-tick
         - ModelNodeRegistrationAcked -> handler-node-registration-acked
@@ -118,17 +154,23 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
     Handler routing is driven entirely by the contract and initialized
     via MixinHandlerRouting from the base class.
 
-    Example YAML Contract:
+    Example YAML Contract (contract.yaml format):
         ```yaml
         handler_routing:
           routing_strategy: "payload_type_match"
           handlers:
-            - event_model: "ModelNodeIntrospectionEvent"
-              handler_class: "HandlerNodeIntrospected"
-            - event_model: "ModelRuntimeTick"
-              handler_class: "HandlerRuntimeTick"
-            - event_model: "ModelNodeHeartbeatEvent"
-              handler_class: "HandlerNodeHeartbeat"
+            - event_model:
+                name: "ModelNodeIntrospectionEvent"
+                module: "omnibase_infra.models.registration..."
+              handler:
+                name: "HandlerNodeIntrospected"
+                module: "omnibase_infra.nodes...handlers..."
+            - event_model:
+                name: "ModelRuntimeTick"
+                module: "omnibase_infra.runtime.models..."
+              handler:
+                name: "HandlerRuntimeTick"
+                module: "omnibase_infra.nodes...handlers..."
 
         workflow_coordination:
           workflow_definition:
@@ -156,6 +198,16 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
               max_retries: 3
               timeout_ms: 30000
         ```
+
+    Note on Handler Routing Field Names:
+        The contract.yaml uses a nested structure with ``event_model.name`` and
+        ``handler.name``, but ModelHandlerRoutingEntry uses flat fields:
+
+        - ``routing_key``: Corresponds to ``event_model.name``
+        - ``handler_key``: The handler's adapter ID in ServiceHandlerRegistry
+          (e.g., "handler-node-introspected"), NOT the class name
+
+        See ``_create_handler_routing_subcontract()`` for the translation.
 
     Usage:
         ```python

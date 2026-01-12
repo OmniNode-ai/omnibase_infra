@@ -468,6 +468,9 @@ class RegistryInfraNodeRegistrationOrchestrator:
     @staticmethod
     def create_registry(
         projection_reader: ProjectionReaderRegistration,
+        # TODO(tech-debt): projector and consul_handler are optional for testing
+        # flexibility, but production deployments should provide these via DI.
+        # Future: resolve from container if not explicitly provided (OMN-1102).
         projector: ProjectorRegistration | None = None,
         consul_handler: HandlerConsul | None = None,
     ) -> ServiceHandlerRegistry:
@@ -571,12 +574,12 @@ class RegistryInfraNodeRegistrationOrchestrator:
 
             reader = self._container.service_registry.get(ProjectionReaderRegistration)
             if reader is not None:
-                # Type guard: service registry returns the registered type
-                if not isinstance(reader, ProjectionReaderRegistration):
+                # Duck typing: verify required projection reader capabilities
+                if not hasattr(reader, "read_projection"):
                     raise TypeError(
-                        f"Expected ProjectionReaderRegistration, got {type(reader).__name__}"
+                        f"Expected object with read_projection method, got {type(reader).__name__}"
                     )
-                return reader
+                return reader  # type: ignore[no-any-return]
 
         # Fallback: Create new instance (requires container to have DB config)
         from omnibase_infra.projectors import ProjectionReaderRegistration

@@ -1,15 +1,25 @@
 # Handoff Document: Contract-Driven Handler Routing
 
-**Date**: 2026-01-11
-**Ticket**: [OMN-1293](https://linear.app/omninode/issue/OMN-1293)
-**Branch**: `jonah/omn-1293-omnibase_core-mixinhandlerrouting-for-contract-driven`
+**Date**: 2026-01-11 (Updated)
+**Tickets**:
+- [OMN-1293](https://linear.app/omninode/issue/OMN-1293) - MixinHandlerRouting integration
+- [OMN-1102](https://linear.app/omninode/issue/OMN-1102) - Declarative orchestrator refactor
+**Branch**: `jonah/omn-1102-refactor-noderegistrationorchestrator-to-be-fully`
 
 ---
 
-> **Scope Note**: This document covers OMN-1293 (MixinHandlerRouting integration into
-> omnibase_core). For the OMN-1102 declarative refactor of NodeRegistrationOrchestrator,
-> see the `node.py` module docstring in
-> `src/omnibase_infra/nodes/node_registration_orchestrator/node.py`.
+## Scope Clarification
+
+This document covers **two related but distinct tickets**:
+
+| Ticket | Scope | Status |
+|--------|-------|--------|
+| **OMN-1293** | `MixinHandlerRouting` mixin implementation in `omnibase_core`. Provides contract-driven handler routing infrastructure for all orchestrators. | **COMPLETE** |
+| **OMN-1102** | Declarative refactor of `NodeRegistrationOrchestrator` in `omnibase_infra`. Makes the orchestrator pure declarative with runtime-driven initialization. | **COMPLETE** (in PR #141) |
+
+**Key Distinction**:
+- **OMN-1293** is about the _infrastructure_ (the mixin, registry service, and routing models)
+- **OMN-1102** is about _applying_ that infrastructure to make `NodeRegistrationOrchestrator` fully declarative
 
 ---
 
@@ -131,34 +141,41 @@ from omnibase_core.models.contracts.subcontracts.model_handler_routing_subcontra
 
 ### 1. NodeRegistrationOrchestrator Integration (COMPLETE)
 
-The orchestrator now:
-1. Calls `_init_handler_routing()` via `_initialize_handler_routing()` method
-2. Registers handlers via `RegistryInfraNodeRegistrationOrchestrator.create_registry()`
-3. Uses `route_to_handlers()` for event processing (inherited from base class)
+The orchestrator is now **pure declarative**:
+1. **No custom initialization logic** - just extends `NodeOrchestrator`
+2. **Runtime-driven routing** - `RuntimeHostProcess` initializes handler routing externally
+3. **Registry factory** - `RegistryInfraNodeRegistrationOrchestrator.create_registry()` creates handler instances
+4. **Base class routing** - `route_to_handlers()` is inherited from `MixinHandlerRouting`
 
 ```python
+# PURE DECLARATIVE - node.py contains ONLY the class definition
 class NodeRegistrationOrchestrator(NodeOrchestrator):
-    def __init__(
-        self,
-        container: ModelONEXContainer,
-        projection_reader: ProjectionReaderRegistration | None = None,
-    ) -> None:
+    """Declarative orchestrator for node registration workflow.
+
+    All behavior is defined in contract.yaml - no custom logic here.
+    Handler routing is driven entirely by the contract and initialized
+    by the runtime via MixinHandlerRouting from the base class.
+    """
+
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize with container dependency injection."""
         super().__init__(container)
-        self._projection_reader = projection_reader
-
-        # Initialize handler routing if projection_reader is available
-        if projection_reader is not None:
-            self._initialize_handler_routing(projection_reader)
-
-    def _initialize_handler_routing(
-        self, projection_reader: ProjectionReaderRegistration
-    ) -> None:
-        handler_routing = _create_handler_routing_subcontract()
-        registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
-            projection_reader=projection_reader,
-        )
-        self._init_handler_routing(handler_routing, registry)
+        # No custom logic - runtime handles handler routing initialization
 ```
+
+**Runtime Initialization Pattern** (performed by `RuntimeHostProcess`, not the orchestrator):
+```python
+# The runtime (not the orchestrator) performs this initialization:
+handler_routing = _create_handler_routing_subcontract()
+registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
+    projection_reader=reader,
+    projector=projector,
+    consul_handler=consul_handler,
+)
+orchestrator._init_handler_routing(handler_routing, registry)
+```
+
+This separation ensures the orchestrator remains purely declarative with zero custom initialization logic.
 
 ### 2. Handler Registration (COMPLETE)
 
@@ -198,21 +215,33 @@ The registry file now exists and the docstring accurately references it:
 
 ### OMN-1293 Current State (COMPLETE)
 
-The ticket work is now **COMPLETE**:
+The `MixinHandlerRouting` infrastructure work is now **COMPLETE**:
 - **MixinHandlerRouting** mixin - **IMPLEMENTED** in omnibase_core
 - **ModelHandlerRoutingSubcontract** model - **IMPLEMENTED** and in use
 - **ModelHandlerRoutingEntry** model - **IMPLEMENTED** and in use
 - Multiple routing strategies - **IMPLEMENTED** (payload_type_match, operation_match, topic_pattern)
 - **NodeOrchestrator** composes mixin - **COMPLETE** (has `_init_handler_routing()`, `route_to_handlers()`, `is_routing_initialized`)
 - **ServiceHandlerRegistry** - **COMPLETE** (fully functional)
+
+### OMN-1102 Current State (COMPLETE in PR #141)
+
+The declarative refactor of `NodeRegistrationOrchestrator` is now **COMPLETE**:
 - **RegistryInfraNodeRegistrationOrchestrator** - **COMPLETE** (handler adapters and factory methods)
-- **NodeRegistrationOrchestrator** integration - **COMPLETE** (uses handler routing from base class)
+- **NodeRegistrationOrchestrator** - **COMPLETE** (pure declarative, runtime-driven initialization)
+- **Handler adapters** - **COMPLETE** (AdapterNodeIntrospected, AdapterRuntimeTick, etc.)
+- **Registry file exists** - `registry/registry_infra_node_registration_orchestrator.py`
 
 ### Remaining Work
 
-**Minor items**:
-1. **Integration tests** - Add tests verifying end-to-end handler routing
-2. **NodeEffect mixin integration** - Verify if needed (may be orchestrator-only pattern)
+**All core implementation is COMPLETE**. Only remaining items:
+
+1. **Integration tests** - Add tests verifying end-to-end handler routing behavior
+   - Contract `handler_routing` section parsing
+   - Events routing to correct handlers
+   - Unknown handler fail-fast validation
+
+**Not needed** (clarified during PR #141 review):
+- ~~NodeEffect mixin integration~~ - Handler routing is orchestrator-only pattern
 
 ---
 
@@ -258,8 +287,8 @@ The ticket work is now **COMPLETE**:
 │                                                              │
 │  NodeRegistrationOrchestrator(NodeOrchestrator) ← COMPLETE ✓│
 │  ├── contract.yaml defines handler_routing                  │
-│  ├── __init__: calls _initialize_handler_routing()    ✓     │
-│  └── process(): uses route_to_handlers()              ✓     │
+│  ├── __init__: PURE DECLARATIVE (no custom logic)     ✓     │
+│  └── Runtime calls _init_handler_routing()            ✓     │
 │                                                              │
 │  Handlers (registered via adapters):            ← COMPLETE ✓│
 │  ├── HandlerNodeIntrospected                                │
@@ -289,10 +318,16 @@ LEGEND: ✓ = Complete, DONE = Implemented
 
 | File | Status | Notes |
 |------|--------|-------|
-| `nodes/node_registration_orchestrator/node.py` | **COMPLETE** | Calls `_init_handler_routing()` via `_initialize_handler_routing()` |
+| `nodes/node_registration_orchestrator/node.py` | **COMPLETE** | Pure declarative (no custom init logic, runtime-driven) |
 | `nodes/node_registration_orchestrator/contract.yaml` | **COMPLETE** | Handler routing config defined |
 | `nodes/node_registration_orchestrator/handlers/` | **COMPLETE** | Handler implementations ready |
-| `nodes/node_registration_orchestrator/registry/registry_infra_node_registration_orchestrator.py` | **COMPLETE** | Handler adapters and factory (NEW) |
+| `nodes/node_registration_orchestrator/registry/registry_infra_node_registration_orchestrator.py` | **COMPLETE** | Handler adapters (4 adapters) and `create_registry()` factory |
+
+**Registry File Details** (`registry/registry_infra_node_registration_orchestrator.py`):
+- **Path**: `src/omnibase_infra/nodes/node_registration_orchestrator/registry/registry_infra_node_registration_orchestrator.py`
+- **Class**: `RegistryInfraNodeRegistrationOrchestrator`
+- **Factory**: `create_registry(projection_reader, projector?, consul_handler?)` -> `ServiceHandlerRegistry`
+- **Adapters**: `AdapterNodeIntrospected`, `AdapterRuntimeTick`, `AdapterNodeRegistrationAcked`, `AdapterNodeHeartbeat`
 
 ---
 
@@ -310,18 +345,20 @@ All items completed:
 3. **Routing strategies** - `payload_type_match`, `operation_match`, `topic_pattern` - implemented
 4. **Base class integration** - `NodeOrchestrator` now composes `MixinHandlerRouting`
 
-### Phase 2: omnibase_infra Integration - COMPLETE
+### Phase 2: omnibase_infra Integration (OMN-1102) - COMPLETE
 
 All items completed:
-6. **Initialize routing** - `NodeRegistrationOrchestrator` calls `_init_handler_routing()` via `_initialize_handler_routing()`
-7. **Register handlers** - `RegistryInfraNodeRegistrationOrchestrator.create_registry()` registers all handlers with adapters
-8. **Docstring** - Registry file now exists, docstring accurate
-9. **PR** - Original review concerns addressed
+6. **Pure declarative orchestrator** - `NodeRegistrationOrchestrator` extends `NodeOrchestrator` with no custom logic
+7. **Runtime-driven initialization** - Handler routing initialized by `RuntimeHostProcess`, not by the orchestrator
+8. **Registry file implemented** - `RegistryInfraNodeRegistrationOrchestrator` with handler adapters and factory
+9. **PR #141** - Original review concerns addressed, registry file now exists
 
 ### Remaining Work
 
 10. **Integration tests** - Add tests verifying end-to-end handler routing behavior
-11. **Documentation** - Update any remaining outdated references
+    - Verify contract parsing
+    - Verify event-to-handler routing
+    - Verify fail-fast on unknown handlers
 
 ---
 
@@ -358,14 +395,15 @@ from omnibase_core.models.contracts.subcontracts.model_handler_routing_subcontra
 
 ### Component Status Summary
 
-| Component | Expected | Actual | Status |
-|-----------|----------|--------|--------|
-| `MixinHandlerRouting` | Exists in `omnibase_core.mixins` | **Exists and integrated** | **COMPLETE** |
-| `ServiceHandlerRegistry` | Handler registration service | **Exists and works** | **COMPLETE** |
-| `NodeOrchestrator` | Composes `MixinHandlerRouting` | **Composes mixin** | **COMPLETE** |
-| Routing models | `ModelHandlerRoutingSubcontract`, `ModelHandlerRoutingEntry` | **Both exist** | **COMPLETE** |
-| `RegistryInfraNodeRegistrationOrchestrator` | Handler registry factory | **Exists with adapters** | **COMPLETE** |
-| `NodeRegistrationOrchestrator` | Uses handler routing | **Integrated** | **COMPLETE** |
+| Component | Expected | Actual | Status | Ticket |
+|-----------|----------|--------|--------|--------|
+| `MixinHandlerRouting` | Exists in `omnibase_core.mixins` | **Exists and integrated** | **COMPLETE** | OMN-1293 |
+| `ServiceHandlerRegistry` | Handler registration service | **Exists and works** | **COMPLETE** | OMN-1293 |
+| `NodeOrchestrator` | Composes `MixinHandlerRouting` | **Composes mixin** | **COMPLETE** | OMN-1293 |
+| Routing models | `ModelHandlerRoutingSubcontract`, `ModelHandlerRoutingEntry` | **Both exist** | **COMPLETE** | OMN-1293 |
+| `RegistryInfraNodeRegistrationOrchestrator` | Handler registry factory | **Exists with 4 adapters** | **COMPLETE** | OMN-1102 |
+| `NodeRegistrationOrchestrator` | Pure declarative | **No custom init logic** | **COMPLETE** | OMN-1102 |
+| Registry file | Exists at documented path | **File exists** | **COMPLETE** | OMN-1102 |
 
 ### ServiceHandlerRegistry Confirmed Methods
 
@@ -386,13 +424,18 @@ is_frozen: bool
 
 ### Implementation Summary
 
-**OMN-1293 is now COMPLETE**. All core components have been implemented:
+**Both OMN-1293 and OMN-1102 are now COMPLETE**:
 
+**OMN-1293 (omnibase_core infrastructure)**:
 - **MixinHandlerRouting** mixin - implemented in omnibase_core
 - **Three routing strategies** - payload_type_match, operation_match, topic_pattern
 - **NodeOrchestrator integration** - base class composes mixin
-- **RegistryInfraNodeRegistrationOrchestrator** - handler adapters and factory methods
-- **NodeRegistrationOrchestrator** - integrated with handler routing
+- **ServiceHandlerRegistry** - handler registration and lookup service
+
+**OMN-1102 (omnibase_infra declarative refactor)**:
+- **NodeRegistrationOrchestrator** - pure declarative with runtime-driven initialization
+- **RegistryInfraNodeRegistrationOrchestrator** - handler adapters and `create_registry()` factory
+- **Four handler adapters** - AdapterNodeIntrospected, AdapterRuntimeTick, AdapterNodeRegistrationAcked, AdapterNodeHeartbeat
 
 **Remaining work**: Integration tests to verify end-to-end handler routing behavior.
 
@@ -400,6 +443,7 @@ is_frozen: bool
 
 ## References
 
-- [OMN-1293 Linear Ticket](https://linear.app/omninode/issue/OMN-1293)
-- `omnibase_core` version: Check `pyproject.toml` for current version
-- PR under review: `jonah/omn-1102-refactor-noderegistrationorchestrator-to-be-fully`
+- [OMN-1293 Linear Ticket](https://linear.app/omninode/issue/OMN-1293) - MixinHandlerRouting infrastructure
+- [OMN-1102 Linear Ticket](https://linear.app/omninode/issue/OMN-1102) - Declarative orchestrator refactor
+- `omnibase_core` version: Check `pyproject.toml` for current version (^0.6.4)
+- PR: [#141](https://github.com/omninode/omnibase_infra/pull/141) - Addresses PR review concerns, adds registry file

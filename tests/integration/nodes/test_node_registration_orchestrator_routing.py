@@ -56,6 +56,7 @@ Running Tests:
 from __future__ import annotations
 
 import importlib
+import re
 from unittest.mock import MagicMock
 
 import pytest
@@ -955,11 +956,19 @@ class TestHandlerRoutingContractCodeConsistency:
         subcontract = _create_handler_routing_subcontract()
         subcontract_routing_keys = {entry.routing_key for entry in subcontract.handlers}
 
-        # Use subset check (<=) because subcontract may include conditional handlers
-        # that are not in contract.yaml. For example, the heartbeat handler is only
-        # registered when a projector is available, so it appears in subcontract
-        # but not in the base contract. Contract entries are always required;
-        # subcontract may have additional optional/conditional entries.
+        # INTENTIONAL: Use subset check (<=) instead of equality (==).
+        #
+        # Why subset instead of equality:
+        # - Contract defines the MINIMUM required handlers (always present)
+        # - Subcontract may include ADDITIONAL conditional handlers
+        #
+        # Example of intentional divergence:
+        # - The heartbeat handler is only registered when a projector is available
+        # - It appears in subcontract but not in the base contract
+        #
+        # This design allows:
+        # - Contract to be stable (all entries are required and always active)
+        # - Subcontract to be flexible (can include optional/conditional handlers)
         assert contract_event_models <= subcontract_routing_keys, (
             f"Contract event models not in subcontract: "
             f"{contract_event_models - subcontract_routing_keys}"
@@ -1023,8 +1032,6 @@ class TestHandlerRoutingContractCodeConsistency:
         # (e.g., HandlerNodeIntrospected -> handler-node-introspected)
         for handler_name in contract_handler_names:
             # Convert CamelCase to kebab-case
-            import re
-
             kebab_name = re.sub(r"(?<!^)(?=[A-Z])", "-", handler_name).lower()
             assert kebab_name in subcontract_handler_keys, (
                 f"Handler '{handler_name}' (as '{kebab_name}') not found in "
