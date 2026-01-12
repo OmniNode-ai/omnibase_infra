@@ -173,7 +173,7 @@ class HandlerNodeHeartbeat:
     @property
     def node_kind(self) -> EnumNodeKind:
         """Return the node kind this handler belongs to."""
-        return EnumNodeKind.COMPUTE
+        return EnumNodeKind.ORCHESTRATOR
 
     @property
     def liveness_window_seconds(self) -> float:

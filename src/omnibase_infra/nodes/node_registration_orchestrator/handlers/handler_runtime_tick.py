@@ -45,6 +45,8 @@ from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutpu
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import BaseModel
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.registration.events.model_node_liveness_expired import (
     ModelNodeLivenessExpired,
 )
@@ -155,7 +157,7 @@ class HandlerRuntimeTick:
 
         Raises:
             RuntimeHostError: If projection queries fail (propagated from reader).
-            ValueError: If envelope_timestamp is naive (no timezone info).
+            ProtocolConfigurationError: If envelope_timestamp is naive (no timezone info).
         """
         start_time = time.perf_counter()
 
@@ -166,9 +168,16 @@ class HandlerRuntimeTick:
 
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
-            raise ValueError(
-                "now must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="handle_runtime_tick",
+                target_name="handler.runtime_tick",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                "envelope_timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime.",
+                context=ctx,
             )
 
         events: list[BaseModel] = []
@@ -253,10 +262,18 @@ class HandlerRuntimeTick:
 
             # Type narrowing: needs_ack_timeout_event() guarantees ack_deadline is not None
             ack_deadline = projection.ack_deadline
-            assert ack_deadline is not None, (
-                f"needs_ack_timeout_event() guarantees ack_deadline is not None: "
-                f"{projection.entity_id}"
-            )
+            if ack_deadline is None:
+                # This should never happen - needs_ack_timeout_event() ensures ack_deadline
+                # is not None. Log and skip this projection as a defensive measure.
+                logger.warning(
+                    "Skipping projection with None ack_deadline despite passing "
+                    "needs_ack_timeout_event() check - this indicates a bug",
+                    extra={
+                        "entity_id": str(projection.entity_id),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                continue
 
             event = ModelNodeRegistrationAckTimedOut(
                 entity_id=projection.entity_id,

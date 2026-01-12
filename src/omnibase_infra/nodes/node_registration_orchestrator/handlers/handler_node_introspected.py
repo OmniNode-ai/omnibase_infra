@@ -63,7 +63,8 @@ from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul
@@ -260,7 +261,7 @@ class HandlerNodeIntrospected:
             RuntimeHostError: If projection query or persist fails (propagated).
             InfraConnectionError: If database connection fails during persist.
             InfraTimeoutError: If database operation times out.
-            ValueError: If envelope timestamp is naive (no timezone info).
+            ProtocolConfigurationError: If envelope timestamp is naive (no timezone info).
         """
         start_time = time.perf_counter()
 
@@ -271,9 +272,16 @@ class HandlerNodeIntrospected:
 
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
-            raise ValueError(
-                "now must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="handle_introspection_event",
+                target_name="handler.node_introspected",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                "envelope_timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime.",
+                context=ctx,
             )
 
         node_id = event.node_id

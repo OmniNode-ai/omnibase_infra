@@ -25,7 +25,7 @@ This document covers **two related but distinct tickets**:
 
 ## Executive Summary
 
-**UPDATE (2026-01-11)**: **OMN-1293 is NOW COMPLETE**. The `MixinHandlerRouting` mixin is implemented in omnibase_core and integrated into `NodeOrchestrator`. The `RegistryInfraNodeRegistrationOrchestrator` registry is fully implemented with handler adapters. Contract-driven handler routing is now functional.
+**UPDATE (2026-01-11)**: **OMN-1293 is NOW COMPLETE**. The `MixinHandlerRouting` mixin is implemented in omnibase_core and integrated into `NodeOrchestrator`. The `RegistryInfraNodeRegistrationOrchestrator` registry is fully implemented. Handlers implement `ProtocolMessageHandler` directly (no adapter classes needed). Contract-driven handler routing is now functional.
 
 ---
 
@@ -179,7 +179,7 @@ This separation ensures the orchestrator remains purely declarative with zero cu
 
 ### 2. Handler Registration (COMPLETE)
 
-Handler adapters and registration implemented via `RegistryInfraNodeRegistrationOrchestrator`:
+Handler registration implemented via `RegistryInfraNodeRegistrationOrchestrator`:
 
 ```python
 # In registry/registry_infra_node_registration_orchestrator.py
@@ -191,11 +191,11 @@ registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
 # Registry is automatically frozen and thread-safe
 ```
 
-Handler adapters bridge existing handlers to `ProtocolMessageHandler` interface:
-- `AdapterNodeIntrospected` - Wraps `HandlerNodeIntrospected`
-- `AdapterRuntimeTick` - Wraps `HandlerRuntimeTick`
-- `AdapterNodeRegistrationAcked` - Wraps `HandlerNodeRegistrationAcked`
-- `AdapterNodeHeartbeat` - Wraps `HandlerNodeHeartbeat`
+Handlers implement `ProtocolMessageHandler` directly (no adapter classes needed):
+- `HandlerNodeIntrospected` - Processes `ModelNodeIntrospectionEvent`
+- `HandlerRuntimeTick` - Processes `ModelRuntimeTick`
+- `HandlerNodeRegistrationAcked` - Processes `ModelNodeRegistrationAcked`
+- `HandlerNodeHeartbeat` - Processes `ModelNodeHeartbeatEvent` (requires projector)
 
 ### 3. Integration Tests
 
@@ -226,9 +226,9 @@ The `MixinHandlerRouting` infrastructure work is now **COMPLETE**:
 ### OMN-1102 Current State (COMPLETE in PR #141)
 
 The declarative refactor of `NodeRegistrationOrchestrator` is now **COMPLETE**:
-- **RegistryInfraNodeRegistrationOrchestrator** - **COMPLETE** (handler adapters and factory methods)
+- **RegistryInfraNodeRegistrationOrchestrator** - **COMPLETE** (handler factory and `create_registry()` method)
 - **NodeRegistrationOrchestrator** - **COMPLETE** (pure declarative, runtime-driven initialization)
-- **Handler adapters** - **COMPLETE** (AdapterNodeIntrospected, AdapterRuntimeTick, etc.)
+- **Handler registration** - **COMPLETE** (4 handlers implement ProtocolMessageHandler directly)
 - **Registry file exists** - `registry/registry_infra_node_registration_orchestrator.py`
 
 ### Remaining Work
@@ -280,21 +280,18 @@ The declarative refactor of `NodeRegistrationOrchestrator` is now **COMPLETE**:
 ├─────────────────────────────────────────────────────────────┤
 │  RegistryInfraNodeRegistrationOrchestrator    ← COMPLETE ✓  │
 │  ├── create_registry() - static factory                     │
-│  ├── AdapterNodeIntrospected                                │
-│  ├── AdapterRuntimeTick                                     │
-│  ├── AdapterNodeRegistrationAcked                           │
-│  └── AdapterNodeHeartbeat                                   │
+│  └── get_handler_map() - instance method                    │
 │                                                              │
 │  NodeRegistrationOrchestrator(NodeOrchestrator) ← COMPLETE ✓│
 │  ├── contract.yaml defines handler_routing                  │
 │  ├── __init__: PURE DECLARATIVE (no custom logic)     ✓     │
 │  └── Runtime calls _init_handler_routing()            ✓     │
 │                                                              │
-│  Handlers (registered via adapters):            ← COMPLETE ✓│
+│  Handlers (implement ProtocolMessageHandler):   ← COMPLETE ✓│
 │  ├── HandlerNodeIntrospected                                │
 │  ├── HandlerRuntimeTick                                     │
 │  ├── HandlerNodeRegistrationAcked                           │
-│  └── HandlerNodeHeartbeat                                   │
+│  └── HandlerNodeHeartbeat (requires projector)              │
 └─────────────────────────────────────────────────────────────┘
 
 LEGEND: ✓ = Complete, DONE = Implemented
@@ -321,13 +318,13 @@ LEGEND: ✓ = Complete, DONE = Implemented
 | `nodes/node_registration_orchestrator/node.py` | **COMPLETE** | Pure declarative (no custom init logic, runtime-driven) |
 | `nodes/node_registration_orchestrator/contract.yaml` | **COMPLETE** | Handler routing config defined |
 | `nodes/node_registration_orchestrator/handlers/` | **COMPLETE** | Handler implementations ready |
-| `nodes/node_registration_orchestrator/registry/registry_infra_node_registration_orchestrator.py` | **COMPLETE** | Handler adapters (4 adapters) and `create_registry()` factory |
+| `nodes/node_registration_orchestrator/registry/registry_infra_node_registration_orchestrator.py` | **COMPLETE** | Handler factory with `create_registry()` method |
 
 **Registry File Details** (`registry/registry_infra_node_registration_orchestrator.py`):
 - **Path**: `src/omnibase_infra/nodes/node_registration_orchestrator/registry/registry_infra_node_registration_orchestrator.py`
 - **Class**: `RegistryInfraNodeRegistrationOrchestrator`
 - **Factory**: `create_registry(projection_reader, projector?, consul_handler?)` -> `ServiceHandlerRegistry`
-- **Adapters**: `AdapterNodeIntrospected`, `AdapterRuntimeTick`, `AdapterNodeRegistrationAcked`, `AdapterNodeHeartbeat`
+- **Handlers**: Registers `HandlerNodeIntrospected`, `HandlerRuntimeTick`, `HandlerNodeRegistrationAcked`, `HandlerNodeHeartbeat` directly (no adapter classes)
 
 ---
 
@@ -350,7 +347,7 @@ All items completed:
 All items completed:
 6. **Pure declarative orchestrator** - `NodeRegistrationOrchestrator` extends `NodeOrchestrator` with no custom logic
 7. **Runtime-driven initialization** - Handler routing initialized by `RuntimeHostProcess`, not by the orchestrator
-8. **Registry file implemented** - `RegistryInfraNodeRegistrationOrchestrator` with handler adapters and factory
+8. **Registry file implemented** - `RegistryInfraNodeRegistrationOrchestrator` with `create_registry()` factory
 9. **PR #141** - Original review concerns addressed, registry file now exists
 
 ### Remaining Work
@@ -401,7 +398,7 @@ from omnibase_core.models.contracts.subcontracts.model_handler_routing_subcontra
 | `ServiceHandlerRegistry` | Handler registration service | **Exists and works** | **COMPLETE** | OMN-1293 |
 | `NodeOrchestrator` | Composes `MixinHandlerRouting` | **Composes mixin** | **COMPLETE** | OMN-1293 |
 | Routing models | `ModelHandlerRoutingSubcontract`, `ModelHandlerRoutingEntry` | **Both exist** | **COMPLETE** | OMN-1293 |
-| `RegistryInfraNodeRegistrationOrchestrator` | Handler registry factory | **Exists with 4 adapters** | **COMPLETE** | OMN-1102 |
+| `RegistryInfraNodeRegistrationOrchestrator` | Handler registry factory | **Exists with create_registry()** | **COMPLETE** | OMN-1102 |
 | `NodeRegistrationOrchestrator` | Pure declarative | **No custom init logic** | **COMPLETE** | OMN-1102 |
 | Registry file | Exists at documented path | **File exists** | **COMPLETE** | OMN-1102 |
 
@@ -434,8 +431,8 @@ is_frozen: bool
 
 **OMN-1102 (omnibase_infra declarative refactor)**:
 - **NodeRegistrationOrchestrator** - pure declarative with runtime-driven initialization
-- **RegistryInfraNodeRegistrationOrchestrator** - handler adapters and `create_registry()` factory
-- **Four handler adapters** - AdapterNodeIntrospected, AdapterRuntimeTick, AdapterNodeRegistrationAcked, AdapterNodeHeartbeat
+- **RegistryInfraNodeRegistrationOrchestrator** - `create_registry()` factory method
+- **Four handlers** - HandlerNodeIntrospected, HandlerRuntimeTick, HandlerNodeRegistrationAcked, HandlerNodeHeartbeat (implement ProtocolMessageHandler directly, no adapter classes)
 
 **Remaining work**: Integration tests to verify end-to-end handler routing behavior.
 

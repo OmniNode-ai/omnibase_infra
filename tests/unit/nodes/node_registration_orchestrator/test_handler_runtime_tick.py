@@ -30,6 +30,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration import ModelNodeCapabilities
 from omnibase_infra.models.registration.events import (
@@ -538,8 +539,8 @@ class TestHandlerRuntimeTickTimezoneValidation:
     """Test that handler validates timezone-awareness of envelope timestamp."""
 
     @pytest.mark.asyncio
-    async def test_raises_value_error_for_naive_datetime(self) -> None:
-        """Test that handler raises ValueError if envelope timestamp is naive (no tzinfo)."""
+    async def test_raises_protocol_configuration_error_for_naive_datetime(self) -> None:
+        """Test that handler raises ProtocolConfigurationError if envelope timestamp is naive."""
         mock_reader = create_mock_projection_reader()
         handler = HandlerRuntimeTick(mock_reader)
 
@@ -550,11 +551,10 @@ class TestHandlerRuntimeTickTimezoneValidation:
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(tick, now=naive_now, correlation_id=uuid4())
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.handle(envelope)
 
         assert "timezone-aware" in str(exc_info.value)
-        assert "naive" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_accepts_timezone_aware_datetime(self) -> None:

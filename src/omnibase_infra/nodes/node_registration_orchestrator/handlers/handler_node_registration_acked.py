@@ -45,7 +45,8 @@ from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutpu
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import BaseModel
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
 )
@@ -105,7 +106,7 @@ def get_liveness_interval_seconds(explicit_value: int | None = None) -> int:
         Liveness interval in seconds.
 
     Raises:
-        ValueError: If environment variable is set but not a valid integer.
+        ProtocolConfigurationError: If environment variable is set but not a valid integer.
 
     Example:
         >>> # Use default or env var
@@ -123,9 +124,18 @@ def get_liveness_interval_seconds(explicit_value: int | None = None) -> int:
         try:
             return int(env_value)
         except ValueError as e:
-            raise ValueError(
+            # Use ProtocolConfigurationError for invalid environment variable values.
+            # No correlation_id available at module-level configuration, so context
+            # is created without one (will auto-generate).
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_liveness_interval_seconds",
+                target_name="env.ONEX_LIVENESS_INTERVAL_SECONDS",
+            )
+            raise ProtocolConfigurationError(
                 f"Invalid value for {ENV_LIVENESS_INTERVAL_SECONDS}: "
-                f"'{env_value}' is not a valid integer"
+                f"'{env_value}' is not a valid integer",
+                context=ctx,
             ) from e
 
     # 3. Fall back to default
@@ -228,7 +238,7 @@ class HandlerNodeRegistrationAcked:
 
         Raises:
             RuntimeHostError: If projection query fails (propagated from reader).
-            ValueError: If timestamp is naive (no timezone info).
+            ProtocolConfigurationError: If timestamp is naive (no timezone info).
         """
         start_time = time.perf_counter()
 
@@ -239,9 +249,16 @@ class HandlerNodeRegistrationAcked:
 
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
-            raise ValueError(
-                "now must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            error_ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="handle_registration_acked",
+                target_name="handler.node_registration_acked",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                "envelope_timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime.",
+                context=error_ctx,
             )
 
         # Create output context for _create_output calls

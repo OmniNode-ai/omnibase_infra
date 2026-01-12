@@ -54,11 +54,59 @@ Related Tickets:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, cast
 
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:
+    """Validate handler implements ProtocolMessageHandler via duck typing.
+
+    Uses duck typing to verify the handler has the required properties and
+    methods for ProtocolMessageHandler compliance. Per ONEX conventions,
+    protocol compliance is verified via structural typing rather than
+    isinstance checks.
+
+    Protocol Requirements (ProtocolMessageHandler):
+        - handler_id (property): Unique identifier string
+        - category (property): EnumMessageCategory value
+        - message_types (property): set[str] of message type names
+        - node_kind (property): EnumNodeKind value
+        - handle (method): async def handle(envelope) -> ModelHandlerOutput
+
+    Args:
+        handler: The handler instance to validate.
+
+    Returns:
+        A tuple of (is_valid, missing_members) where:
+        - is_valid: True if handler implements all required members
+        - missing_members: List of member names that are missing.
+          Empty list if all members are present.
+    """
+    missing_members: list[str] = []
+
+    # Required properties
+    if not hasattr(handler, "handler_id"):
+        missing_members.append("handler_id")
+    if not hasattr(handler, "category"):
+        missing_members.append("category")
+    if not hasattr(handler, "message_types"):
+        missing_members.append("message_types")
+    if not hasattr(handler, "node_kind"):
+        missing_members.append("node_kind")
+
+    # Required method - handle()
+    if not callable(getattr(handler, "handle", None)):
+        missing_members.append("handle")
+
+    return (len(missing_members) == 0, missing_members)
+
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -142,31 +190,64 @@ class RegistryInfraNodeRegistrationOrchestrator:
     @staticmethod
     def create_registry(
         projection_reader: ProjectionReaderRegistration,
-        # TODO(tech-debt): projector and consul_handler are optional for testing
-        # flexibility, but production deployments should provide these via DI.
-        # Future: resolve from container if not explicitly provided (OMN-1102).
         projector: ProjectorRegistration | None = None,
         consul_handler: HandlerConsul | None = None,
+        *,
+        require_heartbeat_handler: bool = True,
     ) -> ServiceHandlerRegistry:
         """Create a frozen ServiceHandlerRegistry with all handlers wired.
 
         This is the preferred method for creating handler registries. It returns
         a thread-safe, frozen registry that can be used by the orchestrator.
 
+        Handler Registration:
+            The contract.yaml defines 4 handlers:
+            - ModelNodeIntrospectionEvent -> HandlerNodeIntrospected (always registered)
+            - ModelRuntimeTick -> HandlerRuntimeTick (always registered)
+            - ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked (always registered)
+            - ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat (requires projector)
+
+        Fail-Fast Behavior:
+            By default (require_heartbeat_handler=True), this method raises
+            ProtocolConfigurationError if projector is None, because the contract
+            defines heartbeat routing which requires a projector for persistence.
+
+            This fail-fast approach prevents silent failures where heartbeat events
+            would be silently dropped at runtime due to missing handler registration.
+
         Args:
             projection_reader: Projection reader for state queries.
-            projector: Optional projector for state persistence.
+            projector: Projector for state persistence. Required for
+                HandlerNodeHeartbeat to persist heartbeat timestamps.
             consul_handler: Optional Consul handler for service registration.
+            require_heartbeat_handler: If True (default), raises ProtocolConfigurationError
+                when projector is None. Set to False only for testing scenarios where
+                heartbeat functionality is intentionally disabled. This creates a
+                contract.yaml mismatch (4 handlers defined, only 3 registered).
 
         Returns:
-            Frozen ServiceHandlerRegistry with all handlers registered.
+            Frozen ServiceHandlerRegistry with handlers registered:
+            - 4 handlers when projector is provided
+            - 3 handlers when projector is None and require_heartbeat_handler=False
+
+        Raises:
+            ProtocolConfigurationError: If projector is None and
+                require_heartbeat_handler is True (default).
 
         Example:
             ```python
+            # Production usage - projector required
             registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
                 projection_reader=reader,
                 projector=projector,
                 consul_handler=consul_handler,
+            )
+
+            # Testing without heartbeat support (explicit opt-in)
+            registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
+                projection_reader=reader,
+                projector=None,
+                require_heartbeat_handler=False,  # Explicitly disable
             )
 
             # Get handler by ID
@@ -184,6 +265,22 @@ class RegistryInfraNodeRegistrationOrchestrator:
             HandlerRuntimeTick,
         )
 
+        # Fail-fast: contract.yaml defines heartbeat routing which requires projector
+        if projector is None and require_heartbeat_handler:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="create_registry",
+                target_name="RegistryInfraNodeRegistrationOrchestrator",
+            )
+            raise ProtocolConfigurationError(
+                "Heartbeat handler requires projector but none was provided. "
+                "The contract.yaml defines ModelNodeHeartbeatEvent routing which "
+                "requires a ProjectorRegistration instance to persist heartbeat updates. "
+                "Either provide a projector or set require_heartbeat_handler=False "
+                "to explicitly disable heartbeat support (testing only).",
+                context=ctx,
+            )
+
         registry = ServiceHandlerRegistry()
 
         # Create handlers with dependencies
@@ -199,19 +296,65 @@ class RegistryInfraNodeRegistrationOrchestrator:
             projection_reader=projection_reader,
         )
 
-        # Register handlers directly (no adapters needed - handlers implement
-        # ProtocolMessageHandler with handle(envelope) -> ModelHandlerOutput)
-        registry.register_handler(handler_introspected)
-        registry.register_handler(handler_runtime_tick)
-        registry.register_handler(handler_registration_acked)
+        # Validate and register handlers (duck typing verification for ProtocolMessageHandler)
+        # Handlers must implement: handler_id, category, message_types, node_kind, handle()
+        handlers_to_register = [
+            handler_introspected,
+            handler_runtime_tick,
+            handler_registration_acked,
+        ]
 
-        # Heartbeat handler requires projector for persistence
+        for handler in handlers_to_register:
+            is_valid, missing = _validate_handler_protocol(handler)
+            if not is_valid:
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="create_registry",
+                    target_name="RegistryInfraNodeRegistrationOrchestrator",
+                )
+                handler_name = type(handler).__name__
+                raise ProtocolConfigurationError(
+                    f"Handler {handler_name} does not implement ProtocolMessageHandler. "
+                    f"Missing required members: {', '.join(missing)}. "
+                    f"Handlers must have: handler_id, category, message_types, node_kind properties "
+                    f"and handle(envelope) method.",
+                    context=ctx,
+                )
+            registry.register_handler(handler)
+
+        # Heartbeat handler requires projector for persistence.
+        # At this point, if projector is None, require_heartbeat_handler must be False
+        # (otherwise we would have raised ProtocolConfigurationError above).
         if projector is not None:
             handler_heartbeat = HandlerNodeHeartbeat(
                 projection_reader=projection_reader,
                 projector=projector,
             )
+            # Validate heartbeat handler before registration
+            is_valid, missing = _validate_handler_protocol(handler_heartbeat)
+            if not is_valid:
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="create_registry",
+                    target_name="RegistryInfraNodeRegistrationOrchestrator",
+                )
+                raise ProtocolConfigurationError(
+                    f"Handler HandlerNodeHeartbeat does not implement ProtocolMessageHandler. "
+                    f"Missing required members: {', '.join(missing)}. "
+                    f"Handlers must have: handler_id, category, message_types, node_kind properties "
+                    f"and handle(envelope) method.",
+                    context=ctx,
+                )
             registry.register_handler(handler_heartbeat)
+        else:
+            # This branch only executes when require_heartbeat_handler=False
+            # (explicit opt-in for testing without heartbeat support)
+            logger.warning(
+                "HandlerNodeHeartbeat NOT registered: require_heartbeat_handler=False. "
+                "This creates a contract.yaml mismatch (4 handlers defined, only 3 registered). "
+                "Heartbeat events (ModelNodeHeartbeatEvent) will NOT be handled. "
+                "This configuration is intended for testing only."
+            )
 
         # Freeze registry to make it thread-safe
         registry.freeze()
@@ -252,20 +395,33 @@ class RegistryInfraNodeRegistrationOrchestrator:
             if reader is not None:
                 # Duck typing: verify required projection reader capabilities
                 if not hasattr(reader, "get_entity_state"):
-                    raise ProtocolConfigurationError(
-                        f"Expected object with get_entity_state method, got {type(reader).__name__}"
+                    ctx = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.DATABASE,
+                        operation="get_projection_reader",
+                        target_name="RegistryInfraNodeRegistrationOrchestrator",
                     )
-                return reader  # type: ignore[no-any-return]
+                    raise ProtocolConfigurationError(
+                        f"Expected object with get_entity_state method, got {type(reader).__name__}",
+                        context=ctx,
+                    )
+                # Cast verified by duck typing check above - reader has get_entity_state
+                return cast(ProjectionReaderRegistration, reader)
 
         # Fallback: Cannot create without a pool - raise configuration error
         # The container does not directly provide an asyncpg.Pool; callers must
         # either provide a ProjectionReaderRegistration via constructor or register
         # one in the container's service_registry.
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_projection_reader",
+            target_name="RegistryInfraNodeRegistrationOrchestrator",
+        )
         raise ProtocolConfigurationError(
             "No ProjectionReaderRegistration available. Either provide one via "
             "constructor or register in container.service_registry. "
             "ProjectionReaderRegistration requires an asyncpg.Pool which cannot "
-            "be obtained from ModelONEXContainer directly."
+            "be obtained from ModelONEXContainer directly.",
+            context=ctx,
         )
 
     def create_handler_node_introspected(self) -> HandlerNodeIntrospected:
@@ -343,9 +499,15 @@ class RegistryInfraNodeRegistrationOrchestrator:
         )
 
         if self._projector is None:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="create_handler_node_heartbeat",
+                target_name="RegistryInfraNodeRegistrationOrchestrator",
+            )
             raise ProtocolConfigurationError(
                 "HandlerNodeHeartbeat requires a projector for heartbeat updates. "
-                "Configure the registry with a ProjectorRegistration instance."
+                "Configure the registry with a ProjectorRegistration instance.",
+                context=ctx,
             )
 
         return HandlerNodeHeartbeat(
@@ -376,6 +538,18 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 - "ModelNodeHeartbeatEvent" -> HandlerNodeHeartbeat (if projector configured)
 
         Note:
+            Handler instances are created fresh on each call. This is intentional:
+
+            1. **Stateless handlers**: These handlers are designed to be stateless;
+               creating fresh instances ensures no accumulated state between calls.
+            2. **Fresh dependencies**: Dependencies (projection_reader, projector) are
+               resolved at creation time, ensuring current configuration is used.
+            3. **No stale caching**: Avoids potential issues with cached handlers
+               holding references to closed connections or outdated state.
+
+            For production use, prefer the static ``create_registry()`` method which
+            returns a frozen ``ServiceHandlerRegistry`` with cached handler instances.
+
             HandlerNodeHeartbeat is only included if a projector is configured,
             as it requires a projector to persist heartbeat timestamp updates.
 
