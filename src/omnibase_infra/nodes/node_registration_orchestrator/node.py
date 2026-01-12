@@ -76,7 +76,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# TODO(OMN-TBD): Consider relocating module-level helper functions to a dedicated
+# TODO(OMN-1315): Consider relocating module-level helper functions to a dedicated
 # utility module (e.g., omnibase_infra.utils.handler_utils) if they become shared
 # across multiple orchestrators. Currently kept here for locality with the
 # _create_handler_routing_subcontract function that uses it.

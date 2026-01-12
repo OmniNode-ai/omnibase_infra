@@ -3,7 +3,7 @@
 """Registry module for NodeRegistrationOrchestrator handler wiring.
 
 This module provides the handler registry for the NodeRegistrationOrchestrator,
-enabling dependency injection and factory methods for all orchestrator handlers.
+enabling a static factory method for creating frozen handler registries.
 
 Handlers Wired:
     - HandlerNodeIntrospected: Processes NodeIntrospectionEvent (registration trigger)
@@ -13,20 +13,19 @@ Handlers Wired:
 
 Usage:
     ```python
-    from omnibase_core.models.container import ModelONEXContainer
     from omnibase_infra.nodes.node_registration_orchestrator.registry import (
         RegistryInfraNodeRegistrationOrchestrator,
     )
 
-    container = ModelONEXContainer()
-    registry = RegistryInfraNodeRegistrationOrchestrator(container)
+    registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
+        projection_reader=reader,
+        projector=projector,
+        consul_handler=consul_handler,
+    )
+    # registry is frozen and thread-safe
 
-    # Create individual handlers
-    introspection_handler = registry.create_handler_node_introspected()
-    tick_handler = registry.create_handler_runtime_tick()
-
-    # Or get handler mapping for orchestrator routing
-    handler_map = registry.get_handler_map()
+    handler = registry.get_handler_by_id("handler-node-introspected")
+    result = await handler.handle(envelope)
     ```
 
 Related:

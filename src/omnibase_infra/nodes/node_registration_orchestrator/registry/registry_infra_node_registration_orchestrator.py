@@ -2,10 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry for NodeRegistrationOrchestrator handler wiring.
 
-This registry provides dependency injection and factory methods for creating
-handler instances used by the NodeRegistrationOrchestrator. It follows the ONEX
-container-based DI pattern and provides a declarative mapping between event
-models and their corresponding handlers.
+This registry provides a static factory method for creating handler instances
+used by the NodeRegistrationOrchestrator. It follows the ONEX registry pattern
+and provides a declarative mapping between event models and their handlers.
 
 Handler Wiring (from contract.yaml):
     - ModelNodeIntrospectionEvent -> HandlerNodeIntrospected
@@ -33,7 +32,6 @@ Usage:
         RegistryInfraNodeRegistrationOrchestrator,
     )
 
-    # Create registry with ServiceHandlerRegistry (preferred)
     registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
         projection_reader=reader,
         projector=projector,
@@ -55,7 +53,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 
@@ -109,22 +107,14 @@ def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:
 
 
 if TYPE_CHECKING:
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
     from omnibase_infra.handlers import HandlerConsul
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerNodeHeartbeat,
-        HandlerNodeIntrospected,
-        HandlerNodeRegistrationAcked,
-        HandlerRuntimeTick,
-    )
     from omnibase_infra.projectors import (
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
 
 
-# TODO(OMN-TBD): Tech debt - subcontract should be loaded from contract.yaml
+# TODO(OMN-1316): Tech debt - subcontract should be loaded from contract.yaml
 # instead of being constructed programmatically. The _create_handler_routing_subcontract()
 # function in node.py already loads handler routing from contract.yaml. Consider:
 # 1. Using that function here instead of duplicating handler registration
@@ -135,19 +125,19 @@ if TYPE_CHECKING:
 class RegistryInfraNodeRegistrationOrchestrator:
     """Handler registry for NodeRegistrationOrchestrator.
 
-    Why a class instead of a function?
-        ONEX registry pattern (CLAUDE.md) requires registry classes with
-        the naming convention ``RegistryInfra<NodeName>``. This enables:
+    This registry provides a static factory method for creating handler registries
+    used by the NodeRegistrationOrchestrator. It follows the ONEX registry pattern
+    with the naming convention ``RegistryInfra<NodeName>``.
 
-        - **Handler factory methods**: Create handlers with proper DI
+    Why a class instead of a function?
+        ONEX registry pattern (CLAUDE.md) requires registry classes. This enables:
+
         - **Centralized wiring**: All handler creation logic in one place
         - **Contract alignment**: Maps event models to handlers per contract.yaml
         - **Testability**: Mock dependencies for unit testing
+        - **Extensibility**: Subclassing for specialized registries
 
-    The registry resolves dependencies from the ONEX container and creates
-    handler instances with proper dependency injection.
-
-    Preferred Usage (static factory):
+    Usage:
         ```python
         registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
             projection_reader=reader,
@@ -157,43 +147,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
         handler = registry.get_handler_by_id("handler-node-introspected")
         result = await handler.handle(envelope)
         ```
-
-    Legacy Usage (instance-based):
-        ```python
-        container = ModelONEXContainer()
-        registry = RegistryInfraNodeRegistrationOrchestrator(container)
-        handler_map = registry.get_handler_map()
-        ```
-
-    Attributes:
-        _container: ONEX dependency injection container.
-        _projection_reader: Cached projection reader instance (shared by handlers).
-        _projector: Cached projector instance (optional, for persistence).
-        _consul_handler: Cached Consul handler (optional, for dual registration).
     """
-
-    def __init__(
-        self,
-        container: ModelONEXContainer,
-        projection_reader: ProjectionReaderRegistration | None = None,
-        projector: ProjectorRegistration | None = None,
-        consul_handler: HandlerConsul | None = None,
-    ) -> None:
-        """Initialize the registry with ONEX container and optional dependencies.
-
-        Args:
-            container: ONEX dependency injection container.
-            projection_reader: Optional pre-configured projection reader.
-                If None, will be resolved from container when needed.
-            projector: Optional pre-configured projector for persistence.
-                If None, handlers will operate in read-only mode.
-            consul_handler: Optional HandlerConsul for Consul service registration.
-                If None, Consul registration is skipped.
-        """
-        self._container = container
-        self._projection_reader = projection_reader
-        self._projector = projector
-        self._consul_handler = consul_handler
 
     @staticmethod
     def create_registry(
@@ -368,230 +322,6 @@ class RegistryInfraNodeRegistrationOrchestrator:
         registry.freeze()
 
         return registry
-
-    def _get_projection_reader(self) -> ProjectionReaderRegistration:
-        """Get ProjectionReaderRegistration from constructor or container.
-
-        Resolution order:
-            1. Return instance provided via constructor
-            2. Resolve from container.service_registry
-            3. Raise ProtocolConfigurationError if unavailable
-
-        Returns:
-            ProjectionReaderRegistration instance.
-
-        Raises:
-            ProtocolConfigurationError: If no ProjectionReaderRegistration is
-                available from constructor or service_registry. Also raised if
-                the resolved object lacks the required ``get_entity_state`` method.
-
-        Note:
-            This method does NOT create a new ProjectionReaderRegistration because
-            that requires an asyncpg.Pool which cannot be obtained from the
-            ModelONEXContainer. Callers must either:
-            - Provide a pre-configured ProjectionReaderRegistration via constructor
-            - Register one in the container's service_registry before calling
-        """
-        if self._projection_reader is not None:
-            return self._projection_reader
-
-        # Try to resolve from container service registry
-        if self._container.service_registry is not None:
-            from omnibase_infra.projectors import ProjectionReaderRegistration
-
-            reader = self._container.service_registry.get(ProjectionReaderRegistration)
-            if reader is not None:
-                # Duck typing: verify required projection reader capabilities
-                if not hasattr(reader, "get_entity_state"):
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.DATABASE,
-                        operation="get_projection_reader",
-                        target_name="RegistryInfraNodeRegistrationOrchestrator",
-                    )
-                    raise ProtocolConfigurationError(
-                        f"Expected object with get_entity_state method, got {type(reader).__name__}",
-                        context=ctx,
-                    )
-                # Cast verified by duck typing check above - reader has get_entity_state
-                return cast(ProjectionReaderRegistration, reader)
-
-        # Fallback: Cannot create without a pool - raise configuration error
-        # The container does not directly provide an asyncpg.Pool; callers must
-        # either provide a ProjectionReaderRegistration via constructor or register
-        # one in the container's service_registry.
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="get_projection_reader",
-            target_name="RegistryInfraNodeRegistrationOrchestrator",
-        )
-        raise ProtocolConfigurationError(
-            "No ProjectionReaderRegistration available. Either provide one via "
-            "constructor or register in container.service_registry. "
-            "ProjectionReaderRegistration requires an asyncpg.Pool which cannot "
-            "be obtained from ModelONEXContainer directly.",
-            context=ctx,
-        )
-
-    def create_handler_node_introspected(self) -> HandlerNodeIntrospected:
-        """Create HandlerNodeIntrospected with dependencies.
-
-        Creates the handler for processing ModelNodeIntrospectionEvent payloads.
-        This is the canonical registration trigger handler.
-
-        Returns:
-            HandlerNodeIntrospected instance with:
-                - projection_reader: For state queries
-                - projector: For persistence (optional)
-                - consul_handler: For Consul registration (optional)
-        """
-        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-            HandlerNodeIntrospected,
-        )
-
-        return HandlerNodeIntrospected(
-            projection_reader=self._get_projection_reader(),
-            projector=self._projector,
-            consul_handler=self._consul_handler,
-        )
-
-    def create_handler_runtime_tick(self) -> HandlerRuntimeTick:
-        """Create HandlerRuntimeTick with dependencies.
-
-        Creates the handler for processing ModelRuntimeTick payloads.
-        This handler detects timeout conditions for ack and liveness deadlines.
-
-        Returns:
-            HandlerRuntimeTick instance with projection_reader for state queries.
-        """
-        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-            HandlerRuntimeTick,
-        )
-
-        return HandlerRuntimeTick(projection_reader=self._get_projection_reader())
-
-    def create_handler_node_registration_acked(self) -> HandlerNodeRegistrationAcked:
-        """Create HandlerNodeRegistrationAcked with dependencies.
-
-        Creates the handler for processing ModelNodeRegistrationAcked commands.
-        This handler processes acknowledgment commands from nodes.
-
-        Returns:
-            HandlerNodeRegistrationAcked instance with:
-                - projection_reader: For state queries
-        """
-        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-            HandlerNodeRegistrationAcked,
-        )
-
-        return HandlerNodeRegistrationAcked(
-            projection_reader=self._get_projection_reader(),
-        )
-
-    def create_handler_node_heartbeat(self) -> HandlerNodeHeartbeat:
-        """Create HandlerNodeHeartbeat with dependencies.
-
-        Creates the handler for processing ModelNodeHeartbeatEvent payloads.
-        This handler updates liveness tracking for active nodes.
-
-        Returns:
-            HandlerNodeHeartbeat instance with:
-                - projection_reader: For state queries
-                - projector: For persistence (required for heartbeat updates)
-
-        Raises:
-            ProtocolConfigurationError: If no projector is configured. HandlerNodeHeartbeat
-                requires a projector to persist heartbeat timestamp updates.
-        """
-        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-            HandlerNodeHeartbeat,
-        )
-
-        if self._projector is None:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="create_handler_node_heartbeat",
-                target_name="RegistryInfraNodeRegistrationOrchestrator",
-            )
-            raise ProtocolConfigurationError(
-                "HandlerNodeHeartbeat requires a projector for heartbeat updates. "
-                "Configure the registry with a ProjectorRegistration instance.",
-                context=ctx,
-            )
-
-        return HandlerNodeHeartbeat(
-            projection_reader=self._get_projection_reader(),
-            projector=self._projector,
-        )
-
-    def get_handler_map(
-        self,
-    ) -> dict[
-        str,
-        HandlerNodeIntrospected
-        | HandlerRuntimeTick
-        | HandlerNodeRegistrationAcked
-        | HandlerNodeHeartbeat,
-    ]:
-        """Get mapping of event model names to handler instances.
-
-        Creates all handlers and returns a dictionary mapping event model
-        class names to their corresponding handler instances. This map
-        aligns with the handler_routing section in contract.yaml.
-
-        Returns:
-            Dictionary mapping event model names to handler instances:
-                - "ModelNodeIntrospectionEvent" -> HandlerNodeIntrospected
-                - "ModelRuntimeTick" -> HandlerRuntimeTick
-                - "ModelNodeRegistrationAcked" -> HandlerNodeRegistrationAcked
-                - "ModelNodeHeartbeatEvent" -> HandlerNodeHeartbeat (if projector configured)
-
-        Note:
-            Handler instances are created fresh on each call. This is intentional:
-
-            1. **Stateless handlers**: These handlers are designed to be stateless;
-               creating fresh instances ensures no accumulated state between calls.
-            2. **Fresh dependencies**: Dependencies (projection_reader, projector) are
-               resolved at creation time, ensuring current configuration is used.
-            3. **No stale caching**: Avoids potential issues with cached handlers
-               holding references to closed connections or outdated state.
-
-            For production use, prefer the static ``create_registry()`` method which
-            returns a frozen ``ServiceHandlerRegistry`` with cached handler instances.
-
-            HandlerNodeHeartbeat is only included if a projector is configured,
-            as it requires a projector to persist heartbeat timestamp updates.
-
-        Example:
-            ```python
-            registry = RegistryInfraNodeRegistrationOrchestrator(container)
-            handler_map = registry.get_handler_map()
-
-            # Route event to handler
-            event_type = type(envelope.payload).__name__
-            handler = handler_map.get(event_type)
-            if handler:
-                result = await handler.handle(envelope)
-            ```
-        """
-        handler_map: dict[
-            str,
-            HandlerNodeIntrospected
-            | HandlerRuntimeTick
-            | HandlerNodeRegistrationAcked
-            | HandlerNodeHeartbeat,
-        ] = {
-            "ModelNodeIntrospectionEvent": self.create_handler_node_introspected(),
-            "ModelRuntimeTick": self.create_handler_runtime_tick(),
-            "ModelNodeRegistrationAcked": self.create_handler_node_registration_acked(),
-        }
-
-        # HandlerNodeHeartbeat requires projector - only add if configured
-        if self._projector is not None:
-            handler_map["ModelNodeHeartbeatEvent"] = (
-                self.create_handler_node_heartbeat()
-            )
-
-        return handler_map
 
 
 __all__ = ["RegistryInfraNodeRegistrationOrchestrator"]

@@ -355,8 +355,7 @@ The declarative refactor of `NodeRegistrationOrchestrator` is now **COMPLETE**:
 │                     omnibase_infra                           │
 ├─────────────────────────────────────────────────────────────┤
 │  RegistryInfraNodeRegistrationOrchestrator    ← COMPLETE ✓  │
-│  ├── create_registry() - static factory                     │
-│  └── get_handler_map() - instance method                    │
+│  └── create_registry() - static factory                     │
 │                                                              │
 │  NodeRegistrationOrchestrator(NodeOrchestrator) ← COMPLETE ✓│
 │  ├── contract.yaml defines handler_routing                  │
