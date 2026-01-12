@@ -112,8 +112,14 @@ class HandlerNodeHeartbeat:
     The handler requires both a projection reader (for lookups) and a projector
     (for updates). It is designed to be used by the registration orchestrator.
 
+    ONEX Contract Compliance:
+        This handler belongs to an ORCHESTRATOR node, so it returns result=None
+        per ONEX contract rules (ORCHESTRATOR nodes use events[] and intents[]
+        only, not result). Callers should verify success by querying the
+        projection state after handle() returns.
+
     Error Handling:
-        - Returns node_not_found=True if no projection exists for the node
+        - If no projection exists, logs warning and returns empty output
         - Only ACTIVE nodes should receive heartbeats; other states log warnings
         - Database errors are re-raised as InfraConnectionError/InfraTimeoutError
 
@@ -132,8 +138,10 @@ class HandlerNodeHeartbeat:
         ...     liveness_window_seconds=90.0,
         ... )
         >>> output = await handler.handle(envelope)
-        >>> if output.result and output.result.success:
-        ...     print(f"Heartbeat processed, deadline extended to {output.result.liveness_deadline}")
+        >>> # Verify success by checking projection state
+        >>> projection = await reader.get_entity_state(node_id)
+        >>> if projection and projection.last_heartbeat_at == event.timestamp:
+        ...     print(f"Heartbeat processed, deadline: {projection.liveness_deadline}")
     """
 
     def __init__(
@@ -183,19 +191,25 @@ class HandlerNodeHeartbeat:
     async def handle(
         self,
         envelope: ModelEventEnvelope[ModelNodeHeartbeatEvent],
-    ) -> ModelHandlerOutput[ModelHeartbeatHandlerResult]:
+    ) -> ModelHandlerOutput[object]:
         """Process a node heartbeat event.
 
         Looks up the registration projection by node_id and updates:
         - `last_heartbeat_at`: Set to event.timestamp
         - `liveness_deadline`: Extended to event.timestamp + liveness_window
 
+        ONEX Contract Compliance:
+            This handler belongs to an ORCHESTRATOR node, so it returns
+            result=None per ONEX contract rules. Success/failure should be
+            verified by querying the projection state after handle() returns.
+
         Args:
             envelope: Event envelope containing the heartbeat event payload.
 
         Returns:
-            ModelHandlerOutput containing ModelHeartbeatHandlerResult with
-            processing outcome.
+            ModelHandlerOutput with result=None. Check projection state via
+            ProjectionReaderRegistration.get_entity_state() to verify heartbeat
+            was processed successfully.
 
         Raises:
             RuntimeHostError: Base class for all infrastructure errors. Specific
@@ -207,8 +221,10 @@ class HandlerNodeHeartbeat:
 
         Example:
             >>> output = await handler.handle(envelope)
-            >>> if output.result and output.result.node_not_found:
-            ...     logger.warning("Heartbeat from unregistered node")
+            >>> # Verify success by checking projection state
+            >>> projection = await reader.get_entity_state(node_id)
+            >>> if projection and projection.last_heartbeat_at == event.timestamp:
+            ...     print("Heartbeat processed successfully")
         """
         start_time = time.perf_counter()
 
@@ -241,13 +257,6 @@ class HandlerNodeHeartbeat:
                 },
             )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
-            result = ModelHeartbeatHandlerResult(
-                success=False,
-                node_id=event.node_id,
-                node_not_found=True,
-                correlation_id=correlation_id,
-                error_message="No registration projection found for node",
-            )
             return ModelHandlerOutput(
                 input_envelope_id=envelope.envelope_id,
                 correlation_id=correlation_id,
@@ -256,7 +265,7 @@ class HandlerNodeHeartbeat:
                 events=(),
                 intents=(),
                 projections=(),
-                result=result,
+                result=None,
                 processing_time_ms=processing_time_ms,
                 timestamp=now,
             )
@@ -300,14 +309,6 @@ class HandlerNodeHeartbeat:
                     },
                 )
                 processing_time_ms = (time.perf_counter() - start_time) * 1000
-                result = ModelHeartbeatHandlerResult(
-                    success=False,
-                    node_id=event.node_id,
-                    previous_state=projection.current_state,
-                    node_not_found=True,
-                    correlation_id=correlation_id,
-                    error_message="Entity not found during heartbeat update",
-                )
                 return ModelHandlerOutput(
                     input_envelope_id=envelope.envelope_id,
                     correlation_id=correlation_id,
@@ -316,7 +317,7 @@ class HandlerNodeHeartbeat:
                     events=(),
                     intents=(),
                     projections=(),
-                    result=result,
+                    result=None,
                     processing_time_ms=processing_time_ms,
                     timestamp=now,
                 )
@@ -332,14 +333,6 @@ class HandlerNodeHeartbeat:
             )
 
             processing_time_ms = (time.perf_counter() - start_time) * 1000
-            result = ModelHeartbeatHandlerResult(
-                success=True,
-                node_id=event.node_id,
-                previous_state=projection.current_state,
-                last_heartbeat_at=heartbeat_timestamp,
-                liveness_deadline=new_liveness_deadline,
-                correlation_id=correlation_id,
-            )
             return ModelHandlerOutput(
                 input_envelope_id=envelope.envelope_id,
                 correlation_id=correlation_id,
@@ -348,7 +341,7 @@ class HandlerNodeHeartbeat:
                 events=(),
                 intents=(),
                 projections=(),
-                result=result,
+                result=None,
                 processing_time_ms=processing_time_ms,
                 timestamp=now,
             )

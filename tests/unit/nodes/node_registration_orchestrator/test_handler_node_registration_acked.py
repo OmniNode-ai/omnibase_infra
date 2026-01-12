@@ -30,6 +30,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration import ModelNodeCapabilities
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
@@ -564,13 +565,13 @@ class TestGetLivenessIntervalSeconds:
 
         assert result == 45
 
-    def test_raises_value_error_for_invalid_env_var(
+    def test_raises_protocol_configuration_error_for_invalid_env_var(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test ValueError raised when env var is not a valid integer."""
+        """Test ProtocolConfigurationError raised when env var is not a valid integer."""
         monkeypatch.setenv(ENV_LIVENESS_INTERVAL_SECONDS, "not_a_number")
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             get_liveness_interval_seconds()
 
         assert ENV_LIVENESS_INTERVAL_SECONDS in str(exc_info.value)
@@ -594,8 +595,8 @@ class TestHandlerAckedTimezoneValidation:
     """Test that handler validates timezone-awareness of envelope timestamp."""
 
     @pytest.mark.asyncio
-    async def test_raises_value_error_for_naive_datetime(self) -> None:
-        """Test that handler raises ValueError if envelope_timestamp is naive (no tzinfo)."""
+    async def test_raises_protocol_configuration_error_for_naive_datetime(self) -> None:
+        """Test that handler raises ProtocolConfigurationError if envelope_timestamp is naive (no tzinfo)."""
         mock_reader = create_mock_projection_reader()
         handler = HandlerNodeRegistrationAcked(mock_reader)
 
@@ -608,7 +609,7 @@ class TestHandlerAckedTimezoneValidation:
         # Create envelope with naive datetime
         envelope = create_envelope(ack_command, naive_now, uuid4())
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.handle(envelope)
 
         assert "timezone-aware" in str(exc_info.value)

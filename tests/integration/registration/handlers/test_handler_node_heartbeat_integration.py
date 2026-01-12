@@ -13,6 +13,11 @@ PostgreSQL database using testcontainers. They test:
 6. Concurrent heartbeat processing from multiple nodes
 7. Error scenarios (simulated connection failures)
 
+ONEX Contract Compliance:
+    The HandlerNodeHeartbeat is part of an ORCHESTRATOR node, so it returns
+    result=None per ONEX contract rules. Tests verify success by checking
+    database state via ProjectionReaderRegistration.get_entity_state().
+
 Related Tickets:
     - OMN-1006: Add last_heartbeat_at for liveness expired event reporting
     - OMN-932 (C2): Durable Timeout Handling
@@ -36,7 +41,6 @@ import pytest
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import InfraConnectionError
@@ -51,7 +55,6 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
     DEFAULT_LIVENESS_WINDOW_SECONDS,
     HandlerNodeHeartbeat,
-    ModelHeartbeatHandlerResult,
 )
 
 if TYPE_CHECKING:
@@ -249,7 +252,12 @@ class TestHandlerNodeHeartbeatInit:
 
 
 class TestHandlerNodeHeartbeatHappyPath:
-    """Tests for successful heartbeat processing scenarios."""
+    """Tests for successful heartbeat processing scenarios.
+
+    ONEX Contract Compliance:
+        The handler returns result=None per ORCHESTRATOR node contract.
+        Success is verified by checking database state via reader.get_entity_state().
+    """
 
     async def test_handle_heartbeat_for_active_node(
         self,
@@ -270,25 +278,17 @@ class TestHandlerNodeHeartbeatHappyPath:
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
 
-        # Verify output wrapper
+        # Verify output wrapper (ORCHESTRATOR returns result=None)
         assert output.handler_id == "handler-node-heartbeat"
         assert output.events == ()  # Heartbeat doesn't emit events
+        assert output.result is None  # ONEX contract: ORCHESTRATOR uses result=None
 
-        # Verify result
-        result = output.result
-        assert result is not None
-        assert result.success is True
-        assert result.node_id == node_id
-        assert result.previous_state == EnumRegistrationState.ACTIVE
-        assert result.node_not_found is False
-        assert result.error_message is None
-        assert result.last_heartbeat_at == event.timestamp
-        assert result.liveness_deadline is not None
-
-        # Verify state was updated in database
+        # Verify success by checking database state
         updated = await reader.get_entity_state(node_id)
         assert updated is not None
         assert updated.last_heartbeat_at == event.timestamp
+        assert updated.liveness_deadline is not None
+        assert updated.current_state == EnumRegistrationState.ACTIVE
 
     async def test_handle_heartbeat_extends_liveness_deadline(
         self,
@@ -307,18 +307,14 @@ class TestHandlerNodeHeartbeatHappyPath:
         envelope = create_envelope(event)
         output = await heartbeat_handler_fast_window.handle(envelope)
 
-        # Verify deadline extension (5 second window from fixture)
-        result = output.result
-        assert result is not None
-        assert result.success is True
-        assert result.liveness_deadline is not None
-        expected_deadline = event_time + timedelta(seconds=5.0)
-        assert abs((result.liveness_deadline - expected_deadline).total_seconds()) < 0.1
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
 
-        # Verify in database
+        # Verify deadline extension in database (5 second window from fixture)
         updated = await reader.get_entity_state(node_id)
         assert updated is not None
         assert updated.liveness_deadline is not None
+        expected_deadline = event_time + timedelta(seconds=5.0)
         assert (
             abs((updated.liveness_deadline - expected_deadline).total_seconds()) < 0.1
         )
@@ -327,6 +323,7 @@ class TestHandlerNodeHeartbeatHappyPath:
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
         projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify heartbeat preserves correlation ID for tracing."""
         node_id = uuid4()
@@ -338,15 +335,20 @@ class TestHandlerNodeHeartbeatHappyPath:
         envelope = create_envelope(event, correlation_id=correlation_id)
         output = await heartbeat_handler.handle(envelope)
 
-        result = output.result
-        assert result is not None
-        assert result.success is True
-        assert result.correlation_id == correlation_id
+        # Verify output correlation_id matches (ORCHESTRATOR returns result=None)
+        assert output.result is None
+        assert output.correlation_id == correlation_id
+
+        # Verify DB update happened (success indicator)
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
+        assert updated.last_heartbeat_at == event.timestamp
 
     async def test_handle_heartbeat_generates_correlation_id_if_missing(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
         projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify handler generates correlation ID when not provided."""
         node_id = uuid4()
@@ -357,10 +359,14 @@ class TestHandlerNodeHeartbeatHappyPath:
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
 
-        result = output.result
-        assert result is not None
-        assert result.success is True
-        assert result.correlation_id is not None
+        # Verify output has correlation_id (ORCHESTRATOR returns result=None)
+        assert output.result is None
+        assert output.correlation_id is not None
+
+        # Verify DB update happened (success indicator)
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
+        assert updated.last_heartbeat_at == event.timestamp
 
     async def test_handle_heartbeat_updates_only_heartbeat_fields(
         self,
@@ -380,14 +386,18 @@ class TestHandlerNodeHeartbeatHappyPath:
         # Process heartbeat
         event = make_heartbeat_event(node_id)
         envelope = create_envelope(event)
-        await heartbeat_handler.handle(envelope)
+        output = await heartbeat_handler.handle(envelope)
 
-        # Verify other fields unchanged
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
+
+        # Verify heartbeat fields updated, other fields unchanged
         updated = await reader.get_entity_state(node_id)
         assert updated is not None
-        assert str(updated.node_version) == original_version
-        assert updated.current_state == EnumRegistrationState.ACTIVE
-        assert updated.node_type == "effect"
+        assert updated.last_heartbeat_at == event.timestamp  # Updated
+        assert str(updated.node_version) == original_version  # Unchanged
+        assert updated.current_state == EnumRegistrationState.ACTIVE  # Unchanged
+        assert updated.node_type == "effect"  # Unchanged
 
 
 # =============================================================================
@@ -396,39 +406,46 @@ class TestHandlerNodeHeartbeatHappyPath:
 
 
 class TestHandlerNodeHeartbeatNotFound:
-    """Tests for heartbeat handling when node is not found."""
+    """Tests for heartbeat handling when node is not found.
+
+    ONEX Contract Compliance:
+        When node is not found, handler returns result=None (not an error result).
+        The warning is logged but handler completes successfully without raising.
+        Verify "not found" by checking that DB state remains unchanged.
+    """
 
     async def test_handle_heartbeat_for_unknown_node(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
+        reader: ProjectionReaderRegistration,
     ) -> None:
-        """Verify heartbeat for unknown node returns node_not_found."""
+        """Verify heartbeat for unknown node returns empty output (no exception).
+
+        ONEX Contract: ORCHESTRATOR returns result=None.
+        Handler logs warning but doesn't raise. Verify by checking no DB entry exists.
+        """
         unknown_node_id = uuid4()
         event = make_heartbeat_event(unknown_node_id)
         envelope = create_envelope(event)
 
+        # Handler should complete without raising
         output = await heartbeat_handler.handle(envelope)
 
-        # Verify output wrapper
+        # Verify output wrapper (ORCHESTRATOR returns result=None)
         assert output.handler_id == "handler-node-heartbeat"
         assert output.events == ()
+        assert output.result is None  # ONEX contract
 
-        result = output.result
-        assert result is not None
-        assert result.success is False
-        assert result.node_id == unknown_node_id
-        assert result.node_not_found is True
-        assert result.previous_state is None
-        assert result.last_heartbeat_at is None
-        assert result.liveness_deadline is None
-        assert result.error_message is not None
-        assert "No registration projection found" in result.error_message
+        # Verify no projection was created
+        projection = await reader.get_entity_state(unknown_node_id)
+        assert projection is None
 
     async def test_handle_heartbeat_not_found_includes_correlation_id(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
+        reader: ProjectionReaderRegistration,
     ) -> None:
-        """Verify not found result includes correlation ID for tracing."""
+        """Verify output includes correlation ID even when node not found."""
         unknown_node_id = uuid4()
         correlation_id = uuid4()
         event = make_heartbeat_event(unknown_node_id, correlation_id=correlation_id)
@@ -436,10 +453,13 @@ class TestHandlerNodeHeartbeatNotFound:
 
         output = await heartbeat_handler.handle(envelope)
 
-        result = output.result
-        assert result is not None
-        assert result.success is False
-        assert result.correlation_id == correlation_id
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
+        assert output.correlation_id == correlation_id
+
+        # Verify no projection was created
+        projection = await reader.get_entity_state(unknown_node_id)
+        assert projection is None
 
 
 # =============================================================================
@@ -448,7 +468,12 @@ class TestHandlerNodeHeartbeatNotFound:
 
 
 class TestHandlerNodeHeartbeatNonActiveNode:
-    """Tests for heartbeat handling when node is in non-ACTIVE state."""
+    """Tests for heartbeat handling when node is in non-ACTIVE state.
+
+    ONEX Contract Compliance:
+        Handler returns result=None. Success verified via DB state.
+        Warning is logged for non-ACTIVE nodes but heartbeat is still processed.
+    """
 
     @pytest.mark.parametrize(
         "state",
@@ -481,19 +506,16 @@ class TestHandlerNodeHeartbeatNonActiveNode:
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
 
-        # Processing should succeed (warning logged, not failed)
-        result = output.result
-        assert result is not None
-        assert result.success is True
-        assert result.node_id == node_id
-        assert result.previous_state == state
-        assert result.last_heartbeat_at == event.timestamp
-        assert result.liveness_deadline is not None
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
 
-        # Verify database was updated
+        # Verify success by checking database was updated
         updated = await reader.get_entity_state(node_id)
         assert updated is not None
         assert updated.last_heartbeat_at == event.timestamp
+        assert updated.liveness_deadline is not None
+        # State should remain unchanged (heartbeat doesn't change FSM state)
+        assert updated.current_state == state
 
 
 # =============================================================================
@@ -502,7 +524,11 @@ class TestHandlerNodeHeartbeatNonActiveNode:
 
 
 class TestHandlerNodeHeartbeatLivenessWindow:
-    """Tests for liveness window deadline calculations."""
+    """Tests for liveness window deadline calculations.
+
+    ONEX Contract Compliance:
+        Handler returns result=None. Verify deadlines via DB state.
+    """
 
     async def test_liveness_deadline_calculation_default_window(
         self,
@@ -525,18 +551,25 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         envelope = create_envelope(event)
         output = await handler.handle(envelope)
 
-        result = output.result
-        assert result is not None
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
+
+        # Verify deadline in database
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
         expected_deadline = event_time + timedelta(
             seconds=DEFAULT_LIVENESS_WINDOW_SECONDS
         )
-        assert result.liveness_deadline is not None
-        assert abs((result.liveness_deadline - expected_deadline).total_seconds()) < 0.1
+        assert updated.liveness_deadline is not None
+        assert (
+            abs((updated.liveness_deadline - expected_deadline).total_seconds()) < 0.1
+        )
 
     async def test_liveness_deadline_uses_event_timestamp(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
         projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify liveness deadline is based on event timestamp, not current time."""
         node_id = uuid4()
@@ -549,14 +582,19 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
 
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
+
         # Deadline should be relative to event timestamp
-        result = output.result
-        assert result is not None
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
         expected_deadline = past_time + timedelta(
             seconds=DEFAULT_LIVENESS_WINDOW_SECONDS
         )
-        assert result.liveness_deadline is not None
-        assert abs((result.liveness_deadline - expected_deadline).total_seconds()) < 0.1
+        assert updated.liveness_deadline is not None
+        assert (
+            abs((updated.liveness_deadline - expected_deadline).total_seconds()) < 0.1
+        )
 
     async def test_consecutive_heartbeats_extend_deadline(
         self,
@@ -573,26 +611,32 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         time1 = datetime.now(UTC)
         event1 = make_heartbeat_event(node_id, timestamp=time1)
         envelope1 = create_envelope(event1)
-        output1 = await heartbeat_handler_fast_window.handle(envelope1)
-        result1 = output1.result
+        await heartbeat_handler_fast_window.handle(envelope1)
+
+        # Get deadline after first heartbeat
+        state1 = await reader.get_entity_state(node_id)
+        assert state1 is not None
+        deadline1 = state1.liveness_deadline
 
         # Second heartbeat 2 seconds later
         time2 = time1 + timedelta(seconds=2)
         event2 = make_heartbeat_event(node_id, timestamp=time2)
         envelope2 = create_envelope(event2)
-        output2 = await heartbeat_handler_fast_window.handle(envelope2)
-        result2 = output2.result
+        await heartbeat_handler_fast_window.handle(envelope2)
 
-        # Deadlines should be different
-        assert result1 is not None
-        assert result2 is not None
-        assert result1.liveness_deadline is not None
-        assert result2.liveness_deadline is not None
-        assert result2.liveness_deadline > result1.liveness_deadline
+        # Get deadline after second heartbeat
+        state2 = await reader.get_entity_state(node_id)
+        assert state2 is not None
+        deadline2 = state2.liveness_deadline
+
+        # Deadlines should be different and progressive
+        assert deadline1 is not None
+        assert deadline2 is not None
+        assert deadline2 > deadline1
 
         # Second deadline should be 5 seconds from second timestamp
         expected = time2 + timedelta(seconds=5.0)
-        assert abs((result2.liveness_deadline - expected).total_seconds()) < 0.1
+        assert abs((deadline2 - expected).total_seconds()) < 0.1
 
 
 # =============================================================================
@@ -601,31 +645,42 @@ class TestHandlerNodeHeartbeatLivenessWindow:
 
 
 class TestHandlerNodeHeartbeatConcurrency:
-    """Tests for concurrent heartbeat processing."""
+    """Tests for concurrent heartbeat processing.
+
+    ONEX Contract Compliance:
+        Handler returns result=None. Verify success via DB state.
+    """
 
     async def test_concurrent_heartbeats_from_different_nodes(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
         projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify concurrent heartbeats from different nodes are handled correctly."""
         # Seed multiple nodes
         node_ids = [uuid4() for _ in range(5)]
+        events = []
         for node_id in node_ids:
             projection = make_projection(entity_id=node_id)
             await seed_projection(projector, projection)
+            events.append(make_heartbeat_event(node_id))
 
         # Process heartbeats concurrently
-        events = [make_heartbeat_event(node_id) for node_id in node_ids]
         envelopes = [create_envelope(event) for event in events]
         outputs = await asyncio.gather(
             *[heartbeat_handler.handle(envelope) for envelope in envelopes]
         )
 
-        # All should succeed
-        results = [o.result for o in outputs]
-        assert all(r is not None and r.success for r in results)
-        assert len(results) == 5
+        # All outputs should have result=None (ONEX contract)
+        assert all(o.result is None for o in outputs)
+        assert len(outputs) == 5
+
+        # Verify all nodes were updated in DB (success indicator)
+        for node_id, event in zip(node_ids, events, strict=True):
+            updated = await reader.get_entity_state(node_id)
+            assert updated is not None, f"Node {node_id} should have projection"
+            assert updated.last_heartbeat_at == event.timestamp
 
     async def test_rapid_heartbeats_same_node(
         self,
@@ -635,11 +690,8 @@ class TestHandlerNodeHeartbeatConcurrency:
     ) -> None:
         """Verify rapid heartbeats from same node are handled correctly.
 
-        PR #94 NITPICK addressed: Added more specific assertions for:
-        - Individual result validation (liveness_deadline, last_heartbeat_at)
-        - Liveness deadline bounds verification
-        - Correlation ID presence
-        - Database state consistency
+        ONEX Contract: Handler returns result=None.
+        Success verified via final DB state.
         """
         node_id = uuid4()
         projection = make_projection(entity_id=node_id)
@@ -661,49 +713,16 @@ class TestHandlerNodeHeartbeatConcurrency:
             *[heartbeat_handler_fast_window.handle(envelope) for envelope in envelopes]
         )
 
-        # Extract results from outputs
-        results = [o.result for o in outputs]
-
-        # All should succeed
-        assert all(r is not None and r.success for r in results), (
-            f"Expected all heartbeats to succeed, but got failures: "
-            f"{[r.error_message for r in results if r is not None and not r.success]}"
+        # All outputs should have result=None (ONEX contract)
+        assert all(o.result is None for o in outputs), (
+            "ORCHESTRATOR nodes must return result=None"
         )
+        assert len(outputs) == 10
 
-        # SPECIFIC ASSERTION 1: Each result should have valid fields
-        for i, result in enumerate(results):
-            assert result is not None, f"Result {i}: result should not be None"
-            assert result.node_id == node_id, f"Result {i}: node_id mismatch"
-            assert result.last_heartbeat_at is not None, (
-                f"Result {i}: last_heartbeat_at should be set"
-            )
-            assert result.liveness_deadline is not None, (
-                f"Result {i}: liveness_deadline should be set"
-            )
-            assert result.correlation_id is not None, (
-                f"Result {i}: correlation_id should be generated"
-            )
-            assert result.node_not_found is False, f"Result {i}: node should be found"
-
-        # SPECIFIC ASSERTION 2: All liveness deadlines should be within bounds
-        # With 5-second window, earliest deadline = base_time + 5s,
-        # latest deadline = latest_event_time + 5s
-        window_seconds = 5.0
-        earliest_valid_deadline = base_time + timedelta(seconds=window_seconds)
-        latest_valid_deadline = latest_event_time + timedelta(seconds=window_seconds)
-        for i, result in enumerate(results):
-            assert result is not None
-            assert result.liveness_deadline is not None
-            assert result.liveness_deadline >= earliest_valid_deadline, (
-                f"Result {i}: deadline {result.liveness_deadline} is before "
-                f"earliest valid {earliest_valid_deadline}"
-            )
-            # Allow 1 second tolerance for timing variations
-            assert result.liveness_deadline <= latest_valid_deadline + timedelta(
-                seconds=1
-            ), (
-                f"Result {i}: deadline {result.liveness_deadline} is after "
-                f"latest valid {latest_valid_deadline}"
+        # All outputs should have correlation_id
+        for i, output in enumerate(outputs):
+            assert output.correlation_id is not None, (
+                f"Output {i}: correlation_id should be present"
             )
 
         # Final state should have the last heartbeat timestamp
@@ -720,8 +739,8 @@ class TestHandlerNodeHeartbeatConcurrency:
             f"event timestamps, but got {final.last_heartbeat_at}"
         )
 
-        # SPECIFIC ASSERTION 3: Final liveness_deadline should be consistent
-        # with final last_heartbeat_at
+        # Final liveness_deadline should be consistent with final last_heartbeat_at
+        window_seconds = 5.0
         assert final.liveness_deadline is not None
         expected_final_deadline = final.last_heartbeat_at + timedelta(
             seconds=window_seconds
@@ -734,6 +753,21 @@ class TestHandlerNodeHeartbeatConcurrency:
             f"last_heartbeat_at + {window_seconds}s = {expected_final_deadline}"
         )
 
+        # Liveness deadline bounds verification
+        earliest_valid_deadline = base_time + timedelta(seconds=window_seconds)
+        latest_valid_deadline = latest_event_time + timedelta(seconds=window_seconds)
+        assert final.liveness_deadline >= earliest_valid_deadline, (
+            f"Final deadline {final.liveness_deadline} is before "
+            f"earliest valid {earliest_valid_deadline}"
+        )
+        # Allow 1 second tolerance for timing variations
+        assert final.liveness_deadline <= latest_valid_deadline + timedelta(
+            seconds=1
+        ), (
+            f"Final deadline {final.liveness_deadline} is after "
+            f"latest valid {latest_valid_deadline}"
+        )
+
 
 # =============================================================================
 # Error Scenario Tests
@@ -741,7 +775,12 @@ class TestHandlerNodeHeartbeatConcurrency:
 
 
 class TestHandlerNodeHeartbeatErrors:
-    """Tests for error handling in heartbeat processing."""
+    """Tests for error handling in heartbeat processing.
+
+    ONEX Contract Compliance:
+        Handler returns result=None even for soft errors (update fails).
+        Hard errors (connection failures) are raised as exceptions.
+    """
 
     async def test_handle_propagates_connection_error(
         self,
@@ -815,16 +854,17 @@ class TestHandlerNodeHeartbeatErrors:
 
             assert "ValueError" in str(exc_info.value)
 
-    async def test_handle_returns_error_when_update_fails(
+    async def test_handle_returns_empty_output_when_update_fails(
         self,
         reader: ProjectionReaderRegistration,
         projector: ProjectorRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
-        """Verify handler returns error when update fails (entity deleted).
+        """Verify handler returns empty output when update fails (entity deleted).
 
+        ONEX Contract: ORCHESTRATOR returns result=None even for soft errors.
         This tests the race condition where entity exists during lookup
-        but is deleted before update.
+        but is deleted before update. Handler logs warning but doesn't raise.
         """
         handler = HandlerNodeHeartbeat(
             projection_reader=reader,
@@ -848,13 +888,10 @@ class TestHandlerNodeHeartbeatErrors:
             envelope = create_envelope(event)
             output = await handler.handle(envelope)
 
-            result = output.result
-            assert result is not None
-            assert result.success is False
-            assert result.node_not_found is True
-            assert result.previous_state == EnumRegistrationState.ACTIVE
-            assert result.error_message is not None
-            assert "Entity not found during heartbeat update" in result.error_message
+            # ORCHESTRATOR returns result=None even for soft errors
+            assert output.result is None
+            assert output.events == ()
+            assert output.handler_id == "handler-node-heartbeat"
 
 
 # =============================================================================
@@ -862,15 +899,21 @@ class TestHandlerNodeHeartbeatErrors:
 # =============================================================================
 
 
-class TestModelHeartbeatHandlerResult:
-    """Tests for ModelHeartbeatHandlerResult model behavior."""
+class TestModelHandlerOutputStructure:
+    """Tests for ModelHandlerOutput structure from heartbeat handler.
 
-    async def test_result_model_is_frozen(
+    ONEX Contract Compliance:
+        ORCHESTRATOR nodes return result=None.
+        Output contains events, intents, handler_id, node_kind, etc.
+    """
+
+    async def test_output_has_correct_structure(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
         projector: ProjectorRegistration,
+        reader: ProjectionReaderRegistration,
     ) -> None:
-        """Verify result model is immutable (frozen)."""
+        """Verify output has correct structure for ORCHESTRATOR node."""
         node_id = uuid4()
         projection = make_projection(entity_id=node_id)
         await seed_projection(projector, projection)
@@ -878,19 +921,27 @@ class TestModelHeartbeatHandlerResult:
         event = make_heartbeat_event(node_id)
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
-        result = output.result
 
-        assert result is not None
-        # Attempt to modify should fail
-        with pytest.raises(ValidationError):
-            result.success = False  # type: ignore[misc]
+        # Verify ORCHESTRATOR output structure
+        assert output.result is None  # ONEX contract
+        assert output.events == ()  # Heartbeat doesn't emit events
+        assert output.intents == ()
+        assert output.projections == ()
+        assert output.handler_id == "handler-node-heartbeat"
+        assert output.correlation_id is not None
+        assert output.processing_time_ms > 0
 
-    async def test_result_contains_all_expected_fields(
+        # Verify success by checking DB
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
+        assert updated.last_heartbeat_at == event.timestamp
+
+    async def test_output_contains_input_envelope_id(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
         projector: ProjectorRegistration,
     ) -> None:
-        """Verify result contains all expected fields for success case."""
+        """Verify output links back to input envelope."""
         node_id = uuid4()
         projection = make_projection(entity_id=node_id)
         await seed_projection(projector, projection)
@@ -898,18 +949,10 @@ class TestModelHeartbeatHandlerResult:
         event = make_heartbeat_event(node_id)
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
-        result = output.result
 
-        assert result is not None
-        # Verify all fields are present
-        assert hasattr(result, "success")
-        assert hasattr(result, "node_id")
-        assert hasattr(result, "previous_state")
-        assert hasattr(result, "last_heartbeat_at")
-        assert hasattr(result, "liveness_deadline")
-        assert hasattr(result, "node_not_found")
-        assert hasattr(result, "correlation_id")
-        assert hasattr(result, "error_message")
+        # Verify envelope linkage
+        assert output.input_envelope_id == envelope.envelope_id
+        assert output.result is None  # ONEX contract
 
 
 # =============================================================================
@@ -1055,7 +1098,8 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
     3. Handler sets projection.liveness_deadline = event.timestamp + window
     4. ServiceTimeoutEmitter uses projection.last_heartbeat_at in ModelNodeLivenessExpired
 
-    These tests verify steps 1-3 with precise timestamp assertions.
+    ONEX Contract Compliance:
+        Handler returns result=None. Verify timestamps via DB state.
     """
 
     async def test_heartbeat_timestamp_matches_event_timestamp_exactly(
@@ -1077,15 +1121,9 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         event = make_heartbeat_event(node_id, timestamp=event_time)
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
-        result = output.result
 
-        # Verify result contains exact timestamp
-        assert result is not None
-        assert result.success is True
-        assert result.last_heartbeat_at == event_time, (
-            f"Result last_heartbeat_at should be exactly {event_time}, "
-            f"got {result.last_heartbeat_at}"
-        )
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
 
         # Verify database contains exact timestamp
         updated = await reader.get_entity_state(node_id)
@@ -1124,18 +1162,22 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         event = make_heartbeat_event(node_id, timestamp=event_time)
         envelope = create_envelope(event)
         output = await handler.handle(envelope)
-        result = output.result
+
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
 
         # Expected: 12:00:00.500000 + 45.5s = 12:00:46.000000
         expected_deadline = event_time + timedelta(seconds=45.5)
 
-        assert result is not None
-        assert result.liveness_deadline is not None
+        # Verify via database
+        updated = await reader.get_entity_state(node_id)
+        assert updated is not None
+        assert updated.liveness_deadline is not None
         # Allow 1 millisecond tolerance for floating point
-        delta = abs((result.liveness_deadline - expected_deadline).total_seconds())
+        delta = abs((updated.liveness_deadline - expected_deadline).total_seconds())
         assert delta < 0.001, (
             f"Deadline calculation off by {delta}s. "
-            f"Expected {expected_deadline}, got {result.liveness_deadline}"
+            f"Expected {expected_deadline}, got {updated.liveness_deadline}"
         )
 
     async def test_heartbeat_preserves_utc_timezone(
@@ -1156,19 +1198,15 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         event = make_heartbeat_event(node_id, timestamp=event_time)
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
-        result = output.result
 
-        # Verify result timestamps are timezone-aware
-        assert result is not None
-        assert result.last_heartbeat_at is not None
-        assert result.last_heartbeat_at.tzinfo is not None
-        assert result.liveness_deadline is not None
-        assert result.liveness_deadline.tzinfo is not None
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
 
-        # Verify database timestamps are timezone-aware
+        # Verify database timestamps
         updated = await reader.get_entity_state(node_id)
         assert updated is not None
         assert updated.last_heartbeat_at is not None
+        assert updated.liveness_deadline is not None
         # Note: PostgreSQL may return timezone-naive datetimes depending on
         # connection settings, but the values should still be correct
 
@@ -1189,29 +1227,33 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
 
         # Send 5 heartbeats with increasing timestamps
         timestamps = [datetime(2025, 12, 25, 10, 0, i, tzinfo=UTC) for i in range(5)]
-        results = []
+        db_states = []
 
         for ts in timestamps:
             event = make_heartbeat_event(node_id, timestamp=ts)
             envelope = create_envelope(event)
             output = await heartbeat_handler_fast_window.handle(envelope)
-            results.append(output.result)
+            # Verify ORCHESTRATOR returns result=None
+            assert output.result is None
+            # Get DB state after each heartbeat
+            state = await reader.get_entity_state(node_id)
+            db_states.append(state)
 
-        # Verify monotonic increase in timestamps
-        for i in range(1, len(results)):
-            assert results[i] is not None
-            assert results[i - 1] is not None
-            assert results[i].last_heartbeat_at is not None
-            assert results[i - 1].last_heartbeat_at is not None
-            assert results[i].last_heartbeat_at > results[i - 1].last_heartbeat_at, (
-                f"Heartbeat {i} timestamp should be > heartbeat {i - 1}"
-            )
+        # Verify monotonic increase in timestamps via DB states
+        for i in range(1, len(db_states)):
+            assert db_states[i] is not None
+            assert db_states[i - 1] is not None
+            assert db_states[i].last_heartbeat_at is not None
+            assert db_states[i - 1].last_heartbeat_at is not None
+            assert (
+                db_states[i].last_heartbeat_at > db_states[i - 1].last_heartbeat_at
+            ), f"Heartbeat {i} timestamp should be > heartbeat {i - 1}"
 
-            assert results[i].liveness_deadline is not None
-            assert results[i - 1].liveness_deadline is not None
-            assert results[i].liveness_deadline > results[i - 1].liveness_deadline, (
-                f"Heartbeat {i} deadline should be > heartbeat {i - 1}"
-            )
+            assert db_states[i].liveness_deadline is not None
+            assert db_states[i - 1].liveness_deadline is not None
+            assert (
+                db_states[i].liveness_deadline > db_states[i - 1].liveness_deadline
+            ), f"Heartbeat {i} deadline should be > heartbeat {i - 1}"
 
         # Verify final database state has latest timestamp
         updated = await reader.get_entity_state(node_id)
@@ -1249,10 +1291,9 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         event = make_heartbeat_event(node_id, timestamp=heartbeat_time)
         envelope = create_envelope(event)
         output = await heartbeat_handler_fast_window.handle(envelope)
-        result = output.result
 
-        assert result is not None
-        assert result.success is True
+        # Verify output (ORCHESTRATOR returns result=None)
+        assert output.result is None
 
         # Query the projection directly (as ServiceTimeoutEmitter would)
         async with pg_pool.acquire() as conn:
@@ -1278,7 +1319,10 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
             "liveness_deadline should be set for liveness expired event"
         )
 
-        # Verify timestamps are consistent with handler result
+        # Verify timestamps are consistent
         # (PostgreSQL returns timezone-naive, so compare without timezone)
         assert db_last_heartbeat.replace(tzinfo=UTC) == heartbeat_time
-        assert db_liveness_deadline.replace(tzinfo=UTC) == result.liveness_deadline
+
+        # Verify deadline calculation (5 second window from fixture)
+        expected_deadline = heartbeat_time + timedelta(seconds=5.0)
+        assert db_liveness_deadline.replace(tzinfo=UTC) == expected_deadline

@@ -169,7 +169,7 @@ class HandlerRuntimeTick:
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
             ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
+                transport_type=EnumInfraTransportType.RUNTIME,
                 operation="handle_runtime_tick",
                 target_name="handler.runtime_tick",
                 correlation_id=correlation_id,

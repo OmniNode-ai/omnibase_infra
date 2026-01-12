@@ -1343,10 +1343,12 @@ class RuntimeHostProcess:
 
         try:
             event_bus_health = await self._event_bus.health_check()
-            # Assert for type narrowing: health_check() returns dict per contract
-            assert isinstance(event_bus_health, dict), (
-                f"health_check() must return dict, got {type(event_bus_health).__name__}"
-            )
+            # Explicit type guard (not assert) for production safety
+            # health_check() returns dict per contract
+            if not isinstance(event_bus_health, dict):
+                raise TypeError(
+                    f"health_check() must return dict, got {type(event_bus_health).__name__}"
+                )
             event_bus_healthy = bool(event_bus_health.get("healthy", False))
         except Exception as e:
             # Create infrastructure error context for health check failure

@@ -237,8 +237,13 @@ class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
                         output_events=[],
                     )
 
-            # Assert helps type narrowing after isinstance/model_validate
-            assert isinstance(payload, ModelNodeRegistrationAcked)
+            # Explicit type guard (not assert) for production safety
+            # Type narrowing after isinstance/model_validate above
+            if not isinstance(payload, ModelNodeRegistrationAcked):
+                raise TypeError(
+                    f"Expected ModelNodeRegistrationAcked after validation, "
+                    f"got {type(payload).__name__}"
+                )
 
             # Get current time for handler
             now = datetime.now(UTC)

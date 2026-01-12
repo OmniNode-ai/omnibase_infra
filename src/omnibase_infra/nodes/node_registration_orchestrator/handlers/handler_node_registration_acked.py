@@ -128,7 +128,7 @@ def get_liveness_interval_seconds(explicit_value: int | None = None) -> int:
             # No correlation_id available at module-level configuration, so context
             # is created without one (will auto-generate).
             ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
+                transport_type=EnumInfraTransportType.RUNTIME,
                 operation="get_liveness_interval_seconds",
                 target_name="env.ONEX_LIVENESS_INTERVAL_SECONDS",
             )
@@ -250,7 +250,7 @@ class HandlerNodeRegistrationAcked:
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
             error_ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
+                transport_type=EnumInfraTransportType.RUNTIME,
                 operation="handle_registration_acked",
                 target_name="handler.node_registration_acked",
                 correlation_id=correlation_id,

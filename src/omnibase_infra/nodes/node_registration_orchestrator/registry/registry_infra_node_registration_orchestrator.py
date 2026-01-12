@@ -124,6 +124,14 @@ if TYPE_CHECKING:
     )
 
 
+# TODO(OMN-TBD): Tech debt - subcontract should be loaded from contract.yaml
+# instead of being constructed programmatically. The _create_handler_routing_subcontract()
+# function in node.py already loads handler routing from contract.yaml. Consider:
+# 1. Using that function here instead of duplicating handler registration
+# 2. Or making the registry reference the subcontract for consistency
+# See: _create_handler_routing_subcontract() in node.py for contract-driven approach.
+
+
 class RegistryInfraNodeRegistrationOrchestrator:
     """Handler registry for NodeRegistrationOrchestrator.
 

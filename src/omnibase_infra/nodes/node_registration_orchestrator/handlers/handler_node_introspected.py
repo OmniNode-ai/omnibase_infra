@@ -273,7 +273,7 @@ class HandlerNodeIntrospected:
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
             ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
+                transport_type=EnumInfraTransportType.RUNTIME,
                 operation="handle_introspection_event",
                 target_name="handler.node_introspected",
                 correlation_id=correlation_id,
