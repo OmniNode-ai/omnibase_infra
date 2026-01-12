@@ -53,16 +53,20 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.projectors import ProjectorRegistration
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
@@ -201,6 +205,26 @@ class HandlerNodeIntrospected:
         )
 
     @property
+    def handler_id(self) -> str:
+        """Unique identifier for this handler."""
+        return "handler-node-introspected"
+
+    @property
+    def category(self) -> EnumMessageCategory:
+        """Message category this handler processes."""
+        return EnumMessageCategory.EVENT
+
+    @property
+    def message_types(self) -> set[str]:
+        """Set of message type names this handler can process."""
+        return {"ModelNodeIntrospectionEvent"}
+
+    @property
+    def node_kind(self) -> EnumNodeKind:
+        """Node kind this handler belongs to."""
+        return EnumNodeKind.ORCHESTRATOR
+
+    @property
     def has_projector(self) -> bool:
         """Check if projector is configured for projection persistence."""
         return self._projector is not None
@@ -212,10 +236,8 @@ class HandlerNodeIntrospected:
 
     async def handle(
         self,
-        event: ModelNodeIntrospectionEvent,
-        now: datetime,
-        correlation_id: UUID,
-    ) -> list[BaseModel]:
+        envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent],
+    ) -> ModelHandlerOutput[object]:
         """Process introspection event and decide on registration.
 
         Queries the current projection state for the node and decides
@@ -224,30 +246,42 @@ class HandlerNodeIntrospected:
 
         When initiating registration with a projector configured, the handler:
         1. Persists the projection with state PENDING_REGISTRATION
-        2. Returns the NodeRegistrationInitiated event
+        2. Returns the NodeRegistrationInitiated event wrapped in ModelHandlerOutput
 
         This ordering ensures projections are readable before events are published.
 
         Args:
-            event: The introspection event from the node.
-            now: Injected current time (used for timestamps and ack_deadline).
-            correlation_id: Correlation ID for distributed tracing.
+            envelope: Event envelope containing ModelNodeIntrospectionEvent payload.
 
         Returns:
-            List containing ModelNodeRegistrationInitiated if registration
-            should be initiated, empty list otherwise.
+            ModelHandlerOutput containing ModelNodeRegistrationInitiated if
+            registration should be initiated, empty events tuple otherwise.
 
         Raises:
             RuntimeHostError: If projection query or persist fails (propagated).
             InfraConnectionError: If database connection fails during persist.
             InfraTimeoutError: If database operation times out.
-            ValueError: If now is naive (no timezone info).
+            ProtocolConfigurationError: If envelope timestamp is naive (no timezone info).
         """
+        start_time = time.perf_counter()
+
+        # Extract from envelope
+        event = envelope.payload
+        now: datetime = envelope.envelope_timestamp
+        correlation_id: UUID = envelope.correlation_id or uuid4()
+
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
-            raise ValueError(
-                "now must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="handle_introspection_event",
+                target_name="handler.node_introspected",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                "envelope_timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime.",
+                context=ctx,
             )
 
         node_id = event.node_id
@@ -300,7 +334,19 @@ class HandlerNodeIntrospected:
                 )
 
         if not should_initiate:
-            return []
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            return ModelHandlerOutput(
+                input_envelope_id=envelope.envelope_id,
+                correlation_id=correlation_id,
+                handler_id=self.handler_id,
+                node_kind=self.node_kind,
+                events=(),
+                intents=(),
+                projections=(),
+                result=None,
+                processing_time_ms=processing_time_ms,
+                timestamp=now,
+            )
 
         # Build NodeRegistrationInitiated event
         registration_attempt_id = uuid4()
@@ -377,7 +423,19 @@ class HandlerNodeIntrospected:
             },
         )
 
-        return [initiated_event]
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        return ModelHandlerOutput(
+            input_envelope_id=envelope.envelope_id,
+            correlation_id=correlation_id,
+            handler_id=self.handler_id,
+            node_kind=self.node_kind,
+            events=(initiated_event,),
+            intents=(),
+            projections=(),
+            result=None,
+            processing_time_ms=processing_time_ms,
+            timestamp=now,
+        )
 
     async def _register_with_consul(
         self,

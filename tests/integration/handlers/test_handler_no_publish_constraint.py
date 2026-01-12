@@ -496,11 +496,11 @@ class TestHandlerNodeIntrospectedBusIsolation:
         """Handler instance has no bus-related attributes."""
         assert_no_bus_attributes(introspection_handler, "HandlerNodeIntrospected")
 
-    def test_handle_returns_list_of_events(self) -> None:
-        """handle() returns list[BaseModel], not a publish action.
+    def test_handle_returns_model_handler_output(self) -> None:
+        """handle() returns ModelHandlerOutput, not a publish action.
 
-        The handler RETURNS events for the orchestrator to publish.
-        It does NOT publish them directly.
+        The handler RETURNS a ModelHandlerOutput for the orchestrator to process.
+        It does NOT publish events directly.
         """
         sig = inspect.signature(HandlerNodeIntrospected.handle)
 
@@ -510,10 +510,10 @@ class TestHandlerNodeIntrospectedBusIsolation:
             "handle() should have a return type annotation"
         )
 
-        # The return type should be list[BaseModel]
+        # The return type should be ModelHandlerOutput
         annotation_str = str(return_annotation)
-        assert "list" in annotation_str.lower(), (
-            f"handle() should return a list, got: {annotation_str}"
+        assert "ModelHandlerOutput" in annotation_str, (
+            f"handle() should return ModelHandlerOutput, got: {annotation_str}"
         )
 
     def test_no_publish_methods_exist(
@@ -701,8 +701,8 @@ class TestHandlerNoPublishConstraintCrossValidation:
     def test_introspection_handler_handle_signature_matches_pattern(self) -> None:
         """HandlerNodeIntrospected.handle follows the handler pattern.
 
-        Pattern: async def handle(event, ...) -> list[BaseModel]
-        NOT: async def handle(event, bus) -> None
+        Pattern: async def handle(envelope, ...) -> ModelHandlerOutput
+        NOT: async def handle(envelope, bus) -> None
 
         This test verifies key domain parameters exist and the no-publish
         constraint is enforced, while allowing the handler to evolve with
@@ -714,8 +714,8 @@ class TestHandlerNoPublishConstraintCrossValidation:
         # First parameter must be 'self'
         assert params[0] == "self", "First parameter must be 'self'"
 
-        # Must accept key domain parameters
-        assert "event" in params, "handle() must accept 'event' parameter"
+        # Must accept envelope parameter (contains the event)
+        assert "envelope" in params, "handle() must accept 'envelope' parameter"
 
         # Must NOT accept any bus-related parameters
         for forbidden in FORBIDDEN_BUS_PARAMETERS:
@@ -1102,7 +1102,7 @@ class TestOrchestratorBusAccessVerification:
 
     This is the intended architectural pattern:
     1. Orchestrator receives container (DI)
-    2. Orchestrator receives coordinators with bus access (setter injection)
+    2. Orchestrator uses contract-driven handler routing (declarative)
     3. Coordinator delegates to services with event_bus (composition)
     4. Services publish to event bus (actual publishing)
 
@@ -1156,47 +1156,36 @@ class TestOrchestratorBusAccessVerification:
             "this is the ServiceTimeoutEmitter with bus access"
         )
 
-    def test_orchestrator_has_set_timeout_coordinator_method(self) -> None:
-        """NodeRegistrationOrchestrator has setter for timeout coordinator.
+    def test_orchestrator_is_declarative(self) -> None:
+        """NodeRegistrationOrchestrator is fully declarative (OMN-1102).
 
-        This proves the orchestrator can receive components with bus access.
-        The setter injection pattern allows orchestrators to be wired with
-        coordinators that have publishing capabilities.
+        The orchestrator no longer has setter methods for timeout coordinator
+        or heartbeat handler. Handler routing is driven entirely by
+        contract.yaml and registry-based wiring.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
             NodeRegistrationOrchestrator,
         )
 
-        # Verify the method exists
-        assert hasattr(NodeRegistrationOrchestrator, "set_timeout_coordinator"), (
-            "NodeRegistrationOrchestrator must have 'set_timeout_coordinator' method - "
-            "this enables wiring coordinators with bus access"
+        # Verify the old imperative methods have been removed
+        assert not hasattr(NodeRegistrationOrchestrator, "set_timeout_coordinator"), (
+            "NodeRegistrationOrchestrator should NOT have 'set_timeout_coordinator' - "
+            "OMN-1102 removed imperative wiring in favor of declarative routing"
         )
 
-        # Verify it's callable
-        assert callable(NodeRegistrationOrchestrator.set_timeout_coordinator), (
-            "set_timeout_coordinator must be callable"
+        assert not hasattr(NodeRegistrationOrchestrator, "has_timeout_coordinator"), (
+            "NodeRegistrationOrchestrator should NOT have 'has_timeout_coordinator' - "
+            "OMN-1102 removed imperative wiring in favor of declarative routing"
         )
 
-        # Verify the method signature accepts coordinator
-        sig = inspect.signature(NodeRegistrationOrchestrator.set_timeout_coordinator)
-        params = list(sig.parameters.keys())
-        assert "coordinator" in params, (
-            "set_timeout_coordinator should accept 'coordinator' parameter"
+        assert not hasattr(NodeRegistrationOrchestrator, "set_heartbeat_handler"), (
+            "NodeRegistrationOrchestrator should NOT have 'set_heartbeat_handler' - "
+            "OMN-1102 removed imperative wiring in favor of declarative routing"
         )
 
-    def test_orchestrator_has_timeout_coordinator_property(self) -> None:
-        """NodeRegistrationOrchestrator has property to check coordinator status.
-
-        Proves orchestrator exposes whether it has bus-capable coordinator wired.
-        """
-        from omnibase_infra.nodes.node_registration_orchestrator.node import (
-            NodeRegistrationOrchestrator,
-        )
-
-        # Verify the property exists
-        assert hasattr(NodeRegistrationOrchestrator, "has_timeout_coordinator"), (
-            "NodeRegistrationOrchestrator must have 'has_timeout_coordinator' property"
+        assert not hasattr(NodeRegistrationOrchestrator, "has_heartbeat_handler"), (
+            "NodeRegistrationOrchestrator should NOT have 'has_heartbeat_handler' - "
+            "OMN-1102 removed imperative wiring in favor of declarative routing"
         )
 
     def test_orchestrator_container_pattern_differs_from_handlers(self) -> None:
@@ -1204,7 +1193,7 @@ class TestOrchestratorBusAccessVerification:
 
         This test explicitly documents the architectural difference:
         - Handlers: Direct DI of domain dependencies, NO bus access
-        - Orchestrators: Container + setter injection for coordinators with bus
+        - Orchestrators: Container + contract-driven handler routing (declarative)
 
         The container pattern enables orchestrators to resolve bus-related
         dependencies through the ONEX dependency injection system.
@@ -1253,11 +1242,7 @@ class TestOrchestratorBusAccessVerification:
         assert orchestrator is not None
         assert isinstance(orchestrator, NodeRegistrationOrchestrator)
 
-        # Verify timeout coordinator is not set by default
-        assert not orchestrator.has_timeout_coordinator, (
-            "Timeout coordinator should not be set by default - "
-            "requires explicit wiring via set_timeout_coordinator()"
-        )
+        # OMN-1102: Orchestrator is now fully declarative - no custom methods
 
     def test_service_timeout_emitter_stores_event_bus(self) -> None:
         """ServiceTimeoutEmitter stores the event_bus dependency.

@@ -235,18 +235,31 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                         output_events=[],
                     )
 
-            # Assert helps type narrowing after isinstance/model_validate
-            assert isinstance(payload, ModelNodeIntrospectionEvent)
+            # Explicit type guard (not assert) for production safety
+            # Type narrowing after isinstance/model_validate above
+            if not isinstance(payload, ModelNodeIntrospectionEvent):
+                raise TypeError(
+                    f"Expected ModelNodeIntrospectionEvent after validation, "
+                    f"got {type(payload).__name__}"
+                )
 
             # Get current time for handler
             now = datetime.now(UTC)
 
-            # Delegate to wrapped handler
-            output_events = await self._handler.handle(
-                event=payload,
-                now=now,
-                correlation_id=correlation_id,
+            # Create envelope for handler (ProtocolMessageHandler signature)
+            handler_envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent] = (
+                ModelEventEnvelope(
+                    envelope_id=uuid4(),
+                    payload=payload,
+                    envelope_timestamp=now,
+                    correlation_id=correlation_id,
+                    source=self.dispatcher_id,
+                )
             )
+
+            # Delegate to wrapped handler
+            handler_output = await self._handler.handle(handler_envelope)
+            output_events = list(handler_output.events)
 
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000

@@ -34,17 +34,22 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Final
-from uuid import UUID
+from typing import Final
+from uuid import UUID, uuid4
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from pydantic import BaseModel
+
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
 )
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
     ModelNodeRegistrationAcked,
 )
@@ -59,6 +64,20 @@ from omnibase_infra.projectors.projection_reader_registration import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class OutputContext:
+    """Context for creating handler output, bundling common parameters.
+
+    This dataclass groups the parameters needed for creating ModelHandlerOutput,
+    reducing the parameter count of _create_output from 6 to 3.
+    """
+
+    envelope: ModelEventEnvelope[ModelNodeRegistrationAcked]
+    correlation_id: UUID
+    now: datetime
+    start_time: float
 
 
 # Environment variable name for liveness interval configuration
@@ -87,7 +106,7 @@ def get_liveness_interval_seconds(explicit_value: int | None = None) -> int:
         Liveness interval in seconds.
 
     Raises:
-        ValueError: If environment variable is set but not a valid integer.
+        ProtocolConfigurationError: If environment variable is set but not a valid integer.
 
     Example:
         >>> # Use default or env var
@@ -105,9 +124,18 @@ def get_liveness_interval_seconds(explicit_value: int | None = None) -> int:
         try:
             return int(env_value)
         except ValueError as e:
-            raise ValueError(
+            # Use ProtocolConfigurationError for invalid environment variable values.
+            # No correlation_id available at module-level configuration, so context
+            # is created without one (will auto-generate).
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="get_liveness_interval_seconds",
+                target_name="env.ONEX_LIVENESS_INTERVAL_SECONDS",
+            )
+            raise ProtocolConfigurationError(
                 f"Invalid value for {ENV_LIVENESS_INTERVAL_SECONDS}: "
-                f"'{env_value}' is not a valid integer"
+                f"'{env_value}' is not a valid integer",
+                context=ctx,
             ) from e
 
     # 3. Fall back to default
@@ -141,15 +169,17 @@ class HandlerNodeRegistrationAcked:
     Example:
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
+        >>> from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
         >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
         >>> now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
-        >>> handler = HandlerNodeRegistrationAcked(projection_reader)
-        >>> events = await handler.handle(
-        ...     command=ack_command,
-        ...     now=now,
+        >>> envelope = ModelEventEnvelope(
+        ...     payload=ack_command,
+        ...     envelope_timestamp=now,
         ...     correlation_id=uuid4(),
         ... )
-        >>> # events may contain [AckReceived, BecameActive]
+        >>> handler = HandlerNodeRegistrationAcked(projection_reader)
+        >>> output = await handler.handle(envelope)
+        >>> # output.events may contain (AckReceived, BecameActive)
     """
 
     def __init__(
@@ -170,36 +200,74 @@ class HandlerNodeRegistrationAcked:
             liveness_interval_seconds
         )
 
+    @property
+    def handler_id(self) -> str:
+        """Return the unique identifier for this handler."""
+        return "handler-node-registration-acked"
+
+    @property
+    def category(self) -> EnumMessageCategory:
+        """Return the message category this handler processes."""
+        return EnumMessageCategory.COMMAND
+
+    @property
+    def message_types(self) -> set[str]:
+        """Return the set of message type names this handler processes."""
+        return {"ModelNodeRegistrationAcked"}
+
+    @property
+    def node_kind(self) -> EnumNodeKind:
+        """Return the node kind this handler belongs to."""
+        return EnumNodeKind.ORCHESTRATOR
+
     async def handle(
         self,
-        command: ModelNodeRegistrationAcked,
-        now: datetime,
-        correlation_id: UUID,
-    ) -> list[BaseModel]:
+        envelope: ModelEventEnvelope[ModelNodeRegistrationAcked],
+    ) -> ModelHandlerOutput[object]:
         """Process registration ack command and emit events.
 
         Queries the current projection state and decides whether to
         emit events that complete registration and activate the node.
 
         Args:
-            command: The registration ack command from the node.
-            now: Injected current time for liveness deadline calculation.
-            correlation_id: Correlation ID for distributed tracing.
+            envelope: The event envelope containing the registration ack command.
 
         Returns:
-            List containing [NodeRegistrationAckReceived, NodeBecameActive]
-            if ack is valid, empty list otherwise.
+            ModelHandlerOutput containing [NodeRegistrationAckReceived, NodeBecameActive]
+            if ack is valid, empty events tuple otherwise.
 
         Raises:
             RuntimeHostError: If projection query fails (propagated from reader).
-            ValueError: If now is naive (no timezone info).
+            ProtocolConfigurationError: If timestamp is naive (no timezone info).
         """
+        start_time = time.perf_counter()
+
+        # Extract from envelope
+        command = envelope.payload
+        now = envelope.envelope_timestamp
+        correlation_id = envelope.correlation_id or uuid4()
+
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
-            raise ValueError(
-                "now must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
+            error_ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="handle_registration_acked",
+                target_name="handler.node_registration_acked",
+                correlation_id=correlation_id,
             )
+            raise ProtocolConfigurationError(
+                "envelope_timestamp must be timezone-aware. Use datetime.now(UTC) or "
+                "datetime(..., tzinfo=timezone.utc) instead of naive datetime.",
+                context=error_ctx,
+            )
+
+        # Create output context for _create_output calls
+        ctx = OutputContext(
+            envelope=envelope,
+            correlation_id=correlation_id,
+            now=now,
+            start_time=start_time,
+        )
 
         node_id = command.node_id
 
@@ -220,7 +288,7 @@ class HandlerNodeRegistrationAcked:
                     "correlation_id": str(correlation_id),
                 },
             )
-            return []
+            return self._create_output(ctx=ctx, events=())
 
         current_state = projection.current_state
 
@@ -230,12 +298,13 @@ class HandlerNodeRegistrationAcked:
             EnumRegistrationState.AWAITING_ACK,
         }:
             # Valid ack - emit events
-            return self._emit_activation_events(
+            events = self._emit_activation_events(
                 command=command,
                 now=now,
                 correlation_id=correlation_id,
                 projection=projection,
             )
+            return self._create_output(ctx=ctx, events=tuple(events))
 
         # Handle other states
         if current_state in {
@@ -251,7 +320,7 @@ class HandlerNodeRegistrationAcked:
                     "correlation_id": str(correlation_id),
                 },
             )
-            return []
+            return self._create_output(ctx=ctx, events=())
 
         if current_state == EnumRegistrationState.PENDING_REGISTRATION:
             # Ack too early - not yet accepted
@@ -263,7 +332,7 @@ class HandlerNodeRegistrationAcked:
                     "correlation_id": str(correlation_id),
                 },
             )
-            return []
+            return self._create_output(ctx=ctx, events=())
 
         if current_state == EnumRegistrationState.ACK_TIMED_OUT:
             # Ack too late - already timed out
@@ -275,7 +344,7 @@ class HandlerNodeRegistrationAcked:
                     "correlation_id": str(correlation_id),
                 },
             )
-            return []
+            return self._create_output(ctx=ctx, events=())
 
         if current_state.is_terminal():
             # Terminal state - ack is meaningless
@@ -287,7 +356,7 @@ class HandlerNodeRegistrationAcked:
                     "correlation_id": str(correlation_id),
                 },
             )
-            return []
+            return self._create_output(ctx=ctx, events=())
 
         # Unexpected state - log and return empty
         logger.warning(
@@ -298,7 +367,7 @@ class HandlerNodeRegistrationAcked:
                 "correlation_id": str(correlation_id),
             },
         )
-        return []
+        return self._create_output(ctx=ctx, events=())
 
     def _emit_activation_events(
         self,
@@ -355,6 +424,34 @@ class HandlerNodeRegistrationAcked:
         )
 
         return [ack_received, became_active]
+
+    def _create_output(
+        self,
+        ctx: OutputContext,
+        events: tuple[BaseModel, ...],
+    ) -> ModelHandlerOutput[object]:
+        """Create a ModelHandlerOutput with the given events.
+
+        Args:
+            ctx: Output context containing envelope, correlation_id, now, start_time.
+            events: Tuple of events to include in the output.
+
+        Returns:
+            ModelHandlerOutput with the provided events and metadata.
+        """
+        processing_time_ms = (time.perf_counter() - ctx.start_time) * 1000
+        return ModelHandlerOutput(
+            input_envelope_id=ctx.envelope.envelope_id,
+            correlation_id=ctx.correlation_id,
+            handler_id=self.handler_id,
+            node_kind=self.node_kind,
+            events=events,
+            intents=(),
+            projections=(),
+            result=None,
+            processing_time_ms=processing_time_ms,
+            timestamp=ctx.now,
+        )
 
 
 __all__: list[str] = [

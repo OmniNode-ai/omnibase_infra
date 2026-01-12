@@ -5,9 +5,8 @@
 This orchestrator follows the ONEX declarative pattern:
     - DECLARATIVE orchestrator driven by contract.yaml
     - Zero custom routing logic - all behavior from workflow_definition
-    - Lightweight shell that delegates to TimeoutCoordinator and HeartbeatHandler
     - Used for ONEX-compliant runtime execution via RuntimeHostProcess
-    - Pattern: "Contract-driven, handlers wired externally"
+    - Pattern: "Contract-driven, handlers wired by registry"
 
 Extends NodeOrchestrator from omnibase_core for workflow-driven coordination.
 All workflow logic is 100% driven by contract.yaml, not Python code.
@@ -21,134 +20,260 @@ Workflow Pattern:
 All workflow logic, retry policies, and result aggregation are handled
 by the NodeOrchestrator base class using contract.yaml configuration.
 
-Timeout Coordination (OMN-932):
-    The orchestrator also handles RuntimeTick events for timeout detection.
-    When a RuntimeTick is received:
-    1. The timeout_coordinator queries for overdue entities
-    2. Emits timeout events (NodeRegistrationAckTimedOut, NodeLivenessExpired)
-    3. Updates projection markers to prevent duplicate emissions
+Handler Routing:
+    Handler routing is defined declaratively in contract.yaml under
+    handler_routing section. The orchestrator does NOT contain custom
+    dispatch logic - the base class routes events based on:
+    - routing_strategy: "payload_type_match"
+    - handlers: mapping of event_model to handler_class
 
-    To wire timeout coordination:
-    ```python
-    from omnibase_infra.nodes.node_registration_orchestrator import (
-        NodeRegistrationOrchestrator,
-        TimeoutCoordinator,
-    )
-    from omnibase_infra.services import ServiceTimeoutScanner, ServiceTimeoutEmitter
-
-    # Wire dependencies
-    timeout_query = ServiceTimeoutScanner(projection_reader)
-    timeout_emission = ServiceTimeoutEmitter(
-        timeout_query=timeout_query,
-        event_bus=event_bus,
-        projector=projector,
-    )
-    timeout_coordinator = TimeoutCoordinator(timeout_query, timeout_emission)
-
-    # Create orchestrator with timeout coordinator
-    orchestrator = NodeRegistrationOrchestrator(container)
-    orchestrator.set_timeout_coordinator(timeout_coordinator)
-
-    # Handle RuntimeTick
-    result = await orchestrator.handle_runtime_tick(tick)
-    ```
-
-Heartbeat Handling (OMN-1006):
-    The orchestrator handles node heartbeat events for liveness tracking.
-    When a heartbeat is received:
-    1. The heartbeat_handler updates last_heartbeat_at in the projection
-    2. Extends the liveness_deadline based on the configured liveness window
-    3. Returns a result with the updated timestamps
-
-    To wire heartbeat handling:
-    ```python
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import HandlerNodeHeartbeat
-
-    # Wire heartbeat handler with projection dependencies
-    heartbeat_handler = HandlerNodeHeartbeat(
-        projection_reader=projection_reader,
-        projector=projector,
-        liveness_window_seconds=90.0,
-    )
-
-    # Create orchestrator with heartbeat handler
-    orchestrator = NodeRegistrationOrchestrator(container)
-    orchestrator.set_heartbeat_handler(heartbeat_handler)
-
-    # Handle heartbeat events
-    result = await orchestrator.handle_heartbeat(heartbeat_event)
-    ```
+    Handler routing is initialized by the RUNTIME (not this module) via
+    MixinHandlerRouting._init_handler_routing(), using the registry created
+    by RegistryInfraNodeRegistrationOrchestrator. This module only provides
+    the helper function _create_handler_routing_subcontract() for the runtime.
 
 Design Decisions:
     - 100% Contract-Driven: All workflow logic in YAML, not Python
     - Zero Custom Methods: Base class handles everything
     - Declarative Execution: Workflow steps defined in execution_graph
     - Retry at Base Class: NodeOrchestrator owns retry policy
+    - Contract-Driven Wiring: Handlers wired via handler_routing in contract.yaml
+    - Mixin-Based Routing: MixinHandlerRouting provides route_to_handlers()
 
 Coroutine Safety:
     This orchestrator is NOT coroutine-safe. Each instance should handle one
     workflow at a time. For concurrent workflows, create multiple instances.
 
-Implemented Features:
-    - OMN-973 (Time Injection): The DispatchContextEnforcer provides time injection
-      at dispatch time. Orchestrators receive injected `now` timestamps from
-      RuntimeTick events, enabling deterministic timeout evaluation in workflow
-      steps. See: omnibase_infra/runtime/dispatch_context_enforcer.py
-
-    - OMN-930 (Projection Reader): ProtocolProjectionReader is defined in
-      omnibase_spi.protocols (merged in omnibase_spi#44). The orchestrator can
-      resolve and inject projection readers as dependencies, enabling the
-      "read_projection" workflow step to query current registration state.
-      See: omnibase_spi/protocols/protocol_projection_reader.py
-
 Related Modules:
-    - contract.yaml: Workflow definition and execution graph
-    - timeout_coordinator.py: RuntimeTick timeout coordinator
-    - models/: Input, output, and configuration models (kept for compatibility)
+    - contract.yaml: Workflow definition, execution graph, and handler routing
+    - handlers/: Handler implementations (HandlerNodeIntrospected, etc.)
+    - registry/: RegistryInfraNodeRegistrationOrchestrator for handler wiring
 """
 
 from __future__ import annotations
 
+import logging
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+from omnibase_core.models.contracts.subcontracts.model_handler_routing_entry import (
+    ModelHandlerRoutingEntry,
+)
+from omnibase_core.models.contracts.subcontracts.model_handler_routing_subcontract import (
+    ModelHandlerRoutingSubcontract,
+)
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
     from omnibase_core.models.container import ModelONEXContainer
 
-    from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerNodeHeartbeat,
-        ModelHeartbeatHandlerResult,
+logger = logging.getLogger(__name__)
+
+
+# TODO(OMN-1315): Consider relocating module-level helper functions to a dedicated
+# utility module (e.g., omnibase_infra.utils.handler_utils) if they become shared
+# across multiple orchestrators. Currently kept here for locality with the
+# _create_handler_routing_subcontract function that uses it.
+
+
+def _convert_class_to_handler_key(class_name: str) -> str:
+    """Convert handler class name to handler_key format (kebab-case).
+
+    Converts CamelCase handler class names to kebab-case handler keys
+    as used in ServiceHandlerRegistry.
+
+    Args:
+        class_name: Handler class name in CamelCase (e.g., "HandlerNodeIntrospected").
+
+    Returns:
+        Handler key in kebab-case (e.g., "handler-node-introspected").
+
+    Example:
+        >>> _convert_class_to_handler_key("HandlerNodeIntrospected")
+        'handler-node-introspected'
+        >>> _convert_class_to_handler_key("HandlerRuntimeTick")
+        'handler-runtime-tick'
+    """
+    # Insert hyphen before uppercase letters that follow lowercase letters
+    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1-\2", class_name)
+    # Insert hyphen before uppercase letters that follow other uppercase+lowercase sequences
+    return re.sub("([a-z0-9])([A-Z])", r"\1-\2", s1).lower()
+
+
+def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
+    """Load handler routing configuration from contract.yaml.
+
+    Loads the handler_routing section from this node's contract.yaml
+    and converts it to ModelHandlerRoutingSubcontract format. This follows
+    the Handler Plugin Loader pattern (see CLAUDE.md) where routing is
+    defined declaratively in contract.yaml, not hardcoded in Python.
+
+    Contract Structure:
+        The contract.yaml uses a nested structure::
+
+            handler_routing:
+              routing_strategy: "payload_type_match"
+              handlers:
+                - event_model:
+                    name: "ModelNodeIntrospectionEvent"
+                    module: "omnibase_infra.models..."
+                  handler:
+                    name: "HandlerNodeIntrospected"
+                    module: "omnibase_infra.nodes..."
+
+        This is converted to ModelHandlerRoutingEntry with flat fields::
+
+            ModelHandlerRoutingEntry(
+                routing_key="ModelNodeIntrospectionEvent",  # from event_model.name
+                handler_key="handler-node-introspected",    # kebab-case of handler.name
+            )
+
+        The ``routing_key`` maps to ``event_model.name`` from contract.yaml.
+        The ``handler_key`` is derived by converting ``handler.name`` to kebab-case,
+        matching the handler's adapter ID in ServiceHandlerRegistry.
+
+    Returns:
+        ModelHandlerRoutingSubcontract with entries mapping event models to handlers.
+
+    Raises:
+        ProtocolConfigurationError: If contract.yaml does not exist, contains invalid
+            YAML syntax, is empty, or handler_routing section is missing. Error context
+            includes operation and target_name for debugging.
+    """
+    # Load contract.yaml from same directory as this module
+    contract_path = Path(__file__).parent / "contract.yaml"
+
+    try:
+        with contract_path.open("r", encoding="utf-8") as f:
+            contract = yaml.safe_load(f)
+    except FileNotFoundError as e:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="load_handler_routing_contract",
+            target_name=str(contract_path),
+        )
+        logger.exception(
+            "contract.yaml not found at %s - handler routing cannot be loaded",
+            contract_path,
+        )
+        raise ProtocolConfigurationError(
+            f"contract.yaml not found at {contract_path} - handler routing cannot be loaded",
+            context=ctx,
+        ) from e
+    except yaml.YAMLError as e:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="parse_handler_routing_contract",
+            target_name=str(contract_path),
+        )
+        # Sanitize error message - don't include raw YAML error which may contain file contents
+        error_type = type(e).__name__
+        logger.exception(
+            "Invalid YAML syntax in contract.yaml at %s: %s",
+            contract_path,
+            error_type,
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid YAML syntax in contract.yaml at {contract_path}: {error_type}",
+            context=ctx,
+        ) from e
+
+    if contract is None:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="validate_handler_routing_contract",
+            target_name=str(contract_path),
+        )
+        msg = f"contract.yaml at {contract_path} is empty"
+        logger.error(msg)
+        raise ProtocolConfigurationError(msg, context=ctx)
+
+    handler_routing = contract.get("handler_routing")
+    if handler_routing is None:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="validate_handler_routing_contract",
+            target_name=str(contract_path),
+        )
+        msg = f"handler_routing section not found in contract.yaml at {contract_path}"
+        logger.error(msg)
+        raise ProtocolConfigurationError(msg, context=ctx)
+
+    # Build routing entries from contract
+    entries: list[ModelHandlerRoutingEntry] = []
+    handlers_config = handler_routing.get("handlers", [])
+
+    for handler_config in handlers_config:
+        event_model = handler_config.get("event_model", {})
+        handler = handler_config.get("handler", {})
+
+        event_model_name = event_model.get("name")
+        handler_class_name = handler.get("name")
+
+        if not event_model_name:
+            logger.warning(
+                "Skipping handler entry with missing event_model.name in contract.yaml"
+            )
+            continue
+
+        if not handler_class_name:
+            logger.warning(
+                "Skipping handler entry for %s with missing handler.name in contract.yaml",
+                event_model_name,
+            )
+            continue
+
+        entries.append(
+            ModelHandlerRoutingEntry(
+                routing_key=event_model_name,
+                handler_key=_convert_class_to_handler_key(handler_class_name),
+            )
+        )
+
+    logger.debug(
+        "Loaded %d handler routing entries from contract.yaml",
+        len(entries),
     )
-    from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
-        ModelTimeoutCoordinationResult,
-        TimeoutCoordinator,
+
+    return ModelHandlerRoutingSubcontract(
+        version=ModelSemVer(major=1, minor=0, patch=0),
+        routing_strategy=handler_routing.get("routing_strategy", "payload_type_match"),
+        handlers=entries,
+        default_handler=None,
     )
-    from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 
 
 class NodeRegistrationOrchestrator(NodeOrchestrator):
-    """Registration orchestrator - workflow driven by contract.yaml.
+    """Declarative orchestrator for node registration workflow.
 
-    This orchestrator coordinates node registration by:
-    1. Receiving introspection events (consumed_events in contract)
-    2. Calling reducer to compute intents (workflow_definition.execution_graph)
-    3. Executing intents via effect (workflow_definition.execution_graph)
-    4. Publishing result events (published_events in contract)
+    All behavior is defined in contract.yaml - no custom logic here.
+    Handler routing is driven entirely by the contract and initialized
+    via MixinHandlerRouting from the base class.
 
-    Additionally, handles RuntimeTick events for timeout coordination:
-    1. Queries for overdue entities (ack timeouts, liveness expirations)
-    2. Emits timeout events
-    3. Updates projection markers
-
-    All workflow logic, retry policies, and result aggregation are handled
-    by the NodeOrchestrator base class using contract.yaml configuration.
-
-    Example YAML Contract:
+    Example YAML Contract (contract.yaml format):
         ```yaml
+        handler_routing:
+          routing_strategy: "payload_type_match"
+          handlers:
+            - event_model:
+                name: "ModelNodeIntrospectionEvent"
+                module: "omnibase_infra.models.registration..."
+              handler:
+                name: "HandlerNodeIntrospected"
+                module: "omnibase_infra.nodes...handlers..."
+            - event_model:
+                name: "ModelRuntimeTick"
+                module: "omnibase_infra.runtime.models..."
+              handler:
+                name: "HandlerRuntimeTick"
+                module: "omnibase_infra.nodes...handlers..."
+
         workflow_coordination:
           workflow_definition:
             workflow_metadata:
@@ -176,6 +301,16 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
               timeout_ms: 30000
         ```
 
+    Note on Handler Routing Field Names:
+        The contract.yaml uses a nested structure with ``event_model.name`` and
+        ``handler.name``, but ModelHandlerRoutingEntry uses flat fields:
+
+        - ``routing_key``: Corresponds to ``event_model.name``
+        - ``handler_key``: The handler's adapter ID in ServiceHandlerRegistry
+          (e.g., "handler-node-introspected"), NOT the class name
+
+        See ``_create_handler_routing_subcontract()`` for the translation.
+
     Usage:
         ```python
         from omnibase_core.models.container import ModelONEXContainer
@@ -184,150 +319,39 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
         container = ModelONEXContainer()
         orchestrator = NodeRegistrationOrchestrator(container)
 
-        # Workflow definition must be set (from contract or manually)
-        orchestrator.workflow_definition = ModelWorkflowDefinition(...)
-
+        # Workflow definition loaded from contract.yaml by runtime
+        # Handler routing initialized via runtime using registry factory
         # Process input
         result = await orchestrator.process(input_data)
         ```
 
-    Timeout Coordination Usage:
-        ```python
-        # Wire timeout coordinator
-        orchestrator.set_timeout_coordinator(timeout_coordinator)
+    Handler Routing:
+        Handler routing is initialized by the runtime, not by this class.
+        The runtime uses RegistryInfraNodeRegistrationOrchestrator.create_registry()
+        to create the handler registry and calls _init_handler_routing() on
+        the orchestrator instance.
 
-        # Handle RuntimeTick events
-        result = await orchestrator.handle_runtime_tick(tick)
-        ```
+    Runtime Initialization:
+        Handler routing is initialized by RuntimeHostProcess, not by this class.
+        The runtime performs the following sequence:
+
+        1. Creates handler registry via
+           RegistryInfraNodeRegistrationOrchestrator.create_registry()
+        2. Creates handler routing subcontract via
+           _create_handler_routing_subcontract()
+        3. Calls orchestrator._init_handler_routing(subcontract, registry)
+
+        This separation ensures the orchestrator remains purely declarative
+        with no custom initialization logic.
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:
-        """Initialize the orchestrator.
+        """Initialize with container dependency injection.
 
         Args:
-            container: ONEX dependency injection container
+            container: ONEX dependency injection container.
         """
         super().__init__(container)
-        self._timeout_coordinator: TimeoutCoordinator | None = None
-        self._heartbeat_handler: HandlerNodeHeartbeat | None = None
-
-    def set_timeout_coordinator(self, coordinator: TimeoutCoordinator) -> None:
-        """Set the timeout coordinator for RuntimeTick coordination.
-
-        The timeout coordinator is used to coordinate RuntimeTick events for
-        detecting and emitting timeout events.
-
-        Args:
-            coordinator: Configured TimeoutCoordinator instance.
-
-        Example:
-            >>> timeout_coordinator = TimeoutCoordinator(timeout_query, timeout_emission)
-            >>> orchestrator.set_timeout_coordinator(timeout_coordinator)
-        """
-        self._timeout_coordinator = coordinator
-
-    @property
-    def has_timeout_coordinator(self) -> bool:
-        """Check if timeout coordinator is configured."""
-        return self._timeout_coordinator is not None
-
-    async def handle_runtime_tick(
-        self,
-        tick: ModelRuntimeTick,
-        domain: str = "registration",
-    ) -> ModelTimeoutCoordinationResult:
-        """Handle a RuntimeTick event for timeout coordination.
-
-        Delegates to the configured timeout coordinator to coordinate timeouts.
-        Uses tick.now for all time-based decisions (never system clock).
-
-        Args:
-            tick: The RuntimeTick event with injected 'now'.
-            domain: Domain namespace for queries (default: "registration").
-
-        Returns:
-            ModelTimeoutCoordinationResult with coordination details.
-
-        Raises:
-            ProtocolConfigurationError: If no timeout coordinator is configured.
-            InfraConnectionError: If database/Kafka connection fails.
-            InfraTimeoutError: If operations time out.
-            InfraUnavailableError: If circuit breaker is open.
-
-        Example:
-            >>> result = await orchestrator.handle_runtime_tick(tick)
-            >>> print(f"Emitted {result.total_emitted} timeout events")
-        """
-        if self._timeout_coordinator is None:
-            raise ProtocolConfigurationError(
-                "Timeout coordinator not configured. "
-                "Call set_timeout_coordinator() before handling RuntimeTick events."
-            )
-
-        return await self._timeout_coordinator.coordinate(tick, domain=domain)
-
-    def set_heartbeat_handler(self, handler: HandlerNodeHeartbeat) -> None:
-        """Set the heartbeat handler for processing node heartbeat events.
-
-        The heartbeat handler is used to update last_heartbeat_at and extend
-        liveness_deadline when heartbeat events are received from active nodes.
-
-        Args:
-            handler: Configured HandlerNodeHeartbeat instance.
-
-        Example:
-            >>> heartbeat_handler = HandlerNodeHeartbeat(
-            ...     projection_reader=reader,
-            ...     projector=projector,
-            ... )
-            >>> orchestrator.set_heartbeat_handler(heartbeat_handler)
-        """
-        self._heartbeat_handler = handler
-
-    @property
-    def has_heartbeat_handler(self) -> bool:
-        """Check if heartbeat handler is configured."""
-        return self._heartbeat_handler is not None
-
-    async def handle_heartbeat(
-        self,
-        event: ModelNodeHeartbeatEvent,
-        domain: str = "registration",
-    ) -> ModelHeartbeatHandlerResult:
-        """Handle a node heartbeat event for liveness tracking.
-
-        Delegates to the configured heartbeat handler to update the registration
-        projection with the heartbeat timestamp and extended liveness deadline.
-
-        Args:
-            event: The heartbeat event from an active node.
-            domain: Domain namespace for projection lookup (default: "registration").
-
-        Returns:
-            ModelHeartbeatHandlerResult with processing outcome including:
-            - success: Whether the heartbeat was processed successfully
-            - last_heartbeat_at: Updated heartbeat timestamp
-            - liveness_deadline: Extended liveness deadline
-            - node_not_found: True if no projection exists for this node
-
-        Raises:
-            ProtocolConfigurationError: If no heartbeat handler is configured.
-            InfraConnectionError: If database connection fails.
-            InfraTimeoutError: If database operation times out.
-            RuntimeHostError: For other infrastructure errors.
-
-        Example:
-            >>> result = await orchestrator.handle_heartbeat(heartbeat_event)
-            >>> if result.success:
-            ...     print(f"Heartbeat processed, deadline: {result.liveness_deadline}")
-        """
-        if self._heartbeat_handler is None:
-            raise ProtocolConfigurationError(
-                "Heartbeat handler not configured. "
-                "Call set_heartbeat_handler() before handling heartbeat events."
-            )
-
-        return await self._heartbeat_handler.handle(event, domain=domain)
 
 
 __all__ = ["NodeRegistrationOrchestrator"]

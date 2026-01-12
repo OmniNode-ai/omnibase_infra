@@ -112,7 +112,11 @@ if TYPE_CHECKING:
         NodeRegistrationOrchestrator,
     )
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
         HandlerNodeIntrospected,
+    )
+    from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+        TimeoutCoordinator,
     )
     from omnibase_infra.projectors import (
         ProjectionReaderRegistration,
@@ -603,56 +607,82 @@ async def timeout_emitter(
 
 
 @pytest.fixture
-async def registration_orchestrator(
-    wired_container: ModelONEXContainer,
-    timeout_scanner: TimeoutScanner,
-    timeout_emitter: TimeoutEmitter,
+async def heartbeat_handler(
     projection_reader: ProjectionReaderRegistration,
     real_projector: ProjectorRegistration,
-) -> NodeRegistrationOrchestrator:
-    """Fully wired NodeRegistrationOrchestrator for E2E tests.
+) -> HandlerNodeHeartbeat:
+    """HandlerNodeHeartbeat for E2E heartbeat tests.
 
-    This fixture creates a complete orchestrator with:
-    - Container-based dependency injection
-    - TimeoutCoordinator for RuntimeTick handling
-    - HandlerNodeHeartbeat for liveness tracking
+    OMN-1102: Handlers are now tested directly rather than through
+    orchestrator methods. The orchestrator is declarative and routes
+    events to handlers via contract.yaml.
 
     Args:
-        wired_container: Container with handlers wired.
-        timeout_scanner: Scanner for timeout queries.
-        timeout_emitter: Emitter for timeout events.
         projection_reader: Reader for projection queries.
         real_projector: Projector for persisting state.
 
     Returns:
-        NodeRegistrationOrchestrator: Fully configured orchestrator.
+        HandlerNodeHeartbeat: Configured handler for heartbeat processing.
     """
-    from omnibase_infra.nodes.node_registration_orchestrator import (
-        NodeRegistrationOrchestrator,
-    )
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )
-    from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
-        TimeoutCoordinator,
-    )
 
-    # Create orchestrator
-    orchestrator = NodeRegistrationOrchestrator(wired_container)
-
-    # Wire timeout coordinator
-    timeout_coordinator = TimeoutCoordinator(timeout_scanner, timeout_emitter)
-    orchestrator.set_timeout_coordinator(timeout_coordinator)
-
-    # Wire heartbeat handler
-    heartbeat_handler = HandlerNodeHeartbeat(
+    return HandlerNodeHeartbeat(
         projection_reader=projection_reader,
         projector=real_projector,
         liveness_window_seconds=90.0,
     )
-    orchestrator.set_heartbeat_handler(heartbeat_handler)
 
-    return orchestrator
+
+@pytest.fixture
+async def timeout_coordinator(
+    timeout_scanner: TimeoutScanner,
+    timeout_emitter: TimeoutEmitter,
+) -> TimeoutCoordinator:
+    """TimeoutCoordinator for E2E timeout tests.
+
+    OMN-1102: The coordinator is now tested directly rather than through
+    orchestrator methods. The orchestrator is declarative.
+
+    Args:
+        timeout_scanner: Scanner for timeout queries.
+        timeout_emitter: Emitter for timeout events.
+
+    Returns:
+        TimeoutCoordinator: Configured coordinator for timeout handling.
+    """
+    from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
+        TimeoutCoordinator,
+    )
+
+    return TimeoutCoordinator(timeout_scanner, timeout_emitter)
+
+
+@pytest.fixture
+async def registration_orchestrator(
+    wired_container: ModelONEXContainer,
+) -> NodeRegistrationOrchestrator:
+    """Declarative NodeRegistrationOrchestrator for E2E tests.
+
+    OMN-1102: The orchestrator is now fully declarative - no custom methods.
+    All handler routing is driven by contract.yaml.
+
+    For handler-specific testing, use the handler fixtures directly:
+    - heartbeat_handler: For heartbeat event processing
+    - timeout_coordinator: For RuntimeTick timeout handling
+
+    Args:
+        wired_container: Container with handlers wired.
+
+    Returns:
+        NodeRegistrationOrchestrator: Declarative orchestrator.
+    """
+    from omnibase_infra.nodes.node_registration_orchestrator import (
+        NodeRegistrationOrchestrator,
+    )
+
+    return NodeRegistrationOrchestrator(wired_container)
 
 
 # =============================================================================

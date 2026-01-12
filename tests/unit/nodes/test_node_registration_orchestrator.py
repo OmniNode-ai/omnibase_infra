@@ -115,8 +115,8 @@ class TestDeclarativeOrchestratorPattern:
         The declarative pattern should have minimal code - just __init__
         that calls super().__init__. All other behavior comes from base class.
 
-        Exception: Timeout handling methods (OMN-932) are intentional extensions
-        to support RuntimeTick processing for durable timeout detection.
+        OMN-1102: Removed timeout/heartbeat methods - now fully declarative.
+        Handler routing is driven entirely by contract.yaml.
         """
         # Get methods defined directly on NodeRegistrationOrchestrator
         # (not inherited from base classes)
@@ -128,31 +128,11 @@ class TestDeclarativeOrchestratorPattern:
             and name in NodeRegistrationOrchestrator.__dict__
         ]
 
-        # Expected methods for timeout handling (OMN-932) and heartbeat handling (OMN-1006)
-        # These are intentional extensions for RuntimeTick and heartbeat processing
-        expected_timeout_methods = {"set_timeout_coordinator", "handle_runtime_tick"}
-        expected_heartbeat_methods = {"set_heartbeat_handler", "handle_heartbeat"}
-
-        # Filter out expected timeout and heartbeat methods
-        allowed_methods = expected_timeout_methods | expected_heartbeat_methods
-        unexpected_methods = [m for m in own_methods if m not in allowed_methods]
-
-        # Should have no unexpected public methods defined directly on the class
-        # (all other behavior inherited from NodeOrchestrator)
-        assert unexpected_methods == [], f"Unexpected methods: {unexpected_methods}"
-
-        # Verify the timeout methods are present (OMN-932 requirement)
-        present_timeout_methods = set(own_methods) & expected_timeout_methods
-        assert present_timeout_methods == expected_timeout_methods, (
-            f"Missing timeout methods. Expected: {expected_timeout_methods}, "
-            f"Found: {present_timeout_methods}"
-        )
-
-        # Verify the heartbeat methods are present (OMN-1006 requirement)
-        present_heartbeat_methods = set(own_methods) & expected_heartbeat_methods
-        assert present_heartbeat_methods == expected_heartbeat_methods, (
-            f"Missing heartbeat methods. Expected: {expected_heartbeat_methods}, "
-            f"Found: {present_heartbeat_methods}"
+        # Should have NO public methods defined directly on the class
+        # (all behavior inherited from NodeOrchestrator and driven by contract.yaml)
+        assert own_methods == [], (
+            f"Declarative node should have no custom public methods. "
+            f"Found: {own_methods}"
         )
 
 
@@ -397,105 +377,3 @@ class TestNodeInstantiation:
         orch2 = NodeRegistrationOrchestrator(simple_mock_container)
 
         assert orch1 is not orch2
-
-
-# =============================================================================
-# TestTimeoutHandling (OMN-932)
-# =============================================================================
-
-
-class TestTimeoutHandling:
-    """Tests for RuntimeTick timeout handling (OMN-932)."""
-
-    def test_has_timeout_coordinator_initially_false(
-        self, simple_mock_container: MagicMock
-    ) -> None:
-        """Test that has_timeout_coordinator is False initially."""
-        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
-
-        assert orchestrator.has_timeout_coordinator is False
-
-    def test_set_timeout_coordinator_updates_property(
-        self, simple_mock_container: MagicMock
-    ) -> None:
-        """Test that set_timeout_coordinator updates has_timeout_coordinator."""
-        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
-        mock_coordinator = MagicMock()
-
-        orchestrator.set_timeout_coordinator(mock_coordinator)
-
-        assert orchestrator.has_timeout_coordinator is True
-
-    @pytest.mark.asyncio
-    async def test_handle_runtime_tick_raises_without_coordinator(
-        self, simple_mock_container: MagicMock
-    ) -> None:
-        """Test that handle_runtime_tick raises ProtocolConfigurationError without coordinator."""
-        from datetime import UTC, datetime
-
-        from omnibase_infra.errors import ProtocolConfigurationError
-
-        # Create a minimal tick mock
-        tick = MagicMock()
-        tick.now = datetime.now(UTC)
-        tick.tick_id = uuid4()
-        tick.correlation_id = uuid4()
-
-        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
-
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
-            await orchestrator.handle_runtime_tick(tick)
-
-        assert "Timeout coordinator not configured" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_handle_runtime_tick_delegates_to_coordinator(
-        self, simple_mock_container: MagicMock
-    ) -> None:
-        """Test that handle_runtime_tick delegates to the configured coordinator."""
-        from datetime import UTC, datetime
-        from unittest.mock import AsyncMock
-
-        # Create a mock tick
-        tick = MagicMock()
-        tick.now = datetime.now(UTC)
-        tick.tick_id = uuid4()
-        tick.correlation_id = uuid4()
-
-        # Create a mock coordinator with async coordinate method
-        mock_coordinator = MagicMock()
-        mock_result = MagicMock()
-        mock_coordinator.coordinate = AsyncMock(return_value=mock_result)
-
-        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
-        orchestrator.set_timeout_coordinator(mock_coordinator)
-
-        result = await orchestrator.handle_runtime_tick(tick)
-
-        mock_coordinator.coordinate.assert_called_once_with(tick, domain="registration")
-        assert result is mock_result
-
-    @pytest.mark.asyncio
-    async def test_handle_runtime_tick_passes_custom_domain(
-        self, simple_mock_container: MagicMock
-    ) -> None:
-        """Test that handle_runtime_tick passes custom domain to coordinator."""
-        from datetime import UTC, datetime
-        from unittest.mock import AsyncMock
-
-        tick = MagicMock()
-        tick.now = datetime.now(UTC)
-        tick.tick_id = uuid4()
-        tick.correlation_id = uuid4()
-
-        mock_coordinator = MagicMock()
-        mock_coordinator.coordinate = AsyncMock(return_value=MagicMock())
-
-        orchestrator = NodeRegistrationOrchestrator(simple_mock_container)
-        orchestrator.set_timeout_coordinator(mock_coordinator)
-
-        await orchestrator.handle_runtime_tick(tick, domain="custom_domain")
-
-        mock_coordinator.coordinate.assert_called_once_with(
-            tick, domain="custom_domain"
-        )
