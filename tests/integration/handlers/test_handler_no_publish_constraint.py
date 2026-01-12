@@ -496,11 +496,11 @@ class TestHandlerNodeIntrospectedBusIsolation:
         """Handler instance has no bus-related attributes."""
         assert_no_bus_attributes(introspection_handler, "HandlerNodeIntrospected")
 
-    def test_handle_returns_list_of_events(self) -> None:
-        """handle() returns list[BaseModel], not a publish action.
+    def test_handle_returns_model_handler_output(self) -> None:
+        """handle() returns ModelHandlerOutput, not a publish action.
 
-        The handler RETURNS events for the orchestrator to publish.
-        It does NOT publish them directly.
+        The handler RETURNS a ModelHandlerOutput for the orchestrator to process.
+        It does NOT publish events directly.
         """
         sig = inspect.signature(HandlerNodeIntrospected.handle)
 
@@ -510,10 +510,10 @@ class TestHandlerNodeIntrospectedBusIsolation:
             "handle() should have a return type annotation"
         )
 
-        # The return type should be list[BaseModel]
+        # The return type should be ModelHandlerOutput
         annotation_str = str(return_annotation)
-        assert "list" in annotation_str.lower(), (
-            f"handle() should return a list, got: {annotation_str}"
+        assert "ModelHandlerOutput" in annotation_str, (
+            f"handle() should return ModelHandlerOutput, got: {annotation_str}"
         )
 
     def test_no_publish_methods_exist(
@@ -701,8 +701,8 @@ class TestHandlerNoPublishConstraintCrossValidation:
     def test_introspection_handler_handle_signature_matches_pattern(self) -> None:
         """HandlerNodeIntrospected.handle follows the handler pattern.
 
-        Pattern: async def handle(event, ...) -> list[BaseModel]
-        NOT: async def handle(event, bus) -> None
+        Pattern: async def handle(envelope, ...) -> ModelHandlerOutput
+        NOT: async def handle(envelope, bus) -> None
 
         This test verifies key domain parameters exist and the no-publish
         constraint is enforced, while allowing the handler to evolve with
@@ -714,8 +714,8 @@ class TestHandlerNoPublishConstraintCrossValidation:
         # First parameter must be 'self'
         assert params[0] == "self", "First parameter must be 'self'"
 
-        # Must accept key domain parameters
-        assert "event" in params, "handle() must accept 'event' parameter"
+        # Must accept envelope parameter (contains the event)
+        assert "envelope" in params, "handle() must accept 'envelope' parameter"
 
         # Must NOT accept any bus-related parameters
         for forbidden in FORBIDDEN_BUS_PARAMETERS:

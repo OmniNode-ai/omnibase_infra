@@ -219,14 +219,27 @@ class RegistryInfraNodeRegistrationOrchestrator:
         return registry
 
     def _get_projection_reader(self) -> ProjectionReaderRegistration:
-        """Get or create ProjectionReaderRegistration.
+        """Get ProjectionReaderRegistration from constructor or container.
+
+        Resolution order:
+            1. Return instance provided via constructor
+            2. Resolve from container.service_registry
+            3. Raise ProtocolConfigurationError if unavailable
 
         Returns:
             ProjectionReaderRegistration instance.
 
+        Raises:
+            ProtocolConfigurationError: If no ProjectionReaderRegistration is
+                available from constructor or service_registry. Also raised if
+                the resolved object lacks the required ``get_entity_state`` method.
+
         Note:
-            If no projection_reader was provided to constructor and container
-            cannot resolve one, this will raise an error at handler creation time.
+            This method does NOT create a new ProjectionReaderRegistration because
+            that requires an asyncpg.Pool which cannot be obtained from the
+            ModelONEXContainer. Callers must either:
+            - Provide a pre-configured ProjectionReaderRegistration via constructor
+            - Register one in the container's service_registry before calling
         """
         if self._projection_reader is not None:
             return self._projection_reader
@@ -244,10 +257,16 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     )
                 return reader  # type: ignore[no-any-return]
 
-        # Fallback: Create new instance (requires container to have DB config)
-        from omnibase_infra.projectors import ProjectionReaderRegistration
-
-        return ProjectionReaderRegistration(self._container)
+        # Fallback: Cannot create without a pool - raise configuration error
+        # The container does not directly provide an asyncpg.Pool; callers must
+        # either provide a ProjectionReaderRegistration via constructor or register
+        # one in the container's service_registry.
+        raise ProtocolConfigurationError(
+            "No ProjectionReaderRegistration available. Either provide one via "
+            "constructor or register in container.service_registry. "
+            "ProjectionReaderRegistration requires an asyncpg.Pool which cannot "
+            "be obtained from ModelONEXContainer directly."
+        )
 
     def create_handler_node_introspected(self) -> HandlerNodeIntrospected:
         """Create HandlerNodeIntrospected with dependencies.
