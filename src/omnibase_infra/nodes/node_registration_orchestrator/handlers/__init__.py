@@ -1,42 +1,34 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration Orchestrator Handlers.
+"""Handlers for NodeRegistrationOrchestrator.
 
-This module exports handler implementations for the NodeRegistrationOrchestrator.
-Each handler processes a specific event type and returns events only.
+All handlers implement ProtocolMessageHandler with standard signature:
+    async def handle(envelope: ModelEventEnvelope[T]) -> ModelHandlerOutput
+
+Properties required by ProtocolMessageHandler:
+    - handler_id: str
+    - category: EnumMessageCategory
+    - message_types: set[str]
+    - node_kind: EnumNodeKind
 
 Handlers:
-    - HandlerNodeIntrospected: Processes NodeIntrospectionEvent (canonical trigger)
-    - HandlerNodeRegistrationAcked: Processes NodeRegistrationAcked commands
-    - HandlerRuntimeTick: Processes RuntimeTick for timeout evaluation
-    - HandlerNodeHeartbeat: Processes NodeHeartbeat for liveness tracking
-
-All handlers follow the pattern:
-    async def handle(event, now, correlation_id) -> list[BaseModel]
+    - HandlerNodeIntrospected: Processes node introspection events
+    - HandlerRuntimeTick: Processes runtime tick events for timeout detection
+    - HandlerNodeRegistrationAcked: Processes registration acknowledgment commands
+    - HandlerNodeHeartbeat: Processes heartbeat events for liveness tracking
 
 Handler Architecture:
     - Handlers are stateless classes (no mutable state between calls)
-    - Handlers use projection reader for state queries
-    - Handlers may use projector for state persistence (e.g., HandlerNodeIntrospected)
-    - Handlers use `now` parameter for time-based decisions
-    - Handlers return EVENTS only (never intents or projections)
-
-Projection Persistence:
-    Handlers that modify registration state can optionally accept a projector for
-    persisting projections to PostgreSQL. When configured with a projector, the
-    handler persists the state transition BEFORE returning events, ensuring that
-    read models are consistent before downstream processing.
-
-    Example:
-        handler = HandlerNodeIntrospected(reader, projector=projector)
-        events = await handler.handle(event, now, correlation_id)
-        # Projection was persisted before events were returned
+    - Handlers receive all context via the envelope (event, correlation_id, timestamp)
+    - Handlers return ModelHandlerOutput containing events and metadata
+    - Time-based decisions use envelope.timestamp or datetime.now(UTC)
 
 Related Tickets:
     - OMN-888 (C1): Registration Orchestrator
     - OMN-932 (C2): Durable Timeout Handling
     - OMN-1006: Node Heartbeat for Liveness Tracking
     - OMN-892: 2-Way Registration E2E Integration Test
+    - OMN-1102: Refactor to pure declarative with standard handler signatures
 """
 
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_heartbeat import (

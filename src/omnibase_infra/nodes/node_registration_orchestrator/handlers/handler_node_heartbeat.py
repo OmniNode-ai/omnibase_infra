@@ -12,15 +12,20 @@ Related Tickets:
     - OMN-1006: Add last_heartbeat_at for liveness expired event reporting
     - OMN-932 (C2): Durable Timeout Handling
     - OMN-881: Node introspection with configurable topics
+    - OMN-1102: Refactor to ProtocolMessageHandler signature
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
@@ -129,9 +134,9 @@ class HandlerNodeHeartbeat:
         ...     projector=projector,
         ...     liveness_window_seconds=90.0,
         ... )
-        >>> result = await handler.handle(heartbeat_event)
-        >>> if result.success:
-        ...     print(f"Heartbeat processed, deadline extended to {result.liveness_deadline}")
+        >>> output = await handler.handle(envelope)
+        >>> if output.result and output.result.success:
+        ...     print(f"Heartbeat processed, deadline extended to {output.result.liveness_deadline}")
     """
 
     def __init__(
@@ -154,15 +159,34 @@ class HandlerNodeHeartbeat:
         self._liveness_window_seconds = liveness_window_seconds
 
     @property
+    def handler_id(self) -> str:
+        """Return unique identifier for this handler."""
+        return "handler-node-heartbeat"
+
+    @property
+    def category(self) -> EnumMessageCategory:
+        """Return the message category this handler processes."""
+        return EnumMessageCategory.EVENT
+
+    @property
+    def message_types(self) -> set[str]:
+        """Return the set of message types this handler processes."""
+        return {"ModelNodeHeartbeatEvent"}
+
+    @property
+    def node_kind(self) -> EnumNodeKind:
+        """Return the node kind this handler belongs to."""
+        return EnumNodeKind.ORCHESTRATOR
+
+    @property
     def liveness_window_seconds(self) -> float:
         """Return configured liveness window in seconds."""
         return self._liveness_window_seconds
 
     async def handle(
         self,
-        event: ModelNodeHeartbeatEvent,
-        domain: str = "registration",
-    ) -> ModelHeartbeatHandlerResult:
+        envelope: ModelEventEnvelope[ModelNodeHeartbeatEvent],
+    ) -> ModelHandlerOutput[ModelHeartbeatHandlerResult]:
         """Process a node heartbeat event.
 
         Looks up the registration projection by node_id and updates:
@@ -170,11 +194,11 @@ class HandlerNodeHeartbeat:
         - `liveness_deadline`: Extended to event.timestamp + liveness_window
 
         Args:
-            event: The heartbeat event to process.
-            domain: Domain namespace for projection lookup (default: "registration").
+            envelope: Event envelope containing the heartbeat event payload.
 
         Returns:
-            ModelHeartbeatHandlerResult with processing outcome.
+            ModelHandlerOutput containing ModelHeartbeatHandlerResult with
+            processing outcome.
 
         Raises:
             RuntimeHostError: Base class for all infrastructure errors. Specific
@@ -185,11 +209,18 @@ class HandlerNodeHeartbeat:
                 - InfraUnavailableError: Resource temporarily unavailable
 
         Example:
-            >>> result = await handler.handle(heartbeat_event)
-            >>> if result.node_not_found:
+            >>> output = await handler.handle(envelope)
+            >>> if output.result and output.result.node_not_found:
             ...     logger.warning("Heartbeat from unregistered node")
         """
-        correlation_id = event.correlation_id or uuid4()
+        start_time = time.perf_counter()
+
+        # Extract from envelope
+        event = envelope.payload
+        now = envelope.envelope_timestamp
+        correlation_id = envelope.correlation_id or uuid4()
+        domain = "registration"  # Was passed as parameter, now hardcoded
+
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="handle_heartbeat",
@@ -212,12 +243,25 @@ class HandlerNodeHeartbeat:
                     "correlation_id": str(correlation_id),
                 },
             )
-            return ModelHeartbeatHandlerResult(
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            result = ModelHeartbeatHandlerResult(
                 success=False,
                 node_id=event.node_id,
                 node_not_found=True,
                 correlation_id=correlation_id,
                 error_message="No registration projection found for node",
+            )
+            return ModelHandlerOutput(
+                input_envelope_id=envelope.envelope_id,
+                correlation_id=correlation_id,
+                handler_id=self.handler_id,
+                node_kind=self.node_kind,
+                events=(),
+                intents=(),
+                projections=(),
+                result=result,
+                processing_time_ms=processing_time_ms,
+                timestamp=now,
             )
 
         # Check if node is in a state that should receive heartbeats
@@ -258,13 +302,26 @@ class HandlerNodeHeartbeat:
                         "correlation_id": str(correlation_id),
                     },
                 )
-                return ModelHeartbeatHandlerResult(
+                processing_time_ms = (time.perf_counter() - start_time) * 1000
+                result = ModelHeartbeatHandlerResult(
                     success=False,
                     node_id=event.node_id,
                     previous_state=projection.current_state,
                     node_not_found=True,
                     correlation_id=correlation_id,
                     error_message="Entity not found during heartbeat update",
+                )
+                return ModelHandlerOutput(
+                    input_envelope_id=envelope.envelope_id,
+                    correlation_id=correlation_id,
+                    handler_id=self.handler_id,
+                    node_kind=self.node_kind,
+                    events=(),
+                    intents=(),
+                    projections=(),
+                    result=result,
+                    processing_time_ms=processing_time_ms,
+                    timestamp=now,
                 )
 
             logger.debug(
@@ -277,13 +334,26 @@ class HandlerNodeHeartbeat:
                 },
             )
 
-            return ModelHeartbeatHandlerResult(
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            result = ModelHeartbeatHandlerResult(
                 success=True,
                 node_id=event.node_id,
                 previous_state=projection.current_state,
                 last_heartbeat_at=heartbeat_timestamp,
                 liveness_deadline=new_liveness_deadline,
                 correlation_id=correlation_id,
+            )
+            return ModelHandlerOutput(
+                input_envelope_id=envelope.envelope_id,
+                correlation_id=correlation_id,
+                handler_id=self.handler_id,
+                node_kind=self.node_kind,
+                events=(),
+                intents=(),
+                projections=(),
+                result=result,
+                processing_time_ms=processing_time_ms,
+                timestamp=now,
             )
 
         except (

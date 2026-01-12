@@ -25,6 +25,8 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -93,6 +95,21 @@ def create_ack_command(
     )
 
 
+def create_envelope(
+    command: ModelNodeRegistrationAcked,
+    now: datetime | None = None,
+    correlation_id: UUID | None = None,
+) -> ModelEventEnvelope[ModelNodeRegistrationAcked]:
+    """Create a test event envelope wrapping an ack command."""
+    return ModelEventEnvelope(
+        envelope_id=uuid4(),
+        payload=command,
+        envelope_timestamp=now or TEST_NOW,
+        correlation_id=correlation_id or uuid4(),
+        source="test",
+    )
+
+
 class TestHandlerAckedEmitsActiveEvents:
     """G2 Requirement 7: Handler emits active events for valid acks."""
 
@@ -123,17 +140,17 @@ class TestHandlerAckedEmitsActiveEvents:
         )
 
         # Act
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=correlation_id,
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, correlation_id)
+        output = await handler.handle(envelope)
+
+        # Assert - handler_id is correct
+        assert output.handler_id == "handler-node-registration-acked"
 
         # Assert - two events emitted
-        assert len(events) == 2
+        assert len(output.events) == 2
 
         # First event: AckReceived
-        ack_received = events[0]
+        ack_received = output.events[0]
         assert isinstance(ack_received, ModelNodeRegistrationAckReceived)
         assert ack_received.node_id == node_id
         assert ack_received.entity_id == node_id
@@ -148,7 +165,7 @@ class TestHandlerAckedEmitsActiveEvents:
         assert ack_received.liveness_deadline == expected_deadline
 
         # Second event: BecameActive
-        became_active = events[1]
+        became_active = output.events[1]
         assert isinstance(became_active, ModelNodeBecameActive)
         assert became_active.node_id == node_id
         assert became_active.entity_id == node_id
@@ -173,15 +190,13 @@ class TestHandlerAckedEmitsActiveEvents:
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(node_id)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
-        assert len(events) == 2
-        assert isinstance(events[0], ModelNodeRegistrationAckReceived)
-        assert isinstance(events[1], ModelNodeBecameActive)
+        assert output.handler_id == "handler-node-registration-acked"
+        assert len(output.events) == 2
+        assert isinstance(output.events[0], ModelNodeRegistrationAckReceived)
+        assert isinstance(output.events[1], ModelNodeBecameActive)
 
 
 class TestHandlerAckedIgnoresDuplicate:
@@ -191,7 +206,7 @@ class TestHandlerAckedIgnoresDuplicate:
     async def test_handler_acked_ignores_duplicate(self) -> None:
         """Given projection with state=ACTIVE,
         When handler processes NodeRegistrationAcked,
-        Then returns empty list (already active).
+        Then returns empty events tuple (already active).
         """
         # Arrange
         mock_reader = create_mock_projection_reader()
@@ -207,14 +222,12 @@ class TestHandlerAckedIgnoresDuplicate:
         ack_command = create_ack_command(node_id)
 
         # Act
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
         # Assert - no events (duplicate ack)
-        assert events == []
+        assert output.handler_id == "handler-node-registration-acked"
+        assert output.events == ()
 
     @pytest.mark.asyncio
     async def test_ignores_ack_for_ack_received_state(self) -> None:
@@ -231,13 +244,11 @@ class TestHandlerAckedIgnoresDuplicate:
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(node_id)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
-        assert events == []
+        assert output.handler_id == "handler-node-registration-acked"
+        assert output.events == ()
 
 
 class TestHandlerAckedUnknownNode:
@@ -245,20 +256,18 @@ class TestHandlerAckedUnknownNode:
 
     @pytest.mark.asyncio
     async def test_ignores_ack_for_unknown_node(self) -> None:
-        """Test that ack for unknown node returns empty list."""
+        """Test that ack for unknown node returns empty events tuple."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # Unknown node
 
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(uuid4())
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
-        assert events == []
+        assert output.handler_id == "handler-node-registration-acked"
+        assert output.events == ()
 
 
 class TestHandlerAckedPendingState:
@@ -279,14 +288,12 @@ class TestHandlerAckedPendingState:
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(node_id)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
         # Ack too early - not yet accepted
-        assert events == []
+        assert output.handler_id == "handler-node-registration-acked"
+        assert output.events == ()
 
 
 class TestHandlerAckedTerminalStates:
@@ -317,14 +324,14 @@ class TestHandlerAckedTerminalStates:
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(node_id)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
         # Terminal state - ack is meaningless
-        assert events == [], f"Expected no events for terminal state {terminal_state}"
+        assert output.handler_id == "handler-node-registration-acked"
+        assert output.events == (), (
+            f"Expected no events for terminal state {terminal_state}"
+        )
 
     @pytest.mark.asyncio
     async def test_ignores_ack_when_already_timed_out(self) -> None:
@@ -341,14 +348,12 @@ class TestHandlerAckedTerminalStates:
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(node_id)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
         # Too late - already timed out
-        assert events == []
+        assert output.handler_id == "handler-node-registration-acked"
+        assert output.events == ()
 
 
 class TestHandlerAckedLivenessDeadline:
@@ -371,14 +376,12 @@ class TestHandlerAckedLivenessDeadline:
 
         custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=custom_now,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, custom_now, uuid4())
+        output = await handler.handle(envelope)
 
-        assert len(events) == 2
-        ack_received = events[0]
+        assert output.handler_id == "handler-node-registration-acked"
+        assert len(output.events) == 2
+        ack_received = output.events[0]
         assert isinstance(ack_received, ModelNodeRegistrationAckReceived)
 
         # Liveness deadline should be custom_now + 60 seconds
@@ -404,14 +407,12 @@ class TestHandlerAckedLivenessDeadline:
         )
         ack_command = create_ack_command(node_id)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
-        assert len(events) == 2
-        ack_received = events[0]
+        assert output.handler_id == "handler-node-registration-acked"
+        assert len(output.events) == 2
+        ack_received = output.events[0]
 
         # Liveness deadline should use custom interval
         expected_deadline = TEST_NOW + timedelta(seconds=custom_interval)
@@ -443,14 +444,12 @@ class TestHandlerAckedCapabilitiesSnapshot:
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(node_id)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
-        assert len(events) == 2
-        became_active = events[1]
+        assert output.handler_id == "handler-node-registration-acked"
+        assert len(output.events) == 2
+        became_active = output.events[1]
         assert isinstance(became_active, ModelNodeBecameActive)
 
         # Capabilities should match projection
@@ -479,16 +478,14 @@ class TestHandlerAckedEventCausation:
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(node_id)
 
-        events = await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, uuid4())
+        output = await handler.handle(envelope)
 
-        assert len(events) == 2
+        assert output.handler_id == "handler-node-registration-acked"
+        assert len(output.events) == 2
 
         # Both events should link to the command via causation_id
-        for event in events:
+        for event in output.events:
             assert event.causation_id == ack_command.command_id
 
 
@@ -511,12 +508,10 @@ class TestHandlerAckedProjectionQueries:
             timestamp=TEST_NOW,
         )
 
-        await handler.handle(
-            command=ack_command,
-            now=TEST_NOW,
-            correlation_id=correlation_id,
-        )
+        envelope = create_envelope(ack_command, TEST_NOW, correlation_id)
+        output = await handler.handle(envelope)
 
+        assert output.handler_id == "handler-node-registration-acked"
         mock_reader.get_entity_state.assert_called_once_with(
             entity_id=node_id,
             domain="registration",
@@ -596,11 +591,11 @@ class TestGetLivenessIntervalSeconds:
 
 
 class TestHandlerAckedTimezoneValidation:
-    """Test that handler validates timezone-awareness of now parameter."""
+    """Test that handler validates timezone-awareness of envelope timestamp."""
 
     @pytest.mark.asyncio
     async def test_raises_value_error_for_naive_datetime(self) -> None:
-        """Test that handler raises ValueError if now is naive (no tzinfo)."""
+        """Test that handler raises ValueError if envelope_timestamp is naive (no tzinfo)."""
         mock_reader = create_mock_projection_reader()
         handler = HandlerNodeRegistrationAcked(mock_reader)
 
@@ -610,12 +605,11 @@ class TestHandlerAckedTimezoneValidation:
 
         ack_command = create_ack_command(uuid4())
 
+        # Create envelope with naive datetime
+        envelope = create_envelope(ack_command, naive_now, uuid4())
+
         with pytest.raises(ValueError) as exc_info:
-            await handler.handle(
-                command=ack_command,
-                now=naive_now,
-                correlation_id=uuid4(),
-            )
+            await handler.handle(envelope)
 
         assert "timezone-aware" in str(exc_info.value)
         assert "naive" in str(exc_info.value)
@@ -635,11 +629,9 @@ class TestHandlerAckedTimezoneValidation:
         ack_command = create_ack_command(uuid4())
 
         # Should not raise - timezone-aware datetime is valid
-        events = await handler.handle(
-            command=ack_command,
-            now=aware_now,
-            correlation_id=uuid4(),
-        )
+        envelope = create_envelope(ack_command, aware_now, uuid4())
+        output = await handler.handle(envelope)
 
-        # Unknown node - returns empty list (but should not raise)
-        assert events == []
+        # Unknown node - returns empty events (but should not raise)
+        assert output.handler_id == "handler-node-registration-acked"
+        assert output.events == ()

@@ -33,6 +33,8 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
@@ -49,6 +51,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
     DEFAULT_LIVENESS_WINDOW_SECONDS,
     HandlerNodeHeartbeat,
+    ModelHeartbeatHandlerResult,
 )
 
 if TYPE_CHECKING:
@@ -135,6 +138,30 @@ def make_heartbeat_event(
         active_operations_count=5,
         timestamp=timestamp or datetime.now(UTC),
         correlation_id=correlation_id,
+    )
+
+
+def create_envelope(
+    event: ModelNodeHeartbeatEvent,
+    now: datetime | None = None,
+    correlation_id: UUID | None = None,
+) -> ModelEventEnvelope[ModelNodeHeartbeatEvent]:
+    """Create an event envelope for testing.
+
+    Args:
+        event: The heartbeat event payload.
+        now: Optional timestamp for the envelope (defaults to event.timestamp).
+        correlation_id: Optional correlation ID (defaults to new UUID).
+
+    Returns:
+        ModelEventEnvelope wrapping the heartbeat event.
+    """
+    return ModelEventEnvelope(
+        envelope_id=uuid4(),
+        payload=event,
+        envelope_timestamp=now or event.timestamp,
+        correlation_id=correlation_id or event.correlation_id or uuid4(),
+        source="test",
     )
 
 
@@ -240,9 +267,16 @@ class TestHandlerNodeHeartbeatHappyPath:
 
         # Create and process heartbeat
         event = make_heartbeat_event(node_id)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
+
+        # Verify output wrapper
+        assert output.handler_id == "handler-node-heartbeat"
+        assert output.events == ()  # Heartbeat doesn't emit events
 
         # Verify result
+        result = output.result
+        assert result is not None
         assert result.success is True
         assert result.node_id == node_id
         assert result.previous_state == EnumRegistrationState.ACTIVE
@@ -270,9 +304,12 @@ class TestHandlerNodeHeartbeatHappyPath:
         # Process heartbeat with known timestamp
         event_time = datetime.now(UTC)
         event = make_heartbeat_event(node_id, timestamp=event_time)
-        result = await heartbeat_handler_fast_window.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler_fast_window.handle(envelope)
 
         # Verify deadline extension (5 second window from fixture)
+        result = output.result
+        assert result is not None
         assert result.success is True
         assert result.liveness_deadline is not None
         expected_deadline = event_time + timedelta(seconds=5.0)
@@ -298,8 +335,11 @@ class TestHandlerNodeHeartbeatHappyPath:
 
         correlation_id = uuid4()
         event = make_heartbeat_event(node_id, correlation_id=correlation_id)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event, correlation_id=correlation_id)
+        output = await heartbeat_handler.handle(envelope)
 
+        result = output.result
+        assert result is not None
         assert result.success is True
         assert result.correlation_id == correlation_id
 
@@ -314,8 +354,11 @@ class TestHandlerNodeHeartbeatHappyPath:
         await seed_projection(projector, projection)
 
         event = make_heartbeat_event(node_id, correlation_id=None)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
 
+        result = output.result
+        assert result is not None
         assert result.success is True
         assert result.correlation_id is not None
 
@@ -336,7 +379,8 @@ class TestHandlerNodeHeartbeatHappyPath:
 
         # Process heartbeat
         event = make_heartbeat_event(node_id)
-        await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        await heartbeat_handler.handle(envelope)
 
         # Verify other fields unchanged
         updated = await reader.get_entity_state(node_id)
@@ -361,9 +405,16 @@ class TestHandlerNodeHeartbeatNotFound:
         """Verify heartbeat for unknown node returns node_not_found."""
         unknown_node_id = uuid4()
         event = make_heartbeat_event(unknown_node_id)
+        envelope = create_envelope(event)
 
-        result = await heartbeat_handler.handle(event)
+        output = await heartbeat_handler.handle(envelope)
 
+        # Verify output wrapper
+        assert output.handler_id == "handler-node-heartbeat"
+        assert output.events == ()
+
+        result = output.result
+        assert result is not None
         assert result.success is False
         assert result.node_id == unknown_node_id
         assert result.node_not_found is True
@@ -381,9 +432,12 @@ class TestHandlerNodeHeartbeatNotFound:
         unknown_node_id = uuid4()
         correlation_id = uuid4()
         event = make_heartbeat_event(unknown_node_id, correlation_id=correlation_id)
+        envelope = create_envelope(event, correlation_id=correlation_id)
 
-        result = await heartbeat_handler.handle(event)
+        output = await heartbeat_handler.handle(envelope)
 
+        result = output.result
+        assert result is not None
         assert result.success is False
         assert result.correlation_id == correlation_id
 
@@ -424,9 +478,12 @@ class TestHandlerNodeHeartbeatNonActiveNode:
         await seed_projection(projector, projection)
 
         event = make_heartbeat_event(node_id)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
 
         # Processing should succeed (warning logged, not failed)
+        result = output.result
+        assert result is not None
         assert result.success is True
         assert result.node_id == node_id
         assert result.previous_state == state
@@ -465,8 +522,11 @@ class TestHandlerNodeHeartbeatLivenessWindow:
 
         event_time = datetime.now(UTC)
         event = make_heartbeat_event(node_id, timestamp=event_time)
-        result = await handler.handle(event)
+        envelope = create_envelope(event)
+        output = await handler.handle(envelope)
 
+        result = output.result
+        assert result is not None
         expected_deadline = event_time + timedelta(
             seconds=DEFAULT_LIVENESS_WINDOW_SECONDS
         )
@@ -486,9 +546,12 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         # Use a past timestamp
         past_time = datetime.now(UTC) - timedelta(minutes=5)
         event = make_heartbeat_event(node_id, timestamp=past_time)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
 
         # Deadline should be relative to event timestamp
+        result = output.result
+        assert result is not None
         expected_deadline = past_time + timedelta(
             seconds=DEFAULT_LIVENESS_WINDOW_SECONDS
         )
@@ -509,14 +572,20 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         # First heartbeat
         time1 = datetime.now(UTC)
         event1 = make_heartbeat_event(node_id, timestamp=time1)
-        result1 = await heartbeat_handler_fast_window.handle(event1)
+        envelope1 = create_envelope(event1)
+        output1 = await heartbeat_handler_fast_window.handle(envelope1)
+        result1 = output1.result
 
         # Second heartbeat 2 seconds later
         time2 = time1 + timedelta(seconds=2)
         event2 = make_heartbeat_event(node_id, timestamp=time2)
-        result2 = await heartbeat_handler_fast_window.handle(event2)
+        envelope2 = create_envelope(event2)
+        output2 = await heartbeat_handler_fast_window.handle(envelope2)
+        result2 = output2.result
 
         # Deadlines should be different
+        assert result1 is not None
+        assert result2 is not None
         assert result1.liveness_deadline is not None
         assert result2.liveness_deadline is not None
         assert result2.liveness_deadline > result1.liveness_deadline
@@ -548,12 +617,14 @@ class TestHandlerNodeHeartbeatConcurrency:
 
         # Process heartbeats concurrently
         events = [make_heartbeat_event(node_id) for node_id in node_ids]
-        results = await asyncio.gather(
-            *[heartbeat_handler.handle(event) for event in events]
+        envelopes = [create_envelope(event) for event in events]
+        outputs = await asyncio.gather(
+            *[heartbeat_handler.handle(envelope) for envelope in envelopes]
         )
 
         # All should succeed
-        assert all(r.success for r in results)
+        results = [o.result for o in outputs]
+        assert all(r is not None and r.success for r in results)
         assert len(results) == 5
 
     async def test_rapid_heartbeats_same_node(
@@ -584,19 +655,24 @@ class TestHandlerNodeHeartbeatConcurrency:
             for i in range(10)
         ]
         latest_event_time = events[-1].timestamp
+        envelopes = [create_envelope(event) for event in events]
 
-        results = await asyncio.gather(
-            *[heartbeat_handler_fast_window.handle(event) for event in events]
+        outputs = await asyncio.gather(
+            *[heartbeat_handler_fast_window.handle(envelope) for envelope in envelopes]
         )
 
+        # Extract results from outputs
+        results = [o.result for o in outputs]
+
         # All should succeed
-        assert all(r.success for r in results), (
+        assert all(r is not None and r.success for r in results), (
             f"Expected all heartbeats to succeed, but got failures: "
-            f"{[r.error_message for r in results if not r.success]}"
+            f"{[r.error_message for r in results if r is not None and not r.success]}"
         )
 
         # SPECIFIC ASSERTION 1: Each result should have valid fields
         for i, result in enumerate(results):
+            assert result is not None, f"Result {i}: result should not be None"
             assert result.node_id == node_id, f"Result {i}: node_id mismatch"
             assert result.last_heartbeat_at is not None, (
                 f"Result {i}: last_heartbeat_at should be set"
@@ -616,6 +692,7 @@ class TestHandlerNodeHeartbeatConcurrency:
         earliest_valid_deadline = base_time + timedelta(seconds=window_seconds)
         latest_valid_deadline = latest_event_time + timedelta(seconds=window_seconds)
         for i, result in enumerate(results):
+            assert result is not None
             assert result.liveness_deadline is not None
             assert result.liveness_deadline >= earliest_valid_deadline, (
                 f"Result {i}: deadline {result.liveness_deadline} is before "
@@ -701,8 +778,9 @@ class TestHandlerNodeHeartbeatErrors:
             )
 
             event = make_heartbeat_event(node_id)
+            envelope = create_envelope(event)
             with pytest.raises(InfraConnectionError):
-                await handler.handle(event)
+                await handler.handle(envelope)
 
     async def test_handle_wraps_unexpected_error(
         self,
@@ -731,8 +809,9 @@ class TestHandlerNodeHeartbeatErrors:
             mock_update.side_effect = ValueError("Unexpected error")
 
             event = make_heartbeat_event(node_id)
+            envelope = create_envelope(event)
             with pytest.raises(RuntimeHostError) as exc_info:
-                await handler.handle(event)
+                await handler.handle(envelope)
 
             assert "ValueError" in str(exc_info.value)
 
@@ -766,8 +845,11 @@ class TestHandlerNodeHeartbeatErrors:
             mock_update.return_value = False  # Entity not found during update
 
             event = make_heartbeat_event(node_id)
-            result = await handler.handle(event)
+            envelope = create_envelope(event)
+            output = await handler.handle(envelope)
 
+            result = output.result
+            assert result is not None
             assert result.success is False
             assert result.node_not_found is True
             assert result.previous_state == EnumRegistrationState.ACTIVE
@@ -794,8 +876,11 @@ class TestModelHeartbeatHandlerResult:
         await seed_projection(projector, projection)
 
         event = make_heartbeat_event(node_id)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
+        result = output.result
 
+        assert result is not None
         # Attempt to modify should fail
         with pytest.raises(ValidationError):
             result.success = False  # type: ignore[misc]
@@ -811,8 +896,11 @@ class TestModelHeartbeatHandlerResult:
         await seed_projection(projector, projection)
 
         event = make_heartbeat_event(node_id)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
+        result = output.result
 
+        assert result is not None
         # Verify all fields are present
         assert hasattr(result, "success")
         assert hasattr(result, "node_id")
@@ -846,7 +934,8 @@ class TestHandlerNodeHeartbeatDatabaseState:
 
         event_time = datetime.now(UTC)
         event = make_heartbeat_event(node_id, timestamp=event_time)
-        await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        await heartbeat_handler.handle(envelope)
 
         # Query database directly
         async with pg_pool.acquire() as conn:
@@ -891,7 +980,8 @@ class TestHandlerNodeHeartbeatDatabaseState:
 
         # Process heartbeat
         event = make_heartbeat_event(node_id)
-        await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        await heartbeat_handler.handle(envelope)
 
         # Verify marker was NOT reset
         async with pg_pool.acquire() as conn:
@@ -929,7 +1019,8 @@ class TestHandlerNodeHeartbeatDatabaseState:
 
         # Process heartbeat
         event = make_heartbeat_event(node_id)
-        await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        await heartbeat_handler.handle(envelope)
 
         # Verify ack_deadline unchanged
         async with pg_pool.acquire() as conn:
@@ -984,9 +1075,12 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         # Use a specific timestamp
         event_time = datetime(2025, 12, 25, 10, 30, 45, 123456, tzinfo=UTC)
         event = make_heartbeat_event(node_id, timestamp=event_time)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
+        result = output.result
 
         # Verify result contains exact timestamp
+        assert result is not None
         assert result.success is True
         assert result.last_heartbeat_at == event_time, (
             f"Result last_heartbeat_at should be exactly {event_time}, "
@@ -1028,11 +1122,14 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         # Use timestamp with microseconds
         event_time = datetime(2025, 12, 25, 12, 0, 0, 500000, tzinfo=UTC)
         event = make_heartbeat_event(node_id, timestamp=event_time)
-        result = await handler.handle(event)
+        envelope = create_envelope(event)
+        output = await handler.handle(envelope)
+        result = output.result
 
         # Expected: 12:00:00.500000 + 45.5s = 12:00:46.000000
         expected_deadline = event_time + timedelta(seconds=45.5)
 
+        assert result is not None
         assert result.liveness_deadline is not None
         # Allow 1 millisecond tolerance for floating point
         delta = abs((result.liveness_deadline - expected_deadline).total_seconds())
@@ -1057,9 +1154,12 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
 
         event_time = datetime.now(UTC)
         event = make_heartbeat_event(node_id, timestamp=event_time)
-        result = await heartbeat_handler.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler.handle(envelope)
+        result = output.result
 
         # Verify result timestamps are timezone-aware
+        assert result is not None
         assert result.last_heartbeat_at is not None
         assert result.last_heartbeat_at.tzinfo is not None
         assert result.liveness_deadline is not None
@@ -1093,11 +1193,14 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
 
         for ts in timestamps:
             event = make_heartbeat_event(node_id, timestamp=ts)
-            result = await heartbeat_handler_fast_window.handle(event)
-            results.append(result)
+            envelope = create_envelope(event)
+            output = await heartbeat_handler_fast_window.handle(envelope)
+            results.append(output.result)
 
         # Verify monotonic increase in timestamps
         for i in range(1, len(results)):
+            assert results[i] is not None
+            assert results[i - 1] is not None
             assert results[i].last_heartbeat_at is not None
             assert results[i - 1].last_heartbeat_at is not None
             assert results[i].last_heartbeat_at > results[i - 1].last_heartbeat_at, (
@@ -1144,8 +1247,11 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         # Simulate heartbeat at a known time
         heartbeat_time = datetime(2025, 12, 25, 14, 30, 0, 0, tzinfo=UTC)
         event = make_heartbeat_event(node_id, timestamp=heartbeat_time)
-        result = await heartbeat_handler_fast_window.handle(event)
+        envelope = create_envelope(event)
+        output = await heartbeat_handler_fast_window.handle(envelope)
+        result = output.result
 
+        assert result is not None
         assert result.success is True
 
         # Query the projection directly (as ServiceTimeoutEmitter would)

@@ -25,6 +25,8 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -64,6 +66,21 @@ def create_runtime_tick(now: datetime = TEST_NOW) -> ModelRuntimeTick:
         correlation_id=uuid4(),
         scheduler_id="test-scheduler",
         tick_interval_ms=1000,
+    )
+
+
+def create_envelope(
+    tick: ModelRuntimeTick,
+    now: datetime | None = None,
+    correlation_id: UUID | None = None,
+) -> ModelEventEnvelope[ModelRuntimeTick]:
+    """Create a test envelope wrapping a runtime tick."""
+    return ModelEventEnvelope(
+        envelope_id=uuid4(),
+        payload=tick,
+        envelope_timestamp=now or datetime.now(UTC),
+        correlation_id=correlation_id or uuid4(),
+        source="test",
     )
 
 
@@ -119,17 +136,18 @@ class TestHandlerRuntimeTickDetectsAckTimeout:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        # Act
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
+        # Act
+        output = await handler.handle(envelope)
+
         # Assert
-        assert len(events) == 1
-        timeout_event = events[0]
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert len(output.events) == 1
+        timeout_event = output.events[0]
         assert isinstance(timeout_event, ModelNodeRegistrationAckTimedOut)
         assert timeout_event.node_id == node_id
         assert timeout_event.entity_id == node_id
@@ -154,15 +172,16 @@ class TestHandlerRuntimeTickDetectsAckTimeout:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationAckTimedOut)
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationAckTimedOut)
 
     @pytest.mark.asyncio
     async def test_emits_ack_timeout_for_accepted_state(self) -> None:
@@ -180,15 +199,16 @@ class TestHandlerRuntimeTickDetectsAckTimeout:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationAckTimedOut)
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationAckTimedOut)
 
 
 class TestHandlerRuntimeTickDeduplicatesTimeout:
@@ -220,16 +240,17 @@ class TestHandlerRuntimeTickDeduplicatesTimeout:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        # Act
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
+        # Act
+        output = await handler.handle(envelope)
+
         # Assert - no events because deduplication filters it out
-        assert events == []
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert output.events == ()
 
     @pytest.mark.asyncio
     async def test_no_duplicate_ack_timeout_when_already_emitted(self) -> None:
@@ -248,15 +269,16 @@ class TestHandlerRuntimeTickDeduplicatesTimeout:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
+        output = await handler.handle(envelope)
+
         # Deduplication should prevent event emission
-        assert events == []
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert output.events == ()
 
 
 class TestHandlerRuntimeTickLivenessExpiry:
@@ -281,15 +303,16 @@ class TestHandlerRuntimeTickLivenessExpiry:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
-        assert len(events) == 1
-        liveness_event = events[0]
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert len(output.events) == 1
+        liveness_event = output.events[0]
         assert isinstance(liveness_event, ModelNodeLivenessExpired)
         assert liveness_event.node_id == node_id
         assert liveness_event.entity_id == node_id
@@ -318,15 +341,16 @@ class TestHandlerRuntimeTickLivenessExpiry:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
+        output = await handler.handle(envelope)
+
         # Deduplication should prevent event emission
-        assert events == []
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert output.events == ()
 
 
 class TestHandlerRuntimeTickMultipleTimeouts:
@@ -353,15 +377,16 @@ class TestHandlerRuntimeTickMultipleTimeouts:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
-        assert len(events) == 3
-        for event in events:
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert len(output.events) == 3
+        for event in output.events:
             assert isinstance(event, ModelNodeRegistrationAckTimedOut)
 
     @pytest.mark.asyncio
@@ -389,21 +414,22 @@ class TestHandlerRuntimeTickMultipleTimeouts:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
-        assert len(events) == 2
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert len(output.events) == 2
         # First event is ack timeout
-        assert isinstance(events[0], ModelNodeRegistrationAckTimedOut)
+        assert isinstance(output.events[0], ModelNodeRegistrationAckTimedOut)
         # Second event is liveness expiry
-        assert isinstance(events[1], ModelNodeLivenessExpired)
+        assert isinstance(output.events[1], ModelNodeLivenessExpired)
         # last_heartbeat_at is None when no heartbeat has ever been received.
         # Per ModelNodeLivenessExpired contract: "None if never received".
-        assert events[1].last_heartbeat_at is None
+        assert output.events[1].last_heartbeat_at is None
 
 
 class TestHandlerRuntimeTickNoTimeouts:
@@ -418,22 +444,23 @@ class TestHandlerRuntimeTickNoTimeouts:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=TEST_NOW)
-
-        events = await handler.handle(
-            tick=tick,
-            now=TEST_NOW,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
         )
 
-        assert events == []
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert output.events == ()
 
 
 class TestHandlerRuntimeTickInjectedNow:
-    """Test that handler uses injected `now` parameter."""
+    """Test that handler uses injected `now` parameter from envelope."""
 
     @pytest.mark.asyncio
-    async def test_uses_injected_now_for_ack_deadline_query(self) -> None:
-        """Test that injected now is used for ack deadline queries."""
+    async def test_uses_envelope_timestamp_for_ack_deadline_query(self) -> None:
+        """Test that envelope timestamp is used for ack deadline queries."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
@@ -443,14 +470,11 @@ class TestHandlerRuntimeTickInjectedNow:
         custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
         correlation_id = uuid4()
         tick = create_runtime_tick(now=custom_now)
+        envelope = create_envelope(tick, now=custom_now, correlation_id=correlation_id)
 
-        await handler.handle(
-            tick=tick,
-            now=custom_now,
-            correlation_id=correlation_id,
-        )
+        await handler.handle(envelope)
 
-        # Verify the reader was called with injected now
+        # Verify the reader was called with timestamp from envelope
         mock_reader.get_overdue_ack_registrations.assert_called_once_with(
             now=custom_now,
             domain="registration",
@@ -458,8 +482,8 @@ class TestHandlerRuntimeTickInjectedNow:
         )
 
     @pytest.mark.asyncio
-    async def test_uses_injected_now_for_liveness_deadline_query(self) -> None:
-        """Test that injected now is used for liveness deadline queries."""
+    async def test_uses_envelope_timestamp_for_liveness_deadline_query(self) -> None:
+        """Test that envelope timestamp is used for liveness deadline queries."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
@@ -469,14 +493,11 @@ class TestHandlerRuntimeTickInjectedNow:
         custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
         correlation_id = uuid4()
         tick = create_runtime_tick(now=custom_now)
+        envelope = create_envelope(tick, now=custom_now, correlation_id=correlation_id)
 
-        await handler.handle(
-            tick=tick,
-            now=custom_now,
-            correlation_id=correlation_id,
-        )
+        await handler.handle(envelope)
 
-        # Verify the reader was called with injected now
+        # Verify the reader was called with timestamp from envelope
         mock_reader.get_overdue_liveness_registrations.assert_called_once_with(
             now=custom_now,
             domain="registration",
@@ -484,8 +505,8 @@ class TestHandlerRuntimeTickInjectedNow:
         )
 
     @pytest.mark.asyncio
-    async def test_timeout_event_uses_injected_now_for_emitted_at(self) -> None:
-        """Test that timeout events use injected now for emitted_at field."""
+    async def test_timeout_event_uses_envelope_timestamp_for_emitted_at(self) -> None:
+        """Test that timeout events use envelope timestamp for emitted_at field."""
         mock_reader = create_mock_projection_reader()
 
         custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
@@ -500,24 +521,25 @@ class TestHandlerRuntimeTickInjectedNow:
 
         handler = HandlerRuntimeTick(mock_reader)
         tick = create_runtime_tick(now=custom_now)
-
-        events = await handler.handle(
-            tick=tick,
-            now=custom_now,
-            correlation_id=tick.correlation_id,
+        envelope = create_envelope(
+            tick, now=custom_now, correlation_id=tick.correlation_id
         )
 
-        assert len(events) == 1
-        # emitted_at should be the injected now, not system time
-        assert events[0].emitted_at == custom_now
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert len(output.events) == 1
+        # emitted_at should be the envelope timestamp, not system time
+        assert output.events[0].emitted_at == custom_now
 
 
 class TestHandlerRuntimeTickTimezoneValidation:
-    """Test that handler validates timezone-awareness of now parameter."""
+    """Test that handler validates timezone-awareness of envelope timestamp."""
 
     @pytest.mark.asyncio
     async def test_raises_value_error_for_naive_datetime(self) -> None:
-        """Test that handler raises ValueError if now is naive (no tzinfo)."""
+        """Test that handler raises ValueError if envelope timestamp is naive (no tzinfo)."""
         mock_reader = create_mock_projection_reader()
         handler = HandlerRuntimeTick(mock_reader)
 
@@ -526,14 +548,10 @@ class TestHandlerRuntimeTickTimezoneValidation:
         assert naive_now.tzinfo is None  # Confirm it's naive
 
         tick = create_runtime_tick(now=TEST_NOW)
-        correlation_id = uuid4()
+        envelope = create_envelope(tick, now=naive_now, correlation_id=uuid4())
 
         with pytest.raises(ValueError) as exc_info:
-            await handler.handle(
-                tick=tick,
-                now=naive_now,
-                correlation_id=correlation_id,
-            )
+            await handler.handle(envelope)
 
         assert "timezone-aware" in str(exc_info.value)
         assert "naive" in str(exc_info.value)
@@ -553,12 +571,11 @@ class TestHandlerRuntimeTickTimezoneValidation:
 
         tick = create_runtime_tick(now=aware_now)
         correlation_id = uuid4()
+        envelope = create_envelope(tick, now=aware_now, correlation_id=correlation_id)
 
         # Should not raise - timezone-aware datetime is valid
-        events = await handler.handle(
-            tick=tick,
-            now=aware_now,
-            correlation_id=correlation_id,
-        )
+        output = await handler.handle(envelope)
 
-        assert events == []  # No events expected (empty projections)
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-runtime-tick"
+        assert output.events == ()  # No events expected (empty projections)

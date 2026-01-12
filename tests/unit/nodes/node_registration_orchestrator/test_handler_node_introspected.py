@@ -25,6 +25,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -84,6 +86,21 @@ def create_introspection_event(
     )
 
 
+def create_envelope(
+    event: ModelNodeIntrospectionEvent,
+    now: datetime | None = None,
+    correlation_id: UUID | None = None,
+) -> ModelEventEnvelope[ModelNodeIntrospectionEvent]:
+    """Create a test envelope wrapping an introspection event."""
+    return ModelEventEnvelope(
+        envelope_id=uuid4(),
+        payload=event,
+        envelope_timestamp=now or TEST_NOW,
+        correlation_id=correlation_id or uuid4(),
+        source="test",
+    )
+
+
 class TestHandlerNodeIntrospectedEmitsInitiated:
     """G2 Requirement 3: Handler emits NodeRegistrationInitiated for new nodes."""
 
@@ -103,17 +120,18 @@ class TestHandlerNodeIntrospectedEmitsInitiated:
         node_id = uuid4()
         correlation_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
-
-        # Act
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=correlation_id,
+        envelope = create_envelope(
+            introspection_event, now=TEST_NOW, correlation_id=correlation_id
         )
 
+        # Act
+        output = await handler.handle(envelope)
+
         # Assert
-        assert len(events) == 1
-        initiated = events[0]
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-node-introspected"
+        assert len(output.events) == 1
+        initiated = output.events[0]
         assert isinstance(initiated, ModelNodeRegistrationInitiated)
         assert initiated.node_id == node_id
         assert initiated.entity_id == node_id
@@ -133,15 +151,13 @@ class TestHandlerNodeIntrospectedEmitsInitiated:
 
         handler = HandlerNodeIntrospected(mock_reader)
         introspection_event = create_introspection_event()
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
 
 class TestHandlerNodeIntrospectedSkipsBlockingStates:
@@ -151,7 +167,7 @@ class TestHandlerNodeIntrospectedSkipsBlockingStates:
     async def test_handler_node_introspected_skips_active_node(self) -> None:
         """Given projection returns state=ACTIVE,
         When handler processes NodeIntrospectionEvent,
-        Then returns empty list (no events).
+        Then returns empty events tuple.
         """
         # Arrange
         mock_reader = create_mock_projection_reader()
@@ -164,16 +180,15 @@ class TestHandlerNodeIntrospectedSkipsBlockingStates:
 
         handler = HandlerNodeIntrospected(mock_reader)
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
         # Act
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
         # Assert
-        assert events == []
+        assert isinstance(output, ModelHandlerOutput)
+        assert output.handler_id == "handler-node-introspected"
+        assert len(output.events) == 0
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -200,14 +215,12 @@ class TestHandlerNodeIntrospectedSkipsBlockingStates:
 
         handler = HandlerNodeIntrospected(mock_reader)
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert events == [], f"Expected no events for state {blocking_state}"
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 0, f"Expected no events for state {blocking_state}"
 
 
 class TestHandlerNodeIntrospectedRetriableStates:
@@ -236,16 +249,14 @@ class TestHandlerNodeIntrospectedRetriableStates:
 
         handler = HandlerNodeIntrospected(mock_reader)
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
-        assert events[0].node_id == node_id
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
+        assert output.events[0].node_id == node_id
 
     @pytest.mark.asyncio
     async def test_emits_initiated_for_liveness_expired_state(self) -> None:
@@ -260,15 +271,13 @@ class TestHandlerNodeIntrospectedRetriableStates:
 
         handler = HandlerNodeIntrospected(mock_reader)
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
     @pytest.mark.asyncio
     async def test_emits_initiated_for_rejected_state(self) -> None:
@@ -283,15 +292,13 @@ class TestHandlerNodeIntrospectedRetriableStates:
 
         handler = HandlerNodeIntrospected(mock_reader)
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
     @pytest.mark.asyncio
     async def test_emits_initiated_for_ack_timed_out_state(self) -> None:
@@ -306,15 +313,13 @@ class TestHandlerNodeIntrospectedRetriableStates:
 
         handler = HandlerNodeIntrospected(mock_reader)
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
 
 class TestHandlerNodeIntrospectedEventFields:
@@ -330,24 +335,21 @@ class TestHandlerNodeIntrospectedEventFields:
 
         # Process same event twice
         introspection_event = create_introspection_event()
+        envelope1 = create_envelope(introspection_event, now=TEST_NOW)
+        envelope2 = create_envelope(introspection_event, now=TEST_NOW)
 
-        events1 = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
-        events2 = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output1 = await handler.handle(envelope1)
+        output2 = await handler.handle(envelope2)
 
         # Both should succeed
-        assert len(events1) == 1
-        assert len(events2) == 1
+        assert len(output1.events) == 1
+        assert len(output2.events) == 1
 
         # But registration attempt IDs should differ
-        assert events1[0].registration_attempt_id != events2[0].registration_attempt_id
+        assert (
+            output1.events[0].registration_attempt_id
+            != output2.events[0].registration_attempt_id
+        )
 
     @pytest.mark.asyncio
     async def test_causation_id_links_to_introspection_event(self) -> None:
@@ -364,16 +366,13 @@ class TestHandlerNodeIntrospectedEventFields:
             correlation_id=introspection_correlation_id,
             timestamp=TEST_NOW,
         )
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1
+        assert len(output.events) == 1
         # Causation should link to the introspection event's correlation ID
-        assert events[0].causation_id == introspection_correlation_id
+        assert output.events[0].causation_id == introspection_correlation_id
 
     @pytest.mark.asyncio
     async def test_entity_id_equals_node_id(self) -> None:
@@ -385,17 +384,14 @@ class TestHandlerNodeIntrospectedEventFields:
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1
-        assert events[0].entity_id == node_id
-        assert events[0].node_id == node_id
-        assert events[0].entity_id == events[0].node_id
+        assert len(output.events) == 1
+        assert output.events[0].entity_id == node_id
+        assert output.events[0].node_id == node_id
+        assert output.events[0].entity_id == output.events[0].node_id
 
 
 class TestHandlerNodeIntrospectedProjectionQueries:
@@ -412,12 +408,11 @@ class TestHandlerNodeIntrospectedProjectionQueries:
         node_id = uuid4()
         correlation_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
-
-        await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=correlation_id,
+        envelope = create_envelope(
+            introspection_event, now=TEST_NOW, correlation_id=correlation_id
         )
+
+        await handler.handle(envelope)
 
         mock_reader.get_entity_state.assert_called_once_with(
             entity_id=node_id,
@@ -427,11 +422,11 @@ class TestHandlerNodeIntrospectedProjectionQueries:
 
 
 class TestHandlerNodeIntrospectedTimezoneValidation:
-    """Test that handler validates timezone-awareness of now parameter."""
+    """Test that handler validates timezone-awareness of envelope timestamp."""
 
     @pytest.mark.asyncio
     async def test_raises_value_error_for_naive_datetime(self) -> None:
-        """Test that handler raises ValueError if now is naive (no tzinfo)."""
+        """Test that handler raises ValueError if envelope_timestamp is naive (no tzinfo)."""
         mock_reader = create_mock_projection_reader()
         handler = HandlerNodeIntrospected(mock_reader)
 
@@ -440,13 +435,10 @@ class TestHandlerNodeIntrospectedTimezoneValidation:
         assert naive_now.tzinfo is None  # Confirm it's naive
 
         introspection_event = create_introspection_event(node_id=uuid4())
+        envelope = create_envelope(introspection_event, now=naive_now)
 
         with pytest.raises(ValueError) as exc_info:
-            await handler.handle(
-                event=introspection_event,
-                now=naive_now,
-                correlation_id=uuid4(),
-            )
+            await handler.handle(envelope)
 
         assert "timezone-aware" in str(exc_info.value)
         assert "naive" in str(exc_info.value)
@@ -464,15 +456,13 @@ class TestHandlerNodeIntrospectedTimezoneValidation:
         assert aware_now.tzinfo is not None  # Confirm it's aware
 
         introspection_event = create_introspection_event(node_id=uuid4())
+        envelope = create_envelope(introspection_event, now=aware_now)
 
         # Should not raise - timezone-aware datetime is valid
-        events = await handler.handle(
-            event=introspection_event,
-            now=aware_now,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1  # New node triggers registration
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1  # New node triggers registration
 
 
 def create_mock_projector() -> AsyncMock:
@@ -503,16 +493,16 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         node_id = uuid4()
         correlation_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
-
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=correlation_id,
+        envelope = create_envelope(
+            introspection_event, now=TEST_NOW, correlation_id=correlation_id
         )
 
+        output = await handler.handle(envelope)
+
         # Should emit event
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
         # Should have called projector to persist state transition
         mock_projector.persist_state_transition.assert_called_once()
@@ -537,16 +527,14 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
         # Should still emit event
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
     @pytest.mark.asyncio
     async def test_has_projector_property(self) -> None:
@@ -592,12 +580,9 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
             correlation_id=uuid4(),
             timestamp=TEST_NOW,
         )
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        await handler.handle(envelope)
 
         # Verify capabilities were passed to projector
         call_kwargs = mock_projector.persist_state_transition.call_args[1]
@@ -621,12 +606,9 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         )
 
         introspection_event = create_introspection_event()
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        await handler.handle(envelope)
 
         # Verify ack_deadline was calculated
         call_kwargs = mock_projector.persist_state_transition.call_args[1]
@@ -648,12 +630,9 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         )
 
         introspection_event = create_introspection_event()
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        await handler.handle(envelope)
 
         # Verify default ack_deadline (30 seconds)
         call_kwargs = mock_projector.persist_state_transition.call_args[1]
@@ -680,15 +659,13 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         )
 
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
         # Should not emit events (node already active)
-        assert events == []
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 0
 
         # Should NOT call projector
         mock_projector.persist_state_transition.assert_not_called()
@@ -714,16 +691,16 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
 
         introspection_event = create_introspection_event(node_id=node_id)
         correlation_id = uuid4()
-
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=correlation_id,
+        envelope = create_envelope(
+            introspection_event, now=TEST_NOW, correlation_id=correlation_id
         )
 
+        output = await handler.handle(envelope)
+
         # Should emit re-registration event
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
         # Should persist projection for re-registration
         mock_projector.persist_state_transition.assert_called_once()
@@ -775,16 +752,14 @@ class TestHandlerNodeIntrospectedConsulRegistration:
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
         # Should emit event
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
         # Should have called HandlerConsul.execute
         mock_consul.execute.assert_called_once()
@@ -811,16 +786,14 @@ class TestHandlerNodeIntrospectedConsulRegistration:
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
         # Should not raise - just skip Consul registration
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
     @pytest.mark.asyncio
     async def test_continues_on_consul_error(self) -> None:
@@ -838,17 +811,15 @@ class TestHandlerNodeIntrospectedConsulRegistration:
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
         # Should not raise - Consul failure is non-fatal
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
         # Should still emit event despite Consul failure
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
         # Consul execute should have been attempted
         mock_consul.execute.assert_called_once()
@@ -872,12 +843,9 @@ class TestHandlerNodeIntrospectedConsulRegistration:
         expected_service_name = "onex-effect"
 
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        await handler.handle(envelope)
 
         call_args = mock_consul.execute.call_args[0][0]
         payload = call_args["payload"]
@@ -909,12 +877,9 @@ class TestHandlerNodeIntrospectedConsulRegistration:
             correlation_id=uuid4(),
             timestamp=TEST_NOW,
         )
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        await handler.handle(envelope)
 
         call_args = mock_consul.execute.call_args[0][0]
         payload = call_args["payload"]
@@ -940,16 +905,14 @@ class TestHandlerNodeIntrospectedConsulRegistration:
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        events = await handler.handle(
-            event=introspection_event,
-            now=TEST_NOW,
-            correlation_id=uuid4(),
-        )
+        output = await handler.handle(envelope)
 
         # Should emit event
-        assert len(events) == 1
-        assert isinstance(events[0], ModelNodeRegistrationInitiated)
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
         # Both PostgreSQL and Consul should be called
         mock_projector.persist_state_transition.assert_called_once()

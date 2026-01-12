@@ -13,14 +13,13 @@ Handler Wiring (from contract.yaml):
     - ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked
     - ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat
 
-Handler Adapters:
-    The registry uses adapter classes to bridge existing handlers to the
-    ProtocolMessageHandler interface required by ServiceHandlerRegistry.
-    Each adapter:
-    - Implements handler_id, category, message_types, node_kind properties
-    - Extracts payload, timestamp, and correlation_id from ModelEventEnvelope
-    - Delegates to the inner handler's handle() method
-    - Wraps results in ModelHandlerOutput
+Handler Implementation:
+    All handlers implement ProtocolMessageHandler directly with:
+    - handler_id, category, message_types, node_kind properties
+    - handle(envelope) -> ModelHandlerOutput signature
+
+    Handlers are registered directly with ServiceHandlerRegistry without
+    adapter classes.
 
 Handler Dependencies:
     All handlers require ProjectionReaderRegistration for state queries.
@@ -55,19 +54,12 @@ Related Tickets:
 
 from __future__ import annotations
 
-import time
-from datetime import datetime
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
 
-from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
-from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from pydantic import BaseModel
 
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
@@ -80,326 +72,6 @@ if TYPE_CHECKING:
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
-
-
-class AdapterNodeIntrospected:
-    """Adapter for HandlerNodeIntrospected to ProtocolMessageHandler interface.
-
-    Bridges the existing handler signature:
-        handle(event, now, correlation_id) -> list[BaseModel]
-
-    To the ProtocolMessageHandler signature:
-        handle(envelope) -> ModelHandlerOutput
-    """
-
-    def __init__(self, inner: HandlerNodeIntrospected) -> None:
-        """Initialize adapter with inner handler.
-
-        Args:
-            inner: The HandlerNodeIntrospected instance to wrap.
-        """
-        self._inner = inner
-
-    @property
-    def handler_id(self) -> str:
-        """Unique identifier for this handler."""
-        return "handler-node-introspected"
-
-    @property
-    def category(self) -> EnumMessageCategory:
-        """Message category this handler processes."""
-        return EnumMessageCategory.EVENT
-
-    @property
-    def message_types(self) -> set[str]:
-        """Set of message type names this handler can process."""
-        return {"ModelNodeIntrospectionEvent"}
-
-    @property
-    def node_kind(self) -> EnumNodeKind:
-        """Node kind this handler belongs to."""
-        return EnumNodeKind.ORCHESTRATOR
-
-    async def handle(
-        self, envelope: ModelEventEnvelope[object]
-    ) -> ModelHandlerOutput[object]:
-        """Process event envelope and return handler output.
-
-        Args:
-            envelope: Event envelope containing ModelNodeIntrospectionEvent payload.
-
-        Returns:
-            ModelHandlerOutput containing emitted events.
-        """
-        start_time = time.perf_counter()
-
-        # Extract from envelope
-        payload = envelope.payload
-        now: datetime = envelope.envelope_timestamp
-        correlation_id: UUID = envelope.correlation_id or uuid4()
-
-        # Delegate to inner handler
-        events: list[BaseModel] = await self._inner.handle(
-            event=payload,  # type: ignore[arg-type]
-            now=now,
-            correlation_id=correlation_id,
-        )
-
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
-
-        return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
-            correlation_id=correlation_id,
-            handler_id=self.handler_id,
-            node_kind=self.node_kind,
-            events=tuple(events),
-            intents=(),
-            projections=(),
-            result=None,
-            processing_time_ms=processing_time_ms,
-            timestamp=now,
-        )
-
-
-class AdapterRuntimeTick:
-    """Adapter for HandlerRuntimeTick to ProtocolMessageHandler interface.
-
-    Bridges the existing handler signature:
-        handle(tick, now, correlation_id) -> list[BaseModel]
-
-    To the ProtocolMessageHandler signature:
-        handle(envelope) -> ModelHandlerOutput
-    """
-
-    def __init__(self, inner: HandlerRuntimeTick) -> None:
-        """Initialize adapter with inner handler.
-
-        Args:
-            inner: The HandlerRuntimeTick instance to wrap.
-        """
-        self._inner = inner
-
-    @property
-    def handler_id(self) -> str:
-        """Unique identifier for this handler."""
-        return "handler-runtime-tick"
-
-    @property
-    def category(self) -> EnumMessageCategory:
-        """Message category this handler processes."""
-        return EnumMessageCategory.EVENT
-
-    @property
-    def message_types(self) -> set[str]:
-        """Set of message type names this handler can process."""
-        return {"ModelRuntimeTick"}
-
-    @property
-    def node_kind(self) -> EnumNodeKind:
-        """Node kind this handler belongs to."""
-        return EnumNodeKind.ORCHESTRATOR
-
-    async def handle(
-        self, envelope: ModelEventEnvelope[object]
-    ) -> ModelHandlerOutput[object]:
-        """Process event envelope and return handler output.
-
-        Args:
-            envelope: Event envelope containing ModelRuntimeTick payload.
-
-        Returns:
-            ModelHandlerOutput containing emitted events.
-        """
-        start_time = time.perf_counter()
-
-        # Extract from envelope
-        payload = envelope.payload
-        now: datetime = envelope.envelope_timestamp
-        correlation_id: UUID = envelope.correlation_id or uuid4()
-
-        # Delegate to inner handler
-        events: list[BaseModel] = await self._inner.handle(
-            tick=payload,  # type: ignore[arg-type]
-            now=now,
-            correlation_id=correlation_id,
-        )
-
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
-
-        return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
-            correlation_id=correlation_id,
-            handler_id=self.handler_id,
-            node_kind=self.node_kind,
-            events=tuple(events),
-            intents=(),
-            projections=(),
-            result=None,
-            processing_time_ms=processing_time_ms,
-            timestamp=now,
-        )
-
-
-class AdapterNodeRegistrationAcked:
-    """Adapter for HandlerNodeRegistrationAcked to ProtocolMessageHandler interface.
-
-    Bridges the existing handler signature:
-        handle(command, now, correlation_id) -> list[BaseModel]
-
-    To the ProtocolMessageHandler signature:
-        handle(envelope) -> ModelHandlerOutput
-    """
-
-    def __init__(self, inner: HandlerNodeRegistrationAcked) -> None:
-        """Initialize adapter with inner handler.
-
-        Args:
-            inner: The HandlerNodeRegistrationAcked instance to wrap.
-        """
-        self._inner = inner
-
-    @property
-    def handler_id(self) -> str:
-        """Unique identifier for this handler."""
-        return "handler-node-registration-acked"
-
-    @property
-    def category(self) -> EnumMessageCategory:
-        """Message category this handler processes."""
-        return EnumMessageCategory.COMMAND
-
-    @property
-    def message_types(self) -> set[str]:
-        """Set of message type names this handler can process."""
-        return {"ModelNodeRegistrationAcked"}
-
-    @property
-    def node_kind(self) -> EnumNodeKind:
-        """Node kind this handler belongs to."""
-        return EnumNodeKind.ORCHESTRATOR
-
-    async def handle(
-        self, envelope: ModelEventEnvelope[object]
-    ) -> ModelHandlerOutput[object]:
-        """Process event envelope and return handler output.
-
-        Args:
-            envelope: Event envelope containing ModelNodeRegistrationAcked payload.
-
-        Returns:
-            ModelHandlerOutput containing emitted events.
-        """
-        start_time = time.perf_counter()
-
-        # Extract from envelope
-        payload = envelope.payload
-        now: datetime = envelope.envelope_timestamp
-        correlation_id: UUID = envelope.correlation_id or uuid4()
-
-        # Delegate to inner handler
-        events: list[BaseModel] = await self._inner.handle(
-            command=payload,  # type: ignore[arg-type]
-            now=now,
-            correlation_id=correlation_id,
-        )
-
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
-
-        return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
-            correlation_id=correlation_id,
-            handler_id=self.handler_id,
-            node_kind=self.node_kind,
-            events=tuple(events),
-            intents=(),
-            projections=(),
-            result=None,
-            processing_time_ms=processing_time_ms,
-            timestamp=now,
-        )
-
-
-class AdapterNodeHeartbeat:
-    """Adapter for HandlerNodeHeartbeat to ProtocolMessageHandler interface.
-
-    Bridges the existing handler signature:
-        handle(event, domain) -> ModelHeartbeatHandlerResult
-
-    To the ProtocolMessageHandler signature:
-        handle(envelope) -> ModelHandlerOutput
-
-    Note:
-        HandlerNodeHeartbeat has a different return type (ModelHeartbeatHandlerResult)
-        than other handlers. The adapter wraps this in ModelHandlerOutput.result.
-    """
-
-    def __init__(self, inner: HandlerNodeHeartbeat) -> None:
-        """Initialize adapter with inner handler.
-
-        Args:
-            inner: The HandlerNodeHeartbeat instance to wrap.
-        """
-        self._inner = inner
-
-    @property
-    def handler_id(self) -> str:
-        """Unique identifier for this handler."""
-        return "handler-node-heartbeat"
-
-    @property
-    def category(self) -> EnumMessageCategory:
-        """Message category this handler processes."""
-        return EnumMessageCategory.EVENT
-
-    @property
-    def message_types(self) -> set[str]:
-        """Set of message type names this handler can process."""
-        return {"ModelNodeHeartbeatEvent"}
-
-    @property
-    def node_kind(self) -> EnumNodeKind:
-        """Node kind this handler belongs to."""
-        return EnumNodeKind.ORCHESTRATOR
-
-    async def handle(
-        self, envelope: ModelEventEnvelope[object]
-    ) -> ModelHandlerOutput[object]:
-        """Process event envelope and return handler output.
-
-        Args:
-            envelope: Event envelope containing ModelNodeHeartbeatEvent payload.
-
-        Returns:
-            ModelHandlerOutput with result containing ModelHeartbeatHandlerResult.
-        """
-        start_time = time.perf_counter()
-
-        # Extract from envelope
-        payload = envelope.payload
-        now: datetime = envelope.envelope_timestamp
-        correlation_id: UUID = envelope.correlation_id or uuid4()
-
-        # Delegate to inner handler
-        # Note: HandlerNodeHeartbeat takes (event, domain) not (event, now, correlation_id)
-        result = await self._inner.handle(
-            event=payload,  # type: ignore[arg-type]
-            domain="registration",
-        )
-
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
-
-        return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
-            correlation_id=correlation_id,
-            handler_id=self.handler_id,
-            node_kind=self.node_kind,
-            events=(),
-            intents=(),
-            projections=(),
-            result=result,
-            processing_time_ms=processing_time_ms,
-            timestamp=now,
-        )
 
 
 class RegistryInfraNodeRegistrationOrchestrator:
@@ -510,45 +182,34 @@ class RegistryInfraNodeRegistrationOrchestrator:
             HandlerRuntimeTick,
         )
 
-        # Create registry
         registry = ServiceHandlerRegistry()
 
-        # Create inner handlers with dependencies
-        inner_introspected = HandlerNodeIntrospected(
+        # Create handlers with dependencies
+        handler_introspected = HandlerNodeIntrospected(
             projection_reader=projection_reader,
             projector=projector,
             consul_handler=consul_handler,
         )
-
-        inner_runtime_tick = HandlerRuntimeTick(
+        handler_runtime_tick = HandlerRuntimeTick(
+            projection_reader=projection_reader,
+        )
+        handler_registration_acked = HandlerNodeRegistrationAcked(
             projection_reader=projection_reader,
         )
 
-        inner_registration_acked = HandlerNodeRegistrationAcked(
-            projection_reader=projection_reader,
-        )
+        # Register handlers directly (no adapters needed - handlers implement
+        # ProtocolMessageHandler with handle(envelope) -> ModelHandlerOutput)
+        registry.register_handler(handler_introspected)
+        registry.register_handler(handler_runtime_tick)
+        registry.register_handler(handler_registration_acked)
 
-        # HandlerNodeHeartbeat requires projector (not optional for heartbeat updates)
-        # If no projector provided, create handler anyway (it will log warnings)
+        # Heartbeat handler requires projector for persistence
         if projector is not None:
-            inner_node_heartbeat = HandlerNodeHeartbeat(
+            handler_heartbeat = HandlerNodeHeartbeat(
                 projection_reader=projection_reader,
                 projector=projector,
             )
-            # Wrap and register heartbeat handler
-            registry.register_handler(AdapterNodeHeartbeat(inner_node_heartbeat))
-
-        # Wrap inner handlers in adapters
-        adapter_introspected = AdapterNodeIntrospected(inner_introspected)
-        adapter_runtime_tick = AdapterRuntimeTick(inner_runtime_tick)
-        adapter_registration_acked = AdapterNodeRegistrationAcked(
-            inner_registration_acked
-        )
-
-        # Register handlers
-        registry.register_handler(adapter_introspected)
-        registry.register_handler(adapter_runtime_tick)
-        registry.register_handler(adapter_registration_acked)
+            registry.register_handler(handler_heartbeat)
 
         # Freeze registry to make it thread-safe
         registry.freeze()
@@ -703,10 +364,10 @@ class RegistryInfraNodeRegistrationOrchestrator:
             handler_map = registry.get_handler_map()
 
             # Route event to handler
-            event_type = type(event).__name__
+            event_type = type(envelope.payload).__name__
             handler = handler_map.get(event_type)
             if handler:
-                result = await handler.handle(event, now, correlation_id)
+                result = await handler.handle(envelope)
             ```
         """
         handler_map: dict[

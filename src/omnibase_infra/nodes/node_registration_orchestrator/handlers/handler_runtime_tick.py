@@ -30,14 +30,20 @@ Related Tickets:
     - OMN-888 (C1): Registration Orchestrator
     - OMN-932 (C2): Durable Timeout Handling
     - OMN-940 (F0): Projector Execution Model
+    - OMN-1102: Refactor to ProtocolMessageHandler signature
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
-from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
+
+from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from pydantic import BaseModel
 
 from omnibase_infra.models.registration.events.model_node_liveness_expired import (
     ModelNodeLivenessExpired,
@@ -49,9 +55,6 @@ from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +116,30 @@ class HandlerRuntimeTick:
         """
         self._projection_reader = projection_reader
 
+    @property
+    def handler_id(self) -> str:
+        """Return unique identifier for this handler."""
+        return "handler-runtime-tick"
+
+    @property
+    def category(self) -> EnumMessageCategory:
+        """Return the message category this handler processes."""
+        return EnumMessageCategory.EVENT
+
+    @property
+    def message_types(self) -> set[str]:
+        """Return the set of message types this handler processes."""
+        return {"ModelRuntimeTick"}
+
+    @property
+    def node_kind(self) -> EnumNodeKind:
+        """Return the node kind this handler belongs to."""
+        return EnumNodeKind.ORCHESTRATOR
+
     async def handle(
         self,
-        tick: ModelRuntimeTick,
-        now: datetime,
-        correlation_id: UUID,
-    ) -> list[BaseModel]:
+        envelope: ModelEventEnvelope[ModelRuntimeTick],
+    ) -> ModelHandlerOutput[object]:
         """Process runtime tick and emit timeout events.
 
         Scans the projection for overdue deadlines and emits appropriate
@@ -126,18 +147,23 @@ class HandlerRuntimeTick:
         duplicate timeout events.
 
         Args:
-            tick: The runtime tick event from the scheduler.
-            now: Injected current time for deadline comparison.
-            correlation_id: Correlation ID for distributed tracing.
+            envelope: The event envelope containing the runtime tick event.
 
         Returns:
-            List of timeout events (ModelNodeRegistrationAckTimedOut,
-            ModelNodeLivenessExpired). May be empty if no timeouts detected.
+            ModelHandlerOutput containing timeout events (ModelNodeRegistrationAckTimedOut,
+            ModelNodeLivenessExpired). Events tuple may be empty if no timeouts detected.
 
         Raises:
             RuntimeHostError: If projection queries fail (propagated from reader).
-            ValueError: If now is naive (no timezone info).
+            ValueError: If envelope_timestamp is naive (no timezone info).
         """
+        start_time = time.perf_counter()
+
+        # Extract from envelope
+        tick = envelope.payload
+        now = envelope.envelope_timestamp
+        correlation_id = envelope.correlation_id or uuid4()
+
         # Validate timezone-awareness for time injection pattern
         if now.tzinfo is None:
             raise ValueError(
@@ -174,7 +200,20 @@ class HandlerRuntimeTick:
                 },
             )
 
-        return events
+        # Wrap result in ModelHandlerOutput
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        return ModelHandlerOutput(
+            input_envelope_id=envelope.envelope_id,
+            correlation_id=correlation_id,
+            handler_id=self.handler_id,
+            node_kind=self.node_kind,
+            events=tuple(events),
+            intents=(),
+            projections=(),
+            result=None,
+            processing_time_ms=processing_time_ms,
+            timestamp=now,
+        )
 
     async def _check_ack_timeouts(
         self,
