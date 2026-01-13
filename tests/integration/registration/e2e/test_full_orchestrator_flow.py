@@ -681,8 +681,9 @@ async def ensure_test_topic_exists(
     exists in the Kafka cluster before tests run. The topic should be pre-created
     during initial infrastructure setup.
 
-    Fail-fast behavior: If the topic doesn't exist, this fixture fails immediately
-    with a clear error message, preventing cryptic failures later in the test.
+    Fail-fast behavior: If the topic doesn't exist or validation fails, this
+    fixture fails immediately with a clear error message, preventing cryptic
+    failures later in the test.
 
     Test isolation is achieved via unique consumer group IDs rather than
     unique topic names.
@@ -695,7 +696,7 @@ async def ensure_test_topic_exists(
         The test topic name.
 
     Raises:
-        pytest.fail: If the topic does not exist in Kafka.
+        pytest.fail: If the topic does not exist in Kafka or validation fails.
     """
     import os
 
@@ -706,28 +707,62 @@ async def ensure_test_topic_exists(
         pytest.fail("KAFKA_BOOTSTRAP_SERVERS environment variable not set")
 
     admin_client: AIOKafkaAdminClient | None = None
+    topic_creation_hint = (
+        f"Create it before running E2E tests: "
+        f"rpk topic create {TEST_INTROSPECTION_TOPIC} --partitions 1"
+    )
+
     try:
         admin_client = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
         await admin_client.start()
 
         # Validate topic exists by describing it
-        # describe_topics raises if topic doesn't exist
+        # describe_topics returns list of topic metadata or raises exception
         topic_descriptions = await admin_client.describe_topics(
             [TEST_INTROSPECTION_TOPIC]
         )
 
+        # Fail-fast validation 1: Empty response means topic doesn't exist
         if not topic_descriptions:
             pytest.fail(
-                f"Test topic '{TEST_INTROSPECTION_TOPIC}' does not exist. "
-                f"Create it before running E2E tests: "
-                f"rpk topic create {TEST_INTROSPECTION_TOPIC} --partitions 1"
+                f"Test topic '{TEST_INTROSPECTION_TOPIC}' does not exist "
+                f"(describe_topics returned empty response). {topic_creation_hint}"
+            )
+
+        # Fail-fast validation 2: Check if topic is actually in the response
+        # The response is a list of dicts with topic metadata
+        topic_metadata = topic_descriptions[0]
+
+        # Validate topic name matches (handles potential mismatch)
+        topic_name = topic_metadata.get("topic", topic_metadata.get("name"))
+        if topic_name and topic_name != TEST_INTROSPECTION_TOPIC:
+            pytest.fail(
+                f"Topic name mismatch: expected '{TEST_INTROSPECTION_TOPIC}', "
+                f"got '{topic_name}'. {topic_creation_hint}"
+            )
+
+        # Fail-fast validation 3: Check for error codes in response
+        # aiokafka may return error_code field for non-existent topics
+        error_code = topic_metadata.get("error_code", 0)
+        if error_code != 0:
+            pytest.fail(
+                f"Test topic '{TEST_INTROSPECTION_TOPIC}' has error code {error_code}. "
+                f"Topic may not exist or has invalid configuration. {topic_creation_hint}"
+            )
+
+        # Fail-fast validation 4: Ensure topic has at least one partition
+        partitions = topic_metadata.get("partitions", [])
+        if not partitions:
+            pytest.fail(
+                f"Test topic '{TEST_INTROSPECTION_TOPIC}' has no partitions. "
+                f"Topic may be misconfigured. {topic_creation_hint}"
             )
 
         logger.info(
-            "Test topic validated",
+            "Test topic validated successfully",
             extra={
                 "topic": TEST_INTROSPECTION_TOPIC,
-                "partitions": len(topic_descriptions[0].get("partitions", [])),
+                "partitions": len(partitions),
             },
         )
 
@@ -737,8 +772,13 @@ async def ensure_test_topic_exists(
         if "unknown topic" in error_msg or "not found" in error_msg:
             pytest.fail(
                 f"Test topic '{TEST_INTROSPECTION_TOPIC}' does not exist. "
-                f"Create it before running E2E tests: "
-                f"rpk topic create {TEST_INTROSPECTION_TOPIC} --partitions 1"
+                f"{topic_creation_hint}"
+            )
+        # Check for other common Kafka errors
+        if "timeout" in error_msg:
+            pytest.fail(
+                f"Timeout validating topic '{TEST_INTROSPECTION_TOPIC}'. "
+                f"Kafka cluster may be unreachable at {bootstrap_servers}."
             )
         # Re-raise other errors (connection issues, etc.)
         raise

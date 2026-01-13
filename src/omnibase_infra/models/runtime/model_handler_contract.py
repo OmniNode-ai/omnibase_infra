@@ -23,11 +23,14 @@ from __future__ import annotations
 
 import logging
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
+from omnibase_infra.models.runtime.model_contract_security_config import (
+    ModelContractSecurityConfig,
+)
 
 # Handler type category mapping from contract strings to enum
 _HANDLER_TYPE_CATEGORY_MAP: dict[str, EnumHandlerTypeCategory] = {
@@ -116,6 +119,17 @@ class ModelHandlerContract(BaseModel):
         validation_alias="tags",
         description="Tags for handler discovery and filtering (also accepts 'tags')",
     )
+    protocol_type: str | None = Field(
+        default=None,
+        description=(
+            "Protocol type identifier for registry (e.g., 'db', 'http', 'consul'). "
+            "If not provided, defaults to handler_name with 'handler-' prefix stripped."
+        ),
+    )
+    security: ModelContractSecurityConfig | None = Field(
+        default=None,
+        description="Optional security configuration for the handler",
+    )
 
     @field_validator("handler_type", mode="before")
     @classmethod
@@ -190,6 +204,42 @@ class ModelHandlerContract(BaseModel):
             return valid_tags
 
         return []
+
+    @model_validator(mode="after")
+    def set_default_protocol_type(self) -> ModelHandlerContract:
+        """Set protocol_type from handler_name if not explicitly provided.
+
+        If protocol_type is None, derives it from handler_name by stripping
+        the 'handler-' prefix. If handler_name doesn't have that prefix,
+        uses the full handler_name as protocol_type.
+
+        Returns:
+            Self with protocol_type populated.
+
+        Example:
+            >>> contract = ModelHandlerContract(
+            ...     handler_name="handler-db",
+            ...     handler_class="myapp.handlers.DbHandler",
+            ...     handler_type="effect",
+            ... )
+            >>> contract.protocol_type
+            'db'
+
+            >>> contract = ModelHandlerContract(
+            ...     handler_name="custom-handler",
+            ...     handler_class="myapp.handlers.Custom",
+            ...     handler_type="compute",
+            ... )
+            >>> contract.protocol_type
+            'custom-handler'
+        """
+        if self.protocol_type is None:
+            prefix = "handler-"
+            if self.handler_name.startswith(prefix):
+                self.protocol_type = self.handler_name[len(prefix) :]
+            else:
+                self.protocol_type = self.handler_name
+        return self
 
 
 __all__ = ["ModelHandlerContract"]

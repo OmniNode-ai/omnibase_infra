@@ -564,6 +564,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         handler_class_path = contract.handler_class
         handler_type = contract.handler_type
         capability_tags = contract.capability_tags
+        # protocol_type is the registry key (e.g., "db", "http")
+        # The model_validator in ModelHandlerContract sets this from handler_name
+        # if not explicitly provided (strips "handler-" prefix)
+        protocol_type = contract.protocol_type
+        # Should never be None after model_validator, but assert for type safety
+        assert protocol_type is not None, (
+            "protocol_type should be set by model_validator"
+        )
 
         # Import and validate handler class
         handler_class = self._import_handler_class(
@@ -628,6 +636,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         return ModelLoadedHandler(
             handler_name=handler_name,
+            protocol_type=protocol_type,
             handler_type=handler_type,
             handler_class=handler_class_path,
             contract_path=resolved_contract_path,

@@ -19,7 +19,7 @@
 --   - Brief table locks (seconds) are acceptable
 --   - Running inside a transaction block (e.g., CI/CD pipeline migrations)
 --
---   USE THIS SCRIPT (003a_capability_fields_concurrent.sql) WHEN:
+--   USE THIS SCRIPT (004_capability_fields_concurrent.sql) WHEN:
 --   - Running in production with live traffic
 --   - Table has > 100,000 rows (recommended for > 1M rows)
 --   - Zero-downtime deployments are required
@@ -34,15 +34,15 @@
 --
 -- If using psql:
 --   \set AUTOCOMMIT on
---   \i 003a_capability_fields_concurrent.sql
+--   \i 004_capability_fields_concurrent.sql
 --
 -- If using psql with -f flag:
---   psql -h <host> -d <database> -f 003a_capability_fields_concurrent.sql
+--   psql -h <host> -d <database> -f 004_capability_fields_concurrent.sql
 --   (autocommit is enabled by default)
 --
 -- DO NOT USE:
 --   BEGIN;
---   \i 003a_capability_fields_concurrent.sql
+--   \i 004_capability_fields_concurrent.sql
 --   COMMIT;
 --   -- This will ERROR with: "CREATE INDEX CONCURRENTLY cannot run inside a transaction block"
 --

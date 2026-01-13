@@ -78,6 +78,7 @@ from .verification_helpers import (
     verify_postgres_registration,
     wait_for_consul_registration,
     wait_for_postgres_registration,
+    wait_for_postgres_write,
 )
 
 if TYPE_CHECKING:
@@ -782,8 +783,13 @@ class TestSuite2RegistryDualRegistration:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Allow PostgreSQL async write to complete before testing handler behavior
-        await asyncio.sleep(0.1)
+        # Wait for PostgreSQL write to complete using deterministic polling
+        write_result = await wait_for_postgres_write(
+            projection_reader, unique_node_id, timeout_seconds=2.0
+        )
+        assert write_result is not None, (
+            f"PostgreSQL write did not complete in time for node {unique_node_id}"
+        )
 
         # Create introspection event for the same node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
@@ -870,8 +876,13 @@ class TestSuite2RegistryDualRegistration:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Allow PostgreSQL async write to complete before testing handler behavior
-        await asyncio.sleep(0.1)
+        # Wait for PostgreSQL write to complete using deterministic polling
+        write_result = await wait_for_postgres_write(
+            projection_reader, unique_node_id, timeout_seconds=2.0
+        )
+        assert write_result is not None, (
+            f"PostgreSQL write did not complete in time for node {unique_node_id}"
+        )
 
         # Create introspection event for the same node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
@@ -1013,9 +1024,15 @@ class TestSuite3ReIntrospection:
             enable_registry_listener=True,
         )
 
-        # Allow time for the registry listener to establish Kafka subscription
-        # This is necessary because the listener subscribes asynchronously
-        await asyncio.sleep(2.0)
+        # Wait for registry listener's Kafka consumer to be ready.
+        # The listener subscribes to DEFAULT_REQUEST_INTROSPECTION_TOPIC internally.
+        # RATIONALE: This uses wait_for_consumer_ready for consistency with other
+        # consumer waits, though we can't access the internal event bus directly.
+        # The wait_for_consumer_ready helper documents the known limitation that
+        # true readiness polling would require KafkaEventBus API changes.
+        await wait_for_consumer_ready(
+            real_kafka_event_bus, DEFAULT_REQUEST_INTROSPECTION_TOPIC, max_wait=2.0
+        )
 
         try:
             # Collect introspection events for our node
@@ -1112,8 +1129,11 @@ class TestSuite3ReIntrospection:
             enable_registry_listener=True,
         )
 
-        # Allow time for the registry listener to establish Kafka subscription
-        await asyncio.sleep(2.0)
+        # Wait for registry listener's Kafka consumer to be ready.
+        # See wait_for_consumer_ready docstring for known limitations.
+        await wait_for_consumer_ready(
+            real_kafka_event_bus, DEFAULT_REQUEST_INTROSPECTION_TOPIC, max_wait=2.0
+        )
 
         try:
             # Track responses with matching correlation_id
@@ -1265,8 +1285,11 @@ class TestSuite4HeartbeatPublishing:
                 enable_registry_listener=False,
             )
 
-            # Wait for 2 heartbeat intervals (65 seconds to be safe)
-            # First heartbeat happens immediately on start
+            # RATIONALE: This is a heartbeat interval test - we MUST wait for
+            # at least 2 heartbeat cycles (30s interval) to verify the timing.
+            # A shorter wait would not test the actual heartbeat interval behavior.
+            # Wait for 2 heartbeat intervals (65 seconds to be safe).
+            # First heartbeat happens immediately on start.
             await asyncio.sleep(65.0)
 
             # Verify we received at least 2 heartbeats
@@ -1554,7 +1577,10 @@ class TestHeartbeatPerformanceExtended:
                 enable_registry_listener=False,
             )
 
-            # Wait for 3+ intervals (100 seconds)
+            # RATIONALE: This is a heartbeat consistency test - we MUST wait for
+            # at least 3 heartbeat cycles (30s interval each) to verify interval
+            # stability. A shorter wait would not test the actual timing consistency.
+            # Wait for 3+ intervals (100 seconds).
             await asyncio.sleep(100.0)
 
             # Verify we have enough heartbeats
@@ -1656,8 +1682,13 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Allow PostgreSQL async write to complete before subsequent operations
-        await asyncio.sleep(0.2)
+        # Wait for PostgreSQL write to complete using deterministic polling
+        write_result = await wait_for_postgres_write(
+            projection_reader, unique_node_id, timeout_seconds=2.0
+        )
+        assert write_result is not None, (
+            f"PostgreSQL write did not complete in time for node {unique_node_id}"
+        )
 
         # Step 2: Create a NEW container and orchestrator (simulating restart)
         from omnibase_core.container import ModelONEXContainer as ContainerClass
@@ -1748,8 +1779,13 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Allow PostgreSQL async write to complete before subsequent operations
-        await asyncio.sleep(0.2)
+        # Wait for PostgreSQL write to complete using deterministic polling
+        write_result = await wait_for_postgres_write(
+            projection_reader, unique_node_id, timeout_seconds=2.0
+        )
+        assert write_result is not None, (
+            f"PostgreSQL write did not complete in time for node {unique_node_id}"
+        )
 
         # Step 2: Create handler and process same introspection event (simulating re-registration)
         handler_projection_reader = await get_projection_reader_from_container(
@@ -1841,10 +1877,7 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Allow PostgreSQL async write to complete before first verification
-        await asyncio.sleep(0.2)
-
-        # Verify initial registration
+        # Verify initial registration (polling already handles retry)
         first_result = await wait_for_postgres_registration(
             projection_reader=projection_reader,
             node_id=unique_node_id,
@@ -1872,10 +1905,7 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(2),
         )
 
-        # Allow PostgreSQL UPSERT to complete before final verification
-        await asyncio.sleep(0.2)
-
-        # Step 3: Verify single record with updated data
+        # Step 3: Verify single record with updated data (polling already handles retry)
         final_result = await wait_for_postgres_registration(
             projection_reader=projection_reader,
             node_id=unique_node_id,
@@ -1987,9 +2017,7 @@ class TestSuite6MultipleNodes:
             if isinstance(result, Exception):
                 pytest.fail(f"Node {node_ids[i]} registration failed: {result}")
 
-        # Step 3: Verify all nodes appear in PostgreSQL
-        await asyncio.sleep(0.5)  # Allow propagation
-
+        # Step 3: Verify all nodes appear in PostgreSQL (polling already handles retry)
         for i, node_id in enumerate(node_ids):
             projection = await verify_postgres_registration(
                 projection_reader=projection_reader,
@@ -2065,9 +2093,7 @@ class TestSuite6MultipleNodes:
             for ex in exceptions:
                 print(f"Concurrent operation exception (may be expected): {ex}")
 
-        # Step 3: Verify exactly one registration exists
-        await asyncio.sleep(0.5)  # Allow final state to settle
-
+        # Step 3: Verify exactly one registration exists (polling already handles retry)
         projection = await verify_postgres_registration(
             projection_reader=projection_reader,
             node_id=unique_node_id,
@@ -2169,10 +2195,7 @@ class TestSuite6MultipleNodes:
             }
             await real_consul_handler.execute(consul_envelope)
 
-        # Allow Consul KV writes to propagate before verification
-        await asyncio.sleep(0.5)
-
-        # Step 2: Verify all 3 in Consul
+        # Step 2: Verify all 3 in Consul (polling already handles retry)
         consul_results = []
         for service_id in service_ids:
             result = await verify_consul_registration(

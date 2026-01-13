@@ -340,22 +340,25 @@ class ContractHandlerDiscovery:
                             correlation_id,
                         )
 
-                        # Register with handler_registry using handler_name as key
-                        # This enables runtime lookup by handler_name
+                        # Register with handler_registry using protocol_type as key
+                        # This enables runtime lookup by protocol type (e.g., "db", "http")
+                        # which matches how message routing selects handlers
                         self._handler_registry.register(
-                            loaded.handler_name,
+                            loaded.protocol_type,
                             handler_class,
                         )
                         handlers_registered += 1
                         path_handlers_registered += 1
 
                         logger.debug(
-                            "Registered handler: %s -> %s",
+                            "Registered handler: %s (protocol=%s) -> %s",
                             loaded.handler_name,
+                            loaded.protocol_type,
                             loaded.handler_class,
                             extra={
                                 "correlation_id": str(correlation_id),
                                 "handler_name": loaded.handler_name,
+                                "protocol_type": loaded.protocol_type,
                                 "handler_class": loaded.handler_class,
                                 "contract_path": str(loaded.contract_path),
                             },

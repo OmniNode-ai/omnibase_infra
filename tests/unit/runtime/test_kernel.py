@@ -747,6 +747,20 @@ class TestIntegration:
         This test uses real components except for the shutdown wait and health server.
         Health server is mocked to avoid port conflicts in parallel tests.
         """
+        # Create a minimal handler contract in tmp_path for discovery
+        handlers_dir = tmp_path / "handlers" / "http"
+        handlers_dir.mkdir(parents=True)
+        contract_file = handlers_dir / "handler_contract.yaml"
+        contract_file.write_text(
+            yaml.dump(
+                {
+                    "name": "handler-http",
+                    "handler_class": "omnibase_infra.handlers.handler_http.HttpRestHandler",
+                    "handler_type": "effect",
+                    "tags": ["http", "test"],
+                }
+            )
+        )
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
 
         with patch(
@@ -775,6 +789,20 @@ class TestIntegration:
         This test uses real components (InMemoryEventBus, RuntimeHostProcess)
         but mocks ServiceHealth to verify the container injection.
         """
+        # Create a minimal handler contract in tmp_path for discovery
+        handlers_dir = tmp_path / "handlers" / "http"
+        handlers_dir.mkdir(parents=True)
+        contract_file = handlers_dir / "handler_contract.yaml"
+        contract_file.write_text(
+            yaml.dump(
+                {
+                    "name": "handler-http",
+                    "handler_class": "omnibase_infra.handlers.handler_http.HttpRestHandler",
+                    "handler_type": "effect",
+                    "tags": ["http", "test"],
+                }
+            )
+        )
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
 
         with patch(

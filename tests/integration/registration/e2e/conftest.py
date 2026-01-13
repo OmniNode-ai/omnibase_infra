@@ -159,15 +159,15 @@ async def wait_for_consumer_ready(
         uses a minimal 0.5s delay which is sufficient for local/CI Kafka.
     """
     # Minimal delay for Kafka consumer group join to complete.
-    # Default 0.5s is typically sufficient for Redpanda/Kafka on local infrastructure.
+    # Minimum 0.5s is typically sufficient for Redpanda/Kafka on local infrastructure.
     # Some tests (e.g., heartbeat capture) may need longer waits and can pass
-    # max_wait > 0.5 to override the default.
+    # max_wait > 0.5 to override this minimum.
     #
     # This could be replaced with proper polling if KafkaEventBus exposes
     # consumer group state or offset information.
-    default_wait = 0.5
-    # Use the larger of default_wait (minimum required) or max_wait (caller override)
-    await asyncio.sleep(max(default_wait, max_wait))
+    minimum_wait = 0.5
+    # Use the larger of minimum_wait (floor) or max_wait (caller override)
+    await asyncio.sleep(max(minimum_wait, max_wait))
     return True
 
 

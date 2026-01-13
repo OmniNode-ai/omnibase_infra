@@ -65,6 +65,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from tests.integration.registration.e2e.conftest import (
+    wait_for_consumer_ready,
     wrap_event_in_envelope,
 )
 
@@ -425,9 +426,11 @@ class TestRuntimeE2EFlow:
         )
 
         try:
-            # Allow Kafka consumer group join to complete before publishing.
-            # Without this delay, the consumer may miss the first message.
-            await asyncio.sleep(2.0)
+            # Wait for Kafka consumer to be ready before publishing.
+            # See wait_for_consumer_ready docstring for known limitations.
+            await wait_for_consumer_ready(
+                real_kafka_event_bus, output_topic, max_wait=2.0
+            )
 
             # Publish introspection event wrapped in envelope
             envelope = wrap_event_in_envelope(introspection_event)
@@ -523,16 +526,28 @@ class TestRuntimeErrorHandling:
             value=b"not valid json {{{",
         )
 
-        # Allow time for runtime to process and recover from malformed message.
-        # The runtime should log an error but remain healthy.
-        await asyncio.sleep(2.0)
+        # RATIONALE: This sleep cannot be replaced with deterministic polling.
+        # This is a "negative" test verifying the runtime stays healthy after
+        # receiving invalid input. There's no observable state change to poll for -
+        # the runtime should simply log an error and continue. The 2.0s wait gives
+        # enough time for the message to be consumed and (mis)processed.
+        # Alternative: Poll health endpoint repeatedly over 2s to catch transient
+        # failures, implemented below.
+        max_wait = 2.0
+        poll_interval = 0.2
+        start_time = asyncio.get_running_loop().time()
+        health_ok = True
 
-        # Verify runtime is still healthy
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(RUNTIME_HEALTH_URL)
-            assert response.status_code == 200, (
-                "Runtime became unhealthy after malformed message"
-            )
+            while asyncio.get_running_loop().time() - start_time < max_wait:
+                response = await client.get(RUNTIME_HEALTH_URL)
+                if response.status_code != 200:
+                    health_ok = False
+                    break
+                await asyncio.sleep(poll_interval)
+
+        # Verify runtime remained healthy throughout the wait period
+        assert health_ok, "Runtime became unhealthy after malformed message"
 
     @pytest.mark.asyncio
     async def test_runtime_handles_missing_fields(
@@ -552,16 +567,28 @@ class TestRuntimeErrorHandling:
             value=json.dumps(incomplete_event).encode("utf-8"),
         )
 
-        # Allow time for runtime to process and recover from incomplete event.
-        # The runtime should validate and reject gracefully without crashing.
-        await asyncio.sleep(2.0)
+        # RATIONALE: This sleep cannot be replaced with deterministic polling.
+        # This is a "negative" test verifying the runtime stays healthy after
+        # receiving incomplete events. There's no observable state change to poll for -
+        # the runtime should validate and reject gracefully. The 2.0s wait gives
+        # enough time for the message to be consumed and rejected.
+        # Alternative: Poll health endpoint repeatedly over 2s to catch transient
+        # failures, implemented below.
+        max_wait = 2.0
+        poll_interval = 0.2
+        start_time = asyncio.get_running_loop().time()
+        health_ok = True
 
-        # Verify runtime is still healthy
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(RUNTIME_HEALTH_URL)
-            assert response.status_code == 200, (
-                "Runtime became unhealthy after incomplete event"
-            )
+            while asyncio.get_running_loop().time() - start_time < max_wait:
+                response = await client.get(RUNTIME_HEALTH_URL)
+                if response.status_code != 200:
+                    health_ok = False
+                    break
+                await asyncio.sleep(poll_interval)
+
+        # Verify runtime remained healthy throughout the wait period
+        assert health_ok, "Runtime became unhealthy after incomplete event"
 
 
 class TestRuntimePerformance:

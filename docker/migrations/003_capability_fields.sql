@@ -44,7 +44,7 @@
 -- -------------------------------------------------------------------------------------
 -- This migration uses standard CREATE INDEX which briefly locks the table.
 -- For production databases with >100K rows or zero-downtime requirements,
--- use the companion script: 003a_capability_fields_concurrent.sql
+-- use the companion script: 004_capability_fields_concurrent.sql
 --
 -- WHEN TO USE STANDARD INDEXES (this script):
 --   - Development/staging environments
@@ -52,7 +52,7 @@
 --   - CI/CD pipelines requiring transaction blocks
 --   - Brief locks (seconds) are acceptable
 --
--- WHEN TO USE CONCURRENT INDEXES (003a_capability_fields_concurrent.sql):
+-- WHEN TO USE CONCURRENT INDEXES (004_capability_fields_concurrent.sql):
 --   - Production with live traffic
 --   - Tables with > 100,000 rows (strongly recommended for > 1M rows)
 --   - Zero-downtime deployments required
@@ -60,11 +60,11 @@
 -- PRODUCTION DEPLOYMENT STEPS (using concurrent indexes):
 --   1. Run this script (003_capability_fields.sql) for column creation only,
 --      commenting out the CREATE INDEX statements
---   2. Run 003a_capability_fields_concurrent.sql outside any transaction block
+--   2. Run 004_capability_fields_concurrent.sql outside any transaction block
 --   3. Monitor progress: SELECT * FROM pg_stat_progress_create_index;
 --
 -- IMPORTANT: CONCURRENTLY indexes CANNOT run inside a transaction block.
--- See 003a_capability_fields_concurrent.sql for full production deployment guide.
+-- See 004_capability_fields_concurrent.sql for full production deployment guide.
 -- -------------------------------------------------------------------------------------
 --
 -- ROLLBACK:
@@ -127,7 +127,7 @@ ALTER TABLE registration_projections
 --   - Index size scales with total array elements, not just row count
 --
 -- For tables with >100K rows or high write traffic, consider using
--- 003a_capability_fields_concurrent.sql which creates indexes CONCURRENTLY
+-- 004_capability_fields_concurrent.sql which creates indexes CONCURRENTLY
 -- to avoid blocking table writes during creation.
 -- =============================================================================
 
