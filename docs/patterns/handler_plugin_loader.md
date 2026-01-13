@@ -453,17 +453,18 @@ for namespace in self._allowed_namespaces:
             return  # Exact match or proper boundary
 ```
 
-**Recommendation**: Always use trailing dots in namespace prefixes for maximum security:
+**Recommendation**: Always use trailing dots in namespace prefixes for clarity and consistency:
 ```python
-# GOOD: Trailing dots enforce package boundaries
+# RECOMMENDED: Trailing dots make package boundaries explicit
 loader = HandlerPluginLoader(
     allowed_namespaces=["omnibase_infra.", "myapp.handlers."]
 )
 
-# LESS SECURE: No trailing dot could match unintended packages
-# "omnibase" would match both "omnibase.core" AND "omnibase_malicious"
+# WORKS BUT LESS EXPLICIT: Without trailing dot, relies on boundary validation
+# The implementation validates that remaining path is empty or starts with "."
+# So "omnibase" matches "omnibase" and "omnibase.core" but NOT "omnibase_malicious"
 loader = HandlerPluginLoader(
-    allowed_namespaces=["omnibase", "myapp"]  # Avoid this pattern
+    allowed_namespaces=["omnibase", "myapp"]  # Prefer trailing dots for clarity
 )
 ```
 

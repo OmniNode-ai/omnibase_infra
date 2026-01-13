@@ -1899,21 +1899,9 @@ class TestDiscoverHandlersFromContractsCorrelationTracking:
         with caplog.at_level(logging.INFO):
             await process._discover_handlers_from_contracts()
 
-        # Discovery should log with correlation tracking
+        # Discovery should produce INFO level logs with correlation tracking
         info_logs = [r for r in caplog.records if r.levelno == logging.INFO]
-        assert len(info_logs) > 0, "Should have INFO level logs"
-
-        # Check that discovery produces structured logs that could include correlation IDs
-        # Correlation IDs may be in record extra data, __dict__, or message text
-        logs_with_correlation = [
-            r
-            for r in caplog.records
-            if (
-                hasattr(r, "correlation_id")
-                or "correlation_id" in str(r.__dict__)
-                or "correlation" in r.getMessage().lower()
-            )
-        ]
+        assert len(info_logs) > 0, "Should have INFO level logs during discovery"
 
         # Verify the discovery completed successfully
         discovery_result = process._handler_discovery.last_discovery_result
@@ -1925,34 +1913,45 @@ class TestDiscoverHandlersFromContractsCorrelationTracking:
         )
 
         # Verify correlation ID tracking in logs
-        # Correlation IDs may be in record extra data, __dict__, or message text.
-        # When present, correlation IDs should be valid UUIDs.
+        # The contract handler discovery auto-generates correlation IDs and includes
+        # them in structured log extra data (e.g., extra={"correlation_id": str(uuid)})
         #
-        # Note: The handler plugin loader logs correlation IDs in structured log
-        # extra data. If no correlation logs are found, this is acceptable as
-        # correlation tracking is observability-only. However, when logs DO
-        # contain correlation IDs, we verify they are valid.
+        # We verify that:
+        # 1. At least one log record contains a correlation_id field
+        # 2. All correlation_id values are valid UUID-like strings (36 chars with hyphens)
+        # 3. All correlation IDs within the same discovery call match (same correlation)
         correlation_ids_found: list[str] = []
-        for log_record in logs_with_correlation:
-            # Check record extra dict for correlation_id field
-            if hasattr(log_record, "__dict__"):
-                record_dict = log_record.__dict__
-                if "correlation_id" in record_dict:
-                    corr_id = record_dict["correlation_id"]
-                    # Verify it's a valid format (string or UUID)
-                    assert corr_id is not None, (
-                        "Correlation ID in log should not be None"
-                    )
-                    # Convert to string for validation
-                    corr_id_str = str(corr_id)
-                    # UUID strings are 36 chars (with hyphens) or 32 (without)
-                    assert len(corr_id_str) >= 32, (
-                        f"Correlation ID '{corr_id_str}' should be UUID-like (length >= 32)"
-                    )
-                    correlation_ids_found.append(corr_id_str)
+        for log_record in caplog.records:
+            # Check record __dict__ for correlation_id in extra data
+            record_dict = log_record.__dict__
+            if "correlation_id" in record_dict:
+                corr_id = record_dict["correlation_id"]
+                # Verify it's a valid format (string or UUID)
+                assert corr_id is not None, "Correlation ID in log should not be None"
+                # Convert to string for validation
+                corr_id_str = str(corr_id)
+                # UUID strings with hyphens are exactly 36 chars (8-4-4-4-12)
+                assert len(corr_id_str) == 36, (
+                    f"Correlation ID '{corr_id_str}' should be UUID format (36 chars)"
+                )
+                # Verify UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+                parts = corr_id_str.split("-")
+                assert len(parts) == 5, (
+                    f"Correlation ID '{corr_id_str}' should have 5 hyphen-separated parts"
+                )
+                correlation_ids_found.append(corr_id_str)
 
         # Assert that we found at least one correlation ID in the logs
-        # This ensures the correlation tracking functionality is actually working
-        assert len(correlation_ids_found) > 0 or len(logs_with_correlation) == 0, (
-            "When correlation logs are present, they should contain valid correlation IDs"
+        # The contract handler discovery MUST log with correlation IDs for observability
+        assert len(correlation_ids_found) > 0, (
+            "Discovery should log with correlation_id in structured log extra data. "
+            "No correlation IDs found in log records."
+        )
+
+        # Verify all correlation IDs from the same discovery call are consistent
+        # (same correlation ID should be used throughout the discovery operation)
+        unique_correlation_ids = set(correlation_ids_found)
+        assert len(unique_correlation_ids) == 1, (
+            f"All logs from same discovery call should use the same correlation ID. "
+            f"Found {len(unique_correlation_ids)} different IDs: {unique_correlation_ids}"
         )

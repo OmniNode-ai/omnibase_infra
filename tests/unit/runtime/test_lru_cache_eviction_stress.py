@@ -1043,9 +1043,6 @@ class TestCachePerformanceUnderStress:
         cache_size = 32
         PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
 
-        # Record initial state
-        PolicyRegistry._get_semver_cache_info()
-
         # Perform many operations
         for i in range(50_000):
             PolicyRegistry._parse_semver(f"{i}.0.0")

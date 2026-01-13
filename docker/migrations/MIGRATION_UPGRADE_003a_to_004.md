@@ -37,44 +37,24 @@ The renumbering to `004` makes it explicit that this is a standalone migration t
 
 ## Upgrade Scenarios
 
-### Scenario 1: Fresh Deployment (No Migrations Applied)
+### Scenario 1: Fresh Deployment (No Migrations Applied Yet)
 
-Apply migrations in order:
+For **new databases** or databases where no ONEX migrations have been applied yet.
 
 ```bash
 # Apply base schema
 psql -h $HOST -d $DB -f 001_registration_projection.sql
 psql -h $HOST -d $DB -f 002_updated_at_audit_index.sql
 
-# Choose ONE of the following paths:
-
-# PATH A: Development/Staging (standard indexes, faster, runs in transaction)
+# Apply capability fields with standard indexes
+# This is sufficient for ALL fresh deployments (dev, staging, and production)
 psql -h $HOST -d $DB -f 003_capability_fields.sql
 # Done - this creates columns AND standard indexes
 ```
 
-**PATH B: Production with large tables (>100K rows)**
+> **Why PATH A is always sufficient for fresh deployments**: On an empty or new table, `CREATE INDEX` completes instantly with no blocking. The concurrent index variant (migration 004) is only needed when adding indexes to **existing tables with data** where you cannot afford brief write locks.
 
-For fresh deployments where the table is empty or small, PATH A is sufficient even for production. Use PATH B only when deploying to an **existing** production database with >100K rows where you need zero-downtime index creation.
-
-```bash
-# Step 1: Apply 003 to create columns AND standard indexes
-# NOTE: On a fresh/empty table, this is fast and non-blocking
-psql -h $HOST -d $DB -f 003_capability_fields.sql
-
-# Step 2: Drop standard indexes (brief operation, fast on any table size)
-psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_capability_tags;"
-psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_intent_types;"
-psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_protocols;"
-psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_contract_type_state;"
-
-# Step 3: Create concurrent indexes (non-blocking, cannot run in transaction)
-psql -h $HOST -d $DB -f 004_capability_fields_concurrent.sql
-```
-
-> **Why drop and recreate?** Migration 003 creates standard indexes. For tables with existing data (>100K rows), we replace them with concurrent indexes from migration 004 to avoid blocking writes. The drop operation is fast on any table size. For fresh/empty tables, the standard indexes from 003 are sufficient.
->
-> **Recommended for fresh deployments**: Use PATH A (003 only). The standard indexes are fine for new tables since there's no data to lock against.
+**When to use migration 004 instead**: If you are adding migrations to an **existing production database** that already has data in the `registration_projections` table (>100K rows), see Scenario 3 for the upgrade path using concurrent indexes.
 
 ### Scenario 2: Production Database with 003a Already Applied
 
@@ -396,9 +376,7 @@ You need to apply `003_capability_fields.sql` first to create the columns.
 
 | Date | Change |
 |------|--------|
-| 2026-01-13 | Improved Scenario 1 PATH B guidance: clarified when to use concurrent vs standard indexes |
-| 2026-01-13 | Added recommendation to use PATH A for fresh deployments |
-| 2026-01-13 | Clarified Scenario 1 (fresh deployment) with explicit PATH A/B options |
+| 2026-01-13 | Simplified Scenario 1: removed PATH B, clarified fresh deployments always use 003 only |
 | 2026-01-13 | Added Migration Gap Detection section with validation SQL script |
 | 2026-01-13 | Renamed `003a` to `004` per PR #143 review feedback |
 | 2026-01-12 | Initial `003a_capability_fields_concurrent.sql` created |

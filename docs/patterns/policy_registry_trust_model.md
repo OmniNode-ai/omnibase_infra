@@ -132,6 +132,31 @@ class ImpurePolicy:
 
 ## Security Mitigations for High-Security Environments
 
+### Policy Registry Error Class
+
+Following ONEX error conventions, `PolicyRegistryError` extends `ProtocolConfigurationError` to integrate with the standard error handling infrastructure:
+
+```python
+from omnibase_infra.errors import ProtocolConfigurationError
+
+
+class PolicyRegistryError(ProtocolConfigurationError):
+    """Raised when policy registration or execution fails.
+
+    Extends ProtocolConfigurationError to integrate with ONEX error handling.
+    Provides policy-specific context for debugging and monitoring.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        policy_id: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(message, **kwargs)
+        self.policy_id = policy_id
+```
+
 ### 1. Code Review Gate
 
 Require mandatory code review for all policy implementations:

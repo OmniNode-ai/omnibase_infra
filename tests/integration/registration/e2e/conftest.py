@@ -35,6 +35,8 @@ Fixture Dependency Graph:
     real_kafka_event_bus
         -> registration_orchestrator
         -> introspectable_test_node
+    ensure_test_topic
+        -> ensure_test_topic_exists (UUID-suffixed topic with cleanup)
     real_consul_handler
         -> cleanup_consul_services
 
@@ -49,7 +51,7 @@ import asyncio
 import logging
 import os
 import socket
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -125,7 +127,6 @@ async def wait_for_consumer_ready(
     event_bus: KafkaEventBus,
     topic: str,
     max_wait: float = 10.0,
-    poll_interval: float = 0.2,  # Deprecated: kept for API compat, uses backoff instead
     initial_backoff: float = 0.1,
     max_backoff: float = 1.0,
     backoff_multiplier: float = 1.5,
@@ -165,8 +166,6 @@ async def wait_for_consumer_ready(
         max_wait: Maximum time in seconds to poll before giving up. The function
             will return True regardless of whether consumer became ready.
             Default: 10.0s. Actual wait may be up to max_wait + 0.1s (stabilization).
-        poll_interval: DEPRECATED - Ignored. Kept for API compatibility.
-            Use initial_backoff/max_backoff instead.
         initial_backoff: Initial polling delay in seconds (default 0.1s).
         max_backoff: Maximum polling delay cap in seconds (default 1.0s).
         backoff_multiplier: Multiplier for exponential backoff (default 1.5).
@@ -176,8 +175,12 @@ async def wait_for_consumer_ready(
         Do not use return value for failure detection.
 
     Example:
-        # Best-effort wait for consumer readiness
+        # Best-effort wait for consumer readiness (default max_wait=10.0s)
+        await wait_for_consumer_ready(bus, topic)
+
+        # Shorter wait for fast tests
         await wait_for_consumer_ready(bus, topic, max_wait=2.0)
+
         # Consumer MAY be ready here, but test should not rely on this
         # Use assertions on actual test outcomes instead
     """
@@ -543,6 +546,140 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
     yield bus
 
     await bus.close()
+
+
+# =============================================================================
+# Topic Management Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+async def ensure_test_topic() -> AsyncGenerator[
+    Callable[[str, int], Coroutine[object, object, str]], None
+]:
+    """Create test topics via Kafka admin API before tests and cleanup after.
+
+    This fixture handles explicit topic creation for Redpanda/Kafka brokers
+    that have topic auto-creation disabled. Topics are created before test
+    execution and deleted during cleanup.
+
+    Topic names are automatically suffixed with a UUID to ensure parallel test
+    isolation, preventing cross-test pollution when multiple test processes
+    run concurrently.
+
+    Yields:
+        Async function that creates a topic with the given name and partition count.
+        Returns the topic name (with UUID suffix) for convenience.
+
+    Example:
+        async def test_publish_subscribe(ensure_test_topic):
+            topic = await ensure_test_topic("test.e2e.introspection")
+            # Topic now exists as "test.e2e.introspection-<uuid>" and can be used
+    """
+    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+
+    admin: AIOKafkaAdminClient | None = None
+    created_topics: list[str] = []
+
+    async def _wait_for_topic_metadata(
+        admin_client: AIOKafkaAdminClient,
+        topic_name: str,
+        timeout: float = 10.0,
+    ) -> bool:
+        """Wait for topic metadata to be available in the broker."""
+        start_time = asyncio.get_running_loop().time()
+        while (asyncio.get_running_loop().time() - start_time) < timeout:
+            try:
+                description = await admin_client.describe_topics([topic_name])
+                if description:
+                    return True
+            except Exception:
+                pass  # Topic not yet available
+            await asyncio.sleep(0.5)
+        return False
+
+    async def _create_topic(topic_name: str, partitions: int = 1) -> str:
+        """Create a topic with the given name and partition count.
+
+        Args:
+            topic_name: Base name of the topic to create (UUID will be appended).
+            partitions: Number of partitions (default: 1).
+
+        Returns:
+            The full topic name with UUID suffix.
+        """
+        nonlocal admin, created_topics
+
+        # Append UUID for parallel test isolation
+        unique_topic_name = f"{topic_name}-{uuid4().hex[:12]}"
+
+        # Lazy initialization of admin client
+        if admin is None:
+            admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+            await admin.start()
+
+        try:
+            await admin.create_topics(
+                [
+                    NewTopic(
+                        name=unique_topic_name,
+                        num_partitions=partitions,
+                        replication_factor=1,
+                    )
+                ]
+            )
+            created_topics.append(unique_topic_name)
+
+            # Wait for topic metadata to propagate
+            await _wait_for_topic_metadata(admin, unique_topic_name)
+        except Exception:
+            # Topic may already exist - still wait for metadata
+            if admin is not None:
+                await _wait_for_topic_metadata(admin, unique_topic_name, timeout=5.0)
+
+        return unique_topic_name
+
+    yield _create_topic
+
+    # Cleanup: delete created topics
+    if admin is not None:
+        if created_topics:
+            try:
+                await admin.delete_topics(created_topics)
+                logger.debug("Cleaned up test topics: %s", created_topics)
+            except Exception as e:
+                logger.warning(
+                    "Cleanup failed for Kafka topics %s: %s",
+                    created_topics,
+                    sanitize_error_message(e),
+                )
+        try:
+            await admin.close()
+        except Exception as e:
+            logger.warning(
+                "Failed to close Kafka admin client: %s",
+                sanitize_error_message(e),
+            )
+
+
+@pytest.fixture
+async def ensure_test_topic_exists(
+    ensure_test_topic: Callable[[str, int], Coroutine[object, object, str]],
+) -> str:
+    """Pre-create a unique topic for E2E tests with automatic cleanup.
+
+    This fixture creates a topic with UUID suffix for parallel test isolation.
+    The topic is automatically deleted after the test completes.
+
+    Returns:
+        The created topic name (with UUID suffix).
+
+    Example:
+        async def test_introspection_flow(ensure_test_topic_exists):
+            # Topic already exists, use it directly
+            await publish_to_topic(ensure_test_topic_exists, event)
+    """
+    return await ensure_test_topic("test.e2e.introspection", partitions=3)
 
 
 # =============================================================================
@@ -1171,18 +1308,21 @@ def configure_e2e_logging() -> None:
     This session-scoped fixture ensures that:
     - All E2E pipeline logs are visible during test runs (with -v flag)
     - Log output uses a clear, structured format
-    - DEBUG level for E2E test loggers (tests.integration.registration.e2e)
-    - INFO level for omnibase_infra modules (reduces verbosity)
+
+    Log Levels Configured:
+        - tests.integration.registration.e2e: DEBUG (verbose test output)
+        - omnibase_infra: INFO (reduces infrastructure noise)
 
     Usage:
         Run tests with pytest -v to see pipeline stage logs
         Run tests with pytest -v --log-cli-level=DEBUG for verbose output
     """
-    # Configure root logger for E2E tests
+    # Configure E2E test logger: DEBUG level for verbose test diagnostics
     e2e_logger = logging.getLogger("tests.integration.registration.e2e")
     e2e_logger.setLevel(logging.DEBUG)
 
-    # Configure omnibase_infra logger for infrastructure visibility
+    # Configure omnibase_infra logger: INFO level to reduce verbosity
+    # (DEBUG would emit too much internal infrastructure noise)
     infra_logger = logging.getLogger("omnibase_infra")
     infra_logger.setLevel(logging.INFO)
 
@@ -1219,6 +1359,9 @@ __all__ = [
     "handler_node_introspected",
     # Kafka fixtures
     "real_kafka_event_bus",
+    # Topic fixtures
+    "ensure_test_topic",
+    "ensure_test_topic_exists",
     # Consul fixtures
     "real_consul_handler",
     "cleanup_consul_services",

@@ -69,7 +69,7 @@ class HandlerConsulDeregister:
         >>> from unittest.mock import AsyncMock
         >>> consul_client = AsyncMock()
         >>> consul_client.deregister_service.return_value = ModelBackendResult(
-        ...     success=True, duration_ms=0.0
+        ...     success=True, duration_ms=0.0, backend_id="consul"
         ... )
         >>> handler = HandlerConsulDeregister(consul_client)
         >>> # Call handler.handle(request, correlation_id) in async context

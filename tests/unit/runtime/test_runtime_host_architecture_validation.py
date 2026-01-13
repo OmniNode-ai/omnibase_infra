@@ -251,7 +251,7 @@ class TestErrorSeverityBlocksStartup:
             mock_get_registry.return_value = mock_registry
 
             # Seed handler INSTANCES in _handlers to satisfy fail-fast startup
-            # (see _setup_mock_handlers docstring for detailed explanation)
+            # (see seed_mock_handlers docstring for detailed explanation)
             seed_mock_handlers(process)
 
             # Should NOT raise - empty registry means no classes to validate

@@ -177,7 +177,7 @@ WHERE NOT indisvalid;
 **Decision tree for next migration:**
 
 1. Is this a production-optimized variant? -> Use next main number with `_concurrent` suffix
-2. Is this a rollback/cleanup for an existing migration? -> Use letter suffix (`003b`)
+2. Is this a rollback/cleanup for an existing migration? -> Use letter suffix (e.g., `003a` is available)
 3. Otherwise -> Use next main number (`005`)
 
 ## Migration Validation

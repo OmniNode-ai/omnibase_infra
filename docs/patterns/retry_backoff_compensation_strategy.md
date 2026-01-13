@@ -464,6 +464,21 @@ class CompensationFailedError(RuntimeHostError):
 class SagaExecutor:
     """Execute saga with automatic compensation on failure."""
 
+    def __init__(
+        self,
+        transport_type: EnumInfraTransportType = EnumInfraTransportType.HTTP,
+    ) -> None:
+        """Initialize saga executor.
+
+        Args:
+            transport_type: Transport type for error context. Defaults to HTTP
+                since sagas are commonly triggered by HTTP requests. Override
+                this when the saga primarily operates on a specific transport
+                (e.g., DATABASE for database-centric sagas, KAFKA for
+                event-driven sagas).
+        """
+        self._transport_type = transport_type
+
     async def execute(
         self,
         steps: list[SagaStep],
@@ -508,7 +523,7 @@ class SagaExecutor:
             # If any compensations failed, raise aggregate error
             if compensation_errors:
                 context = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.HTTP,
+                    transport_type=self._transport_type,
                     operation="saga_compensation",
                     correlation_id=correlation_id,
                 )
