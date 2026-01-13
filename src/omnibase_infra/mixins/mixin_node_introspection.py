@@ -1406,9 +1406,11 @@ class MixinNodeIntrospection:
         """
         self._ensure_initialized()
 
-        # Convert string reason to enum if needed
+        # Convert reason to enum (EnumIntrospectionReason is also a str, so check enum first)
         reason_enum: EnumIntrospectionReason
-        if isinstance(reason, str):
+        if isinstance(reason, EnumIntrospectionReason):
+            reason_enum = reason
+        elif isinstance(reason, str):
             try:
                 reason_enum = EnumIntrospectionReason(reason)
             except ValueError:
@@ -1421,7 +1423,9 @@ class MixinNodeIntrospection:
                 )
                 reason_enum = EnumIntrospectionReason.HEARTBEAT
         else:
-            reason_enum = reason
+            raise TypeError(
+                f"reason must be str or EnumIntrospectionReason, got {type(reason).__name__}"
+            )
 
         if self._introspection_event_bus is None:
             logger.warning(

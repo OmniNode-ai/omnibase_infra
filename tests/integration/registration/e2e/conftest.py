@@ -45,6 +45,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
@@ -55,14 +56,19 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import UUID, uuid4
 
 import pytest
-
-# Module-level logger for test cleanup diagnostics
-logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_infra.enums import EnumIntrospectionReason
+from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
+from tests.conftest import check_service_registry_available
+from tests.infrastructure_config import (
+    DEFAULT_CONSUL_PORT,
+    DEFAULT_POSTGRES_PORT,
+)
 
 # Load environment configuration with priority:
 # 1. .env.docker in this directory (for Docker compose infrastructure)
@@ -81,26 +87,6 @@ if _docker_env_file.exists():
 elif _project_env_file.exists():
     # Remote infrastructure mode - use project .env
     load_dotenv(_project_env_file)
-
-# =============================================================================
-# Cross-Module Imports
-# =============================================================================
-# From tests/infrastructure_config.py:
-#   - DEFAULT_CONSUL_PORT: Standard Consul port on infrastructure server (28500)
-#   - DEFAULT_POSTGRES_PORT: Standard PostgreSQL port on infrastructure server (5436)
-#
-# This configuration module centralizes infrastructure endpoints to:
-#   - Enable environment variable overrides for different deployments
-#   - Provide graceful skip behavior when infrastructure is unavailable
-#   - Document the ONEX development infrastructure server (192.168.86.200)
-# =============================================================================
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
-from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from tests.infrastructure_config import (
-    DEFAULT_CONSUL_PORT,
-    DEFAULT_POSTGRES_PORT,
-)
 
 if TYPE_CHECKING:
     import asyncpg
@@ -125,6 +111,64 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
     from omnibase_infra.services import TimeoutEmitter, TimeoutScanner
     from tests.helpers.deterministic import DeterministicClock
+
+# Module-level logger for test cleanup diagnostics
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Consumer Readiness Helper
+# =============================================================================
+
+
+async def wait_for_consumer_ready(
+    event_bus: KafkaEventBus,
+    topic: str,
+    max_wait: float = 2.0,
+    poll_interval: float = 0.1,
+) -> bool:
+    """Wait for Kafka consumer to be ready to receive messages.
+
+    Kafka consumers require time to join the consumer group and start
+    receiving messages after subscription. This helper encapsulates the
+    wait pattern with proper documentation.
+
+    Known Limitation:
+        The KafkaEventBus does not expose a consumer readiness signal.
+        This function uses a minimal sleep as a best-effort approach.
+        A more robust solution would require either:
+        1. Exposing consumer group state from aiokafka
+        2. Publishing a "probe" message and waiting for receipt
+        3. Polling consumer group offsets via Kafka admin API
+
+        These approaches add significant complexity and are deferred
+        pending a design decision on KafkaEventBus interface changes.
+
+    Args:
+        event_bus: The KafkaEventBus instance (unused, kept for future API).
+        topic: The topic subscribed to (unused, kept for future API).
+        max_wait: Maximum time to wait in seconds (currently a fixed delay).
+        poll_interval: Polling interval (currently unused, reserved for future).
+
+    Returns:
+        True when the consumer is likely ready (best-effort).
+
+    Note:
+        The parameters are designed to be forward-compatible with a future
+        implementation that actually polls for readiness. Current implementation
+        uses a minimal 0.5s delay which is sufficient for local/CI Kafka.
+    """
+    # Minimal delay for Kafka consumer group join to complete.
+    # Default 0.5s is typically sufficient for Redpanda/Kafka on local infrastructure.
+    # Some tests (e.g., heartbeat capture) may need longer waits and can pass
+    # max_wait > 0.5 to override the default.
+    #
+    # This could be replaced with proper polling if KafkaEventBus exposes
+    # consumer group state or offset information.
+    default_wait = 0.5
+    actual_wait = max_wait if max_wait > default_wait else default_wait
+    await asyncio.sleep(min(actual_wait, max_wait))  # Respect max_wait as upper bound
+    return True
 
 
 # =============================================================================
@@ -198,20 +242,6 @@ def _check_consul_reachable() -> bool:
 
 
 CONSUL_AVAILABLE = _check_consul_reachable()
-
-
-# =============================================================================
-# Cross-Module Import: Service Registry Availability
-# =============================================================================
-# From tests/conftest.py:
-#   - check_service_registry_available: Function that checks if ServiceRegistry
-#     is available in ModelONEXContainer. Returns False when omnibase_core 0.6.x
-#     has a circular import issue causing service_registry to be None.
-#
-# This check enables graceful test skipping when ServiceRegistry is unavailable,
-# which is a known issue in omnibase_core 0.6.2 due to circular imports.
-# =============================================================================
-from tests.conftest import check_service_registry_available
 
 SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
 
@@ -799,6 +829,7 @@ class ProtocolIntrospectableTestNode(Protocol):
     - Node identity (node_id, node_type, version)
     - Sample operations for capability discovery
     - Introspection event publishing via Kafka
+    - Introspection lifecycle methods (from MixinNodeIntrospection)
     """
 
     @property
@@ -822,6 +853,36 @@ class ProtocolIntrospectableTestNode(Protocol):
 
     async def handle_request(self, request: object) -> object:
         """Handle a sample request."""
+        ...
+
+    # Methods from MixinNodeIntrospection
+    async def publish_introspection(
+        self,
+        reason: EnumIntrospectionReason | str = EnumIntrospectionReason.STARTUP,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Publish introspection event to the event bus."""
+        ...
+
+    async def get_introspection_data(self) -> ModelNodeIntrospectionEvent:
+        """Get introspection data with caching support."""
+        ...
+
+    async def start_introspection_tasks(
+        self,
+        enable_heartbeat: bool = True,
+        heartbeat_interval_seconds: float = 30.0,
+        enable_registry_listener: bool = True,
+    ) -> None:
+        """Start background introspection tasks."""
+        ...
+
+    async def stop_introspection_tasks(self) -> None:
+        """Stop all background introspection tasks."""
+        ...
+
+    async def _publish_heartbeat(self) -> bool:
+        """Publish heartbeat event to the event bus."""
         ...
 
 
@@ -1041,6 +1102,44 @@ async def cleanup_node_ids(
 
 
 # =============================================================================
+# Logging Configuration for E2E Observability
+# =============================================================================
+
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_e2e_logging() -> None:
+    """Configure logging for E2E test observability.
+
+    This session-scoped fixture ensures that:
+    - All E2E pipeline logs are visible during test runs (with -v flag)
+    - Log output uses a clear, structured format
+    - DEBUG level is enabled for omnibase_infra modules
+
+    Usage:
+        Run tests with pytest -v to see pipeline stage logs
+        Run tests with pytest -v --log-cli-level=DEBUG for verbose output
+    """
+    # Configure root logger for E2E tests
+    e2e_logger = logging.getLogger("tests.integration.registration.e2e")
+    e2e_logger.setLevel(logging.DEBUG)
+
+    # Configure omnibase_infra logger for infrastructure visibility
+    infra_logger = logging.getLogger("omnibase_infra")
+    infra_logger.setLevel(logging.INFO)
+
+    # Add console handler if not already present
+    if not any(isinstance(h, logging.StreamHandler) for h in e2e_logger.handlers):
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        handler.setFormatter(formatter)
+        e2e_logger.addHandler(handler)
+
+
+# =============================================================================
 # Export Fixtures
 # =============================================================================
 
@@ -1051,6 +1150,8 @@ __all__ = [
     "KAFKA_AVAILABLE",
     "POSTGRES_AVAILABLE",
     "SERVICE_REGISTRY_AVAILABLE",
+    # Helper functions
+    "wait_for_consumer_ready",
     # Database fixtures
     "postgres_pool",
     # Container fixtures
@@ -1082,4 +1183,6 @@ __all__ = [
     # Cleanup fixtures
     "cleanup_projections",
     "cleanup_node_ids",
+    # Logging fixtures
+    "configure_e2e_logging",
 ]

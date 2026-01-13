@@ -65,6 +65,7 @@ from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
 # Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
+from .conftest import wait_for_consumer_ready
 from .verification_helpers import (
     wait_for_postgres_registration,
 )
@@ -79,6 +80,11 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# Log formatting constants for pipeline observability
+_LOG_SEPARATOR = "=" * 70
+_LOG_STAGE_SEPARATOR = "-" * 70
+_LOG_ERROR_SEPARATOR = "!" * 70
 
 # Module-level markers
 # Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
@@ -182,31 +188,79 @@ class OrchestratorPipeline:
         This is the callback registered with KafkaEventBus.subscribe().
         It deserializes the message and routes through handler -> reducer -> effect.
 
+        Pipeline Stages:
+            1. DESERIALIZE - Parse Kafka message to ModelNodeIntrospectionEvent
+            2. HANDLER - Check if registration is needed via HandlerNodeIntrospected
+            3. REDUCER - Generate intents (Consul + PostgreSQL) via RegistrationReducer
+            4. EFFECT - Execute dual registration via NodeRegistryEffect
+            5. PROJECTION - Persist registration state to PostgreSQL
+
         Args:
             message: The Kafka message received from the introspection topic.
         """
         async with self._processing_lock:
+            correlation_id: UUID | None = None
             try:
-                # Step 1: Deserialize message to introspection event
+                # =============================================================
+                # ORCHESTRATOR PIPELINE: Processing Message
+                # =============================================================
+                logger.info(
+                    "\n%s\n  ORCHESTRATOR PIPELINE: Processing Message\n%s",
+                    _LOG_SEPARATOR,
+                    _LOG_SEPARATOR,
+                )
+                logger.info(
+                    "  Topic: %s | Partition: %s | Offset: %s",
+                    message.topic,
+                    getattr(message, "partition", "N/A"),
+                    getattr(message, "offset", "N/A"),
+                )
+
+                # =============================================================
+                # STAGE 1: DESERIALIZE
+                # =============================================================
+                logger.info(
+                    "\n%s\n  STAGE 1: DESERIALIZE - Parsing Kafka message\n%s",
+                    _LOG_STAGE_SEPARATOR,
+                    _LOG_STAGE_SEPARATOR,
+                )
                 event = self._deserialize_introspection_event(message)
                 if event is None:
                     logger.warning(
-                        "Failed to deserialize introspection event",
-                        extra={"message_topic": message.topic},
+                        "  [DESERIALIZE] FAILED - Invalid message format\n"
+                        "    Topic: %s\n"
+                        "    Value preview: %s",
+                        message.topic,
+                        str(message.value)[:100] if message.value else "None",
+                    )
+                    logger.info(
+                        "%s\n  PIPELINE ABORTED: Deserialization failed\n%s",
+                        _LOG_SEPARATOR,
+                        _LOG_SEPARATOR,
                     )
                     return
 
+                correlation_id = event.correlation_id or uuid4()
                 logger.info(
-                    "Processing introspection event",
-                    extra={
-                        "node_id": str(event.node_id),
-                        "node_type": event.node_type,
-                        "correlation_id": str(event.correlation_id),
-                    },
+                    "  [DESERIALIZE] SUCCESS\n"
+                    "    Node ID: %s\n"
+                    "    Node Type: %s\n"
+                    "    Version: %s\n"
+                    "    Correlation ID: %s",
+                    event.node_id,
+                    event.node_type,
+                    event.node_version,
+                    correlation_id,
                 )
 
-                # Step 2: Run through handler to check if registration needed
-                correlation_id = event.correlation_id or uuid4()
+                # =============================================================
+                # STAGE 2: HANDLER
+                # =============================================================
+                logger.info(
+                    "\n%s\n  STAGE 2: HANDLER - Checking registration need\n%s",
+                    _LOG_STAGE_SEPARATOR,
+                    _LOG_STAGE_SEPARATOR,
+                )
                 now = datetime.now(UTC)
 
                 # Wrap event in envelope for handler API
@@ -222,46 +276,129 @@ class OrchestratorPipeline:
 
                 if not handler_output.events:
                     logger.info(
-                        "Handler returned no events - registration not needed",
-                        extra={"node_id": str(event.node_id)},
+                        "  [HANDLER] SKIP - No registration needed\n"
+                        "    Node ID: %s\n"
+                        "    Reason: Handler returned no events "
+                        "(node may already be registered)",
+                        event.node_id,
+                    )
+                    logger.info(
+                        "\n%s\n  PIPELINE COMPLETE (No Action Required)\n%s",
+                        _LOG_SEPARATOR,
+                        _LOG_SEPARATOR,
                     )
                     return
 
-                # Step 3: Run through reducer to generate intents
+                logger.info(
+                    "  [HANDLER] PROCEED - Registration needed\n"
+                    "    Node ID: %s\n"
+                    "    Events generated: %d",
+                    event.node_id,
+                    len(handler_output.events),
+                )
+
+                # =============================================================
+                # STAGE 3: REDUCER
+                # =============================================================
+                logger.info(
+                    "\n%s\n  STAGE 3: REDUCER - Generating intents\n%s",
+                    _LOG_STAGE_SEPARATOR,
+                    _LOG_STAGE_SEPARATOR,
+                )
                 state = ModelRegistrationState()
                 reducer_output = self._reducer.reduce(state, event)
 
+                intent_types = [
+                    intent.payload.intent_type
+                    for intent in reducer_output.intents
+                    if hasattr(intent.payload, "intent_type")
+                ]
                 logger.info(
-                    "Reducer generated intents",
-                    extra={
-                        "node_id": str(event.node_id),
-                        "intent_count": len(reducer_output.intents),
-                        "new_status": reducer_output.result.status,
-                    },
+                    "  [REDUCER] SUCCESS\n"
+                    "    Node ID: %s\n"
+                    "    Intents generated: %d\n"
+                    "    Intent types: %s\n"
+                    "    New status: %s",
+                    event.node_id,
+                    len(reducer_output.intents),
+                    ", ".join(intent_types) if intent_types else "None",
+                    reducer_output.result.status,
                 )
 
-                # Step 4: Execute effects via NodeRegistryEffect
+                # =============================================================
+                # STAGE 4: EFFECT
+                # =============================================================
+                logger.info(
+                    "\n%s\n  STAGE 4: EFFECT - Executing dual registration\n%s",
+                    _LOG_STAGE_SEPARATOR,
+                    _LOG_STAGE_SEPARATOR,
+                )
                 if reducer_output.intents:
                     await self._execute_effects(event, correlation_id)
+                    logger.info(
+                        "  [EFFECT] SUCCESS\n"
+                        "    Node ID: %s\n"
+                        "    Consul registration: Completed\n"
+                        "    PostgreSQL registration: Completed",
+                        event.node_id,
+                    )
+                else:
+                    logger.info(
+                        "  [EFFECT] SKIP - No intents to execute\n    Node ID: %s",
+                        event.node_id,
+                    )
 
-                # Step 5: Persist projection
+                # =============================================================
+                # STAGE 5: PROJECTION
+                # =============================================================
+                logger.info(
+                    "\n%s\n  STAGE 5: PROJECTION - Persisting state\n%s",
+                    _LOG_STAGE_SEPARATOR,
+                    _LOG_STAGE_SEPARATOR,
+                )
                 await self._persist_projection(event, now, correlation_id)
+                logger.info(
+                    "  [PROJECTION] SUCCESS\n"
+                    "    Node ID: %s\n"
+                    "    Domain: registration\n"
+                    "    Sequence: %d",
+                    event.node_id,
+                    self._sequence_counter,
+                )
 
                 # Track successful processing
                 self._processed_events.append(event.node_id)
 
+                # =============================================================
+                # PIPELINE COMPLETE
+                # =============================================================
                 logger.info(
-                    "Successfully processed introspection event",
-                    extra={
-                        "node_id": str(event.node_id),
-                        "correlation_id": str(correlation_id),
-                    },
+                    "\n%s\n  PIPELINE COMPLETE - All stages successful\n%s\n"
+                    "    Node ID: %s\n"
+                    "    Node Type: %s\n"
+                    "    Version: %s\n"
+                    "    Intents executed: %d\n"
+                    "    Correlation ID: %s\n%s",
+                    _LOG_SEPARATOR,
+                    _LOG_SEPARATOR,
+                    event.node_id,
+                    event.node_type,
+                    event.node_version,
+                    len(reducer_output.intents),
+                    correlation_id,
+                    _LOG_SEPARATOR,
                 )
 
             except Exception as e:
                 logger.exception(
-                    "Error processing introspection event",
-                    extra={"error": str(e)},
+                    "\n%s\n  PIPELINE ERROR - Exception during processing\n%s\n"
+                    "    Error: %s\n"
+                    "    Correlation ID: %s\n%s",
+                    _LOG_ERROR_SEPARATOR,
+                    _LOG_ERROR_SEPARATOR,
+                    str(e),
+                    correlation_id or "Not assigned",
+                    _LOG_ERROR_SEPARATOR,
                 )
                 self._processing_errors.append(e)
 
@@ -515,7 +652,7 @@ async def orchestrator_pipeline(
 @pytest.fixture
 async def ensure_test_topic_exists(
     real_kafka_event_bus: KafkaEventBus,
-) -> AsyncGenerator[str, None]:
+) -> str:
     """Return the pre-existing test topic name.
 
     This fixture no longer creates topics dynamically since we now use
@@ -529,7 +666,7 @@ async def ensure_test_topic_exists(
         real_kafka_event_bus: Real Kafka event bus (unused but kept for
             fixture dependency ordering).
 
-    Yields:
+    Returns:
         The test topic name.
     """
     # The topic already exists - no need for complex creation logic
@@ -571,8 +708,9 @@ async def running_orchestrator_consumer(
         on_message=orchestrator_pipeline.pipeline.process_message,
     )
 
-    # Give consumer time to start
-    await asyncio.sleep(0.5)
+    # Wait for consumer to be ready to receive messages.
+    # See wait_for_consumer_ready docstring for known limitations.
+    await wait_for_consumer_ready(real_kafka_event_bus, ensure_test_topic_exists)
 
     # Create a new context with the unsubscribe function included
     context = OrchestratorTestContext(
@@ -661,6 +799,7 @@ class TestFullOrchestratorFlow:
         while elapsed < max_wait:
             if unique_node_id in pipeline.processed_events:
                 break
+            # Polling interval - wait before checking processed_events again
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
@@ -732,6 +871,7 @@ class TestFullOrchestratorFlow:
         while elapsed < max_wait:
             if unique_node_id in pipeline.processed_events:
                 break
+            # Polling interval - wait before checking processed_events again
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
@@ -802,6 +942,7 @@ class TestFullOrchestratorFlow:
             )
             if processed_count == len(node_ids):
                 break
+            # Polling interval - wait before recounting processed events
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
@@ -841,7 +982,8 @@ class TestFullOrchestratorFlow:
             headers=headers,
         )
 
-        # Wait a bit
+        # Allow time for pipeline to process and reject the malformed message.
+        # This ensures the pipeline is ready for the next valid message.
         await asyncio.sleep(1.0)
 
         # Publish a valid message after the malformed one
@@ -873,6 +1015,7 @@ class TestFullOrchestratorFlow:
         while elapsed < max_wait:
             if unique_node_id in pipeline.processed_events:
                 break
+            # Polling interval - wait before checking processed_events again
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
@@ -902,7 +1045,7 @@ class TestFullPipelineWithRealInfrastructure:
         real_projector: ProjectorRegistration,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test that introspection event creates PostgreSQL projection.
 
@@ -1098,8 +1241,11 @@ class TestPipelineLifecycle:
         )
 
         try:
-            # Give consumer time to start
-            await asyncio.sleep(0.5)
+            # Wait for consumer to be ready to receive messages.
+            # See wait_for_consumer_ready docstring for known limitations.
+            await wait_for_consumer_ready(
+                real_kafka_event_bus, ensure_test_topic_exists
+            )
 
             # Publish test message
             headers = ModelEventHeaders(
@@ -1150,7 +1296,10 @@ class TestPipelineLifecycle:
             on_message=handler,
         )
 
-        await asyncio.sleep(0.5)
+        # Brief wait before testing shutdown (tests cleanup, not message receipt).
+        # Using wait_for_consumer_ready for consistency, though this test doesn't
+        # actually need to receive messages.
+        await wait_for_consumer_ready(real_kafka_event_bus, ensure_test_topic_exists)
 
         # Unsubscribe should not raise
         await unsubscribe()

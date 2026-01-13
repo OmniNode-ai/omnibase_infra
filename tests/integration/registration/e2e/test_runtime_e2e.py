@@ -55,8 +55,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-logger = logging.getLogger(__name__)
-
 import httpx
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
@@ -66,16 +64,16 @@ from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+from tests.integration.registration.e2e.conftest import (
+    wrap_event_in_envelope,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
-# Import shared envelope helper from conftest
-# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
-from tests.integration.registration.e2e.conftest import (
-    wrap_event_in_envelope,
-)
+# Module-level logger
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Topic Configuration
@@ -296,6 +294,7 @@ class TestRuntimeE2EFlow:
             if projection is not None:
                 break
 
+            # Polling interval - wait before checking database again
             await asyncio.sleep(poll_interval)
 
         # Verify projection was created
@@ -367,6 +366,7 @@ class TestRuntimeE2EFlow:
             if all_found:
                 break
 
+            # Polling interval - wait before checking all projections again
             await asyncio.sleep(0.5)
 
         # Verify all projections exist
@@ -425,7 +425,8 @@ class TestRuntimeE2EFlow:
         )
 
         try:
-            # Allow subscription to establish
+            # Allow Kafka consumer group join to complete before publishing.
+            # Without this delay, the consumer may miss the first message.
             await asyncio.sleep(2.0)
 
             # Publish introspection event wrapped in envelope
@@ -491,6 +492,7 @@ class TestRuntimeE2EFlow:
                 except Exception:
                     pass
 
+                # Polling interval - wait before checking Consul catalog again
                 await asyncio.sleep(0.5)
 
         if consul_entry is None:
@@ -521,7 +523,8 @@ class TestRuntimeErrorHandling:
             value=b"not valid json {{{",
         )
 
-        # Wait a moment
+        # Allow time for runtime to process and recover from malformed message.
+        # The runtime should log an error but remain healthy.
         await asyncio.sleep(2.0)
 
         # Verify runtime is still healthy
@@ -549,7 +552,8 @@ class TestRuntimeErrorHandling:
             value=json.dumps(incomplete_event).encode("utf-8"),
         )
 
-        # Wait a moment
+        # Allow time for runtime to process and recover from incomplete event.
+        # The runtime should validate and reject gracefully without crashing.
         await asyncio.sleep(2.0)
 
         # Verify runtime is still healthy
@@ -625,6 +629,7 @@ class TestRuntimePerformance:
                 processing_time = elapsed
                 break
 
+            # Tight polling interval (0.1s) for accurate SLA measurement
             await asyncio.sleep(0.1)
 
         # Check soft SLA and warn if exceeded (but don't fail)

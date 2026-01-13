@@ -191,7 +191,7 @@ services:
   # Valkey (Redis-compatible Key-Value Store)
   # ==========================================================================
   valkey:
-    image: valkey/valkey:8
+    image: valkey/valkey:9.0.1
     container_name: omnibase-infra-valkey
     ports:
       - "${VALKEY_PORT:-6379}:6379"

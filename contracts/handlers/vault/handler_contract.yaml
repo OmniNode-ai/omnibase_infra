@@ -17,3 +17,11 @@ tags:
   - security
   - infrastructure
   - effect
+# Security metadata for handler loading validation
+security:
+  # Trusted namespace - loader should verify class is from trusted namespace
+  trusted_namespace: omnibase_infra.handlers
+  # Audit logging - enable for security-sensitive handlers
+  audit_logging: true
+  # Vault-specific: requires authentication since it deals with secrets
+  requires_authentication: true

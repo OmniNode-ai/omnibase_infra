@@ -128,6 +128,7 @@ async def verify_consul_registration(
                 },
             )
 
+        # Polling interval - retry Consul KV lookup every 0.2s until timeout
         await asyncio.sleep(0.2)
 
     return None
@@ -196,6 +197,7 @@ async def wait_for_consul_registration(
                 },
             )
 
+        # Polling interval - check Consul registration status periodically
         await asyncio.sleep(poll_interval)
 
     error_msg = (
@@ -309,6 +311,7 @@ async def wait_for_postgres_registration(
             if expected_state is None or projection.current_state == expected_state:
                 return projection
 
+        # Polling interval - check PostgreSQL projection status periodically
         await asyncio.sleep(poll_interval)
 
     if last_projection is not None and expected_state is not None:
@@ -529,6 +532,8 @@ async def collect_registration_events(
                 node_id,
             )
 
+    # Collection window - wait for timeout_seconds to collect events from Kafka.
+    # Events published after subscription started will be captured by the handler.
     await asyncio.sleep(timeout_seconds)
 
     # Cleanup subscriptions
@@ -606,6 +611,7 @@ async def verify_dual_registration(
         if consul_result is not None and postgres_result is not None:
             return consul_result, postgres_result
 
+        # Polling interval - check both Consul and PostgreSQL every 0.5s
         await asyncio.sleep(0.5)
 
     missing = []
@@ -672,6 +678,7 @@ async def verify_state_transition(
                 # Already transitioned - that's fine
                 return projection
 
+        # Polling interval - check projection state every 0.2s until from_state reached
         await asyncio.sleep(0.2)
 
     if initial_projection is not None and initial_projection.current_state == to_state:
@@ -790,6 +797,7 @@ async def wait_for_heartbeat_update(
         ):
             return projection
 
+        # Polling interval - check heartbeat every 1.0s (longer interval for 30s heartbeat cycle)
         await asyncio.sleep(1.0)
 
     projection = await verify_postgres_registration(
@@ -887,7 +895,7 @@ def assert_node_became_active(event: ModelNodeBecameActive) -> None:
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.causation_id is not None, "causation_id is required"
     assert event.emitted_at is not None, "emitted_at is required"
-    assert event.declared_capabilities is not None, "declared_capabilities is required"
+    assert event.capabilities is not None, "capabilities is required"
 
 
 def assert_registration_accepted(event: ModelNodeRegistrationAccepted) -> None:

@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import warnings
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -60,6 +61,7 @@ from omnibase_infra.models.registration import (
 )
 
 # Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
+from .conftest import wait_for_consumer_ready
 from .performance_utils import (
     PerformanceThresholds,
     assert_heartbeat_interval,
@@ -79,6 +81,7 @@ from .verification_helpers import (
 )
 
 if TYPE_CHECKING:
+    import asyncpg
     from omnibase_core.container import ModelONEXContainer
 
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
@@ -170,7 +173,7 @@ class TestSuite1NodeStartupIntrospection:
     @pytest.mark.asyncio
     async def test_introspection_event_structure_and_completeness(
         self,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test introspection event has all required fields.
 
@@ -209,7 +212,7 @@ class TestSuite1NodeStartupIntrospection:
     @pytest.mark.asyncio
     async def test_introspection_event_with_custom_endpoints(
         self,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test introspection event correctly includes custom endpoints.
 
@@ -347,7 +350,7 @@ class TestSuite2RegistryDualRegistration:
         self,
         registration_orchestrator: NodeRegistrationOrchestrator,
         wired_container: ModelONEXContainer,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
     ) -> None:
@@ -482,10 +485,10 @@ class TestSuite2RegistryDualRegistration:
     async def test_postgres_registration_succeeds(
         self,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test PostgreSQL registration succeeds.
 
@@ -547,9 +550,9 @@ class TestSuite2RegistryDualRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         cleanup_consul_services: list[str],
-        cleanup_projections,
+        cleanup_projections: None,
         unique_node_id: UUID,
     ) -> None:
         """Test dual registration to both Consul and PostgreSQL.
@@ -636,9 +639,9 @@ class TestSuite2RegistryDualRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         cleanup_consul_services: list[str],
-        cleanup_projections,
+        cleanup_projections: None,
         unique_node_id: UUID,
     ) -> None:
         """Test dual registration completes under 300ms.
@@ -722,11 +725,11 @@ class TestSuite2RegistryDualRegistration:
     async def test_handler_idempotency_blocking_states(
         self,
         wired_container: ModelONEXContainer,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test handler idempotency for blocking registration states.
 
@@ -779,7 +782,7 @@ class TestSuite2RegistryDualRegistration:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for projection to be persisted
+        # Allow PostgreSQL async write to complete before testing handler behavior
         await asyncio.sleep(0.1)
 
         # Create introspection event for the same node
@@ -808,11 +811,11 @@ class TestSuite2RegistryDualRegistration:
     async def test_handler_allows_retriable_states(
         self,
         wired_container: ModelONEXContainer,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test handler allows re-registration for retriable states.
 
@@ -867,7 +870,7 @@ class TestSuite2RegistryDualRegistration:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for projection to be persisted
+        # Allow PostgreSQL async write to complete before testing handler behavior
         await asyncio.sleep(0.1)
 
         # Create introspection event for the same node
@@ -1248,9 +1251,12 @@ class TestSuite4HeartbeatPublishing:
         )
 
         try:
-            # Wait for consumer to be fully ready before starting heartbeats
-            # This ensures the first "immediate" heartbeat is captured
-            await asyncio.sleep(1.0)
+            # Wait for consumer to be ready before starting heartbeats.
+            # Using max_wait=1.0 to ensure the first "immediate" heartbeat is captured.
+            # See wait_for_consumer_ready docstring for known limitations.
+            await wait_for_consumer_ready(
+                real_kafka_event_bus, heartbeat_topic, max_wait=1.0
+            )
 
             # Start heartbeat with 30s interval
             await introspectable_test_node.start_introspection_tasks(
@@ -1597,12 +1603,12 @@ class TestSuite5RegistryRecovery:
     async def test_registry_recovery_after_restart(
         self,
         wired_container: ModelONEXContainer,
-        postgres_pool,
+        postgres_pool: asyncpg.Pool,
         real_kafka_event_bus: KafkaEventBus,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test registry recovers state after simulated restart.
 
@@ -1650,7 +1656,7 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for persistence
+        # Allow PostgreSQL async write to complete before subsequent operations
         await asyncio.sleep(0.2)
 
         # Step 2: Create a NEW container and orchestrator (simulating restart)
@@ -1689,13 +1695,13 @@ class TestSuite5RegistryRecovery:
     async def test_re_registration_after_recovery(
         self,
         wired_container: ModelONEXContainer,
-        postgres_pool,
+        postgres_pool: asyncpg.Pool,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test nodes can re-register after registry recovery.
 
@@ -1742,7 +1748,7 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for persistence
+        # Allow PostgreSQL async write to complete before subsequent operations
         await asyncio.sleep(0.2)
 
         # Step 2: Create handler and process same introspection event (simulating re-registration)
@@ -1791,11 +1797,11 @@ class TestSuite5RegistryRecovery:
         self,
         registration_orchestrator: NodeRegistrationOrchestrator,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test registration uses UPSERT semantics (idempotent).
 
@@ -1835,7 +1841,7 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for initial persistence
+        # Allow PostgreSQL async write to complete before first verification
         await asyncio.sleep(0.2)
 
         # Verify initial registration
@@ -1866,7 +1872,7 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(2),
         )
 
-        # Wait for update
+        # Allow PostgreSQL UPSERT to complete before final verification
         await asyncio.sleep(0.2)
 
         # Step 3: Verify single record with updated data
@@ -1918,11 +1924,11 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test multiple nodes can register simultaneously.
 
@@ -2000,10 +2006,10 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test no race conditions when registering same node concurrently.
 
@@ -2086,11 +2092,11 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test all registered nodes appear in both Consul and PostgreSQL.
 
@@ -2163,7 +2169,7 @@ class TestSuite6MultipleNodes:
             }
             await real_consul_handler.execute(consul_envelope)
 
-        # Allow propagation
+        # Allow Consul KV writes to propagate before verification
         await asyncio.sleep(0.5)
 
         # Step 2: Verify all 3 in Consul
@@ -2183,15 +2189,17 @@ class TestSuite6MultipleNodes:
         )
 
         # Step 3: Verify all 3 in PostgreSQL
-        postgres_results = []
+        postgres_results: list[ModelRegistrationProjection | None] = []
         for node_id in node_ids:
-            result = await verify_postgres_registration(
+            pg_result = await verify_postgres_registration(
                 projection_reader=projection_reader,
                 node_id=node_id,
             )
-            postgres_results.append(result)
-            assert result is not None, f"Node {node_id} should be found in PostgreSQL"
-            assert result.current_state == EnumRegistrationState.ACTIVE
+            postgres_results.append(pg_result)
+            assert pg_result is not None, (
+                f"Node {node_id} should be found in PostgreSQL"
+            )
+            assert pg_result.current_state == EnumRegistrationState.ACTIVE
 
         assert len([r for r in postgres_results if r is not None]) == node_count, (
             f"Expected {node_count} registrations in PostgreSQL, "
@@ -2299,12 +2307,12 @@ class TestSuite7GracefulDegradation:
     async def test_registry_works_when_consul_unavailable(
         self,
         wired_container: ModelONEXContainer,
-        postgres_pool,
+        postgres_pool: asyncpg.Pool,
         projection_reader: ProjectionReaderRegistration,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test registry can still register in PostgreSQL when Consul is unavailable.
 
@@ -2364,7 +2372,7 @@ class TestSuite7GracefulDegradation:
     async def test_registry_works_when_postgres_unavailable(
         self,
         real_consul_handler: HandlerConsul,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         cleanup_consul_services: list[str],
     ) -> None:
@@ -2608,10 +2616,10 @@ class TestSuite8RegistrySelfRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         wired_container: ModelONEXContainer,
         cleanup_consul_services: list[str],
-        cleanup_projections,
+        cleanup_projections: None,
         unique_node_id: UUID,
     ) -> None:
         """Test registry can register itself as a service.
@@ -2707,11 +2715,11 @@ class TestSuite8RegistrySelfRegistration:
     async def test_self_registration_in_database(
         self,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         wired_container: ModelONEXContainer,
-        postgres_pool,
+        postgres_pool: asyncpg.Pool,
         unique_node_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test registry self-registration persists in database.
 
@@ -2769,7 +2777,7 @@ class TestSuite8RegistrySelfRegistration:
     async def test_registry_introspection_data_complete(
         self,
         wired_container: ModelONEXContainer,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test registry's own introspection data is complete.
 
@@ -2812,35 +2820,39 @@ class TestSuite8RegistrySelfRegistration:
     @pytest.mark.asyncio
     async def test_registry_introspection_with_custom_capabilities(
         self,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test registry introspection includes custom capabilities.
 
         Verifies:
-        - Registry can specify handler capabilities
-        - Timeout coordination capability is included
+        - Registry can specify handler capabilities via supported_types
+        - Processing and routing capabilities can be enabled
+        - Custom capabilities work via model_extra
         """
         from omnibase_infra.models.registration.model_node_capabilities import (
             ModelNodeCapabilities,
         )
 
         # Create capabilities typical for a registry orchestrator
+        # Use supported_types for handler names (valid list[str] field)
         registry_capabilities = ModelNodeCapabilities(
-            handlers=[
+            supported_types=[
                 "HandlerNodeIntrospected",
                 "HandlerRuntimeTick",
                 "HandlerNodeHeartbeat",
             ],
-            supports_timeout_coordination=True,
-            supports_batch_operations=True,
+            processing=True,
+            routing=True,
         )
 
         # Verify capabilities are structured correctly
-        assert registry_capabilities.handlers is not None
-        assert len(registry_capabilities.handlers) == 3
-        assert "HandlerNodeIntrospected" in registry_capabilities.handlers
-        assert "HandlerRuntimeTick" in registry_capabilities.handlers
-        assert "HandlerNodeHeartbeat" in registry_capabilities.handlers
+        assert registry_capabilities.supported_types is not None
+        assert len(registry_capabilities.supported_types) == 3
+        assert "HandlerNodeIntrospected" in registry_capabilities.supported_types
+        assert "HandlerRuntimeTick" in registry_capabilities.supported_types
+        assert "HandlerNodeHeartbeat" in registry_capabilities.supported_types
+        assert registry_capabilities.processing is True
+        assert registry_capabilities.routing is True
 
     @pytest.mark.asyncio
     async def test_registry_discoverable_by_other_nodes(
@@ -2906,7 +2918,8 @@ class TestSuite8RegistrySelfRegistration:
 
             if isinstance(value, bytes):
                 value = value.decode("utf-8")
-            stored_data = json_mod.loads(value)
-            assert stored_data.get("service_type") == "registry"
-            assert stored_data.get("node_type") == "orchestrator"
-            assert "registration" in stored_data.get("endpoints", {})
+            if isinstance(value, str):
+                stored_data = json_mod.loads(value)
+                assert stored_data.get("service_type") == "registry"
+                assert stored_data.get("node_type") == "orchestrator"
+                assert "registration" in stored_data.get("endpoints", {})

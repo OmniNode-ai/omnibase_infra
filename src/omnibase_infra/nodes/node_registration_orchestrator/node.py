@@ -58,17 +58,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
-from omnibase_core.models.contracts.subcontracts.model_handler_routing_entry import (
-    ModelHandlerRoutingEntry,
-)
-from omnibase_core.models.contracts.subcontracts.model_handler_routing_subcontract import (
-    ModelHandlerRoutingSubcontract,
-)
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.models.routing import (
+    ModelRoutingEntry,
+    ModelRoutingSubcontract,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.models.container import ModelONEXContainer
@@ -106,11 +104,11 @@ def _convert_class_to_handler_key(class_name: str) -> str:
     return re.sub("([a-z0-9])([A-Z])", r"\1-\2", s1).lower()
 
 
-def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
+def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
     """Load handler routing configuration from contract.yaml.
 
     Loads the handler_routing section from this node's contract.yaml
-    and converts it to ModelHandlerRoutingSubcontract format. This follows
+    and converts it to ModelRoutingSubcontract format. This follows
     the Handler Plugin Loader pattern (see CLAUDE.md) where routing is
     defined declaratively in contract.yaml, not hardcoded in Python.
 
@@ -127,9 +125,9 @@ def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
                     name: "HandlerNodeIntrospected"
                     module: "omnibase_infra.nodes..."
 
-        This is converted to ModelHandlerRoutingEntry with flat fields::
+        This is converted to ModelRoutingEntry with flat fields::
 
-            ModelHandlerRoutingEntry(
+            ModelRoutingEntry(
                 routing_key="ModelNodeIntrospectionEvent",  # from event_model.name
                 handler_key="handler-node-introspected",    # kebab-case of handler.name
             )
@@ -139,7 +137,7 @@ def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
         matching the handler's adapter ID in ServiceHandlerRegistry.
 
     Returns:
-        ModelHandlerRoutingSubcontract with entries mapping event models to handlers.
+        ModelRoutingSubcontract with entries mapping event models to handlers.
 
     Raises:
         ProtocolConfigurationError: If contract.yaml does not exist, contains invalid
@@ -206,7 +204,7 @@ def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
         raise ProtocolConfigurationError(msg, context=ctx)
 
     # Build routing entries from contract
-    entries: list[ModelHandlerRoutingEntry] = []
+    entries: list[ModelRoutingEntry] = []
     handlers_config = handler_routing.get("handlers", [])
 
     for handler_config in handlers_config:
@@ -230,7 +228,7 @@ def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
             continue
 
         entries.append(
-            ModelHandlerRoutingEntry(
+            ModelRoutingEntry(
                 routing_key=event_model_name,
                 handler_key=_convert_class_to_handler_key(handler_class_name),
             )
@@ -241,7 +239,7 @@ def _create_handler_routing_subcontract() -> ModelHandlerRoutingSubcontract:
         len(entries),
     )
 
-    return ModelHandlerRoutingSubcontract(
+    return ModelRoutingSubcontract(
         version=ModelSemVer(major=1, minor=0, patch=0),
         routing_strategy=handler_routing.get("routing_strategy", "payload_type_match"),
         handlers=entries,
@@ -303,7 +301,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
 
     Note on Handler Routing Field Names:
         The contract.yaml uses a nested structure with ``event_model.name`` and
-        ``handler.name``, but ModelHandlerRoutingEntry uses flat fields:
+        ``handler.name``, but ModelRoutingEntry uses flat fields:
 
         - ``routing_key``: Corresponds to ``event_model.name``
         - ``handler_key``: The handler's adapter ID in ServiceHandlerRegistry
