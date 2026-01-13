@@ -149,7 +149,6 @@ if TYPE_CHECKING:
 # for integration tests. See tests/infrastructure_config.py for full
 # documentation on environment variable overrides and CI/CD graceful skip behavior.
 # =============================================================================
-from tests.infrastructure_config import REMOTE_INFRA_HOST
 
 # =============================================================================
 # Environment Variable Utilities

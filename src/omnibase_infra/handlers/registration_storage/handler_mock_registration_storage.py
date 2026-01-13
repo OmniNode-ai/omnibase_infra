@@ -25,7 +25,6 @@ from omnibase_infra.handlers.registration_storage.models import (
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
     ModelRegistrationRecord,
-    ModelRegistrationUpdate,
     ModelStorageHealthCheckDetails,
     ModelStorageHealthCheckResult,
     ModelStorageQuery,
@@ -343,7 +342,7 @@ class MockRegistrationStorageHandler:
         start_time = time.monotonic()
 
         async with self._lock:
-            record_count = len(self._records)
+            len(self._records)
 
         latency_ms = (time.monotonic() - start_time) * 1000
 

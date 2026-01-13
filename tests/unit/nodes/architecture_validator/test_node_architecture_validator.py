@@ -35,7 +35,6 @@ import pytest
 
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.nodes.architecture_validator import (
-    SUPPORTED_RULE_IDS,
     EnumValidationSeverity,
     ModelArchitectureValidationRequest,
     ModelArchitectureValidationResult,
@@ -44,10 +43,6 @@ from omnibase_infra.nodes.architecture_validator import (
     NodeArchitectureValidatorCompute,
     ProtocolArchitectureRule,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
 
 # =============================================================================
 # Mock Rule Implementation
@@ -1302,7 +1297,7 @@ class TestImmutabilityAndThreadSafety:
 
     def test_validation_result_is_frozen(self) -> None:
         """Verify ModelArchitectureValidationResult is frozen."""
-        result = ModelArchitectureValidationResult.passed(
+        ModelArchitectureValidationResult.passed(
             rules_checked=("RULE_1",),
             nodes_checked=5,
         )
@@ -1312,7 +1307,7 @@ class TestImmutabilityAndThreadSafety:
 
     def test_validation_request_is_frozen(self) -> None:
         """Verify ModelArchitectureValidationRequest is frozen."""
-        request = ModelArchitectureValidationRequest(
+        ModelArchitectureValidationRequest(
             nodes=(),
             handlers=(),
         )
@@ -1322,7 +1317,7 @@ class TestImmutabilityAndThreadSafety:
 
     def test_violation_is_frozen(self) -> None:
         """Verify ModelArchitectureViolation is frozen."""
-        violation = ModelArchitectureViolation(
+        ModelArchitectureViolation(
             rule_id="TEST",
             rule_name="Test",
             severity=EnumValidationSeverity.ERROR,
@@ -1336,7 +1331,7 @@ class TestImmutabilityAndThreadSafety:
 
     def test_rule_check_result_is_frozen(self) -> None:
         """Verify ModelRuleCheckResult is frozen."""
-        result = ModelRuleCheckResult(
+        ModelRuleCheckResult(
             passed=True,
             rule_id="TEST",
         )

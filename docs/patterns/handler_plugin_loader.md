@@ -268,6 +268,26 @@ ONEX uses duck typing for protocol validation to:
 
 This section provides comprehensive security documentation for the handler plugin loader's dynamic import mechanism. Understanding these security implications is essential for safe production deployment.
 
+### Quick Security Reference
+
+| Threat | Risk | Status | Control |
+|--------|------|--------|---------|
+| **YAML deserialization attacks** | CRITICAL | **MITIGATED** | `yaml.safe_load()` blocks `!!python/object` tags |
+| **Memory exhaustion (DoS)** | HIGH | **MITIGATED** | 10MB file size limit (`MAX_CONTRACT_SIZE`) |
+| **Arbitrary class loading** | HIGH | **MITIGATED** | Protocol validation requires 5 `ProtocolHandler` methods |
+| **Path information disclosure** | MEDIUM | **MITIGATED** | `_sanitize_exception_message()` strips paths from errors |
+| **Non-class object loading** | MEDIUM | **MITIGATED** | `isinstance(handler_class, type)` check |
+| **Malicious contract injection** | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` parameter |
+| **Module path traversal** | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` with package boundary validation |
+| **Import-time code execution** | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict to trusted modules |
+| **Handler instantiation exploits** | HIGH | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict to trusted modules |
+
+**Legend**:
+- **MITIGATED**: Built-in protection, always active
+- **OPTIONALLY MITIGATED**: Requires enabling `allowed_namespaces` parameter (recommended for production)
+
+**For production deployments**: Enable `allowed_namespaces` to convert "optionally mitigated" threats to "mitigated".
+
 ---
 
 ### Dynamic Import Security Model
@@ -403,6 +423,128 @@ handler = loader.load_from_contract(Path("malicious_contract.yaml"))
 | `allowed_namespaces=None` (default) | All namespaces allowed | Development, trusted environments |
 | `allowed_namespaces=["omnibase_.", "myapp."]` | Only specified prefixes allowed | Production deployments |
 | `allowed_namespaces=[]` | ALL namespaces blocked | Effectively disables loader |
+
+#### Path Traversal Protection
+
+The `allowed_namespaces` parameter provides **package boundary validation** that prevents path traversal attacks:
+
+**Attack Example**:
+```yaml
+# Malicious contract attempting path traversal
+handler_class: "os.system"  # Attempt to load system module
+# OR
+handler_class: "sys.modules"  # Attempt to access runtime internals
+```
+
+**How Namespace Allowlisting Protects**:
+1. **Prefix matching with boundary validation**: The namespace `"foo."` only matches packages starting with `foo.`, not `foobar.`
+2. **Explicit trailing dot requirement**: Namespaces should end with `.` to enforce package boundaries
+3. **No dynamic path construction**: Module paths cannot escape the allowed namespace prefixes
+
+**Implementation Detail** (from `_validate_namespace()`):
+```python
+# Package boundary validation prevents "foo" from matching "foobar.module"
+for namespace in self._allowed_namespaces:
+    if class_path.startswith(namespace):
+        if namespace.endswith("."):
+            return  # Matched with proper package boundary
+        remaining = class_path[len(namespace):]
+        if remaining == "" or remaining.startswith("."):
+            return  # Exact match or proper boundary
+```
+
+**Recommendation**: Always use trailing dots in namespace prefixes for maximum security:
+```python
+# GOOD: Trailing dots enforce package boundaries
+loader = HandlerPluginLoader(
+    allowed_namespaces=["omnibase_infra.", "myapp.handlers."]
+)
+
+# LESS SECURE: No trailing dot could match unintended packages
+# "omnibase" would match both "omnibase.core" AND "omnibase_malicious"
+loader = HandlerPluginLoader(
+    allowed_namespaces=["omnibase", "myapp"]  # Avoid this pattern
+)
+```
+
+### Contract Content Security: No Secrets in Contracts
+
+**CRITICAL**: Handler contracts must NEVER contain secrets, credentials, or sensitive configuration values.
+
+#### What Must NOT Be in Contracts
+
+| Category | Examples | Why Prohibited |
+|----------|----------|----------------|
+| **Credentials** | Passwords, API keys, tokens, secrets | Git history exposure, log leakage |
+| **Connection strings with auth** | `postgresql://user:pass@host` | Full credential disclosure |
+| **Private keys** | SSL certificates, encryption keys | Cryptographic compromise |
+| **Environment-specific secrets** | Production passwords, staging tokens | Cross-environment leakage |
+| **PII** | User data, emails in examples | Privacy/compliance violation |
+
+#### What IS Safe in Contracts
+
+| Category | Examples | Rationale |
+|----------|----------|-----------|
+| **Handler class paths** | `myapp.handlers.AuthHandler` | Code reference, not secret |
+| **Handler names** | `auth.validate`, `db.query` | Identifiers only |
+| **Handler types** | `effect`, `compute`, `reducer` | Static categorization |
+| **Capability tags** | `["database", "async"]` | Feature flags, non-sensitive |
+| **Non-secret configuration** | Timeouts, retry counts, feature flags | Operational metadata |
+
+#### Example: Correct vs Incorrect Contract
+
+```yaml
+# INCORRECT - Contains secrets (NEVER DO THIS)
+handler_name: "db.query"
+handler_class: "myapp.handlers.DatabaseHandler"
+handler_type: "effect"
+config:
+  connection_string: "postgresql://admin:secret123@db.prod:5432/app"  # VIOLATION
+  api_key: "sk-abc123xyz"  # VIOLATION
+  aws_secret_key: "AKIAIOSFODNN7EXAMPLE"  # VIOLATION
+```
+
+```yaml
+# CORRECT - No secrets, references environment/Vault
+handler_name: "db.query"
+handler_class: "myapp.handlers.DatabaseHandler"
+handler_type: "effect"
+capability_tags:
+  - database
+  - pooled
+  - async
+# Secrets loaded at runtime from:
+# - Environment variables (POSTGRES_PASSWORD)
+# - HashiCorp Vault (secret/data/db/credentials)
+# - Kubernetes secrets (mounted as env vars)
+```
+
+#### Where Secrets Should Live
+
+| Source | When to Use | Example |
+|--------|-------------|---------|
+| **Environment variables** | Container/pod configuration | `POSTGRES_PASSWORD`, `API_KEY` |
+| **HashiCorp Vault** | Dynamic secrets, rotation | `vault kv get secret/data/db/creds` |
+| **Kubernetes secrets** | Static secrets in K8s | `secretKeyRef` in pod spec |
+| **AWS Secrets Manager** | AWS deployments | `secretsmanager:GetSecretValue` |
+
+#### CI Validation
+
+Contracts should be validated in CI to detect accidental secret inclusion:
+
+```bash
+# Example: Scan contracts for potential secrets
+grep -rE "(password|secret|key|token|credential).*:" contracts/ && echo "FAIL: Potential secrets in contracts" && exit 1
+```
+
+Consider using tools like:
+- **gitleaks** - Scan for hardcoded secrets in contracts
+- **trufflehog** - Detect high-entropy strings
+- **detect-secrets** - Pre-commit hook for secret detection
+
+**See Also**: [Secret Management](./security_patterns.md#secret-management) for comprehensive secret handling guidance.
+
+---
 
 ### What the Loader Does NOT Protect Against
 
@@ -835,3 +977,4 @@ capability_tags:
 - `src/omnibase_infra/models/runtime/model_loaded_handler.py` - Result model
 - `src/omnibase_infra/models/runtime/model_handler_contract.py` - Contract model
 - [ADR: Handler Plugin Loader Security Model](../decisions/adr-handler-plugin-loader-security.md) - Security decisions
+- [Migration Guide: wire_default_handlers()](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md) - Migration from legacy wiring

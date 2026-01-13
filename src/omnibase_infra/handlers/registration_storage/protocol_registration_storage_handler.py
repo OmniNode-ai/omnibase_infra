@@ -29,7 +29,6 @@ from omnibase_infra.handlers.registration_storage.models import (
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
     ModelRegistrationRecord,
-    ModelRegistrationUpdate,
     ModelStorageHealthCheckResult,
     ModelStorageQuery,
     ModelStorageResult,

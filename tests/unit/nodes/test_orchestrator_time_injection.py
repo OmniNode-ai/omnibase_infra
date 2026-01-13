@@ -261,7 +261,7 @@ class TestOrchestratorNoSystemClockCalls:
             "time"
         }  # Note: 'datetime' might be imported for type hints
 
-        suspicious_imports = imports & time_related_imports
+        imports & time_related_imports
 
         # 'time' module import is a red flag - likely used for time.time() or sleep
         assert "time" not in imports, (

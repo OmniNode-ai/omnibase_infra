@@ -34,9 +34,6 @@ from omnibase_infra.handlers.models.mcp import (
     ModelMcpHandlerConfig,
 )
 
-if TYPE_CHECKING:
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
 
 class TestHandlerMCPInitialization:
     """Test suite for HandlerMCP initialization.

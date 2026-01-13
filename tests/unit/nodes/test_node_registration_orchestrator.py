@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
-from uuid import uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind

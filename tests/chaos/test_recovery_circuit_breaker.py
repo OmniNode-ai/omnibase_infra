@@ -44,7 +44,7 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.enums import EnumCircuitState, EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     MixinAsyncCircuitBreaker,

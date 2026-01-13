@@ -189,7 +189,6 @@ class TestCorrelationIdPropagation:
         """
         from uuid import UUID
 
-        from omnibase_infra.errors import InfraConnectionError
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         # Create directory with a contract that has an invalid import

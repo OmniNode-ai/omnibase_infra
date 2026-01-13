@@ -11,14 +11,13 @@ Part of OMN-1133: Handler Discovery Service implementation.
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.models.runtime.model_discovery_result import ModelDiscoveryResult
 from omnibase_infra.runtime import (
     ContractHandlerDiscovery,
-    HandlerPluginLoader,
     ProtocolBindingRegistry,
     ProtocolHandlerDiscovery,
 )

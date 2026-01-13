@@ -33,13 +33,14 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from tests.conftest import seed_mock_handlers
 from tests.helpers import DeterministicClock, DeterministicIdGenerator
 
 # =============================================================================
@@ -1221,11 +1222,11 @@ class TestRuntimeHostProcessHealthCheck:
             pass
 
         with patch.object(process, "_populate_handlers_from_registry", noop_populate):
-            # Set handlers to avoid fail-fast validation
-            # Create mock handler and mark as initialized so health check returns healthy
+            # Seed handlers to bypass fail-fast validation
+            # MockHandler needs initialized=True for health check to return healthy
             mock_handler = MockHandler()
             mock_handler.initialized = True
-            process._handlers = {"mock": mock_handler}
+            seed_mock_handlers(process, handlers={"mock": mock_handler})
             await process.start()
 
             try:
@@ -1260,8 +1261,8 @@ class TestRuntimeHostProcessHealthCheck:
             pass
 
         with patch.object(process, "_populate_handlers_from_registry", noop_populate):
-            # Set handlers to avoid fail-fast validation
-            process._handlers = {"mock": MockHandler()}
+            # Seed handlers to bypass fail-fast validation
+            seed_mock_handlers(process, handlers={"mock": MockHandler()})
             # After starting
             await process.start()
             health = await process.health_check()
@@ -1288,11 +1289,11 @@ class TestRuntimeHostProcessHealthCheck:
             pass
 
         with patch.object(process, "_populate_handlers_from_registry", noop_populate):
-            # Set handlers to avoid fail-fast validation
-            # Create mock handler and mark as initialized so health check returns healthy
+            # Seed handlers to bypass fail-fast validation
+            # MockHandler needs initialized=True for health check to return healthy
             mock_handler = MockHandler()
             mock_handler.initialized = True
-            process._handlers = {"mock": mock_handler}
+            seed_mock_handlers(process, handlers={"mock": mock_handler})
             await process.start()
 
             try:
@@ -1321,8 +1322,8 @@ class TestRuntimeHostProcessHealthCheck:
             pass
 
         with patch.object(process, "_populate_handlers_from_registry", noop_populate):
-            # Set handlers to avoid fail-fast validation
-            process._handlers = {"mock": MockHandler()}
+            # Seed handlers to bypass fail-fast validation
+            seed_mock_handlers(process, handlers={"mock": MockHandler()})
             await process.start()
 
             try:
@@ -2178,8 +2179,8 @@ class TestRuntimeHostProcessGracefulDrain:
             pass
 
         with patch.object(process, "_populate_handlers_from_registry", noop_populate):
-            # Set handlers to avoid fail-fast validation
-            process._handlers = {"mock": MockHandler()}
+            # Seed handlers to bypass fail-fast validation
+            seed_mock_handlers(process, handlers={"mock": MockHandler()})
             await process.start()
 
             # Verify no messages are pending
@@ -2221,8 +2222,8 @@ class TestRuntimeHostProcessGracefulDrain:
             pass
 
         with patch.object(process, "_populate_handlers_from_registry", noop_populate):
-            # Set handlers to avoid fail-fast validation
-            process._handlers = {"mock": MockHandler()}
+            # Seed handlers to bypass fail-fast validation
+            seed_mock_handlers(process, handlers={"mock": MockHandler()})
             await process.start()
 
             with caplog.at_level(logging.INFO):
@@ -2254,8 +2255,8 @@ class TestRuntimeHostProcessGracefulDrain:
             pass
 
         with patch.object(process, "_populate_handlers_from_registry", noop_populate):
-            # Set handlers to avoid fail-fast validation
-            process._handlers = {"mock": MockHandler()}
+            # Seed handlers to bypass fail-fast validation
+            seed_mock_handlers(process, handlers={"mock": MockHandler()})
             await process.start()
 
             with caplog.at_level(logging.INFO):
@@ -2463,8 +2464,8 @@ class TestRuntimeHostProcessDrainState:
         with patch.object(
             runtime_process, "_populate_handlers_from_registry", noop_populate
         ):
-            # Set handlers to avoid fail-fast validation
-            runtime_process._handlers = {"mock": MockHandler()}
+            # Seed handlers to bypass fail-fast validation
+            seed_mock_handlers(runtime_process, handlers={"mock": MockHandler()})
             await runtime_process.start()
 
             # Get health check
@@ -2498,8 +2499,8 @@ class TestRuntimeHostProcessDrainState:
         with patch.object(
             runtime_process, "_populate_handlers_from_registry", noop_populate
         ):
-            # Set handlers to avoid fail-fast validation
-            runtime_process._handlers = {"mock": MockHandler()}
+            # Seed handlers to bypass fail-fast validation
+            seed_mock_handlers(runtime_process, handlers={"mock": MockHandler()})
             await runtime_process.start()
 
             # Before drain
@@ -2535,8 +2536,8 @@ class TestRuntimeHostProcessDrainState:
         with patch.object(
             runtime_process, "_populate_handlers_from_registry", noop_populate
         ):
-            # Set handlers to avoid fail-fast validation
-            runtime_process._handlers = {"mock": MockHandler()}
+            # Seed handlers to bypass fail-fast validation
+            seed_mock_handlers(runtime_process, handlers={"mock": MockHandler()})
             await runtime_process.start()
 
             # No pending messages

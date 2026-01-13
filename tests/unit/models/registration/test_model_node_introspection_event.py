@@ -713,7 +713,7 @@ class TestModelNodeIntrospectionEventEquality:
         )
         assert event != "not a model"
         assert event != 42
-        assert event != None
+        assert event is not None
 
 
 class TestModelNodeIntrospectionEventHashing:

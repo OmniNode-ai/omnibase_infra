@@ -57,7 +57,7 @@ import time
 from collections.abc import Awaitable, Callable
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import asyncpg
 import yaml

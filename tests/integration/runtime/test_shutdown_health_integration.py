@@ -16,7 +16,7 @@ These tests use real instances (not mocks) to verify integration behavior.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import aiohttp
 import pytest
@@ -24,18 +24,7 @@ import pytest
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.services.service_health import ServiceHealth
-
-
-def _setup_mock_handlers(runtime: RuntimeHostProcess) -> None:
-    """Set up mock handlers on a runtime to avoid fail-fast validation.
-
-    The RuntimeHostProcess.start() validates that handlers are registered.
-    This helper sets up a minimal mock handler to satisfy that check.
-    """
-    mock_handler = MagicMock()
-    mock_handler.shutdown = AsyncMock()
-    mock_handler.health_check = AsyncMock(return_value={"healthy": True})
-    runtime._handlers = {"mock": mock_handler}
+from tests.conftest import seed_mock_handlers
 
 
 class TestShutdownHealthIntegration:
@@ -61,7 +50,7 @@ class TestShutdownHealthIntegration:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
 
             # Verify running state first
@@ -99,7 +88,7 @@ class TestShutdownHealthIntegration:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
 
             # Act - start shutdown (but don't await immediately)
@@ -145,7 +134,7 @@ class TestShutdownHealthIntegration:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
             await health_server.start()
 
@@ -206,7 +195,7 @@ class TestShutdownHealthIntegration:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
             await health_server.start()
 
@@ -266,7 +255,7 @@ class TestShutdownHealthIntegration:
                 runtime, "_populate_handlers_from_registry", noop_populate
             ):
                 # Set handlers to avoid fail-fast validation
-                _setup_mock_handlers(runtime)
+                seed_mock_handlers(runtime)
                 # Start both
                 await runtime.start()
                 await health_server.start()
@@ -317,7 +306,7 @@ class TestShutdownHealthIntegration:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
             await runtime.stop()
 
@@ -349,7 +338,7 @@ class TestShutdownHealthIntegration:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
 
             # Verify event bus is started
@@ -381,7 +370,7 @@ class TestShutdownHealthIntegration:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
 
             # Simulate a degraded state while running
@@ -422,7 +411,7 @@ class TestServiceHealthShutdownBehavior:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
             await health_server.start()
 
@@ -492,7 +481,7 @@ class TestServiceHealthShutdownBehavior:
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
             # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(runtime)
+            seed_mock_handlers(runtime)
             await runtime.start()
             await health_server.start()
 

@@ -50,7 +50,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 from omnibase_infra.protocols.protocol_capability_projection import (
     ProtocolCapabilityProjection,
 )
-from omnibase_infra.services import EnumSelectionStrategy, ServiceCapabilityQuery
+from omnibase_infra.services import ServiceCapabilityQuery
 
 # =============================================================================
 # Test Constants

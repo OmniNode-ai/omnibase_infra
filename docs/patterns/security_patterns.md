@@ -17,6 +17,7 @@ This document provides comprehensive security patterns for ONEX infrastructure d
 - [Input Validation](#input-validation)
 - [Authentication and Authorization](#authentication-and-authorization)
 - [Secret Management](#secret-management)
+  - [YAML Contract Security](#yaml-contract-security-no-secrets-in-contracts)
 - [Network Security](#network-security)
 - [Policy Security](#policy-security)
 - [Introspection Security](#introspection-security)
@@ -785,6 +786,41 @@ class DatabaseCredentialRotator:
 
         return username, password
 ```
+
+### YAML Contract Security: No Secrets in Contracts
+
+**CRITICAL**: ONEX handler contracts (YAML files) must NEVER contain secrets.
+
+Handler contracts are:
+- Version-controlled in Git (secrets would be in repository history forever)
+- Potentially logged during deployment or debugging
+- Shared across environments (dev/staging/prod)
+- Readable by anyone with repository access
+
+#### Prohibited Content in Contracts
+
+```yaml
+# NEVER include these in handler_contract.yaml or contract.yaml:
+config:
+  password: "secret123"           # VIOLATION
+  api_key: "sk-abc123"            # VIOLATION
+  connection_string: "...pass..." # VIOLATION
+  private_key: "-----BEGIN..."    # VIOLATION
+  token: "eyJhbGc..."             # VIOLATION
+```
+
+#### Where to Store Secrets Instead
+
+| Secret Type | Recommended Storage | Access Pattern |
+|-------------|-------------------|----------------|
+| Database credentials | Vault dynamic secrets | `await vault.get_database_credentials()` |
+| API keys | Vault KV store | `await vault.get_secret("secret/api-keys")` |
+| Service tokens | Vault AppRole | `await vault.auth.approle.login()` |
+| Static secrets | Kubernetes secrets | Environment variable injection |
+
+**See Also**: [Handler Plugin Loader - Contract Content Security](./handler_plugin_loader.md#contract-content-security-no-secrets-in-contracts) for detailed contract security guidelines.
+
+---
 
 ### Environment Variable Security
 
@@ -1651,6 +1687,8 @@ Use this checklist before deploying to production:
 ### Pre-Deployment
 
 - [ ] All secrets stored in Vault, not in code or environment files
+- [ ] **Handler contracts contain NO secrets** (passwords, API keys, tokens)
+- [ ] CI pipeline includes secret scanning for contracts (gitleaks, detect-secrets)
 - [ ] TLS 1.3 configured for all network connections
 - [ ] Certificate verification enabled (`verify_mode=CERT_REQUIRED`)
 - [ ] Database connections use SSL with certificate verification

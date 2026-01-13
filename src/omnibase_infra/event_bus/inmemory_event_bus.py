@@ -48,7 +48,6 @@ import logging
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType

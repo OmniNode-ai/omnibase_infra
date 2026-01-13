@@ -19,9 +19,6 @@ from .conftest import (
     INVALID_YAML_SYNTAX,
     MINIMAL_CONTRACT_WITHOUT_HANDLER_TYPE,
     MINIMAL_HANDLER_CONTRACT_YAML,
-    VALID_HANDLER_CONTRACT_YAML,
-    MockInvalidHandler,
-    MockValidHandler,
 )
 
 

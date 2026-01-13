@@ -755,7 +755,6 @@ class TestSecurityMetadataValidatorTotalDomainLength:
         # Arrange - Create a domain with 300+ characters
         # Use multiple 63-char labels plus a shorter one
         label_63 = "x" * 63
-        label_43 = "y" * 43
         # 63 + 1 + 63 + 1 + 63 + 1 + 63 + 1 + 43 = 299, add one more char
         domain_300 = f"{label_63}.{label_63}.{label_63}.{label_63}.{'z' * 44}"
         assert len(domain_300) == 300  # Verify our test setup

@@ -151,7 +151,7 @@ class TestOrchestratorEventPurity:
         # But published should NEVER have commands
         consumed_events = contract_data.get("consumed_events", [])
         published_topics = {e.get("topic") for e in published_events}
-        consumed_topics = {e.get("topic") for e in consumed_events}
+        {e.get("topic") for e in consumed_events}
 
         # Published and consumed should not share command topics
         for topic in published_topics:

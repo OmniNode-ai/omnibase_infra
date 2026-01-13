@@ -33,10 +33,6 @@ from omnibase_infra.nodes.architecture_validator.validators import (
     RuleNoOrchestratorFSM,
 )
 
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
-
-
 # =============================================================================
 # Fixtures
 # =============================================================================

@@ -8,6 +8,10 @@ consolidating shared mocks to avoid code duplication.
 Fixtures:
     mock_wire_infrastructure: Mocks wire_infrastructure_services and
         ModelONEXContainer to avoid wiring errors in tests.
+    mock_runtime_handler: Re-exported from tests.conftest for handler seeding.
+
+Functions:
+    seed_mock_handlers: Re-exported from tests.conftest for fail-fast bypass.
 """
 
 from __future__ import annotations
@@ -18,6 +22,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_infra.runtime.registry import ProtocolBindingRegistry
+
+# Re-export handler seeding utilities from root conftest
+# These are available here for convenience but defined in tests/conftest.py
+# to make them available to both unit and integration tests.
+from tests.conftest import mock_runtime_handler, seed_mock_handlers
+
+__all__ = ["mock_runtime_handler", "seed_mock_handlers"]
 
 if TYPE_CHECKING:
     from collections.abc import Generator

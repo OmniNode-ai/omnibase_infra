@@ -34,6 +34,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from .conftest import wait_for_consumer_ready
+
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.event_bus.models import ModelDlqEvent
@@ -58,7 +60,6 @@ requires_kafka = pytest.mark.skipif(
 # Test configuration constants
 TEST_TIMEOUT_SECONDS = 30
 MESSAGE_DELIVERY_WAIT_SECONDS = 2.0
-CONSUMER_START_WAIT_SECONDS = 1.0
 DLQ_PROCESSING_WAIT_SECONDS = 3.0
 
 
@@ -360,7 +361,8 @@ class TestDlqPublishing:
             dlq_collector,
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumers to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_dlq_bus, created_unique_topic)
 
         # Publish message with retry_count at max (will trigger DLQ on first failure)
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -459,7 +461,8 @@ class TestDlqMessageFormat:
             created_unique_dlq_topic, f"dlq-fmt-{uuid.uuid4().hex[:6]}", dlq_collector
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumers to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_dlq_bus, created_unique_topic)
 
         # Publish message with exhausted retries
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -548,7 +551,8 @@ class TestDlqCallbacks:
             created_unique_topic, unique_group, failing_handler
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_dlq_bus, created_unique_topic)
 
         # Publish message with exhausted retries to trigger DLQ
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -732,7 +736,8 @@ class TestDlqMetrics:
             created_unique_topic, unique_group, failing_handler
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_dlq_bus, created_unique_topic)
 
         # Publish message with exhausted retries
         from omnibase_infra.event_bus.models import ModelEventHeaders

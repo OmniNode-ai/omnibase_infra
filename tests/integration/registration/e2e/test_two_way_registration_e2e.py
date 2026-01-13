@@ -1408,7 +1408,7 @@ class TestSuite4HeartbeatPublishing:
         ) as timing:
             # _publish_heartbeat is the internal method that does the actual work
             # Since we're testing overhead, we call it directly
-            success = await introspectable_test_node._publish_heartbeat()
+            await introspectable_test_node._publish_heartbeat()
 
         # Verify the operation completed (success depends on event bus availability)
         # In E2E tests, event bus is connected so this should succeed

@@ -1434,7 +1434,6 @@ class TestDeterministicRouting:
         dispatch_engine: MessageDispatchEngine,
     ) -> None:
         """Test that same input always produces same handler selection."""
-        handler_calls: list[list[str]] = []
 
         async def handler1(envelope: ModelEventEnvelope[object]) -> None:
             pass

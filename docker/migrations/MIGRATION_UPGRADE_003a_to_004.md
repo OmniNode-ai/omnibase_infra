@@ -142,6 +142,187 @@ The index creation SQL in `003_capability_fields.sql` and `004_capability_fields
 | 003 + 004 | Yes (003) | Yes (004) | Concurrent | Production, >100K rows |
 | 003a (legacy) | No | Yes | Concurrent | **DEPRECATED** - use 004 |
 
+## Migration Gap Detection
+
+Before applying migrations, operators should validate the current migration state to detect gaps or inconsistencies.
+
+### Why Migration Gap Detection Matters
+
+| Scenario | Risk | Detection |
+|----------|------|-----------|
+| Missing 003 (columns) | 004 will fail - columns don't exist | Column check fails |
+| Missing 002 (audit index) | No immediate failure, but audit queries slow | Index check fails |
+| 003a applied, 004 not tracked | Documentation mismatch, no functional issue | Manual record check |
+| Partial 004 (interrupted) | Invalid indexes in database | `indisvalid` check |
+
+### Pre-Migration Validation SQL
+
+Run this validation query before applying any migration to detect gaps:
+
+```sql
+-- =============================================================================
+-- MIGRATION STATE VALIDATION QUERY
+-- Run this before applying migrations to detect gaps
+-- =============================================================================
+
+WITH expected_state AS (
+    SELECT * FROM (VALUES
+        -- (migration_id, description, validation_type, validation_target)
+        ('001', 'registration_projections table', 'table', 'registration_projections'),
+        ('002', 'updated_at audit index', 'index', 'idx_registration_projections_updated_at'),
+        ('003', 'capability columns', 'columns', 'contract_type,intent_types,protocols,capability_tags,contract_version'),
+        ('004', 'concurrent GIN indexes', 'indexes', 'idx_registration_capability_tags,idx_registration_intent_types,idx_registration_protocols,idx_registration_contract_type_state')
+    ) AS t(migration_id, description, validation_type, validation_target)
+),
+table_check AS (
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'registration_projections'
+          AND table_schema = 'public'
+    ) AS table_exists
+),
+column_check AS (
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = 'registration_projections'
+      AND column_name IN ('contract_type', 'intent_types', 'protocols', 'capability_tags', 'contract_version')
+),
+index_check AS (
+    SELECT indexname, indisvalid
+    FROM pg_indexes i
+    JOIN pg_class c ON c.relname = i.indexname
+    JOIN pg_index idx ON idx.indexrelid = c.oid
+    WHERE tablename = 'registration_projections'
+      AND indexname IN (
+        'idx_registration_projections_updated_at',
+        'idx_registration_capability_tags',
+        'idx_registration_intent_types',
+        'idx_registration_protocols',
+        'idx_registration_contract_type_state'
+      )
+)
+SELECT
+    '001' AS migration,
+    CASE WHEN (SELECT table_exists FROM table_check) THEN 'APPLIED' ELSE 'MISSING' END AS status,
+    'registration_projections table' AS description
+UNION ALL
+SELECT
+    '002' AS migration,
+    CASE WHEN EXISTS (SELECT 1 FROM index_check WHERE indexname = 'idx_registration_projections_updated_at')
+         THEN 'APPLIED' ELSE 'MISSING' END AS status,
+    'updated_at audit index' AS description
+UNION ALL
+SELECT
+    '003' AS migration,
+    CASE WHEN (SELECT COUNT(*) FROM column_check) = 5 THEN 'APPLIED'
+         WHEN (SELECT COUNT(*) FROM column_check) > 0 THEN 'PARTIAL'
+         ELSE 'MISSING' END AS status,
+    'capability columns (contract_type, intent_types, etc.)' AS description
+UNION ALL
+SELECT
+    '004' AS migration,
+    CASE
+        WHEN (SELECT COUNT(*) FROM index_check
+              WHERE indexname IN ('idx_registration_capability_tags', 'idx_registration_intent_types',
+                                  'idx_registration_protocols', 'idx_registration_contract_type_state')
+                AND indisvalid = true) = 4 THEN 'APPLIED'
+        WHEN (SELECT COUNT(*) FROM index_check
+              WHERE indexname IN ('idx_registration_capability_tags', 'idx_registration_intent_types',
+                                  'idx_registration_protocols', 'idx_registration_contract_type_state')
+                AND indisvalid = false) > 0 THEN 'INVALID_INDEXES'
+        WHEN (SELECT COUNT(*) FROM index_check
+              WHERE indexname IN ('idx_registration_capability_tags', 'idx_registration_intent_types',
+                                  'idx_registration_protocols', 'idx_registration_contract_type_state')) > 0 THEN 'PARTIAL'
+        ELSE 'MISSING'
+    END AS status,
+    'capability GIN indexes (concurrent)' AS description
+ORDER BY migration;
+```
+
+**Expected Output for Fully Migrated Database:**
+
+```
+ migration |  status  |               description
+-----------+----------+------------------------------------------
+ 001       | APPLIED  | registration_projections table
+ 002       | APPLIED  | updated_at audit index
+ 003       | APPLIED  | capability columns (contract_type, ...)
+ 004       | APPLIED  | capability GIN indexes (concurrent)
+```
+
+### Interpreting Validation Results
+
+| Status | Meaning | Action |
+|--------|---------|--------|
+| `APPLIED` | Migration successfully applied | No action needed |
+| `MISSING` | Migration not applied | Apply the migration |
+| `PARTIAL` | Migration partially applied | Review and complete |
+| `INVALID_INDEXES` | Concurrent index creation interrupted | Drop invalid indexes, re-run 004 |
+
+### Detecting 003a vs 004 Ambiguity
+
+If your deployment history shows "003a" was applied, verify the actual database state:
+
+```sql
+-- Check if 003a/004 content is present (they are functionally identical)
+SELECT
+    CASE
+        WHEN COUNT(*) = 4 THEN 'GIN indexes present (003a or 004 content applied)'
+        WHEN COUNT(*) > 0 THEN 'Partial GIN indexes (' || COUNT(*) || ' of 4)'
+        ELSE 'No GIN indexes - neither 003a nor 004 applied'
+    END AS status
+FROM pg_indexes
+WHERE tablename = 'registration_projections'
+  AND indexname IN (
+    'idx_registration_capability_tags',
+    'idx_registration_intent_types',
+    'idx_registration_protocols',
+    'idx_registration_contract_type_state'
+  );
+```
+
+**Result Interpretation:**
+- "GIN indexes present" → Database is current; update your tracking records to show "004"
+- "Partial GIN indexes" → Interrupted migration; drop invalid indexes and re-run
+- "No GIN indexes" → Apply 003 (columns) then 004 (indexes)
+
+### Automated Validation Script
+
+For CI/CD pipelines, use this exit-code-based validation:
+
+```bash
+#!/bin/bash
+# validate_migrations.sh - Exit 0 if all migrations applied, non-zero otherwise
+
+result=$(psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -t -c "
+SELECT COUNT(*) FROM (
+    SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'registration_projections')
+    UNION ALL
+    SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_registration_projections_updated_at')
+    UNION ALL
+    SELECT 1 WHERE (SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_name = 'registration_projections'
+                      AND column_name IN ('contract_type', 'intent_types', 'protocols', 'capability_tags', 'contract_version')) < 5
+    UNION ALL
+    SELECT 1 WHERE (SELECT COUNT(*) FROM pg_indexes
+                    WHERE tablename = 'registration_projections'
+                      AND indexname IN ('idx_registration_capability_tags', 'idx_registration_intent_types',
+                                        'idx_registration_protocols', 'idx_registration_contract_type_state')) < 4
+) missing;
+")
+
+missing_count=$(echo "$result" | tr -d '[:space:]')
+
+if [ "$missing_count" -eq 0 ]; then
+    echo "All migrations applied successfully"
+    exit 0
+else
+    echo "ERROR: $missing_count migration(s) missing or incomplete"
+    echo "Run the validation query for details"
+    exit 1
+fi
+```
+
 ## Troubleshooting
 
 ### "Index already exists" Error
@@ -185,6 +366,7 @@ You need to apply `003_capability_fields.sql` first to create the columns.
 ## Related Documentation
 
 - `README.md` - Migration versioning conventions
+- `validate_migration_state.sql` - **Run this to validate current migration state**
 - `003_capability_fields.sql` - Column and standard index creation
 - `004_capability_fields_concurrent.sql` - Concurrent index creation
 - `ADR-005-denormalize-capability-fields-in-registration-projections.md` - Design rationale
@@ -193,5 +375,6 @@ You need to apply `003_capability_fields.sql` first to create the columns.
 
 | Date | Change |
 |------|--------|
+| 2026-01-13 | Added Migration Gap Detection section with validation SQL script |
 | 2025-01-13 | Renamed `003a` to `004` per PR #143 review feedback |
 | 2025-01-XX | Initial `003a_capability_fields_concurrent.sql` created |

@@ -1696,7 +1696,7 @@ class TestSnapshotCacheOperations:
         publisher._cache_loaded = True
 
         projection = create_test_projection()
-        snapshot = await publisher.publish_from_projection(projection)
+        await publisher.publish_from_projection(projection)
 
         # Cache should now contain the published snapshot
         cache_key = f"{projection.domain}:{projection.entity_id}"

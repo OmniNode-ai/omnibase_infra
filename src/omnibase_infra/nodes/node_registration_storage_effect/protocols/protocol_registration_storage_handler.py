@@ -49,7 +49,6 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_storage_effect.models import (
         ModelDeleteResult,
         ModelRegistrationRecord,
-        ModelRegistrationUpdate,
         ModelStorageHealthCheckResult,
         ModelStorageQuery,
         ModelStorageResult,

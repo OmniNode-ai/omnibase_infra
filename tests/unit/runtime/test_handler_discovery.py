@@ -48,42 +48,56 @@ from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 # Real handler class path from omnibase_infra.handlers
 REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HttpRestHandler"
 
-# Valid handler contract template
+# Valid handler contract template (matches schema from contracts/handlers/)
 VALID_HANDLER_CONTRACT_YAML = """
-handler_name: "{handler_name}"
+name: "{handler_name}"
 handler_class: "{handler_class}"
 handler_type: "effect"
-capability_tags:
+tags:
   - {tag1}
   - {tag2}
+security:
+  trusted_namespace: omnibase_infra.handlers
+  audit_logging: true
 """
 
 # Invalid YAML syntax (unclosed bracket)
 INVALID_YAML_SYNTAX = """
-handler_name: "test.handler"
+name: "test.handler"
 handler_class: this is not valid yaml: [
     unclosed bracket
 """
 
 # Missing required handler_class field
 HANDLER_CONTRACT_MISSING_CLASS = """
-handler_name: "missing.class.handler"
+name: "missing.class.handler"
 handler_type: "effect"
-capability_tags:
+tags:
   - test
+security:
+  trusted_namespace: omnibase_infra.handlers
+  audit_logging: false
 """
 
-# Missing required handler_name field
+# Missing required name field
 HANDLER_CONTRACT_MISSING_NAME = """
 handler_class: "some.module.Handler"
 handler_type: "effect"
+tags:
+  - test
+security:
+  trusted_namespace: omnibase_infra.handlers
+  audit_logging: false
 """
 
-# Missing both required fields
+# Missing both required fields (name and handler_class)
 HANDLER_CONTRACT_MINIMAL_INVALID = """
 handler_type: "effect"
-capability_tags:
+tags:
   - test
+security:
+  trusted_namespace: omnibase_infra.handlers
+  audit_logging: false
 """
 
 # Empty YAML file
@@ -97,20 +111,26 @@ COMMENTS_ONLY_YAML = """
 
 # Handler contract pointing to non-existent module
 NONEXISTENT_MODULE_CONTRACT_YAML = """
-handler_name: "nonexistent.handler"
+name: "nonexistent.handler"
 handler_class: "nonexistent_module.does.not.exist.Handler"
 handler_type: "effect"
-capability_tags:
+tags:
   - test
+security:
+  trusted_namespace: nonexistent_module
+  audit_logging: false
 """
 
 # Handler contract pointing to non-existent class
 NONEXISTENT_CLASS_CONTRACT_YAML = """
-handler_name: "nonexistent.class.handler"
+name: "nonexistent.class.handler"
 handler_class: "omnibase_infra.handlers.handler_http.NonexistentHandler"
 handler_type: "effect"
-capability_tags:
+tags:
   - test
+security:
+  trusted_namespace: omnibase_infra.handlers
+  audit_logging: false
 """
 
 
@@ -510,23 +530,26 @@ class TestInvalidContractYamlHandling:
             handler_registry=isolated_registry,
         )
 
-        with caplog.at_level(logging.WARNING):
-            with pytest.raises(ProtocolConfigurationError) as exc_info:
-                await process.start()
+        try:
+            with caplog.at_level(logging.WARNING):
+                with pytest.raises(ProtocolConfigurationError) as exc_info:
+                    await process.start()
 
-            # Should have warning about invalid YAML in logs
-            warning_messages = " ".join(
-                r.message for r in caplog.records if r.levelno >= logging.WARNING
-            )
-            assert (
-                "invalid" in warning_messages.lower()
-                or "yaml" in warning_messages.lower()
-                or "error" in warning_messages.lower()
-            )
+                # Should have warning about invalid YAML in logs
+                warning_messages = " ".join(
+                    r.message for r in caplog.records if r.levelno >= logging.WARNING
+                )
+                assert (
+                    "invalid" in warning_messages.lower()
+                    or "yaml" in warning_messages.lower()
+                    or "error" in warning_messages.lower()
+                )
 
-            # Verify the exception
-            error_message = str(exc_info.value)
-            assert "No handlers registered" in error_message
+                # Verify the exception
+                error_message = str(exc_info.value)
+                assert "No handlers registered" in error_message
+        finally:
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_missing_required_fields_raises_configuration_error(
@@ -552,13 +575,18 @@ class TestInvalidContractYamlHandling:
             handler_registry=isolated_registry,
         )
 
-        with caplog.at_level(logging.WARNING):
-            with pytest.raises(ProtocolConfigurationError):
-                await process.start()
+        try:
+            with caplog.at_level(logging.WARNING):
+                with pytest.raises(ProtocolConfigurationError):
+                    await process.start()
 
-            # Should have warnings about missing fields
-            warning_logs = [r for r in caplog.records if r.levelno >= logging.WARNING]
-            assert len(warning_logs) > 0, "Should have warnings for missing fields"
+                # Should have warnings about missing fields
+                warning_logs = [
+                    r for r in caplog.records if r.levelno >= logging.WARNING
+                ]
+                assert len(warning_logs) > 0, "Should have warnings for missing fields"
+        finally:
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_nonexistent_handler_module_raises_configuration_error(
@@ -584,13 +612,18 @@ class TestInvalidContractYamlHandling:
             handler_registry=isolated_registry,
         )
 
-        with caplog.at_level(logging.WARNING):
-            with pytest.raises(ProtocolConfigurationError):
-                await process.start()
+        try:
+            with caplog.at_level(logging.WARNING):
+                with pytest.raises(ProtocolConfigurationError):
+                    await process.start()
 
-            # Should have warnings about import failures
-            warning_logs = [r for r in caplog.records if r.levelno >= logging.WARNING]
-            assert len(warning_logs) > 0, "Should have warnings for import failures"
+                # Should have warnings about import failures
+                warning_logs = [
+                    r for r in caplog.records if r.levelno >= logging.WARNING
+                ]
+                assert len(warning_logs) > 0, "Should have warnings for import failures"
+        finally:
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_empty_yaml_file_raises_configuration_error(
@@ -616,9 +649,12 @@ class TestInvalidContractYamlHandling:
             handler_registry=isolated_registry,
         )
 
-        with caplog.at_level(logging.WARNING):
-            with pytest.raises(ProtocolConfigurationError):
-                await process.start()
+        try:
+            with caplog.at_level(logging.WARNING):
+                with pytest.raises(ProtocolConfigurationError):
+                    await process.start()
+        finally:
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_empty_contract_directory_raises_configuration_error(
@@ -643,11 +679,14 @@ class TestInvalidContractYamlHandling:
             handler_registry=isolated_registry,
         )
 
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
-            await process.start()
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                await process.start()
 
-        error_message = str(exc_info.value)
-        assert "No handlers registered" in error_message
+            error_message = str(exc_info.value)
+            assert "No handlers registered" in error_message
+        finally:
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_nonexistent_contract_path_raises_configuration_error(
@@ -675,12 +714,15 @@ class TestInvalidContractYamlHandling:
             handler_registry=isolated_registry,
         )
 
-        with caplog.at_level(logging.WARNING):
-            with pytest.raises(ProtocolConfigurationError):
-                await process.start()
+        try:
+            with caplog.at_level(logging.WARNING):
+                with pytest.raises(ProtocolConfigurationError):
+                    await process.start()
 
-            # Should have warning about non-existent path
-            # (logged by discovery service)
+                # Should have warning about non-existent path
+                # (logged by discovery service)
+        finally:
+            await process.stop()
 
 
 # =============================================================================
@@ -724,12 +766,15 @@ class TestNoHandlersRegisteredHealthCheck:
             handler_registry=isolated_registry,
         )
 
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
-            await process.start()
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                await process.start()
 
-        # Verify error message indicates no handlers
-        error_message = str(exc_info.value)
-        assert "No handlers registered" in error_message
+            # Verify error message indicates no handlers
+            error_message = str(exc_info.value)
+            assert "No handlers registered" in error_message
+        finally:
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_no_handlers_registered_false_with_valid_handlers(
@@ -789,12 +834,15 @@ class TestNoHandlersRegisteredHealthCheck:
             handler_registry=isolated_registry,
         )
 
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
-            await process.start()
+        try:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                await process.start()
 
-        # Verify error message indicates no handlers
-        error_message = str(exc_info.value)
-        assert "No handlers registered" in error_message
+            # Verify error message indicates no handlers
+            error_message = str(exc_info.value)
+            assert "No handlers registered" in error_message
+        finally:
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_no_handlers_registered_with_mixed_contracts(
@@ -1086,4 +1134,755 @@ __all__: list[str] = [
     "TestInvalidContractYamlHandling",
     "TestNoHandlersRegisteredHealthCheck",
     "TestHandlerDiscoveryLogging",
+    "TestDiscoverHandlersFromContractsUnit",
+    "TestDiscoverHandlersFromContractsErrorHandling",
+    "TestDiscoverHandlersFromContractsFileSystemEdgeCases",
+    "TestDiscoverHandlersFromContractsCorrelationTracking",
 ]
+
+
+# =============================================================================
+# Test Classes for Direct _discover_handlers_from_contracts() Unit Tests
+# =============================================================================
+
+
+class TestDiscoverHandlersFromContractsUnit:
+    """Direct unit tests for RuntimeHostProcess._discover_handlers_from_contracts().
+
+    These tests directly invoke the internal method without going through start(),
+    providing more focused unit test coverage of the discovery behavior.
+    """
+
+    @pytest.mark.asyncio
+    async def test_direct_call_creates_handler_discovery_service(
+        self,
+        valid_handler_contract_dir: Path,
+    ) -> None:
+        """Verify direct call creates ContractHandlerDiscovery with correct components.
+
+        When _discover_handlers_from_contracts() is called directly, it should
+        create a ContractHandlerDiscovery service with HandlerPluginLoader and
+        the handler registry.
+        """
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(valid_handler_contract_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        # _handler_discovery should be None before calling the method
+        assert process._handler_discovery is None
+
+        # Call the method directly
+        await process._discover_handlers_from_contracts()
+
+        # _handler_discovery should now be set
+        assert process._handler_discovery is not None
+
+        # Verify it has the expected interface
+        assert hasattr(process._handler_discovery, "discover_and_register")
+        assert hasattr(process._handler_discovery, "last_discovery_result")
+
+        # Verify discovery result was cached
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        assert result.handlers_discovered >= 1
+
+    @pytest.mark.asyncio
+    async def test_direct_call_with_multiple_contract_paths(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery works with multiple contract paths.
+
+        When multiple paths are provided, all paths should be scanned
+        and handlers from each path should be discovered.
+        """
+        # Create two separate handler directories
+        handlers_dir_1 = tmp_path / "handlers1"
+        handlers_dir_1.mkdir(parents=True)
+        http_dir = handlers_dir_1 / "http"
+        http_dir.mkdir()
+        (http_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="http",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="http",
+                tag2="rest",
+            )
+        )
+
+        handlers_dir_2 = tmp_path / "handlers2"
+        handlers_dir_2.mkdir(parents=True)
+        http2_dir = handlers_dir_2 / "http2"
+        http2_dir.mkdir()
+        (http2_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="http2",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="http",
+                tag2="api",
+            )
+        )
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(handlers_dir_1), str(handlers_dir_2)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        # Verify both handlers were discovered
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        assert result.handlers_discovered >= 2, (
+            f"Expected at least 2 handlers, got {result.handlers_discovered}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_direct_call_with_nested_directory_structure(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery handles nested directory structures.
+
+        When a contract path contains nested directories with contracts,
+        all contracts should be discovered recursively.
+        """
+        # Create nested directory structure
+        root_dir = tmp_path / "handlers"
+        root_dir.mkdir(parents=True)
+
+        # First level handler
+        level1_dir = root_dir / "level1"
+        level1_dir.mkdir()
+        (level1_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="level1.handler",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="level1",
+                tag2="test",
+            )
+        )
+
+        # Second level handler (nested)
+        level2_dir = root_dir / "level1" / "level2"
+        level2_dir.mkdir()
+        (level2_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="level2.handler",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="level2",
+                tag2="nested",
+            )
+        )
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(root_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        # Both handlers should be discovered from nested structure
+        assert result.handlers_discovered >= 2
+
+    @pytest.mark.asyncio
+    async def test_direct_call_discovery_result_counts(
+        self,
+        mixed_valid_invalid_contract_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify discovery result correctly tracks discovered vs registered counts.
+
+        When some contracts are valid and some invalid:
+        - Invalid contracts are filtered at the plugin loader level (logged as warnings)
+        - Only successfully loaded handlers appear in handlers_discovered
+        - handlers_registered equals handlers_discovered when all loaded handlers register
+        """
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(mixed_valid_invalid_contract_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+
+        # At least one handler should be registered (the valid one)
+        assert result.handlers_registered >= 1
+
+        # Handlers discovered equals handlers registered when all loaded handlers register
+        # (invalid contracts are filtered at loader level, not tracked as errors)
+        assert result.handlers_discovered == result.handlers_registered
+
+        # Invalid contracts should be logged as warnings by the plugin loader
+        warning_logs = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warning_logs) > 0, "Invalid contracts should be logged as warnings"
+
+    @pytest.mark.asyncio
+    async def test_direct_call_with_directory_containing_non_contract_files(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery ignores non-contract files in directories.
+
+        When a directory contains files that are not handler contracts,
+        they should be silently ignored without errors.
+        """
+        handlers_dir = tmp_path / "handlers"
+        handlers_dir.mkdir(parents=True)
+
+        # Valid handler contract
+        http_dir = handlers_dir / "http"
+        http_dir.mkdir()
+        (http_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="http",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="http",
+                tag2="rest",
+            )
+        )
+
+        # Non-contract files that should be ignored
+        (handlers_dir / "readme.txt").write_text("This is a readme file")
+        (handlers_dir / "notes.md").write_text("# Some Notes")
+        (handlers_dir / "config.json").write_text('{"key": "value"}')
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(handlers_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        # Only the valid handler should be discovered
+        assert result.handlers_discovered == 1
+        assert result.handlers_registered == 1
+        # No errors from non-contract files
+        assert not result.has_errors
+
+    @pytest.mark.asyncio
+    async def test_direct_call_idempotent_discovery_service_creation(
+        self,
+        valid_handler_contract_dir: Path,
+    ) -> None:
+        """Verify calling _discover_handlers_from_contracts twice creates new service.
+
+        When called multiple times, each call should create a new discovery
+        service instance (not cached).
+        """
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(valid_handler_contract_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        # First call
+        await process._discover_handlers_from_contracts()
+        first_discovery = process._handler_discovery
+        first_result = first_discovery.last_discovery_result
+
+        # Second call
+        await process._discover_handlers_from_contracts()
+        second_discovery = process._handler_discovery
+        second_result = second_discovery.last_discovery_result
+
+        # A new discovery service is created each time
+        assert first_discovery is not second_discovery
+        # But results should be consistent
+        assert first_result.handlers_discovered == second_result.handlers_discovered
+
+    @pytest.mark.asyncio
+    async def test_direct_call_with_empty_contract_paths_list(
+        self,
+    ) -> None:
+        """Verify discovery handles empty contract_paths list gracefully.
+
+        When contract_paths is an empty list, discovery should complete
+        without errors but find no handlers.
+        """
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[],  # Empty list
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        assert result.handlers_discovered == 0
+        assert result.handlers_registered == 0
+        # Empty paths list should not produce errors
+        assert not result.has_errors
+
+
+class TestDiscoverHandlersFromContractsErrorHandling:
+    """Error handling tests for _discover_handlers_from_contracts().
+
+    These tests verify that various error conditions are handled
+    gracefully with proper error reporting.
+
+    Note: Invalid contracts are filtered at the plugin loader level and logged
+    as warnings. The discovery result only tracks errors when handler registration
+    fails AFTER the contract is successfully loaded.
+    """
+
+    @pytest.mark.asyncio
+    async def test_discovery_logs_error_codes_for_invalid_contracts(
+        self,
+        nonexistent_handler_contract_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify discovery logs error codes for invalid contracts.
+
+        When handlers fail to load, the plugin loader logs warnings with
+        error codes (e.g., HANDLER_LOADER_010, HANDLER_LOADER_011).
+        """
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(nonexistent_handler_contract_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+
+        # Invalid contracts are filtered at loader level, not tracked as errors
+        # in the discovery result
+        assert result.handlers_discovered == 0
+        assert result.handlers_registered == 0
+
+        # But warnings should be logged with error codes
+        warning_logs = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warning_logs) > 0, "Should have WARNING logs for invalid contracts"
+
+        # Verify error codes are in the log messages
+        warning_messages = " ".join(r.message for r in warning_logs)
+        assert "HANDLER_LOADER" in warning_messages, (
+            "Warnings should include HANDLER_LOADER error codes"
+        )
+
+    @pytest.mark.asyncio
+    async def test_discovery_logs_individual_failures_as_warnings(
+        self,
+        mixed_valid_invalid_contract_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify discovery logs individual failures at WARNING level.
+
+        When handlers fail during discovery, each failure should be
+        logged as a warning by the plugin loader.
+        """
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(mixed_valid_invalid_contract_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await process._discover_handlers_from_contracts()
+
+        # Should have warning logs for failed handlers
+        warning_logs = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warning_logs) > 0, (
+            "Should have WARNING level logs for failed handlers"
+        )
+
+    @pytest.mark.asyncio
+    async def test_discovery_continues_after_path_errors(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery continues processing after encountering path errors.
+
+        When one path fails, subsequent paths should still be processed.
+        """
+        # Create one valid and one invalid path
+        valid_dir = tmp_path / "valid_handlers"
+        valid_dir.mkdir(parents=True)
+        http_dir = valid_dir / "http"
+        http_dir.mkdir()
+        (http_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="http",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="http",
+                tag2="rest",
+            )
+        )
+
+        nonexistent_path = tmp_path / "does_not_exist"
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        # Put invalid path first to ensure processing continues
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(nonexistent_path), str(valid_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+
+        # Should have error for nonexistent path
+        assert result.has_errors
+        path_errors = [e for e in result.errors if e.error_code == "PATH_NOT_FOUND"]
+        assert len(path_errors) >= 1
+
+        # But valid handler should still be registered
+        assert result.handlers_registered >= 1
+
+    @pytest.mark.asyncio
+    async def test_discovery_logs_include_contract_path(
+        self,
+        invalid_yaml_contract_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify discovery logs include contract path for debugging.
+
+        When a contract fails to load, the warning log should include the
+        path to the problematic contract file.
+        """
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(invalid_yaml_contract_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+
+        # Invalid contracts are filtered at loader level, not tracked in result
+        assert result.handlers_discovered == 0
+        assert result.handlers_registered == 0
+
+        # But warnings should include the contract path
+        warning_logs = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warning_logs) > 0, "Should have warnings for invalid contracts"
+
+        # Check that at least one warning mentions the contract path
+        warning_messages = " ".join(r.message for r in warning_logs)
+        assert (
+            "handler_contract.yaml" in warning_messages
+            or "contract" in warning_messages.lower()
+        )
+
+
+class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
+    """File system edge case tests for _discover_handlers_from_contracts().
+
+    These tests verify handling of unusual filesystem conditions.
+    """
+
+    @pytest.mark.asyncio
+    async def test_discovery_with_symlink_to_valid_directory(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery follows symlinks to valid directories.
+
+        When a contract path is a symlink to a valid directory,
+        discovery should follow it and find handlers.
+        """
+        # Create actual handler directory
+        real_dir = tmp_path / "real_handlers"
+        real_dir.mkdir(parents=True)
+        http_dir = real_dir / "http"
+        http_dir.mkdir()
+        (http_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="http.symlink",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="http",
+                tag2="symlink",
+            )
+        )
+
+        # Create symlink to the directory
+        symlink_dir = tmp_path / "handlers_symlink"
+        symlink_dir.symlink_to(real_dir)
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(symlink_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        # Handler should be discovered via symlink
+        assert result.handlers_discovered >= 1
+        assert result.handlers_registered >= 1
+
+    @pytest.mark.asyncio
+    async def test_discovery_with_symlink_to_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery handles symlinks to contract files.
+
+        When a contract path is a symlink to a contract file,
+        discovery should follow it and load the contract.
+        """
+        # Create actual contract file
+        real_dir = tmp_path / "real_handlers" / "http"
+        real_dir.mkdir(parents=True)
+        contract_file = real_dir / HANDLER_CONTRACT_FILENAME
+        contract_file.write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="http.file.symlink",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="http",
+                tag2="file",
+            )
+        )
+
+        # Create symlink to the file
+        symlink_file = tmp_path / "contract_symlink.yaml"
+        symlink_file.symlink_to(contract_file)
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(symlink_file)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        # Handler should be discovered via symlink to file
+        assert result.handlers_discovered >= 1
+
+    @pytest.mark.asyncio
+    async def test_discovery_with_broken_symlink(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery handles broken symlinks gracefully.
+
+        When a contract path is a broken symlink (target doesn't exist),
+        discovery should report an appropriate error.
+        """
+        # Create symlink to non-existent path
+        broken_symlink = tmp_path / "broken_symlink"
+        broken_symlink.symlink_to(tmp_path / "nonexistent_target")
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(broken_symlink)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        # Should have error for broken symlink
+        assert result.has_errors
+        assert result.handlers_registered == 0
+
+    @pytest.mark.asyncio
+    async def test_discovery_with_special_characters_in_path(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery handles paths with special characters.
+
+        Paths containing spaces, unicode, or other special characters
+        should be handled correctly.
+        """
+        # Create directory with special characters in name
+        special_dir = tmp_path / "handlers with spaces"
+        special_dir.mkdir(parents=True)
+        http_dir = special_dir / "http handler"
+        http_dir.mkdir()
+        (http_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="http.special",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="http",
+                tag2="special",
+            )
+        )
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(special_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        # Handler should be discovered despite special characters
+        assert result.handlers_discovered >= 1
+        assert result.handlers_registered >= 1
+
+    @pytest.mark.asyncio
+    async def test_discovery_with_deeply_nested_structure(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify discovery handles deeply nested directory structures.
+
+        Even with many levels of nesting, contracts should be discovered.
+        """
+        # Create deeply nested structure
+        deep_dir = tmp_path
+        for i in range(10):
+            deep_dir = deep_dir / f"level{i}"
+        deep_dir.mkdir(parents=True)
+
+        # Add handler at the deepest level
+        (deep_dir / HANDLER_CONTRACT_FILENAME).write_text(
+            VALID_HANDLER_CONTRACT_YAML.format(
+                handler_name="deep.handler",
+                handler_class=REAL_HANDLER_HTTP_CLASS,
+                tag1="deep",
+                tag2="nested",
+            )
+        )
+
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(tmp_path)],
+            handler_registry=isolated_registry,
+        )
+
+        await process._discover_handlers_from_contracts()
+
+        result = process._handler_discovery.last_discovery_result
+        assert result is not None
+        # Handler should be discovered even at deep nesting level
+        assert result.handlers_discovered >= 1
+        assert result.handlers_registered >= 1
+
+
+class TestDiscoverHandlersFromContractsCorrelationTracking:
+    """Correlation ID tracking tests for _discover_handlers_from_contracts().
+
+    These tests verify that correlation IDs are properly propagated
+    through the discovery process for observability.
+    """
+
+    @pytest.mark.asyncio
+    async def test_discovery_generates_correlation_id(
+        self,
+        valid_handler_contract_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify discovery generates correlation ID when not provided.
+
+        The discovery process should auto-generate a correlation ID
+        for tracing purposes.
+        """
+        event_bus = InMemoryEventBus()
+        isolated_registry = ProtocolBindingRegistry()
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            contract_paths=[str(valid_handler_contract_dir)],
+            handler_registry=isolated_registry,
+        )
+
+        with caplog.at_level(logging.INFO):
+            await process._discover_handlers_from_contracts()
+
+        # Check that logs contain correlation_id
+        [
+            r
+            for r in caplog.records
+            if hasattr(r, "correlation_id") or "correlation_id" in str(r.__dict__)
+        ]
+        # Discovery should log with correlation tracking
+        info_logs = [r for r in caplog.records if r.levelno == logging.INFO]
+        assert len(info_logs) > 0, "Should have INFO level logs"

@@ -63,8 +63,8 @@ The codebase has two distinct handler systems that require different treatment:
 |--------|-------------|
 | **Location** | `src/omnibase_infra/handlers/handler_*.py` |
 | **Purpose** | Protocol/transport operations (HTTP, DB, Consul, Vault) |
-| **Wiring** | `wire_default_handlers()` with `_KNOWN_HANDLERS` dict |
-| **State** | Hardcoded, needs migration to protocol-driven |
+| **Wiring** | Contract-driven via `HandlerPluginLoader` (preferred) or `wire_default_handlers()` (legacy fallback) |
+| **State** | Contract-driven discovery implemented (PR #143). See [Migration Guide](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md) |
 
 **Current Handlers**:
 - `HttpRestHandler` - HTTP/REST API operations

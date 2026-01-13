@@ -967,7 +967,6 @@ class RuntimeHostProcess:
             ContractHandlerDiscovery,
         )
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
-        from omnibase_infra.runtime.handler_registry import get_handler_registry
 
         logger.info(
             "Starting contract-based handler discovery",

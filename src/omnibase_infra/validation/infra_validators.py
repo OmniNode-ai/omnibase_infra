@@ -30,7 +30,7 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 # Third-party imports
 import yaml

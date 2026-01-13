@@ -177,6 +177,24 @@ WHERE NOT indisvalid;
 2. Is this a rollback/cleanup for an existing migration? -> Use letter suffix (`003b`)
 3. Otherwise -> Use next main number (`005`)
 
+## Migration Validation
+
+Before applying migrations or troubleshooting issues, validate the current database state:
+
+```bash
+# Run the validation script
+psql -h $HOST -d $DB -f validate_migration_state.sql
+```
+
+This script checks:
+- Table existence (migration 001)
+- Audit index presence (migration 002)
+- Capability columns (migration 003)
+- GIN indexes and their validity (migration 004)
+- Invalid index detection (for interrupted concurrent index creation)
+
+See the "Migration Gap Detection" section in `MIGRATION_UPGRADE_003a_to_004.md` for detailed validation queries and remediation steps.
+
 ## Upgrade Notes
 
 ### 003a to 004 Migration Renaming
@@ -186,3 +204,4 @@ The `003a_capability_fields_concurrent.sql` migration was renamed to `004_capabi
 - **If you have 003a applied**: No database changes needed; the SQL is identical
 - **For new deployments**: Use `004_capability_fields_concurrent.sql`
 - **Full details**: See `MIGRATION_UPGRADE_003a_to_004.md`
+- **Validation**: Run `validate_migration_state.sql` to check current state

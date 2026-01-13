@@ -1406,13 +1406,16 @@ class MixinNodeIntrospection:
         """
         self._ensure_initialized()
 
-        # Convert reason to enum (EnumIntrospectionReason is also a str, so check enum first)
+        # Convert reason to enum - check Enum first since EnumIntrospectionReason
+        # inherits from str, so isinstance(..., str) would match both types.
+        # Normalize string inputs with strip().lower() for robust matching.
         reason_enum: EnumIntrospectionReason
         if isinstance(reason, EnumIntrospectionReason):
             reason_enum = reason
         elif isinstance(reason, str):
             try:
-                reason_enum = EnumIntrospectionReason(reason)
+                # Normalize: strip whitespace, lowercase for case-insensitive match
+                reason_enum = EnumIntrospectionReason(reason.strip().lower())
             except ValueError:
                 logger.warning(
                     f"Unknown introspection reason '{reason}', defaulting to HEARTBEAT",

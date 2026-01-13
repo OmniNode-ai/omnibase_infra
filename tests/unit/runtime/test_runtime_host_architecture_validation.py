@@ -12,6 +12,25 @@ Test Categories:
     - WARNING severity violations log but don't block
     - Validation runs BEFORE other startup logic
     - Container injection vs minimal container creation
+
+Handler Semantics Note:
+    RuntimeHostProcess has TWO distinct handler-related checks:
+
+    1. **Fail-fast startup check** (process._handlers):
+       Requires at least one handler INSTANCE in process._handlers for
+       the runtime to be useful. Tests use _setup_mock_handlers() to
+       satisfy this check by seeding a mock handler instance.
+
+    2. **Architecture validation** (handler registry):
+       Validates handler CLASSES from registry.list_protocols() against
+       architecture rules. Tests control this via mock_registry to
+       simulate "no handlers to validate" (empty registry) or "handlers
+       that violate rules" (populated registry with MockHandlerClass).
+
+    These are independent checks. A test can have:
+    - Empty registry (no validation targets) + mock in _handlers (startup OK)
+    - Populated registry (validation runs) + mock in _handlers (startup OK)
+    - Populated registry with violations (validation fails, no startup)
 """
 
 from __future__ import annotations
@@ -30,23 +49,32 @@ from omnibase_infra.nodes.architecture_validator import (
     ModelRuleCheckResult,
 )
 
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.architecture_validator import ProtocolArchitectureRule
-
 # Import RuntimeHostProcess (should always be available)
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from tests.conftest import seed_mock_handlers
 
-
-def _setup_mock_handlers(process: RuntimeHostProcess) -> None:
-    """Set up mock handlers on a process to avoid fail-fast validation.
-
-    The RuntimeHostProcess.start() validates that handlers are registered.
-    This helper sets up a minimal mock handler to satisfy that check.
-    """
-    mock_handler = MagicMock()
-    mock_handler.shutdown = AsyncMock()
-    mock_handler.health_check = AsyncMock(return_value={"healthy": True})
-    process._handlers = {"mock": mock_handler}
+# =============================================================================
+# Handler Semantics Note (Important for Understanding Tests)
+# =============================================================================
+# There are TWO distinct "handler" concepts in RuntimeHostProcess:
+#
+# 1. process._handlers (dict[str, handler_instance]):
+#    - Runtime handler INSTANCES used for event processing
+#    - RuntimeHostProcess.start() requires at least one handler here (fail-fast)
+#    - seed_mock_handlers() populates _handlers to satisfy that startup requirement
+#
+# 2. handler_registry.list_protocols() (list of handler CLASSES):
+#    - Handler CLASSES registered for architecture rule validation
+#    - NodeArchitectureValidatorCompute validates these classes against rules
+#    - Tests control this via mock_registry.list_protocols.return_value
+#
+# When a test says "no handlers to validate", it means:
+#    - mock_registry.list_protocols() returns [] (empty - no classes for validation)
+#    - BUT seed_mock_handlers() still seeds _handlers (satisfies fail-fast)
+#
+# This distinction allows testing "no handlers for architecture validation"
+# without triggering the separate "no handlers registered" fail-fast error.
+# =============================================================================
 
 
 # =============================================================================
@@ -127,9 +155,9 @@ class TestNoRulesConfigured:
             ),
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
         ):
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
-            # Should not raise - no validation occurs
+            # Seed handler instances to satisfy fail-fast startup check
+            seed_mock_handlers(process)
+            # Should not raise - no architecture rules configured
             await process.start()
             assert process.is_running
 
@@ -149,8 +177,8 @@ class TestNoRulesConfigured:
             ),
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
         ):
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
+            # Seed handler instances to satisfy fail-fast startup check
+            seed_mock_handlers(process)
             await process.start()
             assert process.is_running
 
@@ -164,8 +192,21 @@ class TestErrorSeverityBlocksStartup:
     """Tests that ERROR severity violations prevent startup."""
 
     @pytest.mark.asyncio
-    async def test_error_violation_blocks_startup_no_handlers(self) -> None:
-        """With no handlers, validation passes (nothing to validate)."""
+    async def test_empty_registry_skips_architecture_validation(self) -> None:
+        """Empty handler registry means no classes to validate against rules.
+
+        This test verifies that when the handler REGISTRY contains no handler
+        classes (list_protocols() returns []), architecture validation passes
+        because there's nothing to check rules against.
+
+        Note: We still call _setup_mock_handlers() to populate process._handlers
+        with a mock instance. This satisfies the SEPARATE fail-fast startup check
+        that requires at least one handler instance for event processing.
+
+        The two checks are independent:
+        - Fail-fast: process._handlers must not be empty (handler INSTANCES)
+        - Architecture validation: registry.list_protocols() classes validated
+        """
         # Create a rule that always fails with ERROR severity
         # Use valid rule ID from SUPPORTED_RULE_IDS
         failing_rule = MockArchitectureRule(
@@ -181,8 +222,9 @@ class TestErrorSeverityBlocksStartup:
             architecture_rules=(failing_rule,),
         )
 
-        # When no handlers are registered, validation passes because
-        # there's nothing to validate
+        # Mock the handler registry to return NO handler classes for validation.
+        # The failing_rule would fail if it had any handlers to check, but
+        # with list_protocols() returning [], there are no classes to validate.
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
@@ -196,12 +238,15 @@ class TestErrorSeverityBlocksStartup:
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
         ):
             mock_registry = MagicMock()
+            # Empty registry = no handler CLASSES for architecture validation
             mock_registry.list_protocols.return_value = []
             mock_get_registry.return_value = mock_registry
 
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
-            # Should NOT raise - no handlers to validate means nothing fails
+            # Seed handler INSTANCES in _handlers to satisfy fail-fast startup
+            # (see _setup_mock_handlers docstring for detailed explanation)
+            seed_mock_handlers(process)
+
+            # Should NOT raise - empty registry means no classes to validate
             await process.start()
             assert process.is_running
 
@@ -325,8 +370,8 @@ class TestWarningSeverityDoesntBlock:
             mock_registry.get.return_value = MockHandlerClass
             mock_get_registry.return_value = mock_registry
 
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
+            # Seed handler instances to satisfy fail-fast startup check
+            seed_mock_handlers(process)
             # Should NOT raise - warnings don't block
             await process.start()
             assert process.is_running
@@ -371,8 +416,8 @@ class TestWarningSeverityDoesntBlock:
             mock_registry.get.return_value = MockHandlerClass
             mock_get_registry.return_value = mock_registry
 
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
+            # Seed handler instances to satisfy fail-fast startup check
+            seed_mock_handlers(process)
             await process.start()
 
             # Check that warning was logged
@@ -498,8 +543,8 @@ class TestContainerHandling:
             )
             mock_validator_cls.return_value = mock_validator
 
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
+            # Seed handler instances to satisfy fail-fast startup check
+            seed_mock_handlers(process)
             await process.start()
 
             # Verify injected container was used
@@ -555,8 +600,8 @@ class TestContainerHandling:
             )
             mock_validator_cls.return_value = mock_validator
 
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
+            # Seed handler instances to satisfy fail-fast startup check
+            seed_mock_handlers(process)
             await process.start()
 
             # Verify container was created
@@ -601,8 +646,8 @@ class TestPassingValidation:
             mock_registry.list_protocols.return_value = []
             mock_get_registry.return_value = mock_registry
 
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
+            # Seed handler instances to satisfy fail-fast startup check
+            seed_mock_handlers(process)
             await process.start()
             assert process.is_running
 
@@ -637,8 +682,8 @@ class TestPassingValidation:
             mock_registry.list_protocols.return_value = []
             mock_get_registry.return_value = mock_registry
 
-            # Set handlers to avoid fail-fast validation
-            _setup_mock_handlers(process)
+            # Seed handler instances to satisfy fail-fast startup check
+            seed_mock_handlers(process)
             await process.start()
 
             info_logs = [r for r in caplog.records if r.levelname == "INFO"]

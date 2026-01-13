@@ -1002,7 +1002,7 @@ class TestCachePerformanceUnderStress:
 
         # Calculate statistics
         latencies.sort()
-        p50 = latencies[len(latencies) // 2]
+        latencies[len(latencies) // 2]
         p99 = latencies[int(len(latencies) * 0.99)]
 
         # Latency should be reasonable even under continuous eviction
@@ -1045,7 +1045,7 @@ class TestCachePerformanceUnderStress:
         PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
 
         # Record initial state
-        initial_info = PolicyRegistry._get_semver_cache_info()
+        PolicyRegistry._get_semver_cache_info()
 
         # Perform many operations
         for i in range(50_000):

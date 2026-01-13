@@ -688,6 +688,11 @@ async def ensure_test_topic_exists(
     Test isolation is achieved via unique consumer group IDs rather than
     unique topic names.
 
+    Validation Steps:
+        1. Connect to Kafka admin API
+        2. Describe the specific topic (validates existence and configuration)
+        3. Verify topic has no error codes and has partitions
+
     Args:
         real_kafka_event_bus: Real Kafka event bus (unused but kept for
             fixture dependency ordering).
@@ -701,90 +706,210 @@ async def ensure_test_topic_exists(
     import os
 
     from aiokafka.admin import AIOKafkaAdminClient
+    from aiokafka.errors import (
+        KafkaConnectionError,
+        KafkaError,
+        KafkaTimeoutError,
+        UnknownTopicOrPartitionError,
+    )
 
     bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
     if not bootstrap_servers:
-        pytest.fail("KAFKA_BOOTSTRAP_SERVERS environment variable not set")
+        pytest.fail(
+            "KAFKA_BOOTSTRAP_SERVERS environment variable not set.\n"
+            "Set it to your Kafka/Redpanda cluster address, e.g.:\n"
+            "  export KAFKA_BOOTSTRAP_SERVERS=192.168.86.200:29092"
+        )
 
     admin_client: AIOKafkaAdminClient | None = None
     topic_creation_hint = (
-        f"Create it before running E2E tests: "
-        f"rpk topic create {TEST_INTROSPECTION_TOPIC} --partitions 1"
+        f"\n\nTo create the topic, run:\n"
+        f"  rpk topic create {TEST_INTROSPECTION_TOPIC} --partitions 1\n"
+        f"\nOr with kafka-topics:\n"
+        f"  kafka-topics.sh --create --topic {TEST_INTROSPECTION_TOPIC} "
+        f"--partitions 1 --replication-factor 1 --bootstrap-server {bootstrap_servers}"
     )
 
+    # Kafka error codes reference (from Kafka protocol specification)
+    # https://kafka.apache.org/protocol.html#protocol_error_codes
+    kafka_error_codes = {
+        0: "NO_ERROR",
+        3: "UNKNOWN_TOPIC_OR_PARTITION",
+        5: "LEADER_NOT_AVAILABLE",
+        6: "NOT_LEADER_OR_FOLLOWER",
+        7: "REQUEST_TIMED_OUT",
+        9: "REPLICA_NOT_AVAILABLE",
+        36: "NOT_CONTROLLER",
+    }
+
+    def _get_error_description(error_code: int) -> str:
+        """Get human-readable error description for Kafka error codes."""
+        name = kafka_error_codes.get(error_code, "UNKNOWN_ERROR")
+        return f"{name} (code={error_code})"
+
+    def _extract_topic_field(metadata: object, field_name: str) -> object:
+        """Extract field from topic metadata supporting both dict and namedtuple formats.
+
+        aiokafka may return topic metadata as dict or namedtuple depending on version.
+        This helper handles both formats transparently.
+        """
+        if isinstance(metadata, dict):
+            return metadata.get(field_name)
+        return getattr(metadata, field_name, None)
+
     try:
-        admin_client = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
+        # Step 1: Connect to Kafka admin API with explicit timeout
+        logger.debug(
+            "Connecting to Kafka admin API at %s",
+            bootstrap_servers,
+        )
+        admin_client = AIOKafkaAdminClient(
+            bootstrap_servers=bootstrap_servers,
+            request_timeout_ms=30000,  # 30 second timeout for admin operations
+        )
         await admin_client.start()
 
-        # Validate topic exists by describing it
-        # describe_topics returns list of topic metadata or raises exception
+        # Step 2: Describe the specific topic (validates existence and configuration)
+        # NOTE: describe_topics() returns List[Any] (not a dict as some docs suggest).
+        # Each element is a dict with 'error_code', 'topic', and 'partitions' fields.
+        # This is per the Kafka MetadataResponse protocol schema.
+        logger.debug("Describing topic '%s'", TEST_INTROSPECTION_TOPIC)
         topic_descriptions = await admin_client.describe_topics(
             [TEST_INTROSPECTION_TOPIC]
         )
 
-        # Fail-fast validation 1: Empty response means topic doesn't exist
+        # Fail-fast validation 1: Empty response
         if not topic_descriptions:
             pytest.fail(
-                f"Test topic '{TEST_INTROSPECTION_TOPIC}' does not exist "
-                f"(describe_topics returned empty response). {topic_creation_hint}"
+                f"Topic validation failed: describe_topics returned empty response.\n"
+                f"Topic '{TEST_INTROSPECTION_TOPIC}' likely does not exist."
+                f"{topic_creation_hint}"
             )
 
-        # Fail-fast validation 2: Check if topic is actually in the response
-        # The response is a list of dicts with topic metadata
+        # Get the first (and only) topic description
         topic_metadata = topic_descriptions[0]
 
-        # Validate topic name matches (handles potential mismatch)
-        topic_name = topic_metadata.get("topic", topic_metadata.get("name"))
+        # Fail-fast validation 2: Check for error codes
+        # aiokafka may return error_code field for non-existent or inaccessible topics
+        error_code = _extract_topic_field(topic_metadata, "error_code")
+        if error_code is None:
+            error_code = 0  # Default to no error if field not present
+
+        if error_code != 0:
+            error_desc = _get_error_description(error_code)
+            if error_code == 3:  # UNKNOWN_TOPIC_OR_PARTITION
+                pytest.fail(
+                    f"Topic '{TEST_INTROSPECTION_TOPIC}' does not exist.\n"
+                    f"Kafka returned: {error_desc}"
+                    f"{topic_creation_hint}"
+                )
+            else:
+                pytest.fail(
+                    f"Topic '{TEST_INTROSPECTION_TOPIC}' has configuration error.\n"
+                    f"Kafka returned: {error_desc}\n"
+                    f"This may indicate the topic exists but is misconfigured or "
+                    f"the broker is unhealthy."
+                    f"{topic_creation_hint}"
+                )
+
+        # Fail-fast validation 3: Verify topic name matches
+        topic_name = _extract_topic_field(topic_metadata, "topic")
+        if topic_name is None:
+            topic_name = _extract_topic_field(topic_metadata, "name")
+
         if topic_name and topic_name != TEST_INTROSPECTION_TOPIC:
             pytest.fail(
-                f"Topic name mismatch: expected '{TEST_INTROSPECTION_TOPIC}', "
-                f"got '{topic_name}'. {topic_creation_hint}"
+                f"Topic name mismatch in Kafka response.\n"
+                f"Expected: '{TEST_INTROSPECTION_TOPIC}'\n"
+                f"Got: '{topic_name}'\n"
+                f"This indicates a Kafka API response parsing issue."
             )
 
-        # Fail-fast validation 3: Check for error codes in response
-        # aiokafka may return error_code field for non-existent topics
-        error_code = topic_metadata.get("error_code", 0)
-        if error_code != 0:
-            pytest.fail(
-                f"Test topic '{TEST_INTROSPECTION_TOPIC}' has error code {error_code}. "
-                f"Topic may not exist or has invalid configuration. {topic_creation_hint}"
-            )
+        # Fail-fast validation 4: Verify topic has partitions
+        partitions = _extract_topic_field(topic_metadata, "partitions")
+        if partitions is None:
+            partitions = []
 
-        # Fail-fast validation 4: Ensure topic has at least one partition
-        partitions = topic_metadata.get("partitions", [])
+        # Convert partitions to list if it's another iterable type
+        if not isinstance(partitions, list):
+            try:
+                partitions = list(partitions)
+            except TypeError:
+                partitions = []
+
         if not partitions:
             pytest.fail(
-                f"Test topic '{TEST_INTROSPECTION_TOPIC}' has no partitions. "
-                f"Topic may be misconfigured. {topic_creation_hint}"
+                f"Topic '{TEST_INTROSPECTION_TOPIC}' has no partitions.\n"
+                f"The topic exists but appears to be misconfigured.\n"
+                f"Try deleting and recreating the topic:"
+                f"{topic_creation_hint}"
             )
 
+        # Validation successful - log details for debugging
+        partition_count = len(partitions)
         logger.info(
-            "Test topic validated successfully",
-            extra={
-                "topic": TEST_INTROSPECTION_TOPIC,
-                "partitions": len(partitions),
-            },
+            "Topic '%s' validated successfully: %d partition(s)",
+            TEST_INTROSPECTION_TOPIC,
+            partition_count,
+        )
+
+    except UnknownTopicOrPartitionError:
+        pytest.fail(
+            f"Topic '{TEST_INTROSPECTION_TOPIC}' does not exist.{topic_creation_hint}"
+        )
+
+    except KafkaConnectionError as e:
+        pytest.fail(
+            f"Failed to connect to Kafka at {bootstrap_servers}.\n"
+            f"Connection error: {e}\n\n"
+            f"Troubleshooting:\n"
+            f"  1. Verify Kafka/Redpanda is running: rpk cluster info\n"
+            f"  2. Check KAFKA_BOOTSTRAP_SERVERS is correct\n"
+            f"  3. Ensure network connectivity to {bootstrap_servers}\n"
+            f"  4. Check firewall rules allow connections"
+        )
+
+    except KafkaTimeoutError as e:
+        pytest.fail(
+            f"Timeout connecting to Kafka at {bootstrap_servers}.\n"
+            f"Timeout error: {e}\n\n"
+            f"Troubleshooting:\n"
+            f"  1. Kafka may be overloaded or unresponsive\n"
+            f"  2. Network latency may be too high\n"
+            f"  3. Try increasing request_timeout_ms\n"
+            f"  4. Check Kafka broker logs for errors"
+        )
+
+    except KafkaError as e:
+        # Catch-all for other Kafka protocol errors
+        pytest.fail(
+            f"Kafka error validating topic '{TEST_INTROSPECTION_TOPIC}'.\n"
+            f"Error type: {type(e).__name__}\n"
+            f"Error: {e}\n\n"
+            f"This may indicate a broker configuration issue or protocol error."
+            f"{topic_creation_hint}"
         )
 
     except Exception as e:
-        # Check if it's a "topic not found" type error
-        error_msg = str(e).lower()
-        if "unknown topic" in error_msg or "not found" in error_msg:
-            pytest.fail(
-                f"Test topic '{TEST_INTROSPECTION_TOPIC}' does not exist. "
-                f"{topic_creation_hint}"
-            )
-        # Check for other common Kafka errors
-        if "timeout" in error_msg:
-            pytest.fail(
-                f"Timeout validating topic '{TEST_INTROSPECTION_TOPIC}'. "
-                f"Kafka cluster may be unreachable at {bootstrap_servers}."
-            )
-        # Re-raise other errors (connection issues, etc.)
-        raise
+        # Non-Kafka errors (network issues, etc.)
+        pytest.fail(
+            f"Unexpected error validating topic '{TEST_INTROSPECTION_TOPIC}'.\n"
+            f"Error type: {type(e).__name__}\n"
+            f"Error: {e}\n\n"
+            f"If this is a new environment, ensure the topic exists:"
+            f"{topic_creation_hint}"
+        )
+
     finally:
         if admin_client is not None:
-            await admin_client.close()
+            try:
+                await admin_client.close()
+            except Exception as close_err:
+                # Log but don't fail on close errors
+                logger.warning(
+                    "Error closing Kafka admin client: %s",
+                    close_err,
+                )
 
     return TEST_INTROSPECTION_TOPIC
 

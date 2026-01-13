@@ -22,7 +22,6 @@ from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.errors import (
     ComputeRegistryError,
     EventBusRegistryError,
-    ProtocolConfigurationError,
 )
 from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,
@@ -296,7 +295,7 @@ class TestMessageTypeRegistryCorrelationId:
 
     def test_category_constraint_mismatch_error_structure(self) -> None:
         """Test MessageTypeRegistryError structure for constraint mismatch."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         registry = MessageTypeRegistry()
         now = datetime.now(tz=UTC)

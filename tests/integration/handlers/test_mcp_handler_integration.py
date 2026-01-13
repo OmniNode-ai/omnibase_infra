@@ -45,7 +45,6 @@ if TYPE_CHECKING:
         ONEXToMCPAdapter,
         TransportMCPStreamableHttp,
     )
-    from omnibase_infra.handlers.mcp.adapter_onex_to_mcp import MCPToolParameter
     from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]

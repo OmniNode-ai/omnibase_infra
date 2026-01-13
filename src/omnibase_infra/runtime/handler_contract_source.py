@@ -44,9 +44,6 @@ from omnibase_infra.models.handlers import (
     ModelHandlerDescriptor,
     ModelHandlerIdentifier,
 )
-from omnibase_infra.runtime.protocol_contract_descriptor import (
-    ProtocolContractDescriptor,
-)
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
 # Rebuild ModelContractDiscoveryResult to resolve the forward reference

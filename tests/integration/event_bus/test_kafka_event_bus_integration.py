@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from .conftest import wait_for_consumer_ready
+
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.event_bus.models import ModelEventMessage
@@ -51,7 +53,6 @@ pytestmark = [
 # Test configuration constants
 TEST_TIMEOUT_SECONDS = 30
 MESSAGE_DELIVERY_WAIT_SECONDS = 2.0
-CONSUMER_START_WAIT_SECONDS = 1.0
 
 
 # =============================================================================
@@ -226,8 +227,8 @@ class TestKafkaEventBusE2E:
             handler,
         )
 
-        # Give consumer time to start
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
 
         # Publish message
         test_key = b"test-key"
@@ -290,8 +291,8 @@ class TestKafkaEventBusE2E:
             created_unique_topic, group2, handler2
         )
 
-        # Give consumers time to start
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumers to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
 
         # Publish message
         test_value = b"test-multiple-subscribers"
@@ -342,7 +343,8 @@ class TestKafkaEventBusE2E:
             handler,
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
 
         # Publish envelope (dict)
         test_envelope = {
@@ -400,7 +402,8 @@ class TestKafkaEventBusE2E:
             handler,
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
 
         # Publish multiple messages with same key (same partition)
         partition_key = b"ordering-key"
@@ -452,7 +455,8 @@ class TestKafkaEventBusE2E:
             handler,
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
 
         # Publish first message
         await started_kafka_bus.publish(created_unique_topic, None, b"first-message")
@@ -473,7 +477,7 @@ class TestKafkaEventBusE2E:
         await unsubscribe()
 
         # Give time for unsubscribe to complete
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        await asyncio.sleep(0.5)
 
         # Publish second message - should not be received
         await started_kafka_bus.publish(created_unique_topic, None, b"second-message")
@@ -581,7 +585,8 @@ class TestKafkaEventBusResilience:
             created_unique_topic, group2, good_handler
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumers to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
 
         # Publish message - should not crash despite failing handler
         await started_kafka_bus.publish(created_unique_topic, None, b"test-resilience")
@@ -647,7 +652,8 @@ class TestKafkaEventBusHeaders:
             handler,
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
 
         # Publish with custom headers
         custom_headers = ModelEventHeaders(
@@ -710,7 +716,8 @@ class TestKafkaEventBusHeaders:
             handler,
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_unique_topic)
 
         # Create headers with specific correlation_id
         test_correlation_id = uuid.uuid4()
@@ -779,7 +786,8 @@ class TestKafkaEventBusBroadcast:
             handler,
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, created_broadcast_topic)
 
         # Broadcast to environment
         await started_kafka_bus.broadcast_to_environment(
@@ -830,7 +838,8 @@ class TestKafkaEventBusBroadcast:
             handler,
         )
 
-        await asyncio.sleep(CONSUMER_START_WAIT_SECONDS)
+        # Wait for consumer to be ready (uses polling with exponential backoff)
+        await wait_for_consumer_ready(started_kafka_bus, group_topic)
 
         # Send to group
         await started_kafka_bus.send_to_group(

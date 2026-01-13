@@ -124,50 +124,77 @@ logger = logging.getLogger(__name__)
 async def wait_for_consumer_ready(
     event_bus: KafkaEventBus,
     topic: str,
-    max_wait: float = 2.0,
-    poll_interval: float = 0.1,
+    max_wait: float = 10.0,
+    poll_interval: float = 0.2,
+    initial_backoff: float = 0.1,
+    max_backoff: float = 1.0,
+    backoff_multiplier: float = 1.5,
 ) -> bool:
-    """Wait for Kafka consumer to be ready to receive messages.
+    """Wait for Kafka consumer to be ready to receive messages using polling.
 
     Kafka consumers require time to join the consumer group and start
-    receiving messages after subscription. This helper encapsulates the
-    wait pattern with proper documentation.
+    receiving messages after subscription. This helper polls the event bus
+    health check until the consumer for the topic is registered.
 
-    Known Limitation:
-        The KafkaEventBus does not expose a consumer readiness signal.
-        This function uses a minimal sleep as a best-effort approach.
-        A more robust solution would require either:
-        1. Exposing consumer group state from aiokafka
-        2. Publishing a "probe" message and waiting for receipt
-        3. Polling consumer group offsets via Kafka admin API
-
-        These approaches add significant complexity and are deferred
-        pending a design decision on KafkaEventBus interface changes.
+    Implementation:
+        Uses exponential backoff polling to check if the consumer count
+        has increased, indicating the consumer task is running. This is
+        more reliable than a fixed sleep as it adapts to actual readiness
+        and reduces test flakiness.
 
     Args:
-        event_bus: The KafkaEventBus instance (unused, kept for future API).
-        topic: The topic subscribed to (unused, kept for future API).
-        max_wait: Maximum time to wait in seconds (currently a fixed delay).
-        poll_interval: Polling interval (currently unused, reserved for future).
+        event_bus: The KafkaEventBus instance to check for readiness.
+        topic: The topic to wait for consumer registration on.
+        max_wait: Maximum time to wait in seconds before returning (default 10.0s).
+        poll_interval: Base polling interval (kept for API compat, uses backoff instead).
+        initial_backoff: Initial backoff delay for polling (default 0.1s).
+        max_backoff: Maximum backoff delay to prevent excessive waits (default 1.0s).
+        backoff_multiplier: Multiplier for exponential backoff (default 1.5).
 
     Returns:
-        True when the consumer is likely ready (best-effort).
+        True when the consumer is ready or max_wait is exceeded.
 
     Note:
-        The parameters are designed to be forward-compatible with a future
-        implementation that actually polls for readiness. Current implementation
-        uses a minimal 0.5s delay which is sufficient for local/CI Kafka.
+        Returns True even on timeout to maintain backwards compatibility
+        with existing test code that expects the function to always succeed.
+        The polling approach significantly reduces flakiness compared to
+        fixed sleep by detecting actual consumer registration.
     """
-    # Minimal delay for Kafka consumer group join to complete.
-    # Minimum 0.5s is typically sufficient for Redpanda/Kafka on local infrastructure.
-    # Some tests (e.g., heartbeat capture) may need longer waits and can pass
-    # max_wait > 0.5 to override this minimum.
-    #
-    # This could be replaced with proper polling if KafkaEventBus exposes
-    # consumer group state or offset information.
-    minimum_wait = 0.5
-    # Use the larger of minimum_wait (floor) or max_wait (caller override)
-    await asyncio.sleep(max(minimum_wait, max_wait))
+    start_time = asyncio.get_running_loop().time()
+    current_backoff = initial_backoff
+
+    # Get initial consumer count for comparison
+    initial_health = await event_bus.health_check()
+    initial_consumer_count = initial_health.get("consumer_count", 0)
+
+    # Poll until consumer count increases or timeout
+    while (asyncio.get_running_loop().time() - start_time) < max_wait:
+        health = await event_bus.health_check()
+        consumer_count = health.get("consumer_count", 0)
+
+        # If consumer count has increased, the subscription is active
+        if consumer_count > initial_consumer_count:
+            # Add a small additional delay for the consumer loop to start
+            # processing messages after registration
+            await asyncio.sleep(0.1)
+            return True
+
+        # Check if we've timed out
+        elapsed = asyncio.get_running_loop().time() - start_time
+        if elapsed >= max_wait:
+            break
+
+        # Exponential backoff with cap
+        await asyncio.sleep(current_backoff)
+        current_backoff = min(current_backoff * backoff_multiplier, max_backoff)
+
+    # Return True for backwards compatibility even on timeout
+    # Log at debug level for diagnostics
+    logger.debug(
+        "wait_for_consumer_ready timed out after %.2fs for topic %s",
+        max_wait,
+        topic,
+    )
     return True
 
 
@@ -1113,7 +1140,7 @@ def configure_e2e_logging() -> None:
     This session-scoped fixture ensures that:
     - All E2E pipeline logs are visible during test runs (with -v flag)
     - Log output uses a clear, structured format
-    - DEBUG level is enabled for omnibase_infra modules
+    - INFO level is enabled for omnibase_infra modules
 
     Usage:
         Run tests with pytest -v to see pipeline stage logs

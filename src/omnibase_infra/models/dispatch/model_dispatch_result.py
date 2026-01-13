@@ -89,7 +89,6 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
-from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumDispatchStatus, EnumMessageCategory

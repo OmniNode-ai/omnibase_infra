@@ -163,7 +163,7 @@ class TestConcurrentPublishOperations:
 
         num_concurrent = 100
         offsets: list[str] = []
-        lock = asyncio.Lock()
+        asyncio.Lock()
 
         async def publish_and_record() -> None:
             await event_bus.publish(

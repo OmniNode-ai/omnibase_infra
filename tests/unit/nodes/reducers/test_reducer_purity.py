@@ -24,8 +24,6 @@ import pytest
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.enums import EnumNodeArchetype
-
 __all__ = [
     "TestStructuralPurityGates",
     "TestDeterminismGates",

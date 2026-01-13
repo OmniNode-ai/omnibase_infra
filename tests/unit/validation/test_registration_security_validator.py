@@ -21,8 +21,6 @@ See Also:
 
 from __future__ import annotations
 
-import pytest
-
 # Core enum imports
 from omnibase_core.enums import EnumDataClassification
 
