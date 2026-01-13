@@ -306,13 +306,13 @@ class TestModelRegistryIntent:
         """Base model defines required kind field for type discrimination."""
         fields = ModelRegistryIntent.model_fields
         assert "kind" in fields
-        assert fields["kind"].annotation == str
+        assert fields["kind"].annotation is str
 
     def test_has_required_operation_field(self) -> None:
         """Base model defines required operation field."""
         fields = ModelRegistryIntent.model_fields
         assert "operation" in fields
-        assert fields["operation"].annotation == str
+        assert fields["operation"].annotation is str
 
     def test_has_required_node_id_field(self) -> None:
         """Base model defines required node_id field."""

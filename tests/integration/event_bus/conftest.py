@@ -46,83 +46,13 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:2
 
 
 # =============================================================================
-# Consumer Readiness Helper
+# Consumer Readiness Helper (shared implementation)
 # =============================================================================
+# Re-exported from tests.helpers.kafka_utils for backwards compatibility.
+# See tests/helpers/kafka_utils.py for the canonical implementation.
+from tests.helpers.kafka_utils import wait_for_consumer_ready
 
-
-async def wait_for_consumer_ready(
-    event_bus: KafkaEventBus,
-    topic: str,
-    max_wait: float = 10.0,
-    initial_backoff: float = 0.1,
-    max_backoff: float = 1.0,
-    backoff_multiplier: float = 1.5,
-) -> bool:
-    """Wait for Kafka consumer to be ready to receive messages using polling.
-
-    Kafka consumers require time to join the consumer group and start
-    receiving messages after subscription. This helper polls the event bus
-    health check until the consumer for the topic is registered.
-
-    Implementation:
-        Uses exponential backoff polling to check if the consumer count
-        has increased, indicating the consumer task is running. This is
-        more reliable than a fixed sleep as it adapts to actual readiness
-        and reduces test flakiness.
-
-    Args:
-        event_bus: The KafkaEventBus instance to check for readiness.
-        topic: The topic to wait for consumer registration on.
-        max_wait: Maximum time to wait in seconds before returning (default 10.0s).
-        initial_backoff: Initial backoff delay for polling (default 0.1s).
-        max_backoff: Maximum backoff delay to prevent excessive waits (default 1.0s).
-        backoff_multiplier: Multiplier for exponential backoff (default 1.5).
-
-    Returns:
-        True when the consumer is ready or max_wait is exceeded.
-
-    Note:
-        Returns True even on timeout to maintain backwards compatibility
-        with existing test code that expects the function to always succeed.
-        The polling approach significantly reduces flakiness compared to
-        fixed sleep by detecting actual consumer registration.
-    """
-    start_time = asyncio.get_running_loop().time()
-    current_backoff = initial_backoff
-
-    # Get initial consumer count for comparison
-    initial_health = await event_bus.health_check()
-    initial_consumer_count = initial_health.get("consumer_count", 0)
-
-    # Poll until consumer count increases or timeout
-    while (asyncio.get_running_loop().time() - start_time) < max_wait:
-        health = await event_bus.health_check()
-        consumer_count = health.get("consumer_count", 0)
-
-        # If consumer count has increased, the subscription is active
-        if consumer_count > initial_consumer_count:
-            # Add a small additional delay for the consumer loop to start
-            # processing messages after registration
-            await asyncio.sleep(0.1)
-            return True
-
-        # Check if we've timed out
-        elapsed = asyncio.get_running_loop().time() - start_time
-        if elapsed >= max_wait:
-            break
-
-        # Exponential backoff with cap
-        await asyncio.sleep(current_backoff)
-        current_backoff = min(current_backoff * backoff_multiplier, max_backoff)
-
-    # Return True for backwards compatibility even on timeout
-    # Log at debug level for diagnostics
-    logger.debug(
-        "wait_for_consumer_ready timed out after %.2fs for topic %s",
-        max_wait,
-        topic,
-    )
-    return True
+__all__ = ["wait_for_consumer_ready"]
 
 
 # =============================================================================
@@ -152,9 +82,9 @@ async def ensure_test_topic() -> AsyncGenerator[
             topic = await ensure_test_topic(f"test.integration.{uuid4().hex[:12]}")
             # Topic now exists and can be used for produce/consume
     """
-    import asyncio
 
     from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+    from aiokafka.errors import TopicAlreadyExistsError
 
     admin: AIOKafkaAdminClient | None = None
     created_topics: list[str] = []
@@ -221,8 +151,8 @@ async def ensure_test_topic() -> AsyncGenerator[
 
             # Wait for topic metadata to propagate
             await _wait_for_topic_metadata(admin, topic_name)
-        except Exception:
-            # Topic may already exist - this is acceptable
+        except TopicAlreadyExistsError:
+            # Topic already exists - this is acceptable in test environments
             # Still wait for metadata in case topic was just created by another process
             if admin is not None:
                 await _wait_for_topic_metadata(admin, topic_name, timeout=5.0)
@@ -325,6 +255,7 @@ async def topic_factory() -> AsyncGenerator[
             topic = await topic_factory("my.topic", partitions=3, replication=1)
     """
     from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+    from aiokafka.errors import TopicAlreadyExistsError
 
     admin: AIOKafkaAdminClient | None = None
     created_topics: list[str] = []
@@ -361,8 +292,8 @@ async def topic_factory() -> AsyncGenerator[
                 ]
             )
             created_topics.append(topic_name)
-        except Exception:
-            pass  # Topic may already exist
+        except TopicAlreadyExistsError:
+            pass  # Topic already exists - acceptable in test environments
 
         return topic_name
 

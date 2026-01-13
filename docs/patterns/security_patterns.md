@@ -586,8 +586,18 @@ def require_permission(permission: EnumPermission):
     def decorator(func):
         async def wrapper(ctx: AuthorizationContext, *args, **kwargs):
             if permission not in get_user_permissions(ctx.roles):
-                raise PermissionError(
-                    f"Permission {permission.value} required"
+                from omnibase_infra.errors import InfraAuthenticationError, ModelInfraErrorContext
+                from omnibase_infra.enums import EnumInfraTransportType
+
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="authorization_check",
+                    target_name="permission_guard",
+                    correlation_id=getattr(ctx, 'correlation_id', None),
+                )
+                raise InfraAuthenticationError(
+                    f"Authorization denied: permission {permission.value} required",
+                    context=context,
                 )
             return await func(ctx, *args, **kwargs)
         return wrapper
@@ -1086,6 +1096,7 @@ Policy registration and execution require careful security considerations as pol
 
 ```python
 from typing import Final
+from uuid import uuid4
 
 from omnibase_infra.errors import ProtocolConfigurationError, ModelInfraErrorContext
 from omnibase_infra.enums import EnumInfraTransportType
@@ -1103,21 +1114,50 @@ class PolicySecurityError(ProtocolConfigurationError):
     """Raised when a policy fails security validation.
 
     Extends ProtocolConfigurationError to integrate with ONEX error handling.
+
+    Error Codes:
+        POLICY_SECURITY_001: Policy from untrusted source/namespace
+        POLICY_SECURITY_002: Policy code hash not in approved list
+        POLICY_SECURITY_003: Policy failed static analysis
     """
-    pass
+
+    def __init__(
+        self,
+        message: str,
+        error_code: str,
+        policy_class_name: str | None = None,
+        context: ModelInfraErrorContext | None = None,
+        **kwargs: object,
+    ) -> None:
+        """Initialize PolicySecurityError with required error code.
+
+        Args:
+            message: Human-readable error message
+            error_code: Error code for categorization (e.g., "POLICY_SECURITY_001")
+            policy_class_name: Name of the policy class that failed validation
+            context: Optional infrastructure error context
+            **kwargs: Additional context fields
+        """
+        super().__init__(message, context=context, **kwargs)
+        self.error_code = error_code
+        self.policy_class_name = policy_class_name
 
 
-def validate_policy_source(policy_class: type) -> bool:
+def validate_policy_source(
+    policy_class: type,
+    correlation_id: UUID | None = None,
+) -> bool:
     """Validate policy comes from trusted source.
 
     Args:
         policy_class: Policy class to validate
+        correlation_id: Optional correlation ID for tracing
 
     Returns:
         True if from trusted source
 
     Raises:
-        PolicySecurityError: If from untrusted source
+        PolicySecurityError: If from untrusted source (POLICY_SECURITY_001)
     """
     module = policy_class.__module__
 
@@ -1125,8 +1165,16 @@ def validate_policy_source(policy_class: type) -> bool:
         if module.startswith(trusted):
             return True
 
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="validate_policy_source",
+        correlation_id=correlation_id or uuid4(),
+    )
     raise PolicySecurityError(
-        f"Policy {policy_class.__name__} is from untrusted source: {module}"
+        f"Policy from untrusted source namespace: {module}",
+        error_code="POLICY_SECURITY_001",
+        policy_class_name=policy_class.__name__,
+        context=context,
     )
 ```
 

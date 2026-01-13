@@ -48,8 +48,8 @@ Sub-migrations are companion scripts related to a main migration. They share the
 - Independent features should use the next main number
 
 **Ordering:**
-- Sub-migrations (`003a`, `003b`) always relate to their parent (`003`)
-- Execute in alphabetical order: `003` -> `003a` -> `003b` (when applicable)
+- Sub-migrations (`003a`, `003b`, etc.) always relate to their parent (`003`)
+- Execute in alphabetical order: `003` -> `003a` -> `003b` (if multiple exist)
 - Check migration header comments for specific ordering requirements
 
 ## Modifier Suffixes
@@ -85,8 +85,9 @@ Indicates a migration designed for **production environments with live traffic**
 **For a new independent feature:**
 - Use the next sequential number: `005_new_feature.sql`
 
-**For a companion to an existing migration:**
-- Use the next available letter: `003a_capability_fields_rollback.sql` (003a is available since original was renamed to 004)
+**For a companion to an existing migration (e.g., rollback script):**
+- Use the letter suffix matching the parent migration: e.g., `003a_rollback.sql` for migration 003
+- The `003a` slot is currently available (see "Slot availability" note below)
 
 **Current state:**
 ```
@@ -98,9 +99,13 @@ Indicates a migration designed for **production environments with live traffic**
 
 **Next available:**
 - Next main migration: `005_*.sql`
-- Next sub-migration for migration 003: `003a_*.sql` (slot available since original 003a was promoted to 004)
+- Next sub-migration: `003a_*.sql` or `004a_*.sql` (for rollback/companion scripts)
 
-> **Note**: The slot `003a` is available because `003a_capability_fields_concurrent.sql` was promoted to main sequence as `004_capability_fields_concurrent.sql`. Prefer the next main sequence number (`005`) for new features. Reserve letter suffixes (e.g., `003a_capability_fields_rollback.sql`) for rollback scripts or optional companion migrations closely related to their parent.
+> **Slot availability**:
+> - `003a` slot is available (the original `003a_capability_fields_concurrent.sql` was promoted to `004`)
+> - `004a` slot is available for rollback/cleanup scripts related to migration 004
+> - Prefer main sequence numbers (`005`) for new features
+> - Use letter suffixes only for rollback scripts or optional companions closely related to their parent
 >
 > **Upgrade path from 003a to 004**: If your database has the old `003a` applied, no action is needed - the SQL is identical to `004`. See `MIGRATION_UPGRADE_003a_to_004.md` for verification steps and detailed upgrade scenarios.
 

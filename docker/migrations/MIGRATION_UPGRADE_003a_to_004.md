@@ -39,7 +39,7 @@ The renumbering to `004` makes it explicit that this is a standalone migration t
 
 ### Scenario 1: Fresh Deployment (No Migrations Applied Yet)
 
-For **new databases** or databases where no ONEX migrations have been applied yet.
+For **new databases** or databases where **no ONEX migrations have been applied yet** (empty `registration_projections` table or table does not exist).
 
 ```bash
 # Apply base schema
@@ -52,9 +52,9 @@ psql -h $HOST -d $DB -f 003_capability_fields.sql
 # Done - this creates columns AND standard indexes
 ```
 
-> **Why PATH A is always sufficient for fresh deployments**: On an empty or new table, `CREATE INDEX` completes instantly with no blocking. The concurrent index variant (migration 004) is only needed when adding indexes to **existing tables with data** where you cannot afford brief write locks.
+> **Why migration 003 is sufficient for fresh deployments**: On an empty or new table, `CREATE INDEX` completes instantly with no blocking. The concurrent index variant (migration 004) is only needed when adding indexes to **existing tables with data** where you cannot afford brief write locks.
 
-**When to use migration 004 instead**: If you are adding migrations to an **existing production database** that already has data in the `registration_projections` table (>100K rows), see Scenario 3 for the upgrade path using concurrent indexes.
+**When to use migration 004 instead**: If you are adding migrations to a database that **already has data** in the `registration_projections` table (>100K rows), see Scenario 3 for the upgrade path using concurrent indexes.
 
 ### Scenario 2: Production Database with 003a Already Applied
 

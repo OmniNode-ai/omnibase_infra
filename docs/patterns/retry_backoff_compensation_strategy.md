@@ -77,17 +77,17 @@ error_handling:
 Orchestrator (owns retry logic)
     │
     ├─[Attempt 1]─> Effect.execute() -> FAILURE (timeout)
-    │               └─> Returns ModelBackendResult(success=False, error="timeout")
+    │               └─> Returns ModelBackendResult(success=False, error="timeout", backend_id="consul")
     │
     ├─[Backoff 1s]
     │
     ├─[Attempt 2]─> Effect.execute() -> FAILURE (connection refused)
-    │               └─> Returns ModelBackendResult(success=False, error="connection refused")
+    │               └─> Returns ModelBackendResult(success=False, error="connection refused", backend_id="consul")
     │
     ├─[Backoff 2s]
     │
     └─[Attempt 3]─> Effect.execute() -> SUCCESS
-                    └─> Returns ModelBackendResult(success=True, duration_ms=45.2)
+                    └─> Returns ModelBackendResult(success=True, duration_ms=45.2, backend_id="consul")
 ```
 
 ---
@@ -462,20 +462,43 @@ class CompensationFailedError(RuntimeHostError):
 
 
 class SagaExecutor:
-    """Execute saga with automatic compensation on failure."""
+    """Execute saga with automatic compensation on failure.
+
+    Transport Type Selection:
+        The transport_type parameter is used in CompensationFailedError context
+        for observability and categorization. Choose based on your use case:
+
+        **Recommended for Compensation Errors**:
+        - RUNTIME: For saga orchestration errors (compensation is a runtime concern)
+
+        **Alternative: Entry Point Transport**:
+        - HTTP: REST API-triggered sagas (when correlation with trigger matters)
+        - KAFKA: Event-driven sagas (async message processing)
+        - DATABASE: Database-centric workflows (batch operations)
+
+        **Guidance**: For saga compensation failures, `RUNTIME` is often more
+        accurate since compensation is an internal orchestration concern. Use
+        the trigger transport (HTTP, KAFKA) when you need to correlate
+        compensation failures with the original request source.
+
+        Note: Individual saga steps may interact with multiple transports.
+        The executor's transport_type represents the error categorization,
+        not individual step operations.
+    """
 
     def __init__(
         self,
-        transport_type: EnumInfraTransportType = EnumInfraTransportType.HTTP,
+        transport_type: EnumInfraTransportType = EnumInfraTransportType.RUNTIME,
     ) -> None:
         """Initialize saga executor.
 
         Args:
-            transport_type: Transport type for error context. Defaults to HTTP
-                since sagas are commonly triggered by HTTP requests. Override
-                this when the saga primarily operates on a specific transport
-                (e.g., DATABASE for database-centric sagas, KAFKA for
-                event-driven sagas).
+            transport_type: Transport type for CompensationFailedError context.
+                Defaults to RUNTIME since compensation is an orchestration
+                concern. Override to correlate with trigger source:
+                - HTTP: When correlating with REST API triggers
+                - KAFKA: When correlating with event-driven triggers
+                - DATABASE: When correlating with batch job triggers
         """
         self._transport_type = transport_type
 

@@ -50,6 +50,9 @@ Available Utilities:
     Mock Utilities:
         - MockStatResult: NamedTuple matching os.stat_result for file stat mocking
         - create_mock_stat_result: Factory for creating MockStatResult with overrides
+
+    Kafka Testing:
+        - wait_for_consumer_ready: Poll for Kafka consumer readiness with backoff
 """
 
 from tests.helpers.ast_analysis import (
@@ -66,6 +69,7 @@ from tests.helpers.chaos_utils import (
     create_envelope_from_chained_message,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from tests.helpers.kafka_utils import wait_for_consumer_ready
 from tests.helpers.log_helpers import filter_handler_warnings, get_warning_messages
 from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
 from tests.helpers.replay_utils import (
@@ -136,4 +140,6 @@ __all__ = [
     # Mock utilities
     "MockStatResult",
     "create_mock_stat_result",
+    # Kafka testing utilities
+    "wait_for_consumer_ready",
 ]

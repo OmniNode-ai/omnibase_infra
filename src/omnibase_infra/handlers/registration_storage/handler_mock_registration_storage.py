@@ -342,7 +342,7 @@ class MockRegistrationStorageHandler:
         start_time = time.monotonic()
 
         async with self._lock:
-            _ = len(self._records)  # Force lock acquisition to measure latency
+            pass  # Lock is acquired here; duration measures acquisition latency
 
         latency_ms = (time.monotonic() - start_time) * 1000
 

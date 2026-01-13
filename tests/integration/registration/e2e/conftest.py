@@ -119,108 +119,11 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Consumer Readiness Helper
+# Consumer Readiness Helper (shared implementation)
 # =============================================================================
-
-
-async def wait_for_consumer_ready(
-    event_bus: KafkaEventBus,
-    topic: str,
-    max_wait: float = 10.0,
-    initial_backoff: float = 0.1,
-    max_backoff: float = 1.0,
-    backoff_multiplier: float = 1.5,
-) -> bool:
-    """Wait for Kafka consumer to be ready to receive messages using polling.
-
-    This is a **best-effort** readiness check that always returns True. It attempts
-    to detect when the consumer is ready by polling health checks, but falls back
-    gracefully on timeout to avoid blocking tests indefinitely.
-
-    Kafka consumers require time to join the consumer group and start receiving
-    messages after subscription. This helper polls the event bus health check
-    until the consumer count increases, indicating the consumer task is running.
-
-    Behavior Summary:
-        1. Polls event_bus.health_check() with exponential backoff
-        2. If consumer_count increases within max_wait: returns True (early exit)
-        3. If max_wait exceeded: returns True anyway (graceful fallback)
-
-    Why Always Return True?
-        This function maintains backwards compatibility with existing test code
-        that expects it to always succeed. The purpose is to REDUCE flakiness
-        by waiting for actual readiness when possible, not to DETECT failures.
-        Test assertions should verify expected outcomes, not this helper's return.
-
-    Implementation:
-        Uses exponential backoff polling (initial_backoff * backoff_multiplier^n)
-        to check consumer registration, capped at max_backoff per iteration.
-        This is more reliable than a fixed sleep as it:
-        - Returns early when consumer is ready (reduces test time)
-        - Adapts to variable Kafka/Redpanda startup times
-        - Reduces flakiness compared to fixed-duration sleeps
-
-    Args:
-        event_bus: The KafkaEventBus instance to check for readiness.
-        topic: The topic to wait for (used for logging only, not filtering).
-        max_wait: Maximum time in seconds to poll before giving up. The function
-            will return True regardless of whether consumer became ready.
-            Default: 10.0s. Actual wait may be up to max_wait + 0.1s (stabilization).
-        initial_backoff: Initial polling delay in seconds (default 0.1s).
-        max_backoff: Maximum polling delay cap in seconds (default 1.0s).
-        backoff_multiplier: Multiplier for exponential backoff (default 1.5).
-
-    Returns:
-        Always True. This is intentional for backwards compatibility.
-        Do not use return value for failure detection.
-
-    Example:
-        # Best-effort wait for consumer readiness (default max_wait=10.0s)
-        await wait_for_consumer_ready(bus, topic)
-
-        # Shorter wait for fast tests
-        await wait_for_consumer_ready(bus, topic, max_wait=2.0)
-
-        # Consumer MAY be ready here, but test should not rely on this
-        # Use assertions on actual test outcomes instead
-    """
-    start_time = asyncio.get_running_loop().time()
-    current_backoff = initial_backoff
-
-    # Get initial consumer count for comparison
-    initial_health = await event_bus.health_check()
-    initial_consumer_count = initial_health.get("consumer_count", 0)
-
-    # Poll until consumer count increases or timeout
-    while (asyncio.get_running_loop().time() - start_time) < max_wait:
-        health = await event_bus.health_check()
-        consumer_count = health.get("consumer_count", 0)
-
-        # If consumer count has increased, the subscription is active
-        if consumer_count > initial_consumer_count:
-            # Add a small additional delay for the consumer loop to start
-            # processing messages after registration
-            await asyncio.sleep(0.1)
-            return True
-
-        # Check if we've timed out
-        elapsed = asyncio.get_running_loop().time() - start_time
-        if elapsed >= max_wait:
-            break
-
-        # Exponential backoff with cap
-        await asyncio.sleep(current_backoff)
-        current_backoff = min(current_backoff * backoff_multiplier, max_backoff)
-
-    # Return True for backwards compatibility even on timeout
-    # Log at debug level for diagnostics
-    logger.debug(
-        "wait_for_consumer_ready timed out after %.2fs for topic %s",
-        max_wait,
-        topic,
-    )
-    return True
-
+# Imported from tests.helpers.kafka_utils for shared use across test modules.
+# See tests/helpers/kafka_utils.py for the canonical implementation.
+from tests.helpers.kafka_utils import wait_for_consumer_ready
 
 # =============================================================================
 # Envelope Helper
@@ -577,6 +480,7 @@ async def ensure_test_topic() -> AsyncGenerator[
             # Topic now exists as "test.e2e.introspection-<uuid>" and can be used
     """
     from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+    from aiokafka.errors import TopicAlreadyExistsError
 
     admin: AIOKafkaAdminClient | None = None
     created_topics: list[str] = []
@@ -586,12 +490,34 @@ async def ensure_test_topic() -> AsyncGenerator[
         topic_name: str,
         timeout: float = 10.0,
     ) -> bool:
-        """Wait for topic metadata to be available in the broker."""
+        """Wait for topic metadata to be available in the broker.
+
+        Args:
+            admin_client: Kafka admin client for topic operations.
+            topic_name: Name of the topic to wait for.
+            timeout: Maximum time to wait in seconds.
+
+        Returns:
+            True if topic metadata is available, False on timeout.
+
+        Note:
+            aiokafka.describe_topics() returns dict[str, TopicDescription]
+            keyed by topic name. This function validates the dict response
+            and checks for error codes to ensure the topic is truly available.
+        """
         start_time = asyncio.get_running_loop().time()
         while (asyncio.get_running_loop().time() - start_time) < timeout:
             try:
                 description = await admin_client.describe_topics([topic_name])
-                if description:
+                # describe_topics returns dict[str, TopicDescription] keyed by topic name
+                if isinstance(description, dict) and topic_name in description:
+                    topic_metadata = description[topic_name]
+                    # Verify no error code (0 means success, None means field not present)
+                    error_code = getattr(topic_metadata, "error_code", None)
+                    if error_code is None or error_code == 0:
+                        return True
+                elif description:
+                    # Non-dict format (legacy compatibility) - accept if truthy
                     return True
             except Exception:
                 pass  # Topic not yet available
@@ -632,8 +558,8 @@ async def ensure_test_topic() -> AsyncGenerator[
 
             # Wait for topic metadata to propagate
             await _wait_for_topic_metadata(admin, unique_topic_name)
-        except Exception:
-            # Topic may already exist - still wait for metadata
+        except TopicAlreadyExistsError:
+            # Topic already exists - still wait for metadata in case just created
             if admin is not None:
                 await _wait_for_topic_metadata(admin, unique_topic_name, timeout=5.0)
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,8 @@ from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HttpRestHandler"
 
 # Valid handler contract template (matches schema from contracts/handlers/)
+# Uses canonical ONEX field names with required security metadata
+# NOTE: Uses 'name' and 'tags' (canonical) not 'handler_name'/'capability_tags' (aliases)
 VALID_HANDLER_CONTRACT_YAML = """
 name: "{handler_name}"
 handler_class: "{handler_class}"
@@ -80,7 +83,7 @@ security:
   audit_logging: false
 """
 
-# Missing required name field
+# Missing required name field (no 'name' key)
 HANDLER_CONTRACT_MISSING_NAME = """
 handler_class: "some.module.Handler"
 handler_type: "effect"
@@ -1908,8 +1911,9 @@ class TestDiscoverHandlersFromContractsCorrelationTracking:
         assert discovery_result is not None, "Discovery result should be available"
         # Discovery result tracks handlers discovered/registered, not correlation_id directly
         # Correlation tracking happens in logs and error contexts, not on the result model
-        assert discovery_result.handlers_discovered >= 0, (
-            "Discovery should report handlers discovered count"
+        # With valid_handler_contract_dir, at least one handler should be discovered
+        assert discovery_result.handlers_discovered >= 1, (
+            "Discovery should discover at least one handler from valid contract directory"
         )
 
         # Verify correlation ID tracking in logs
@@ -1918,34 +1922,42 @@ class TestDiscoverHandlersFromContractsCorrelationTracking:
         #
         # We verify that:
         # 1. At least one log record contains a correlation_id field
-        # 2. All correlation_id values are valid UUID-like strings (36 chars with hyphens)
+        # 2. All correlation_id values are valid UUIDs (parseable by uuid.UUID)
         # 3. All correlation IDs within the same discovery call match (same correlation)
-        correlation_ids_found: list[str] = []
+        correlation_ids_found: list[uuid.UUID] = []
         for log_record in caplog.records:
             # Check record __dict__ for correlation_id in extra data
             record_dict = log_record.__dict__
             if "correlation_id" in record_dict:
                 corr_id = record_dict["correlation_id"]
-                # Verify it's a valid format (string or UUID)
+                # Verify it's not None
                 assert corr_id is not None, "Correlation ID in log should not be None"
-                # Convert to string for validation
+
+                # Convert to string for UUID parsing
                 corr_id_str = str(corr_id)
-                # UUID strings with hyphens are exactly 36 chars (8-4-4-4-12)
-                assert len(corr_id_str) == 36, (
-                    f"Correlation ID '{corr_id_str}' should be UUID format (36 chars)"
+
+                # Parse as UUID to verify it's a valid UUID (raises ValueError if invalid)
+                try:
+                    parsed_uuid = uuid.UUID(corr_id_str)
+                except ValueError as e:
+                    pytest.fail(
+                        f"Correlation ID '{corr_id_str}' is not a valid UUID: {e}"
+                    )
+
+                # Verify UUID version (should be version 4 for auto-generated UUIDs)
+                assert parsed_uuid.version == 4, (
+                    f"Correlation ID '{corr_id_str}' should be UUID version 4, "
+                    f"got version {parsed_uuid.version}"
                 )
-                # Verify UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-                parts = corr_id_str.split("-")
-                assert len(parts) == 5, (
-                    f"Correlation ID '{corr_id_str}' should have 5 hyphen-separated parts"
-                )
-                correlation_ids_found.append(corr_id_str)
+
+                correlation_ids_found.append(parsed_uuid)
 
         # Assert that we found at least one correlation ID in the logs
         # The contract handler discovery MUST log with correlation IDs for observability
         assert len(correlation_ids_found) > 0, (
             "Discovery should log with correlation_id in structured log extra data. "
-            "No correlation IDs found in log records."
+            "No correlation IDs found in log records. "
+            "Ensure ContractHandlerDiscovery logs with extra={'correlation_id': ...}"
         )
 
         # Verify all correlation IDs from the same discovery call are consistent
@@ -1954,4 +1966,10 @@ class TestDiscoverHandlersFromContractsCorrelationTracking:
         assert len(unique_correlation_ids) == 1, (
             f"All logs from same discovery call should use the same correlation ID. "
             f"Found {len(unique_correlation_ids)} different IDs: {unique_correlation_ids}"
+        )
+
+        # Verify the found correlation ID is a valid auto-generated UUID
+        found_uuid = correlation_ids_found[0]
+        assert found_uuid.variant == uuid.RFC_4122, (
+            f"Correlation ID should be RFC 4122 variant, got {found_uuid.variant}"
         )

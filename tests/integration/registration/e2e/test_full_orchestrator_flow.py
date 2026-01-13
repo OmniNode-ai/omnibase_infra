@@ -98,13 +98,26 @@ pytestmark = [
 # Test Topic Constants
 # =============================================================================
 
-# Use the base topic that already exists in Kafka/Redpanda.
-# Test isolation is achieved via unique consumer group IDs rather than
-# unique topic names, since topic creation can be unreliable/slow.
+# Pre-existing topic used for E2E tests. This topic must exist in Kafka/Redpanda
+# before running tests. The ensure_test_topic_exists fixture validates topic
+# existence and fails fast with clear error messages if the topic is missing.
+#
+# Test Isolation Strategy:
+#   1. Unique consumer group IDs per test (e2e-orchestrator-test-{uuid})
+#   2. enable_auto_commit=False in real_kafka_event_bus (see conftest.py)
+#   3. Each test starts from latest offset, not competing with other groups
+#
+# Why a shared topic instead of unique topics per test:
+#   - Topic creation can be slow/unreliable in some Kafka configurations
+#   - Consumer group isolation provides sufficient test isolation
+#   - Reduces topic proliferation and cleanup complexity
 #
 # NOTE: If running tests in parallel (pytest-xdist), tests may see messages
 # from other workers. The unique group IDs ensure each test starts from
 # the latest offset and doesn't compete for the same consumer group.
+#
+# To create this topic if it doesn't exist:
+#   rpk topic create e2e-test.node.introspection.v1 --partitions 1
 TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
 
 
@@ -802,20 +815,23 @@ async def ensure_test_topic_exists(
                 f"{topic_creation_hint}"
             )
 
-        # Get the topic description - handle both list and dict return types
-        # Dict format: {"topic_name": TopicMetadata}
-        # List format: [TopicMetadata, ...]
-        if isinstance(topic_descriptions, dict):
-            topic_metadata = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
-            if topic_metadata is None:
-                pytest.fail(
-                    f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
-                    f"Available topics: {list(topic_descriptions.keys())}"
-                    f"{topic_creation_hint}"
-                )
-        else:
-            # List format - get first element
-            topic_metadata = topic_descriptions[0]
+        # Get the topic description from describe_topics response.
+        # aiokafka.describe_topics() returns Dict[str, TopicDescription] keyed by topic name.
+        # We handle the expected dict format and fail fast for unexpected formats.
+        if not isinstance(topic_descriptions, dict):
+            pytest.fail(
+                f"Unexpected describe_topics response type: {type(topic_descriptions).__name__}.\n"
+                f"Expected dict[str, TopicDescription], got: {topic_descriptions!r}"
+                f"{topic_creation_hint}"
+            )
+
+        topic_metadata = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
+        if topic_metadata is None:
+            pytest.fail(
+                f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
+                f"Available topics: {list(topic_descriptions.keys())}"
+                f"{topic_creation_hint}"
+            )
 
         # Fail-fast validation 2: Check for error codes
         # aiokafka may return error_code field for non-existent or inaccessible topics
@@ -955,10 +971,17 @@ async def running_orchestrator_consumer(
     - Routes incoming messages to the OrchestratorPipeline.process_message callback
     - Returns the OrchestratorTestContext with pipeline, mocks, and unsubscribe function
 
+    Consumer Configuration (from real_kafka_event_bus fixture):
+        The real_kafka_event_bus fixture in conftest.py configures the consumer with
+        enable_auto_commit=False for strict test isolation. This ensures:
+        - Offsets are committed after successful processing, not periodically
+        - No cross-test pollution from committed offsets before processing completes
+        - Deterministic message consumption position for each test
+
     Args:
-        real_kafka_event_bus: Real Kafka event bus.
+        real_kafka_event_bus: Real Kafka event bus (configured with enable_auto_commit=False).
         orchestrator_pipeline: Context containing pipeline and connected mocks.
-        ensure_test_topic_exists: Fixture that ensures the topic is ready.
+        ensure_test_topic_exists: Fixture that validates the topic is ready.
 
     Yields:
         OrchestratorTestContext with pipeline, mocks, and unsubscribe function.

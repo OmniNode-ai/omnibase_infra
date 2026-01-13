@@ -646,15 +646,36 @@ ALLOWED_MODULE_PREFIXES: Final[tuple[str, ...]] = (
 
 
 from omnibase_infra.errors import ProtocolConfigurationError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumHandlerLoaderError
 
 
 class SecurityValidationError(ProtocolConfigurationError):
     """Raised when security validation fails.
 
     Extends ProtocolConfigurationError to integrate with ONEX error handling.
+
+    Error Codes:
+        SECURITY_NAMESPACE_VIOLATION (SECURITY_001): Handler module not in allowed namespaces
+        SECURITY_POLICY_VIOLATION (SECURITY_002): External policy service rejected handler
     """
-    pass
+
+    def __init__(
+        self,
+        message: str,
+        error_code: str,
+        context: ModelInfraErrorContext | None = None,
+        **kwargs: object,
+    ) -> None:
+        """Initialize SecurityValidationError with required error code.
+
+        Args:
+            message: Human-readable error message
+            error_code: Error code for categorization (e.g., "SECURITY_001")
+            context: Optional infrastructure error context
+            **kwargs: Additional context fields
+        """
+        super().__init__(message, context=context, **kwargs)
+        self.error_code = error_code
 
 
 def secure_load_from_contract(
@@ -664,8 +685,18 @@ def secure_load_from_contract(
 ) -> ModelLoadedHandler:
     """Load handler with additional custom validation.
 
-    Note: The built-in `allowed_namespaces` parameter is preferred
-    as it validates BEFORE any import occurs.
+    This wrapper pattern is useful when you need validation logic beyond
+    simple namespace prefix matching. For most use cases, the built-in
+    `allowed_namespaces` parameter is simpler and equally secure.
+
+    Both approaches validate BEFORE any import occurs:
+    - Built-in `allowed_namespaces`: validates inside `load_from_contract()`
+    - This wrapper: validates at the caller level before calling the loader
+
+    Use this wrapper when you need:
+    - Custom validation rules beyond namespace prefixes
+    - Integration with external policy services
+    - Additional audit logging before loading
 
     Args:
         loader: The handler plugin loader
@@ -676,8 +707,10 @@ def secure_load_from_contract(
         Loaded handler if path passes validation
 
     Raises:
-        SecurityValidationError: If module path is not in allowlist
+        SecurityValidationError: If module path is not in allowlist (SECURITY_001)
     """
+    from uuid import uuid4
+
     # Pre-validate module path before loader processes it
     with open(path) as f:
         contract_data = yaml.safe_load(f)
@@ -686,9 +719,17 @@ def secure_load_from_contract(
 
     # Check against allowlist
     if not any(handler_class.startswith(prefix) for prefix in ALLOWED_MODULE_PREFIXES):
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="validate_handler_namespace",
+            correlation_id=correlation_id or uuid4(),
+        )
         raise SecurityValidationError(
-            f"Handler module path '{handler_class}' not in allowlist. "
-            f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}"
+            f"Handler module path not in allowlist. "
+            f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}",
+            error_code="SECURITY_001",
+            context=context,
+            handler_class=handler_class,  # Safe to include - just the class path
         )
 
     # Additional custom validation can go here

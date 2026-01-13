@@ -1802,7 +1802,7 @@ class TestSecurityGates:
                                 for dangerous_pattern in dangerous_value_patterns
                             )
                             if has_dangerous_pattern:
-                                assert False, (
+                                pytest.fail(
                                     f"Log message contains dangerous credential "
                                     f"pattern alongside safe context: "
                                     f"{record.getMessage()}"
@@ -1811,7 +1811,7 @@ class TestSecurityGates:
                             # No safe context - check for dangerous patterns
                             for dangerous_pattern in dangerous_value_patterns:
                                 if re.search(dangerous_pattern, message_lower):
-                                    assert False, (
+                                    pytest.fail(
                                         f"Log message contains potentially "
                                         f"sensitive pattern '{pattern}' in "
                                         f"dangerous context: {record.getMessage()}"

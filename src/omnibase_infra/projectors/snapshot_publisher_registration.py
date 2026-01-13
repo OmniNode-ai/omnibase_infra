@@ -855,7 +855,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                         f"Invalid port '{port_str}' in '{server}'. "
                         "Port must be a valid integer.",
                         context=ctx,
-                    )
+                    ) from None
 
             # Use the stripped and validated version
             bootstrap_servers = stripped_servers

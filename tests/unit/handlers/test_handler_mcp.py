@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -388,7 +389,7 @@ class TestMcpHandlerConfig:
         """Test config is immutable (frozen)."""
         config = ModelMcpHandlerConfig()
 
-        with pytest.raises(Exception):  # Pydantic raises ValidationError on frozen
+        with pytest.raises(ValidationError):
             config.host = "changed"
 
 

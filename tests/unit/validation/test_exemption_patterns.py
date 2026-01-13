@@ -29,10 +29,10 @@ class TestExemptionPatternType:
     def test_exemption_pattern_fields_are_strings(self) -> None:
         """Verify all ExemptionPattern fields are typed as strings."""
         annotations = ExemptionPattern.__annotations__
-        assert annotations["file_pattern"] == str
-        assert annotations["class_pattern"] == str
-        assert annotations["method_pattern"] == str
-        assert annotations["violation_pattern"] == str
+        assert annotations["file_pattern"] is str
+        assert annotations["class_pattern"] is str
+        assert annotations["method_pattern"] is str
+        assert annotations["violation_pattern"] is str
 
     def test_exemption_pattern_is_total_false(self) -> None:
         """Verify ExemptionPattern allows optional fields (total=False)."""
