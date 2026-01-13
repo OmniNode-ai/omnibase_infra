@@ -30,6 +30,7 @@ Note:
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -922,17 +923,21 @@ class TestNoHandlersRegisteredHealthCheck:
             handler_registry=isolated_registry,
         )
 
-        await process.start()
-        assert process.is_running
+        try:
+            await process.start()
+            assert process.is_running
 
-        await process.stop()
-        assert not process.is_running
+            await process.stop()
+            assert not process.is_running
 
-        # After stop, handlers should still be registered
-        health = await process.health_check()
-        assert health["is_running"] is False
-        # Handlers remain registered after stop
-        assert health["no_handlers_registered"] is False
+            # After stop, handlers should still be registered
+            health = await process.health_check()
+            assert health["is_running"] is False
+            # Handlers remain registered after stop
+            assert health["no_handlers_registered"] is False
+        finally:
+            # Ensure stop() is called even if assertions fail
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_no_handlers_registered_field_computation(
@@ -1644,6 +1649,10 @@ class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
     """
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Symlinks require elevated privileges on Windows",
+    )
     async def test_discovery_with_symlink_to_valid_directory(
         self,
         tmp_path: Path,
@@ -1690,6 +1699,10 @@ class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
         assert result.handlers_registered >= 1
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Symlinks require elevated privileges on Windows",
+    )
     async def test_discovery_with_symlink_to_file(
         self,
         tmp_path: Path,
@@ -1734,6 +1747,10 @@ class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
         assert result.handlers_discovered >= 1
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Symlinks require elevated privileges on Windows",
+    )
     async def test_discovery_with_broken_symlink(
         self,
         tmp_path: Path,
@@ -1908,24 +1925,34 @@ class TestDiscoverHandlersFromContractsCorrelationTracking:
         )
 
         # Verify correlation ID tracking in logs
-        # Note: Correlation IDs may be in record extra data, __dict__, or message text
-        # If no correlation logs are found, the discovery process still completed successfully
-        # - correlation tracking is observability-only and doesn't affect functionality.
-        # However, when present, correlation IDs should be valid UUIDs.
-        if logs_with_correlation:
-            for log_record in logs_with_correlation:
-                # Verify correlation ID is present in some form
-                # Check record extra dict if available
-                if hasattr(log_record, "__dict__"):
-                    record_dict = log_record.__dict__
-                    if "correlation_id" in record_dict:
-                        corr_id = record_dict["correlation_id"]
-                        # Verify it's a valid format (string or UUID)
-                        assert corr_id is not None, (
-                            "Correlation ID in log should not be None"
-                        )
-                        # If it's a string, verify it looks like a UUID
-                        if isinstance(corr_id, str):
-                            assert len(corr_id) >= 32, (
-                                f"Correlation ID '{corr_id}' should be UUID-like"
-                            )
+        # Correlation IDs may be in record extra data, __dict__, or message text.
+        # When present, correlation IDs should be valid UUIDs.
+        #
+        # Note: The handler plugin loader logs correlation IDs in structured log
+        # extra data. If no correlation logs are found, this is acceptable as
+        # correlation tracking is observability-only. However, when logs DO
+        # contain correlation IDs, we verify they are valid.
+        correlation_ids_found: list[str] = []
+        for log_record in logs_with_correlation:
+            # Check record extra dict for correlation_id field
+            if hasattr(log_record, "__dict__"):
+                record_dict = log_record.__dict__
+                if "correlation_id" in record_dict:
+                    corr_id = record_dict["correlation_id"]
+                    # Verify it's a valid format (string or UUID)
+                    assert corr_id is not None, (
+                        "Correlation ID in log should not be None"
+                    )
+                    # Convert to string for validation
+                    corr_id_str = str(corr_id)
+                    # UUID strings are 36 chars (with hyphens) or 32 (without)
+                    assert len(corr_id_str) >= 32, (
+                        f"Correlation ID '{corr_id_str}' should be UUID-like (length >= 32)"
+                    )
+                    correlation_ids_found.append(corr_id_str)
+
+        # Assert that we found at least one correlation ID in the logs
+        # This ensures the correlation tracking functionality is actually working
+        assert len(correlation_ids_found) > 0 or len(logs_with_correlation) == 0, (
+            "When correlation logs are present, they should contain valid correlation IDs"
+        )

@@ -80,8 +80,12 @@ class ModelRegistryResponse(BaseModel):
         ...     status="success",
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
-        ...     consul_result=ModelBackendResult(success=True, duration_ms=45.0),
-        ...     postgres_result=ModelBackendResult(success=True, duration_ms=30.0),
+        ...     consul_result=ModelBackendResult(
+        ...         success=True, duration_ms=45.0, backend_id="consul"
+        ...     ),
+        ...     postgres_result=ModelBackendResult(
+        ...         success=True, duration_ms=30.0, backend_id="postgres"
+        ...     ),
         ...     processing_time_ms=75.0,
         ... )
         >>> response.status
@@ -92,11 +96,14 @@ class ModelRegistryResponse(BaseModel):
         ...     status="partial",
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
-        ...     consul_result=ModelBackendResult(success=True, duration_ms=45.0),
+        ...     consul_result=ModelBackendResult(
+        ...         success=True, duration_ms=45.0, backend_id="consul"
+        ...     ),
         ...     postgres_result=ModelBackendResult(
         ...         success=False,
         ...         error="Connection refused",
         ...         duration_ms=5000.0,
+        ...         backend_id="postgres",
         ...     ),
         ...     processing_time_ms=5045.0,
         ...     error_summary="PostgreSQL: Connection refused",

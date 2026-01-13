@@ -1002,7 +1002,6 @@ class TestCachePerformanceUnderStress:
 
         # Calculate statistics
         latencies.sort()
-        latencies[len(latencies) // 2]
         p99 = latencies[int(len(latencies) * 0.99)]
 
         # Latency should be reasonable even under continuous eviction

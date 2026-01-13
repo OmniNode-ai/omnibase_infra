@@ -132,41 +132,54 @@ async def wait_for_consumer_ready(
 ) -> bool:
     """Wait for Kafka consumer to be ready to receive messages using polling.
 
-    Kafka consumers require time to join the consumer group and start
-    receiving messages after subscription. This helper polls the event bus
-    health check until the consumer for the topic is registered.
+    This is a **best-effort** readiness check that always returns True. It attempts
+    to detect when the consumer is ready by polling health checks, but falls back
+    gracefully on timeout to avoid blocking tests indefinitely.
+
+    Kafka consumers require time to join the consumer group and start receiving
+    messages after subscription. This helper polls the event bus health check
+    until the consumer count increases, indicating the consumer task is running.
+
+    Behavior Summary:
+        1. Polls event_bus.health_check() with exponential backoff
+        2. If consumer_count increases within max_wait: returns True (early exit)
+        3. If max_wait exceeded: returns True anyway (graceful fallback)
+
+    Why Always Return True?
+        This function maintains backwards compatibility with existing test code
+        that expects it to always succeed. The purpose is to REDUCE flakiness
+        by waiting for actual readiness when possible, not to DETECT failures.
+        Test assertions should verify expected outcomes, not this helper's return.
 
     Implementation:
-        Uses exponential backoff polling to check if the consumer count
-        has increased, indicating the consumer task is running. This is
-        more reliable than a fixed sleep as it adapts to actual readiness
-        and reduces test flakiness.
+        Uses exponential backoff polling (initial_backoff * backoff_multiplier^n)
+        to check consumer registration, capped at max_backoff per iteration.
+        This is more reliable than a fixed sleep as it:
+        - Returns early when consumer is ready (reduces test time)
+        - Adapts to variable Kafka/Redpanda startup times
+        - Reduces flakiness compared to fixed-duration sleeps
 
     Args:
         event_bus: The KafkaEventBus instance to check for readiness.
-        topic: The topic to wait for consumer registration on (used for logging).
-        max_wait: Maximum total time to wait in seconds before returning.
-            The actual wait time will be at most max_wait plus ~0.1s for the
-            post-ready stabilization delay. Default: 10.0s.
+        topic: The topic to wait for (used for logging only, not filtering).
+        max_wait: Maximum time in seconds to poll before giving up. The function
+            will return True regardless of whether consumer became ready.
+            Default: 10.0s. Actual wait may be up to max_wait + 0.1s (stabilization).
         poll_interval: DEPRECATED - Ignored. Kept for API compatibility.
             Use initial_backoff/max_backoff instead.
-        initial_backoff: Initial backoff delay for polling (default 0.1s).
-        max_backoff: Maximum backoff delay to prevent excessive waits (default 1.0s).
+        initial_backoff: Initial polling delay in seconds (default 0.1s).
+        max_backoff: Maximum polling delay cap in seconds (default 1.0s).
         backoff_multiplier: Multiplier for exponential backoff (default 1.5).
 
     Returns:
-        True in all cases (consumer ready OR timeout exceeded).
-        Always returns True for backwards compatibility - callers should
-        not rely on return value for failure detection.
+        Always True. This is intentional for backwards compatibility.
+        Do not use return value for failure detection.
 
-    Note:
-        This function always returns True to maintain backwards compatibility
-        with existing test code that expects the function to always succeed.
-        The polling approach significantly reduces flakiness compared to
-        fixed sleep by detecting actual consumer registration.
-
-        After detecting consumer readiness, an additional 0.1s stabilization
-        delay is added to allow the consumer's receive loop to fully start.
+    Example:
+        # Best-effort wait for consumer readiness
+        await wait_for_consumer_ready(bus, topic, max_wait=2.0)
+        # Consumer MAY be ready here, but test should not rely on this
+        # Use assertions on actual test outcomes instead
     """
     start_time = asyncio.get_running_loop().time()
     current_backoff = initial_backoff
@@ -504,6 +517,15 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
     if not KAFKA_AVAILABLE:
         pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
 
+    # NOTE: enable_auto_commit=False is intentional for test isolation.
+    # With auto_commit=True (default), offsets are committed periodically,
+    # which can cause:
+    # 1. Messages committed before processing completes (test failure = lost message)
+    # 2. Flaky tests due to rebalance timing during auto-commit intervals
+    # 3. Cross-test pollution if consumer groups share committed offsets
+    #
+    # With enable_auto_commit=False, offsets are committed after successful
+    # processing, ensuring each test starts from a deterministic position.
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         environment="e2e-test",
@@ -512,6 +534,7 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         max_retry_attempts=3,
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=60.0,
+        enable_auto_commit=False,
     )
     bus = KafkaEventBus(config=config)
 

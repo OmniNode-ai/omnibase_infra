@@ -39,7 +39,7 @@ Sub-migrations are companion scripts related to a main migration. They share the
 > **Historical Note**: Migration `003a_capability_fields_concurrent.sql` was renamed to `004_capability_fields_concurrent.sql` to use main sequence numbering for production-recommended variants. See `MIGRATION_UPGRADE_003a_to_004.md` for upgrade details.
 
 **When to use letter suffixes:**
-- Rollback or cleanup scripts for a main migration (e.g., `003b_rollback.sql`)
+- Rollback or cleanup scripts for a main migration (e.g., `003a_rollback.sql`)
 - Alternative implementations for specific environments
 - Split migrations that must run in a specific order
 
@@ -98,10 +98,11 @@ Indicates a migration designed for **production environments with live traffic**
 
 **Next available:**
 - Next main migration: `005_*.sql`
-- Next sub-migration for 003: `003a_*.sql` (available - original 003a was renamed to 004)
-- Next sub-migration for 004: `004a_*.sql`
+- Next sub-migration for migration 003: `003a_*.sql` (slot available since original 003a was promoted to 004)
 
-> **Note**: While `003a` is technically available (the original `003a_capability_fields_concurrent.sql` was renamed to `004`), prefer using the next main sequence number (`005`) for new features. Letter suffixes are best reserved for rollback scripts or closely-related companion migrations.
+> **Note**: The slot `003a` is available because `003a_capability_fields_concurrent.sql` was promoted to main sequence as `004_capability_fields_concurrent.sql`. Prefer the next main sequence number (`005`) for new features. Reserve letter suffixes (e.g., `003a_capability_fields_rollback.sql`) for rollback scripts or optional companion migrations closely related to their parent.
+>
+> **Upgrade path from 003a to 004**: If your database has the old `003a` applied, no action is needed - the SQL is identical to `004`. See `MIGRATION_UPGRADE_003a_to_004.md` for verification steps and detailed upgrade scenarios.
 
 ## Migration Header Requirements
 
@@ -170,7 +171,7 @@ WHERE NOT indisvalid;
 | Pattern | Example | Use Case |
 |---------|---------|----------|
 | `NNN_desc.sql` | `005_new_table.sql` | New independent feature |
-| `NNNa_desc.sql` | `003b_rollback.sql` | Companion/rollback to NNN |
+| `NNNa_desc.sql` | `003a_rollback.sql` | Companion/rollback to NNN |
 | `NNN_*_concurrent.sql` | `004_*_concurrent.sql` | Non-blocking production variant |
 
 **Decision tree for next migration:**

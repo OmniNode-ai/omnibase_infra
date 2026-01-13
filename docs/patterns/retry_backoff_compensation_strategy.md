@@ -426,6 +426,10 @@ from dataclasses import dataclass
 from typing import Callable, Awaitable
 from uuid import UUID
 
+from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.errors import ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
 
 @dataclass
 class SagaStep:
@@ -435,9 +439,10 @@ class SagaStep:
     compensate: Callable[[], Awaitable[None]]
 
 
-class CompensationFailedError(Exception):
+class CompensationFailedError(RuntimeHostError):
     """Raised when one or more saga compensations fail.
 
+    Extends RuntimeHostError to integrate with ONEX error handling patterns.
     This error aggregates all compensation failures that occurred during
     saga rollback, providing visibility into which steps failed to compensate
     and why. This is critical for operational awareness when the system is
@@ -449,8 +454,9 @@ class CompensationFailedError(Exception):
         message: str,
         failed_steps: list[str],
         errors: list[Exception],
+        context: ModelInfraErrorContext | None = None,
     ):
-        super().__init__(message)
+        super().__init__(message, context=context)
         self.failed_steps = failed_steps
         self.errors = errors
 
@@ -501,10 +507,16 @@ class SagaExecutor:
 
             # If any compensations failed, raise aggregate error
             if compensation_errors:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="saga_compensation",
+                    correlation_id=correlation_id,
+                )
                 raise CompensationFailedError(
                     f"Saga failed and {len(compensation_errors)} compensation(s) also failed",
                     failed_steps=[name for name, _ in compensation_errors],
                     errors=[err for _, err in compensation_errors],
+                    context=context,
                 ) from e
 
             raise

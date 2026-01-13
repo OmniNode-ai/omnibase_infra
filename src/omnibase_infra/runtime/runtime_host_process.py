@@ -739,6 +739,14 @@ class RuntimeHostProcess:
             handler_registry = await self._get_handler_registry()
             registry_protocol_count = len(handler_registry.list_protocols())
 
+            # Build additional diagnostic info
+            failed_handlers_detail = ""
+            if self._failed_handlers:
+                failed_handlers_detail = "FAILED HANDLERS (check these first):\n"
+                for handler_type, error_msg in self._failed_handlers.items():
+                    failed_handlers_detail += f"  * {handler_type}: {error_msg}\n"
+                failed_handlers_detail += "\n"
+
             raise ProtocolConfigurationError(
                 "No handlers registered. The runtime cannot start without at least one handler.\n\n"
                 "CURRENT CONFIGURATION:\n"
@@ -746,20 +754,36 @@ class RuntimeHostProcess:
                 f"  * Registry protocol count: {registry_protocol_count}\n"
                 f"  * Failed handlers: {len(self._failed_handlers)}\n"
                 f"  * Correlation ID: {correlation_id}\n\n"
+                f"{failed_handlers_detail}"
                 "TROUBLESHOOTING STEPS:\n"
-                "  1. Verify ONEX_CONTRACTS_DIR points to a directory containing handler contracts:\n"
-                "     - Check: echo $ONEX_CONTRACTS_DIR\n"
-                "     - Look for files matching: **/handler_contract.yaml or **/contract.yaml\n"
-                "  2. Ensure handler contracts have required fields:\n"
-                "     - handler_name, handler_class, handler_type are mandatory\n"
-                "  3. Verify handler modules are importable:\n"
-                "     - The handler_class path must be a valid Python import path\n"
-                "  4. Check for import errors in application logs:\n"
-                "     - Look for MODULE_NOT_FOUND, CLASS_NOT_FOUND, or IMPORT_ERROR codes\n"
-                "  5. If using wire_handlers(), ensure it's called before start():\n"
-                "     - wire_handlers() registers handler classes in the binding registry\n"
-                "  6. Verify contract file paths exist and are readable:\n"
-                "     - Contract files must be valid YAML with handler configuration",
+                "  1. Verify ONEX_CONTRACTS_DIR points to a valid contracts directory:\n"
+                "     - Run: echo $ONEX_CONTRACTS_DIR && ls -la $ONEX_CONTRACTS_DIR\n"
+                "     - Expected: Directory containing handler_contract.yaml or contract.yaml files\n\n"
+                "  2. Check for handler contract files:\n"
+                "     - Run: find $ONEX_CONTRACTS_DIR -name 'handler_contract.yaml' -o -name 'contract.yaml'\n"
+                "     - If empty: No contracts found - create handler contracts or set correct path\n\n"
+                "  3. Verify handler contracts have required fields:\n"
+                "     - Required: handler_name, handler_class, handler_type\n"
+                "     - Example:\n"
+                "         handler_name: my_handler\n"
+                "         handler_class: mymodule.handlers.MyHandler\n"
+                "         handler_type: http\n\n"
+                "  4. Verify handler modules are importable:\n"
+                "     - Run: python -c 'from mymodule.handlers import MyHandler; print(MyHandler)'\n"
+                "     - Check PYTHONPATH includes your handler module paths\n\n"
+                "  5. Check application logs for loader errors:\n"
+                "     - Look for: MODULE_NOT_FOUND (HANDLER_LOADER_010)\n"
+                "     - Look for: CLASS_NOT_FOUND (HANDLER_LOADER_011)\n"
+                "     - Look for: IMPORT_ERROR (HANDLER_LOADER_012)\n"
+                "     - Look for: AMBIGUOUS_CONTRACT (HANDLER_LOADER_040)\n\n"
+                "  6. If using wire_handlers() manually:\n"
+                "     - Ensure wire_handlers() is called before RuntimeHostProcess.start()\n"
+                "     - Check that handlers implement ProtocolHandler interface\n\n"
+                "  7. Docker/container environment:\n"
+                "     - Verify volume mounts include handler contract directories\n"
+                "     - Check ONEX_CONTRACTS_DIR is set in docker-compose.yml/Dockerfile\n"
+                "     - Run: docker exec <container> ls $ONEX_CONTRACTS_DIR\n\n"
+                "For verbose handler discovery logging, set LOG_LEVEL=DEBUG.",
                 context=context,
                 registered_handler_count=0,
                 failed_handler_count=len(self._failed_handlers),

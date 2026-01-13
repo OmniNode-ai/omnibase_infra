@@ -13,24 +13,43 @@ Test Categories:
     - Validation runs BEFORE other startup logic
     - Container injection vs minimal container creation
 
-Handler Semantics Note:
-    RuntimeHostProcess has TWO distinct handler-related checks:
+Handler Semantics - Two Distinct Concepts:
+    RuntimeHostProcess has TWO INDEPENDENT handler-related checks that serve
+    different purposes. Understanding this distinction is critical for reading
+    these tests correctly:
 
-    1. **Fail-fast startup check** (process._handlers):
-       Requires at least one handler INSTANCE in process._handlers for
-       the runtime to be useful. Tests use seed_mock_handlers() to
-       satisfy this check by seeding a mock handler instance.
+    1. **Fail-fast startup check** (process._handlers - handler INSTANCES):
+       - Purpose: Ensure the runtime has at least one handler instance to
+         process events. A runtime without handlers is useless.
+       - How tests satisfy it: Call seed_mock_handlers(process) to inject a
+         mock handler instance into process._handlers.
+       - When it runs: After architecture validation, during start() step 4.1.
 
-    2. **Architecture validation** (handler registry):
-       Validates handler CLASSES from registry.list_protocols() against
-       architecture rules. Tests control this via mock_registry to
-       simulate "no handlers to validate" (empty registry) or "handlers
-       that violate rules" (populated registry with MockHandlerClass).
+    2. **Architecture validation** (handler registry - handler CLASSES):
+       - Purpose: Validate that handler CLASSES conform to architecture rules
+         (e.g., NO_HANDLER_PUBLISHING, PURE_REDUCERS).
+       - How tests control it: Mock registry.list_protocols() return value.
+         - Empty list [] = no classes to validate = validation passes trivially
+         - Non-empty list = classes are validated against configured rules
+       - When it runs: Before startup, during start() step 1.
 
-    These are independent checks. A test can have:
-    - Empty registry (no validation targets) + mock in _handlers (startup OK)
-    - Populated registry (validation runs) + mock in _handlers (startup OK)
-    - Populated registry with violations (validation fails, no startup)
+    Key Test Scenarios:
+        | Registry (Classes)     | _handlers (Instances) | Outcome                    |
+        |------------------------|-----------------------|----------------------------|
+        | Empty []               | seed_mock_handlers()  | Startup OK (no validation) |
+        | [MockClass] + passing  | seed_mock_handlers()  | Startup OK (rules pass)    |
+        | [MockClass] + failing  | Not reached           | ArchitectureViolationError |
+
+    Why "No Handlers to Validate" Tests Still Seed Handlers:
+        When we test "empty registry skips validation", we still call
+        seed_mock_handlers() because:
+        1. Architecture validation (empty registry) passes trivially
+        2. Startup continues to the SEPARATE fail-fast check
+        3. Fail-fast check requires at least one handler INSTANCE
+        4. Without seeding, the test would fail for the wrong reason
+
+        This is intentional - we're testing architecture validation behavior,
+        not the fail-fast startup check.
 """
 
 from __future__ import annotations
@@ -53,26 +72,16 @@ from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from tests.conftest import seed_mock_handlers
 
 # =============================================================================
-# Handler Semantics Note (Important for Understanding Tests)
+# Quick Reference: Handler Semantics (see module docstring for full details)
 # =============================================================================
-# There are TWO distinct "handler" concepts in RuntimeHostProcess:
+# Two independent checks - don't confuse them:
 #
-# 1. process._handlers (dict[str, handler_instance]):
-#    - Runtime handler INSTANCES used for event processing
-#    - RuntimeHostProcess.start() requires at least one handler here (fail-fast)
-#    - seed_mock_handlers() populates _handlers to satisfy that startup requirement
+# | Check                    | What It Checks          | How Tests Control It         |
+# |--------------------------|-------------------------|------------------------------|
+# | Architecture validation  | Handler CLASSES         | mock_registry.list_protocols |
+# | Fail-fast startup        | Handler INSTANCES       | seed_mock_handlers()         |
 #
-# 2. handler_registry.list_protocols() (list of handler CLASSES):
-#    - Handler CLASSES registered for architecture rule validation
-#    - NodeArchitectureValidatorCompute validates these classes against rules
-#    - Tests control this via mock_registry.list_protocols.return_value
-#
-# When a test says "no handlers to validate", it means:
-#    - mock_registry.list_protocols() returns [] (empty - no classes for validation)
-#    - BUT seed_mock_handlers() still seeds _handlers (satisfies fail-fast)
-#
-# This distinction allows testing "no handlers for architecture validation"
-# without triggering the separate "no handlers registered" fail-fast error.
+# "No handlers to validate" = empty registry (classes), NOT empty _handlers (instances)
 # =============================================================================
 
 
@@ -198,7 +207,7 @@ class TestErrorSeverityBlocksStartup:
         classes (list_protocols() returns []), architecture validation passes
         because there's nothing to check rules against.
 
-        Note: We still call _setup_mock_handlers() to populate process._handlers
+        Note: We still call seed_mock_handlers() to populate process._handlers
         with a mock instance. This satisfies the SEPARATE fail-fast startup check
         that requires at least one handler instance for event processing.
 

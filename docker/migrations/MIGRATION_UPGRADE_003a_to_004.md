@@ -46,14 +46,35 @@ Apply migrations in order:
 psql -h $HOST -d $DB -f 001_registration_projection.sql
 psql -h $HOST -d $DB -f 002_updated_at_audit_index.sql
 
-# For development/staging (standard indexes)
+# Choose ONE of the following paths:
+
+# PATH A: Development/Staging (standard indexes, faster, runs in transaction)
+psql -h $HOST -d $DB -f 003_capability_fields.sql
+# Done - this creates columns AND standard indexes
+```
+
+**PATH B: Production with large tables (>100K rows)**
+
+For fresh deployments where the table is empty or small, PATH A is sufficient even for production. Use PATH B only when deploying to an **existing** production database with >100K rows where you need zero-downtime index creation.
+
+```bash
+# Step 1: Apply 003 to create columns AND standard indexes
+# NOTE: On a fresh/empty table, this is fast and non-blocking
 psql -h $HOST -d $DB -f 003_capability_fields.sql
 
-# OR for production with large tables (concurrent indexes)
-# First, apply 003 with indexes commented out, then run 004:
-psql -h $HOST -d $DB -f 003_capability_fields.sql  # Column creation only
-psql -h $HOST -d $DB -f 004_capability_fields_concurrent.sql  # CONCURRENTLY indexes
+# Step 2: Drop standard indexes (brief operation, fast on any table size)
+psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_capability_tags;"
+psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_intent_types;"
+psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_protocols;"
+psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_contract_type_state;"
+
+# Step 3: Create concurrent indexes (non-blocking, cannot run in transaction)
+psql -h $HOST -d $DB -f 004_capability_fields_concurrent.sql
 ```
+
+> **Why drop and recreate?** Migration 003 creates standard indexes. For tables with existing data (>100K rows), we replace them with concurrent indexes from migration 004 to avoid blocking writes. The drop operation is fast on any table size. For fresh/empty tables, the standard indexes from 003 are sufficient.
+>
+> **Recommended for fresh deployments**: Use PATH A (003 only). The standard indexes are fine for new tables since there's no data to lock against.
 
 ### Scenario 2: Production Database with 003a Already Applied
 
@@ -375,6 +396,9 @@ You need to apply `003_capability_fields.sql` first to create the columns.
 
 | Date | Change |
 |------|--------|
+| 2026-01-13 | Improved Scenario 1 PATH B guidance: clarified when to use concurrent vs standard indexes |
+| 2026-01-13 | Added recommendation to use PATH A for fresh deployments |
+| 2026-01-13 | Clarified Scenario 1 (fresh deployment) with explicit PATH A/B options |
 | 2026-01-13 | Added Migration Gap Detection section with validation SQL script |
 | 2026-01-13 | Renamed `003a` to `004` per PR #143 review feedback |
-| 2026-01-XX | Initial `003a_capability_fields_concurrent.sql` created |
+| 2026-01-12 | Initial `003a_capability_fields_concurrent.sql` created |
