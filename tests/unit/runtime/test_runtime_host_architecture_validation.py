@@ -36,6 +36,19 @@ if TYPE_CHECKING:
 # Import RuntimeHostProcess (should always be available)
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
+
+def _setup_mock_handlers(process: RuntimeHostProcess) -> None:
+    """Set up mock handlers on a process to avoid fail-fast validation.
+
+    The RuntimeHostProcess.start() validates that handlers are registered.
+    This helper sets up a minimal mock handler to satisfy that check.
+    """
+    mock_handler = MagicMock()
+    mock_handler.shutdown = AsyncMock()
+    mock_handler.health_check = AsyncMock(return_value={"healthy": True})
+    process._handlers = {"mock": mock_handler}
+
+
 # =============================================================================
 # Mock Rule Implementation
 # =============================================================================
@@ -114,6 +127,8 @@ class TestNoRulesConfigured:
             ),
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
         ):
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             # Should not raise - no validation occurs
             await process.start()
             assert process.is_running
@@ -134,6 +149,8 @@ class TestNoRulesConfigured:
             ),
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
         ):
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             await process.start()
             assert process.is_running
 
@@ -182,6 +199,8 @@ class TestErrorSeverityBlocksStartup:
             mock_registry.list_protocols.return_value = []
             mock_get_registry.return_value = mock_registry
 
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             # Should NOT raise - no handlers to validate means nothing fails
             await process.start()
             assert process.is_running
@@ -306,6 +325,8 @@ class TestWarningSeverityDoesntBlock:
             mock_registry.get.return_value = MockHandlerClass
             mock_get_registry.return_value = mock_registry
 
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             # Should NOT raise - warnings don't block
             await process.start()
             assert process.is_running
@@ -350,6 +371,8 @@ class TestWarningSeverityDoesntBlock:
             mock_registry.get.return_value = MockHandlerClass
             mock_get_registry.return_value = mock_registry
 
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             await process.start()
 
             # Check that warning was logged
@@ -475,6 +498,8 @@ class TestContainerHandling:
             )
             mock_validator_cls.return_value = mock_validator
 
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             await process.start()
 
             # Verify injected container was used
@@ -530,6 +555,8 @@ class TestContainerHandling:
             )
             mock_validator_cls.return_value = mock_validator
 
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             await process.start()
 
             # Verify container was created
@@ -574,6 +601,8 @@ class TestPassingValidation:
             mock_registry.list_protocols.return_value = []
             mock_get_registry.return_value = mock_registry
 
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             await process.start()
             assert process.is_running
 
@@ -608,6 +637,8 @@ class TestPassingValidation:
             mock_registry.list_protocols.return_value = []
             mock_get_registry.return_value = mock_registry
 
+            # Set handlers to avoid fail-fast validation
+            _setup_mock_handlers(process)
             await process.start()
 
             info_logs = [r for r in caplog.records if r.levelname == "INFO"]

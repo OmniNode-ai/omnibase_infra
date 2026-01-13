@@ -34,6 +34,14 @@ def mock_event_bus() -> MagicMock:
 
 
 @pytest.fixture
+def mock_handler() -> MagicMock:
+    """Create a mock handler for testing."""
+    handler = MagicMock()
+    handler.execute = AsyncMock(return_value={"success": True, "result": "processed"})
+    return handler
+
+
+@pytest.fixture
 def idempotency_config() -> dict[str, ModelIdempotencyGuardConfig]:
     """Create idempotency configuration for testing."""
     return {
@@ -61,7 +69,7 @@ class TestIdempotencyGuardDisabled:
 
     @pytest.mark.asyncio
     async def test_idempotency_disabled_skips_initialization(
-        self, mock_event_bus: MagicMock
+        self, mock_event_bus: MagicMock, mock_handler: MagicMock
     ) -> None:
         """Idempotency guard skips initialization when explicitly disabled."""
         config = {
@@ -77,6 +85,8 @@ class TestIdempotencyGuardDisabled:
             new_callable=AsyncMock,
         ):
             process = RuntimeHostProcess(event_bus=mock_event_bus, config=config)
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         assert process._idempotency_config is not None
@@ -93,6 +103,7 @@ class TestIdempotencyGuardEnabled:
     async def test_idempotency_guard_initializes_memory_store(
         self,
         mock_event_bus: MagicMock,
+        mock_handler: MagicMock,
         idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Idempotency guard initializes InMemory store when configured."""
@@ -104,6 +115,8 @@ class TestIdempotencyGuardEnabled:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         assert process._idempotency_config is not None
@@ -117,6 +130,7 @@ class TestIdempotencyGuardEnabled:
     async def test_idempotency_guard_cleanup_on_stop(
         self,
         mock_event_bus: MagicMock,
+        mock_handler: MagicMock,
         idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Idempotency store is cleaned up during stop()."""
@@ -128,6 +142,8 @@ class TestIdempotencyGuardEnabled:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         assert process._idempotency_store is not None
@@ -161,8 +177,9 @@ class TestDuplicateMessageDetection:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"db": mock_handler}
             await process.start()
-            process._handlers["db"] = mock_handler
 
         message_id = uuid4()
         envelope = {
@@ -200,8 +217,9 @@ class TestDuplicateMessageDetection:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"db": mock_handler}
             await process.start()
-            process._handlers["db"] = mock_handler
 
         message_id = uuid4()
         envelope = {
@@ -241,8 +259,9 @@ class TestDuplicateMessageDetection:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"db": mock_handler}
             await process.start()
-            process._handlers["db"] = mock_handler
 
         message_id = uuid4()
         correlation_id = uuid4()
@@ -301,9 +320,9 @@ class TestDomainIsolation:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"db": mock_db_handler, "http": mock_http_handler}
             await process.start()
-            process._handlers["db"] = mock_db_handler
-            process._handlers["http"] = mock_http_handler
 
         message_id = uuid4()
 
@@ -333,6 +352,7 @@ class TestDomainIsolation:
     async def test_domain_extracted_from_operation_prefix(
         self,
         mock_event_bus: MagicMock,
+        mock_handler: MagicMock,
         idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Domain is correctly extracted from operation prefix."""
@@ -344,6 +364,8 @@ class TestDomainIsolation:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         envelope = {"operation": "db.query", "payload": {}}
@@ -381,8 +403,9 @@ class TestSkipOperations:
             new_callable=AsyncMock,
         ):
             process = RuntimeHostProcess(event_bus=mock_event_bus, config=config)
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"db": mock_handler}
             await process.start()
-            process._handlers["db"] = mock_handler
 
         message_id = uuid4()
 
@@ -410,6 +433,7 @@ class TestMessageIdExtraction:
     async def test_extracts_message_id_from_headers(
         self,
         mock_event_bus: MagicMock,
+        mock_handler: MagicMock,
         idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Message ID is extracted from envelope headers."""
@@ -421,6 +445,8 @@ class TestMessageIdExtraction:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         message_id = uuid4()
@@ -440,6 +466,7 @@ class TestMessageIdExtraction:
     async def test_extracts_message_id_from_top_level(
         self,
         mock_event_bus: MagicMock,
+        mock_handler: MagicMock,
         idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Message ID is extracted from top-level envelope field."""
@@ -451,6 +478,8 @@ class TestMessageIdExtraction:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         message_id = uuid4()
@@ -470,6 +499,7 @@ class TestMessageIdExtraction:
     async def test_falls_back_to_correlation_id(
         self,
         mock_event_bus: MagicMock,
+        mock_handler: MagicMock,
         idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Falls back to correlation_id when message_id not present."""
@@ -481,6 +511,8 @@ class TestMessageIdExtraction:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         correlation_id = uuid4()
@@ -496,6 +528,7 @@ class TestMessageIdExtraction:
     async def test_extracts_string_message_id(
         self,
         mock_event_bus: MagicMock,
+        mock_handler: MagicMock,
         idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """String message_id is parsed to UUID."""
@@ -507,6 +540,8 @@ class TestMessageIdExtraction:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         message_id = uuid4()
@@ -544,8 +579,9 @@ class TestFailOpenBehavior:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"db": mock_handler}
             await process.start()
-            process._handlers["db"] = mock_handler
 
         # Make store raise an error
         process._idempotency_store.check_and_record = AsyncMock(
@@ -588,8 +624,9 @@ class TestReplaySafeBehavior:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"db": mock_handler}
             await process.start()
-            process._handlers["db"] = mock_handler
 
         message_id = uuid4()
         correlation_id = uuid4()
@@ -637,8 +674,9 @@ class TestReplaySafeBehavior:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"db": mock_handler}
             await process.start()
-            process._handlers["db"] = mock_handler
 
         message_id = uuid4()
         envelope = {
@@ -665,6 +703,7 @@ class TestDuplicateResponse:
     async def test_duplicate_response_format(
         self,
         mock_event_bus: MagicMock,
+        mock_handler: MagicMock,
         idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Duplicate response has correct format."""
@@ -676,6 +715,8 @@ class TestDuplicateResponse:
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
+            # Set handlers to avoid fail-fast validation
+            process._handlers = {"mock": mock_handler}
             await process.start()
 
         message_id = uuid4()

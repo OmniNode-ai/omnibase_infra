@@ -107,24 +107,46 @@ pytestmark = [
 # the latest offset and doesn't compete for the same consumer group.
 TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
 
-# Session ID for unique group names (not for topic names)
-_TEST_SESSION_ID = uuid4().hex[:8]
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
 
-def get_test_topic(base_topic: str = TEST_INTROSPECTION_TOPIC) -> str:
-    """Get the test topic name.
+def coerce_to_node_kind(node_type: str | EnumNodeKind) -> EnumNodeKind:
+    """Safely coerce a node type string or enum to EnumNodeKind.
 
-    In this implementation, we use a fixed topic name that already exists
-    in Kafka/Redpanda. Test isolation is achieved via unique consumer
-    group IDs rather than unique topic names.
+    Uses Enum-first pattern with type guard for safer runtime behavior:
+    1. If already an enum, return as-is
+    2. If string, validate and convert
 
     Args:
-        base_topic: Base topic name (defaults to TEST_INTROSPECTION_TOPIC).
+        node_type: Node type as string literal or enum value.
 
     Returns:
-        The test topic name.
+        EnumNodeKind enum value.
+
+    Raises:
+        ValueError: If string value is not a valid EnumNodeKind member.
+
+    Example:
+        >>> coerce_to_node_kind("effect")
+        <EnumNodeKind.EFFECT: 'effect'>
+        >>> coerce_to_node_kind(EnumNodeKind.COMPUTE)
+        <EnumNodeKind.COMPUTE: 'compute'>
     """
-    return base_topic
+    # Enum-first: if already an enum, return directly
+    if isinstance(node_type, EnumNodeKind):
+        return node_type
+
+    # Type guard: validate string is a valid enum value
+    valid_values = {e.value for e in EnumNodeKind}
+    if node_type not in valid_values:
+        raise ValueError(
+            f"Invalid node_type '{node_type}'. Expected one of: {sorted(valid_values)}"
+        )
+
+    return EnumNodeKind(node_type)
 
 
 # =============================================================================
@@ -454,7 +476,7 @@ class OrchestratorPipeline:
         # Note: node_type must be converted from Literal string to EnumNodeKind
         request = ModelRegistryRequest(
             node_id=event.node_id,
-            node_type=EnumNodeKind(event.node_type),
+            node_type=coerce_to_node_kind(event.node_type),
             node_version=event.node_version,
             correlation_id=correlation_id,
             endpoints=dict(event.endpoints) if event.endpoints else {},
@@ -513,7 +535,7 @@ class OrchestratorPipeline:
         projection = ModelRegistrationProjection(
             entity_id=event.node_id,
             current_state=EnumRegistrationState.PENDING_REGISTRATION,
-            node_type=EnumNodeKind(event.node_type),
+            node_type=coerce_to_node_kind(event.node_type),
             node_version=str(event.node_version),
             registered_at=now,
             updated_at=now,
@@ -653,11 +675,14 @@ async def orchestrator_pipeline(
 async def ensure_test_topic_exists(
     real_kafka_event_bus: KafkaEventBus,
 ) -> str:
-    """Return the pre-existing test topic name.
+    """Validate and return the pre-existing test topic name.
 
-    This fixture no longer creates topics dynamically since we now use
-    a fixed, pre-existing topic (e2e-test.node.introspection.v1) that
-    was created during initial infrastructure setup.
+    This fixture validates that the test topic (e2e-test.node.introspection.v1)
+    exists in the Kafka cluster before tests run. The topic should be pre-created
+    during initial infrastructure setup.
+
+    Fail-fast behavior: If the topic doesn't exist, this fixture fails immediately
+    with a clear error message, preventing cryptic failures later in the test.
 
     Test isolation is achieved via unique consumer group IDs rather than
     unique topic names.
@@ -668,8 +693,59 @@ async def ensure_test_topic_exists(
 
     Returns:
         The test topic name.
+
+    Raises:
+        pytest.fail: If the topic does not exist in Kafka.
     """
-    # The topic already exists - no need for complex creation logic
+    import os
+
+    from aiokafka.admin import AIOKafkaAdminClient
+
+    bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+    if not bootstrap_servers:
+        pytest.fail("KAFKA_BOOTSTRAP_SERVERS environment variable not set")
+
+    admin_client: AIOKafkaAdminClient | None = None
+    try:
+        admin_client = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
+        await admin_client.start()
+
+        # Validate topic exists by describing it
+        # describe_topics raises if topic doesn't exist
+        topic_descriptions = await admin_client.describe_topics(
+            [TEST_INTROSPECTION_TOPIC]
+        )
+
+        if not topic_descriptions:
+            pytest.fail(
+                f"Test topic '{TEST_INTROSPECTION_TOPIC}' does not exist. "
+                f"Create it before running E2E tests: "
+                f"rpk topic create {TEST_INTROSPECTION_TOPIC} --partitions 1"
+            )
+
+        logger.info(
+            "Test topic validated",
+            extra={
+                "topic": TEST_INTROSPECTION_TOPIC,
+                "partitions": len(topic_descriptions[0].get("partitions", [])),
+            },
+        )
+
+    except Exception as e:
+        # Check if it's a "topic not found" type error
+        error_msg = str(e).lower()
+        if "unknown topic" in error_msg or "not found" in error_msg:
+            pytest.fail(
+                f"Test topic '{TEST_INTROSPECTION_TOPIC}' does not exist. "
+                f"Create it before running E2E tests: "
+                f"rpk topic create {TEST_INTROSPECTION_TOPIC} --partitions 1"
+            )
+        # Re-raise other errors (connection issues, etc.)
+        raise
+    finally:
+        if admin_client is not None:
+            await admin_client.close()
+
     return TEST_INTROSPECTION_TOPIC
 
 
@@ -984,6 +1060,12 @@ class TestFullOrchestratorFlow:
 
         # Allow time for pipeline to process and reject the malformed message.
         # This ensures the pipeline is ready for the next valid message.
+        #
+        # TODO(OMN-XXX): Replace with deterministic wait once pipeline exposes
+        # a "message processed" signal or callback. Options:
+        # 1. Pipeline.wait_until_idle() method that tracks in-flight messages
+        # 2. Counter-based approach: wait until processed_count increments
+        # 3. Expose processing completion via asyncio.Event per message
         await asyncio.sleep(1.0)
 
         # Publish a valid message after the malformed one
@@ -1092,7 +1174,7 @@ class TestFullPipelineWithRealInfrastructure:
             projection = ModelRegistrationProjection(
                 entity_id=unique_node_id,
                 current_state=EnumRegistrationState.PENDING_REGISTRATION,
-                node_type=EnumNodeKind(event.node_type),
+                node_type=coerce_to_node_kind(event.node_type),
                 node_version=str(event.node_version),
                 registered_at=now,
                 updated_at=now,
@@ -1314,5 +1396,5 @@ __all__ = [
     "TestFullOrchestratorFlow",
     "TestFullPipelineWithRealInfrastructure",
     "TestPipelineLifecycle",
-    "get_test_topic",
+    "coerce_to_node_kind",
 ]

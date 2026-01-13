@@ -166,8 +166,8 @@ async def wait_for_consumer_ready(
     # This could be replaced with proper polling if KafkaEventBus exposes
     # consumer group state or offset information.
     default_wait = 0.5
-    actual_wait = max_wait if max_wait > default_wait else default_wait
-    await asyncio.sleep(min(actual_wait, max_wait))  # Respect max_wait as upper bound
+    # Use the larger of default_wait (minimum required) or max_wait (caller override)
+    await asyncio.sleep(max(default_wait, max_wait))
     return True
 
 
