@@ -126,6 +126,8 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 
 # Environment variable names for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
+# Deprecated: CONTRACTS_DIR - will be removed in v2.0.0, use ONEX_CONTRACTS_DIR instead
+ENV_CONTRACTS_DIR_LEGACY = "CONTRACTS_DIR"
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
@@ -139,7 +141,13 @@ def _get_contracts_dir() -> Path:
     """Get contracts directory from environment.
 
     Reads the ONEX_CONTRACTS_DIR environment variable. If not set,
-    returns the default contracts directory.
+    falls back to CONTRACTS_DIR (deprecated) with a warning.
+    If neither is set, returns the default contracts directory.
+
+    Environment Variable Precedence:
+        1. ONEX_CONTRACTS_DIR (preferred)
+        2. CONTRACTS_DIR (deprecated, logs warning)
+        3. Default: ./contracts
 
     Returns:
         Path to the contracts directory.
@@ -147,6 +155,20 @@ def _get_contracts_dir() -> Path:
     onex_value = os.environ.get(ENV_CONTRACTS_DIR)
     if onex_value:
         return Path(onex_value)
+
+    # Check deprecated CONTRACTS_DIR for backwards compatibility
+    legacy_value = os.environ.get(ENV_CONTRACTS_DIR_LEGACY)
+    if legacy_value:
+        logger.warning(
+            "DEPRECATED: CONTRACTS_DIR environment variable is deprecated and will be "
+            "removed in v2.0.0. Please use ONEX_CONTRACTS_DIR instead.",
+            extra={
+                "deprecated_env_var": ENV_CONTRACTS_DIR_LEGACY,
+                "replacement_env_var": ENV_CONTRACTS_DIR,
+                "current_value": legacy_value,
+            },
+        )
+        return Path(legacy_value)
 
     return Path(DEFAULT_CONTRACTS_DIR)
 
@@ -821,6 +843,10 @@ async def bootstrap() -> int:
             output_topic=config.output_topic,
             config=cast("dict[str, object]", config.model_dump()),
             handler_registry=handler_registry,
+            # Pass contracts directory for handler discovery (OMN-1317)
+            # This enables contract-based handler registration instead of
+            # falling back to wire_handlers() with an empty registry
+            contract_paths=[str(contracts_dir)],
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
@@ -1325,6 +1351,7 @@ if __name__ == "__main__":
 
 __all__: list[str] = [
     "ENV_CONTRACTS_DIR",
+    "ENV_CONTRACTS_DIR_LEGACY",
     "bootstrap",
     "load_runtime_config",
     "main",

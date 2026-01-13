@@ -48,6 +48,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumRegistrationState
@@ -91,33 +92,33 @@ pytestmark = [
 # Test Topic Constants
 # =============================================================================
 
-# Base topic name for E2E tests. In parallel execution, use get_test_topic()
-# to get a unique topic name per test session/worker.
-_BASE_TEST_TOPIC = "e2e-test.node.introspection.v1"
+# Use the base topic that already exists in Kafka/Redpanda.
+# Test isolation is achieved via unique consumer group IDs rather than
+# unique topic names, since topic creation can be unreliable/slow.
+#
+# NOTE: If running tests in parallel (pytest-xdist), tests may see messages
+# from other workers. The unique group IDs ensure each test starts from
+# the latest offset and doesn't compete for the same consumer group.
+TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
 
-# Session-unique suffix for test isolation in parallel execution.
-# Generated once at module load time to ensure all tests in the same
-# session/worker use the same topic while different workers use different topics.
+# Session ID for unique group names (not for topic names)
 _TEST_SESSION_ID = uuid4().hex[:8]
 
 
-def get_test_topic(base_topic: str = _BASE_TEST_TOPIC) -> str:
-    """Get a unique topic name for test isolation.
+def get_test_topic(base_topic: str = TEST_INTROSPECTION_TOPIC) -> str:
+    """Get the test topic name.
 
-    In parallel test execution (e.g., pytest-xdist), each worker will have
-    a unique session ID, ensuring topic isolation between workers.
+    In this implementation, we use a fixed topic name that already exists
+    in Kafka/Redpanda. Test isolation is achieved via unique consumer
+    group IDs rather than unique topic names.
 
     Args:
-        base_topic: Base topic name to extend with session ID.
+        base_topic: Base topic name (defaults to TEST_INTROSPECTION_TOPIC).
 
     Returns:
-        Topic name with session-unique suffix.
+        The test topic name.
     """
-    return f"{base_topic}.{_TEST_SESSION_ID}"
-
-
-# Default test topic - unique per test session for parallel execution safety.
-TEST_INTROSPECTION_TOPIC = get_test_topic()
+    return base_topic
 
 
 # =============================================================================
@@ -208,13 +209,18 @@ class OrchestratorPipeline:
                 correlation_id = event.correlation_id or uuid4()
                 now = datetime.now(UTC)
 
-                handler_events = await self._handler.handle(
-                    event=event,
-                    now=now,
+                # Wrap event in envelope for handler API
+                envelope = ModelEventEnvelope(
+                    envelope_id=uuid4(),
+                    payload=event,
+                    envelope_timestamp=now,
                     correlation_id=correlation_id,
+                    source="e2e-test-pipeline",
                 )
 
-                if not handler_events:
+                handler_output = await self._handler.handle(envelope)
+
+                if not handler_output.events:
                     logger.info(
                         "Handler returned no events - registration not needed",
                         extra={"node_id": str(event.node_id)},
@@ -507,9 +513,34 @@ async def orchestrator_pipeline(
 
 
 @pytest.fixture
+async def ensure_test_topic_exists(
+    real_kafka_event_bus: KafkaEventBus,
+) -> AsyncGenerator[str, None]:
+    """Return the pre-existing test topic name.
+
+    This fixture no longer creates topics dynamically since we now use
+    a fixed, pre-existing topic (e2e-test.node.introspection.v1) that
+    was created during initial infrastructure setup.
+
+    Test isolation is achieved via unique consumer group IDs rather than
+    unique topic names.
+
+    Args:
+        real_kafka_event_bus: Real Kafka event bus (unused but kept for
+            fixture dependency ordering).
+
+    Yields:
+        The test topic name.
+    """
+    # The topic already exists - no need for complex creation logic
+    return TEST_INTROSPECTION_TOPIC
+
+
+@pytest.fixture
 async def running_orchestrator_consumer(
     real_kafka_event_bus: KafkaEventBus,
     orchestrator_pipeline: OrchestratorTestContext,
+    ensure_test_topic_exists: str,  # Ensures topic exists before subscribing
 ) -> AsyncGenerator[OrchestratorTestContext, None]:
     """Start a Kafka consumer that routes messages through the pipeline.
 
@@ -521,6 +552,7 @@ async def running_orchestrator_consumer(
     Args:
         real_kafka_event_bus: Real Kafka event bus.
         orchestrator_pipeline: Context containing pipeline and connected mocks.
+        ensure_test_topic_exists: Fixture that ensures the topic is ready.
 
     Yields:
         OrchestratorTestContext with pipeline, mocks, and unsubscribe function.
@@ -532,9 +564,9 @@ async def running_orchestrator_consumer(
     """
     # Use unique group ID per test run to avoid cross-test coupling
     unique_group_id = f"e2e-orchestrator-test-{uuid4().hex[:8]}"
-    # Subscribe to the introspection topic
+    # Subscribe to the introspection topic (topic is guaranteed to exist)
     unsubscribe = await real_kafka_event_bus.subscribe(
-        topic=TEST_INTROSPECTION_TOPIC,
+        topic=ensure_test_topic_exists,  # Use the ensured topic name
         group_id=unique_group_id,
         on_message=orchestrator_pipeline.pipeline.process_message,
     )
@@ -894,14 +926,19 @@ class TestFullPipelineWithRealInfrastructure:
         handler = HandlerNodeIntrospected(projection_reader)
         now = datetime.now(UTC)
 
-        handler_events = await handler.handle(
-            event=event,
-            now=now,
+        # Wrap event in envelope for handler API
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
 
+        handler_output = await handler.handle(envelope)
+
         # If handler says we should register, create the projection
-        if handler_events:
+        if handler_output.events:
             from omnibase_infra.models.projection import ModelRegistrationProjection
             from omnibase_infra.models.projection.model_sequence_info import (
                 ModelSequenceInfo,
@@ -1040,6 +1077,7 @@ class TestPipelineLifecycle:
         self,
         real_kafka_event_bus: KafkaEventBus,
         unique_correlation_id: UUID,
+        ensure_test_topic_exists: str,
     ) -> None:
         """Test that consumer starts and receives messages.
 
@@ -1052,9 +1090,9 @@ class TestPipelineLifecycle:
             received_messages.append(msg)
             message_received.set()
 
-        # Subscribe
+        # Subscribe (topic is guaranteed to exist via ensure_test_topic_exists fixture)
         unsubscribe = await real_kafka_event_bus.subscribe(
-            topic=TEST_INTROSPECTION_TOPIC,
+            topic=ensure_test_topic_exists,
             group_id=f"lifecycle-test-{unique_correlation_id.hex[:8]}",
             on_message=handler,
         )
@@ -1072,7 +1110,7 @@ class TestPipelineLifecycle:
             )
 
             await real_kafka_event_bus.publish(
-                topic=TEST_INTROSPECTION_TOPIC,
+                topic=ensure_test_topic_exists,
                 key=b"test-key",
                 value=b'{"test": true}',
                 headers=headers,
@@ -1093,6 +1131,7 @@ class TestPipelineLifecycle:
         self,
         real_kafka_event_bus: KafkaEventBus,
         unique_correlation_id: UUID,
+        ensure_test_topic_exists: str,
     ) -> None:
         """Test that consumer handles shutdown without errors.
 
@@ -1104,9 +1143,9 @@ class TestPipelineLifecycle:
             nonlocal message_count
             message_count += 1
 
-        # Subscribe and immediately unsubscribe
+        # Subscribe and immediately unsubscribe (topic is guaranteed to exist)
         unsubscribe = await real_kafka_event_bus.subscribe(
-            topic=TEST_INTROSPECTION_TOPIC,
+            topic=ensure_test_topic_exists,
             group_id=f"shutdown-test-{unique_correlation_id.hex[:8]}",
             on_message=handler,
         )

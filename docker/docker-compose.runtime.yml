@@ -100,7 +100,7 @@ x-runtime-env: &runtime-env
   # -------------------------------------------------------------------------
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
-  CONTRACTS_DIR: /app/contracts
+  ONEX_CONTRACTS_DIR: /app/contracts
   # -------------------------------------------------------------------------
   # OpenTelemetry Observability Configuration
   # -------------------------------------------------------------------------

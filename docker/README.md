@@ -510,7 +510,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | **ONEX Runtime**             |                                    |                                        |
 | `ONEX_LOG_LEVEL`             | `INFO`                             | Logging level (DEBUG, INFO, etc.)      |
 | `ONEX_ENVIRONMENT`           | `development`                      | Environment name                       |
-| `CONTRACTS_DIR`              | `/app/contracts`                   | Path to contract files                 |
+| `ONEX_CONTRACTS_DIR`         | `/app/contracts`                   | Path to contract files                 |
 | **Service Ports**            |                                    |                                        |
 | `RUNTIME_MAIN_PORT`          | `8085`                             | Main runtime exposed port              |
 | `RUNTIME_EFFECTS_PORT`       | `8086`                             | Effects runtime exposed port           |
@@ -581,7 +581,7 @@ docker compose -f docker-compose.runtime.yml logs -f runtime-main
 | "Password authentication failed"   | Missing/wrong `POSTGRES_PASSWORD`             | Check .env file, verify password              |
 | "Address already in use"           | Port 8085 already bound                       | Change `RUNTIME_MAIN_PORT` or free port       |
 | "Connection refused"               | Infrastructure services not running           | Start omninode-bridge services first          |
-| "No such file or directory"        | Missing contracts directory                   | Create `contracts/` or adjust `CONTRACTS_DIR` |
+| "No such file or directory"        | Missing contracts directory                   | Create `contracts/` or adjust `ONEX_CONTRACTS_DIR` |
 | "Permission denied"                | Volume permission issues                      | Check UID 1000 has write access               |
 
 ### Health Check Failing

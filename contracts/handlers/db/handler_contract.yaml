@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# Handler contract for HandlerDb (PostgreSQL database operations)
+# Part of OMN-1317: Handler contract discovery setup
+# Unique identifier for this handler
+name: handler-db
+# Fully qualified class path for dynamic import
+handler_class: omnibase_infra.handlers.handler_db.HandlerDb
+# Handler behavioral classification:
+# - effect: External side effects (I/O, database, network)
+# - compute: Pure computation, no side effects
+# - nondeterministic_compute: Computation that may vary (random, time-based)
+#
+# This handler is 'effect' because it executes SQL queries against PostgreSQL
+handler_type: effect
+# Tags for discovery and filtering
+tags:
+  - database
+  - postgres
+  - sql
+  - infrastructure
+  - effect

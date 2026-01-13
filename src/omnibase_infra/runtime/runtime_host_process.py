@@ -56,6 +56,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
     UnknownHandlerTypeError,
 )
@@ -713,6 +714,28 @@ class RuntimeHostProcess:
         # - Call initialize() on each handler instance with config
         # - Store the handler instance in self._handlers for routing
         await self._populate_handlers_from_registry()
+
+        # Step 4.1: FAIL-FAST validation - runtime MUST have at least one handler
+        # A runtime with no handlers cannot process any events and is misconfigured.
+        # This catches configuration issues early rather than silently starting a
+        # runtime that cannot do anything useful.
+        if not self._handlers:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_handlers",
+                target_name="runtime_host_process",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                "No handlers registered. The runtime cannot start without at least one handler. "
+                "Configure handlers via contract_paths parameter or ensure wire_handlers() "
+                "registers handlers in the handler registry. "
+                "Check ONEX_CONTRACTS_DIR environment variable points to valid contracts directory.",
+                context=context,
+                registered_handler_count=0,
+                failed_handler_count=len(self._failed_handlers),
+                failed_handlers=list(self._failed_handlers.keys()),
+            )
 
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
@@ -1479,7 +1502,8 @@ class RuntimeHostProcess:
             Dictionary with health status information:
                 - healthy: Overall health status (True only if running,
                   event bus healthy, no handlers failed to instantiate,
-                  and all registered handlers are healthy)
+                  all registered handlers are healthy, AND at least one
+                  handler is registered - a runtime without handlers is useless)
                 - degraded: True when process is running but some handlers
                   failed to instantiate. Indicates partial functionality -
                   the system is operational but not at full capacity.
@@ -1498,11 +1522,17 @@ class RuntimeHostProcess:
                 - registered_handlers: List of successfully registered handler types
                 - handlers: Dict of handler_type -> health status for each
                   registered handler
+                - no_handlers_registered: True if no handlers are registered.
+                  This indicates a critical configuration issue - the runtime
+                  cannot process any events without handlers (OMN-1317).
 
         Health State Matrix:
             - healthy=True, degraded=False: Fully operational
             - healthy=False, degraded=True: Running with reduced functionality
-            - healthy=False, degraded=False: Not running or event bus unhealthy
+            - healthy=False, degraded=False: Not running, event bus unhealthy,
+              or no handlers registered (critical configuration issue)
+            - healthy=False, no_handlers_registered=True: Configuration error,
+              runtime cannot process events
 
         Drain State:
             When is_draining=True, the service is shutting down gracefully:
@@ -1581,17 +1611,23 @@ class RuntimeHostProcess:
         # Check for failed handlers - any failures indicate degraded state
         has_failed_handlers = len(self._failed_handlers) > 0
 
+        # Check for no handlers registered - critical configuration issue
+        # A runtime with no handlers cannot process any events and should be unhealthy
+        no_handlers_registered = len(self._handlers) == 0
+
         # Degraded state: process is running but some handlers failed to instantiate
         # This means the system is operational but with reduced functionality
         degraded = self._is_running and has_failed_handlers
 
         # Overall health is True only if running, event bus is healthy,
-        # no handlers failed to instantiate, and all registered handlers are healthy
+        # no handlers failed to instantiate, all registered handlers are healthy,
+        # AND at least one handler is registered (runtime without handlers is useless)
         healthy = (
             self._is_running
             and event_bus_healthy
             and not has_failed_handlers
             and handlers_all_healthy
+            and not no_handlers_registered
         )
 
         return {
@@ -1605,6 +1641,7 @@ class RuntimeHostProcess:
             "failed_handlers": self._failed_handlers,
             "registered_handlers": list(self._handlers.keys()),
             "handlers": handler_health_results,
+            "no_handlers_registered": no_handlers_registered,
         }
 
     def register_handler(self, handler_type: str, handler: ProtocolHandler) -> None:

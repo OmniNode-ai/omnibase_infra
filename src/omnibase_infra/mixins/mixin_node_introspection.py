@@ -1368,7 +1368,7 @@ class MixinNodeIntrospection:
 
     async def publish_introspection(
         self,
-        reason: str = "startup",
+        reason: str | EnumIntrospectionReason = EnumIntrospectionReason.STARTUP,
         correlation_id: UUID | None = None,
     ) -> bool:
         """Publish introspection event to the event bus.
@@ -1381,8 +1381,10 @@ class MixinNodeIntrospection:
         for integrating operation tracking into node operations.
 
         Args:
-            reason: Reason for the introspection event
-                (startup, shutdown, request, heartbeat)
+            reason: Reason for the introspection event. Can be an
+                EnumIntrospectionReason or a string matching enum values
+                (startup, shutdown, request, heartbeat, health_change,
+                capability_change). Invalid strings default to HEARTBEAT.
             correlation_id: Optional correlation ID for tracing
 
         Returns:
@@ -1393,20 +1395,40 @@ class MixinNodeIntrospection:
 
         Example:
             ```python
-            # On startup
-            success = await node.publish_introspection(reason="startup")
+            # On startup (using enum - preferred)
+            success = await node.publish_introspection(
+                reason=EnumIntrospectionReason.STARTUP
+            )
 
-            # On shutdown
+            # On shutdown (using string - backwards compatible)
             success = await node.publish_introspection(reason="shutdown")
             ```
         """
         self._ensure_initialized()
+
+        # Convert string reason to enum if needed
+        reason_enum: EnumIntrospectionReason
+        if isinstance(reason, str):
+            try:
+                reason_enum = EnumIntrospectionReason(reason)
+            except ValueError:
+                logger.warning(
+                    f"Unknown introspection reason '{reason}', defaulting to HEARTBEAT",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "provided_reason": reason,
+                    },
+                )
+                reason_enum = EnumIntrospectionReason.HEARTBEAT
+        else:
+            reason_enum = reason
+
         if self._introspection_event_bus is None:
             logger.warning(
                 f"Cannot publish introspection - no event bus configured for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
-                    "reason": reason,
+                    "reason": reason_enum.value,
                 },
             )
             return False
@@ -1422,7 +1444,7 @@ class MixinNodeIntrospection:
                 final_correlation_id = correlation_id or uuid4()
                 publish_event = event.model_copy(
                     update={
-                        "reason": reason,
+                        "reason": reason_enum,
                         "correlation_id": final_correlation_id,
                     }
                 )
@@ -1453,7 +1475,7 @@ class MixinNodeIntrospection:
                     f"Published introspection event for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
-                        "reason": reason,
+                        "reason": reason_enum.value,
                         "correlation_id": str(final_correlation_id),
                     },
                 )
@@ -1466,7 +1488,7 @@ class MixinNodeIntrospection:
                     f"Failed to publish introspection for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
-                        "reason": reason,
+                        "reason": reason_enum.value,
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                     },

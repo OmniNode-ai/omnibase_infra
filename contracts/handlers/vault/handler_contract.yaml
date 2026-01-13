@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# Handler contract for HandlerVault (HashiCorp Vault secrets management)
+# Part of OMN-1317: Handler contract discovery setup
+# Unique identifier for this handler
+name: handler-vault
+# Fully qualified class path for dynamic import
+handler_class: omnibase_infra.handlers.handler_vault.HandlerVault
+# Handler behavioral classification:
+# This handler is 'effect' because it interacts with Vault for secrets management
+handler_type: effect
+# Tags for discovery and filtering
+tags:
+  - vault
+  - secrets
+  - security
+  - infrastructure
+  - effect

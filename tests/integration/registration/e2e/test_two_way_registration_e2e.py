@@ -44,9 +44,10 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumIntrospectionReason, EnumRegistrationState
 from omnibase_infra.models.discovery import (
     DEFAULT_HEARTBEAT_TOPIC,
     DEFAULT_INTROSPECTION_TOPIC,
@@ -136,7 +137,7 @@ class TestSuite1NodeStartupIntrospection:
 
         Expected Behavior:
             1. Node initializes with introspection mixin configured
-            2. Node calls publish_introspection(reason="startup")
+            2. Node calls publish_introspection(reason=EnumIntrospectionReason.STARTUP)
             3. Introspection event appears on INTROSPECTION_TOPIC
 
         Assertions:
@@ -146,7 +147,7 @@ class TestSuite1NodeStartupIntrospection:
         """
         # Publish introspection event on startup
         success = await introspectable_test_node.publish_introspection(
-            reason="startup",
+            reason=EnumIntrospectionReason.STARTUP,
             correlation_id=unique_correlation_id,
         )
 
@@ -258,7 +259,7 @@ class TestSuite1NodeStartupIntrospection:
             threshold_ms=PerformanceThresholds.INTROSPECTION_BROADCAST_MS,
         ) as timing:
             success = await introspectable_test_node.publish_introspection(
-                reason="performance_test",
+                reason=EnumIntrospectionReason.REQUEST,
                 correlation_id=uuid4(),
             )
 
@@ -384,13 +385,17 @@ class TestSuite2RegistryDualRegistration:
             correlation_id=unique_correlation_id,
         )
 
-        # Process the event through the handler
+        # Process the event through the handler using envelope API
         now = datetime.now(UTC)
-        result_events = await handler.handle(
-            event=event,
-            now=now,
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
+        handler_output = await handler.handle(envelope)
+        result_events = handler_output.events
 
         # For a new node, handler should emit NodeRegistrationInitiated
         assert len(result_events) == 1, (
@@ -783,12 +788,16 @@ class TestSuite2RegistryDualRegistration:
             correlation_id=unique_correlation_id,
         )
 
-        # Process the event through the handler
-        result_events = await handler.handle(
-            event=event,
-            now=now,
+        # Process the event through the handler using envelope API
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
+        handler_output = await handler.handle(envelope)
+        result_events = handler_output.events
 
         # For a node in blocking state, handler should return empty list (no-op)
         assert len(result_events) == 0, (
@@ -867,12 +876,16 @@ class TestSuite2RegistryDualRegistration:
             correlation_id=unique_correlation_id,
         )
 
-        # Process the event through the handler
-        result_events = await handler.handle(
-            event=event,
-            now=now,
+        # Process the event through the handler using envelope API
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
+        handler_output = await handler.handle(envelope)
+        result_events = handler_output.events
 
         # For a node in retriable state, handler should emit NodeRegistrationInitiated
         assert len(result_events) == 1, (
@@ -1235,6 +1248,10 @@ class TestSuite4HeartbeatPublishing:
         )
 
         try:
+            # Wait for consumer to be fully ready before starting heartbeats
+            # This ensures the first "immediate" heartbeat is captured
+            await asyncio.sleep(1.0)
+
             # Start heartbeat with 30s interval
             await introspectable_test_node.start_introspection_tasks(
                 enable_heartbeat=True,
@@ -1441,19 +1458,27 @@ class TestSuite4HeartbeatPublishing:
         min_heartbeat_time = datetime.now(UTC)
 
         # Create heartbeat event - preserve test's correlation_id for tracing
+        heartbeat_timestamp = datetime.now(UTC)
         heartbeat_event = ModelNodeHeartbeatEvent(
             node_id=unique_node_id,
             node_type=introspectable_test_node.node_type,
             uptime_seconds=10.0,
             active_operations_count=0,
             correlation_id=correlation_id,
-            timestamp=datetime.now(UTC),
+            timestamp=heartbeat_timestamp,
         )
 
-        # Process heartbeat through the handler directly
+        # Process heartbeat through the handler directly using envelope API
         # OMN-1102: Orchestrator is declarative - test handler directly
         # (In full E2E with runtime, this would come from Kafka consumer)
-        await heartbeat_handler.handle(heartbeat_event)
+        heartbeat_envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=heartbeat_event,
+            envelope_timestamp=heartbeat_timestamp,
+            correlation_id=correlation_id,
+            source="e2e-test",
+        )
+        await heartbeat_handler.handle(heartbeat_envelope)
 
         # Query the projection to verify heartbeat was processed
         projection = await projection_reader.get_entity_state(
@@ -1731,11 +1756,17 @@ class TestSuite5RegistryRecovery:
             correlation_id=unique_correlation_id,
         )
 
-        result_events = await handler.handle(
-            event=event,
-            now=datetime.now(UTC),
+        # Process the event through the handler using envelope API
+        now = datetime.now(UTC)
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
+        handler_output = await handler.handle(envelope)
+        result_events = handler_output.events
 
         # Step 3: Verify idempotent behavior
         # For a node in ACTIVE state (blocking), handler should return empty list (no-op)
@@ -2043,7 +2074,8 @@ class TestSuite6MultipleNodes:
         assert projection.current_state == EnumRegistrationState.ACTIVE
 
         # Verify no corruption - version should be one of the submitted values
-        version_int = int(projection.node_version.split(".")[-1])
+        # node_version is a ModelSemVer object, access patch directly
+        version_int = projection.node_version.patch
         assert 0 <= version_int < concurrent_count, (
             f"Version {projection.node_version} should be from one of the "
             f"concurrent operations (0-{concurrent_count - 1})"
@@ -2252,7 +2284,9 @@ class TestSuite7GracefulDegradation:
         assert event.node_id == unique_node_id
 
         # Verify publish returns False gracefully (no event bus)
-        success = await node.publish_introspection(reason="test")
+        success = await node.publish_introspection(
+            reason=EnumIntrospectionReason.REQUEST
+        )
         assert success is False, (
             "Publish should return False when no event bus available"
         )

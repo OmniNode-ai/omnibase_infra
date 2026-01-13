@@ -30,6 +30,7 @@ from uuid import UUID, uuid4
 import pytest
 from omnibase_core.enums import EnumNodeKind
 
+from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import (
     DEFAULT_HEARTBEAT_TOPIC,
@@ -643,8 +644,10 @@ class TestMultiDomainConfiguration:
         assert orders_node._heartbeat_topic == "onex.orders.heartbeat.published.v1"
 
         # Publish from both nodes
-        await payments_node.publish_introspection(reason="domain-test")
-        await orders_node.publish_introspection(reason="domain-test")
+        await payments_node.publish_introspection(
+            reason=EnumIntrospectionReason.REQUEST
+        )
+        await orders_node.publish_introspection(reason=EnumIntrospectionReason.REQUEST)
 
         # Verify each published to its own domain topic
         assert len(payments_bus.published_envelopes) == 1
