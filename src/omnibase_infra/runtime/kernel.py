@@ -126,7 +126,8 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 
 # Environment variable names for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
-# Deprecated: CONTRACTS_DIR - will be removed in v2.0.0, use ONEX_CONTRACTS_DIR instead
+# DEPRECATED: CONTRACTS_DIR - will be removed in v2.0.0 (Q2 2026)
+# Use ONEX_CONTRACTS_DIR instead. See .env.example for migration steps.
 ENV_CONTRACTS_DIR_LEGACY = "CONTRACTS_DIR"
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"

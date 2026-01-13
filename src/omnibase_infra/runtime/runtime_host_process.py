@@ -728,9 +728,18 @@ class RuntimeHostProcess:
             )
             raise ProtocolConfigurationError(
                 "No handlers registered. The runtime cannot start without at least one handler. "
-                "Configure handlers via contract_paths parameter or ensure wire_handlers() "
-                "registers handlers in the handler registry. "
-                "Check ONEX_CONTRACTS_DIR environment variable points to valid contracts directory.",
+                "TROUBLESHOOTING STEPS:\n"
+                "  1. Verify ONEX_CONTRACTS_DIR points to a directory containing handler contracts:\n"
+                "     - Check: echo $ONEX_CONTRACTS_DIR\n"
+                "     - Look for files matching: **/handler_contract.yaml or **/contract.yaml\n"
+                "  2. Ensure handler contracts have required fields:\n"
+                "     - handler_name, handler_class, handler_type are mandatory\n"
+                "  3. Verify handler modules are importable:\n"
+                "     - The handler_class path must be a valid Python import path\n"
+                "  4. Check for import errors in application logs:\n"
+                "     - Look for MODULE_NOT_FOUND, CLASS_NOT_FOUND, or IMPORT_ERROR codes\n"
+                "  5. If using wire_handlers(), ensure it's called before start():\n"
+                "     - wire_handlers() registers handler classes in the binding registry",
                 context=context,
                 registered_handler_count=0,
                 failed_handler_count=len(self._failed_handlers),

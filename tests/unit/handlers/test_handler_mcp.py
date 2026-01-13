@@ -12,7 +12,6 @@ execute) rather than directly accessing internal state where possible.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 from uuid import uuid4
 

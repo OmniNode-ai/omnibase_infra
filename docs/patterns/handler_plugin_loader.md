@@ -644,8 +644,15 @@ ALLOWED_MODULE_PREFIXES: Final[tuple[str, ...]] = (
 )
 
 
-class SecurityError(Exception):
-    """Raised when security validation fails."""
+from omnibase_infra.errors import ProtocolConfigurationError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+
+class SecurityValidationError(ProtocolConfigurationError):
+    """Raised when security validation fails.
+
+    Extends ProtocolConfigurationError to integrate with ONEX error handling.
+    """
     pass
 
 
@@ -668,7 +675,7 @@ def secure_load_from_contract(
         Loaded handler if path passes validation
 
     Raises:
-        SecurityError: If module path is not in allowlist
+        SecurityValidationError: If module path is not in allowlist
     """
     # Pre-validate module path before loader processes it
     with open(path) as f:
@@ -678,7 +685,7 @@ def secure_load_from_contract(
 
     # Check against allowlist
     if not any(handler_class.startswith(prefix) for prefix in ALLOWED_MODULE_PREFIXES):
-        raise SecurityError(
+        raise SecurityValidationError(
             f"Handler module path '{handler_class}' not in allowlist. "
             f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}"
         )

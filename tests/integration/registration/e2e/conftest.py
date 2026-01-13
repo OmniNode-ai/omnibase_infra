@@ -125,7 +125,7 @@ async def wait_for_consumer_ready(
     event_bus: KafkaEventBus,
     topic: str,
     max_wait: float = 10.0,
-    poll_interval: float = 0.2,
+    poll_interval: float = 0.2,  # Deprecated: kept for API compat, uses backoff instead
     initial_backoff: float = 0.1,
     max_backoff: float = 1.0,
     backoff_multiplier: float = 1.5,
@@ -144,21 +144,29 @@ async def wait_for_consumer_ready(
 
     Args:
         event_bus: The KafkaEventBus instance to check for readiness.
-        topic: The topic to wait for consumer registration on.
-        max_wait: Maximum time to wait in seconds before returning (default 10.0s).
-        poll_interval: Base polling interval (kept for API compat, uses backoff instead).
+        topic: The topic to wait for consumer registration on (used for logging).
+        max_wait: Maximum total time to wait in seconds before returning.
+            The actual wait time will be at most max_wait plus ~0.1s for the
+            post-ready stabilization delay. Default: 10.0s.
+        poll_interval: DEPRECATED - Ignored. Kept for API compatibility.
+            Use initial_backoff/max_backoff instead.
         initial_backoff: Initial backoff delay for polling (default 0.1s).
         max_backoff: Maximum backoff delay to prevent excessive waits (default 1.0s).
         backoff_multiplier: Multiplier for exponential backoff (default 1.5).
 
     Returns:
-        True when the consumer is ready or max_wait is exceeded.
+        True in all cases (consumer ready OR timeout exceeded).
+        Always returns True for backwards compatibility - callers should
+        not rely on return value for failure detection.
 
     Note:
-        Returns True even on timeout to maintain backwards compatibility
+        This function always returns True to maintain backwards compatibility
         with existing test code that expects the function to always succeed.
         The polling approach significantly reduces flakiness compared to
         fixed sleep by detecting actual consumer registration.
+
+        After detecting consumer readiness, an additional 0.1s stabilization
+        delay is added to allow the consumer's receive loop to fully start.
     """
     start_time = asyncio.get_running_loop().time()
     current_backoff = initial_backoff
@@ -1140,7 +1148,8 @@ def configure_e2e_logging() -> None:
     This session-scoped fixture ensures that:
     - All E2E pipeline logs are visible during test runs (with -v flag)
     - Log output uses a clear, structured format
-    - INFO level is enabled for omnibase_infra modules
+    - DEBUG level for E2E test loggers (tests.integration.registration.e2e)
+    - INFO level for omnibase_infra modules (reduces verbosity)
 
     Usage:
         Run tests with pytest -v to see pipeline stage logs

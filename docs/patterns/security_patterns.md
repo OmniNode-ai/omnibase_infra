@@ -1087,6 +1087,9 @@ Policy registration and execution require careful security considerations as pol
 ```python
 from typing import Final
 
+from omnibase_infra.errors import ProtocolConfigurationError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
 
 # Allowlisted policy packages
 TRUSTED_POLICY_SOURCES: Final[frozenset[str]] = frozenset({
@@ -1094,6 +1097,14 @@ TRUSTED_POLICY_SOURCES: Final[frozenset[str]] = frozenset({
     "myapp.policies",         # Internal application policies
     # Add approved third-party packages after security review
 })
+
+
+class PolicySecurityError(ProtocolConfigurationError):
+    """Raised when a policy fails security validation.
+
+    Extends ProtocolConfigurationError to integrate with ONEX error handling.
+    """
+    pass
 
 
 def validate_policy_source(policy_class: type) -> bool:
@@ -1106,7 +1117,7 @@ def validate_policy_source(policy_class: type) -> bool:
         True if from trusted source
 
     Raises:
-        SecurityError: If from untrusted source
+        PolicySecurityError: If from untrusted source
     """
     module = policy_class.__module__
 
@@ -1114,7 +1125,7 @@ def validate_policy_source(policy_class: type) -> bool:
         if module.startswith(trusted):
             return True
 
-    raise SecurityError(
+    raise PolicySecurityError(
         f"Policy {policy_class.__name__} is from untrusted source: {module}"
     )
 ```

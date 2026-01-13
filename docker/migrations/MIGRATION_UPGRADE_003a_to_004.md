@@ -376,5 +376,5 @@ You need to apply `003_capability_fields.sql` first to create the columns.
 | Date | Change |
 |------|--------|
 | 2026-01-13 | Added Migration Gap Detection section with validation SQL script |
-| 2025-01-13 | Renamed `003a` to `004` per PR #143 review feedback |
-| 2025-01-XX | Initial `003a_capability_fields_concurrent.sql` created |
+| 2026-01-13 | Renamed `003a` to `004` per PR #143 review feedback |
+| 2026-01-XX | Initial `003a_capability_fields_concurrent.sql` created |

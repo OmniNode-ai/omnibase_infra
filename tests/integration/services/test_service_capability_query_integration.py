@@ -746,7 +746,11 @@ class TestErrorPropagation:
 
         correlation_id = uuid4()
 
-        with caplog.at_level(logging.DEBUG):
+        # Specify the logger name to ensure DEBUG level is set on the service's logger.
+        # Without this, the root logger's default WARNING level prevents DEBUG messages
+        # from being emitted even though caplog's handler accepts them.
+        service_logger = "omnibase_infra.services.service_capability_query"
+        with caplog.at_level(logging.DEBUG, logger=service_logger):
             with pytest.raises(InfraConnectionError):
                 await service.resolve_dependency(spec, correlation_id=correlation_id)
 

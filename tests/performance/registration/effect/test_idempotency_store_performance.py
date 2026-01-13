@@ -492,7 +492,6 @@ class TestMixedWorkload:
             await asyncio.sleep(0.01)
 
         avg_burst = mean(burst_latencies)
-        burst_size * num_bursts
 
         print("\nBurst Pattern Performance:")
         print(f"  Bursts:           {num_bursts}")

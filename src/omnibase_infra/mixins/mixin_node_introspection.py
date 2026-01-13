@@ -669,7 +669,9 @@ class MixinNodeIntrospection:
                 f"Introspection initialized without event bus for {config.node_id}",
                 extra={
                     "node_id": config.node_id,
-                    "node_type": config.node_type,
+                    "node_type": config.node_type.value
+                    if hasattr(config.node_type, "value")
+                    else str(config.node_type),
                 },
             )
 
@@ -677,7 +679,9 @@ class MixinNodeIntrospection:
             f"Introspection initialized for {config.node_id}",
             extra={
                 "node_id": config.node_id,
-                "node_type": config.node_type,
+                "node_type": config.node_type.value
+                if hasattr(config.node_type, "value")
+                else str(config.node_type),
                 "version": config.version,
                 "cache_ttl": config.cache_ttl,
                 "has_event_bus": config.event_bus is not None,

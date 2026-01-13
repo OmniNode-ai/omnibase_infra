@@ -256,14 +256,8 @@ class TestOrchestratorNoSystemClockCalls:
         """
         imports = _find_imports(node_ast)
 
-        # Time-related modules that suggest clock usage
-        time_related_imports = {
-            "time"
-        }  # Note: 'datetime' might be imported for type hints
-
-        imports & time_related_imports
-
         # 'time' module import is a red flag - likely used for time.time() or sleep
+        # Note: 'datetime' might be imported for type hints, which is acceptable
         assert "time" not in imports, (
             "Orchestrator imports the 'time' module. "
             "This suggests time-related operations that may violate "

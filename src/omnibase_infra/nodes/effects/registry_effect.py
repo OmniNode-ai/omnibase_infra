@@ -273,6 +273,7 @@ class NodeRegistryEffect:
             consul_result = ModelBackendResult(
                 success=True,
                 duration_ms=0.0,
+                backend_id="consul",
                 correlation_id=correlation_id,
             )
         else:
@@ -285,6 +286,7 @@ class NodeRegistryEffect:
             postgres_result = ModelBackendResult(
                 success=True,
                 duration_ms=0.0,
+                backend_id="postgres",
                 correlation_id=correlation_id,
             )
         else:

@@ -99,7 +99,7 @@ Indicates a migration designed for **production environments with live traffic**
 **Next available:**
 - Next main migration: `005_*.sql`
 - Next sub-migration for 003: `003b_*.sql`
-- Next sub-migration for 004: `004b_*.sql`
+- Next sub-migration for 004: `004a_*.sql`
 
 ## Migration Header Requirements
 

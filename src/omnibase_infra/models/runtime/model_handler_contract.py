@@ -213,8 +213,15 @@ class ModelHandlerContract(BaseModel):
         the 'handler-' prefix. If handler_name doesn't have that prefix,
         uses the full handler_name as protocol_type.
 
+        Guards against empty derived protocol_type which would produce
+        invalid registry keys.
+
         Returns:
             Self with protocol_type populated.
+
+        Raises:
+            ValueError: If derived protocol_type would be empty (e.g., handler_name
+                is exactly "handler-" with nothing after the prefix).
 
         Example:
             >>> contract = ModelHandlerContract(
@@ -236,9 +243,25 @@ class ModelHandlerContract(BaseModel):
         if self.protocol_type is None:
             prefix = "handler-"
             if self.handler_name.startswith(prefix):
-                self.protocol_type = self.handler_name[len(prefix) :]
+                derived = self.handler_name[len(prefix) :]
+                if not derived:
+                    raise ValueError(
+                        f"Cannot derive protocol_type from handler_name '{self.handler_name}': "
+                        f"result would be empty. Either provide an explicit protocol_type "
+                        f"or use a handler_name with content after the 'handler-' prefix."
+                    )
+                self.protocol_type = derived
             else:
                 self.protocol_type = self.handler_name
+
+        # Final guard: ensure protocol_type is never empty
+        if not self.protocol_type:
+            raise ValueError(
+                f"protocol_type cannot be empty. handler_name='{self.handler_name}', "
+                f"derived protocol_type='{self.protocol_type}'. "
+                f"Provide a non-empty protocol_type or handler_name."
+            )
+
         return self
 
 

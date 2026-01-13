@@ -113,12 +113,13 @@ TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
 # =============================================================================
 
 
-def coerce_to_node_kind(node_type: str | EnumNodeKind) -> EnumNodeKind:
+def coerce_to_node_kind(node_type: str | EnumNodeKind | None) -> EnumNodeKind:
     """Safely coerce a node type string or enum to EnumNodeKind.
 
     Uses Enum-first pattern with type guard for safer runtime behavior:
     1. If already an enum, return as-is
     2. If string, validate and convert
+    3. If None or other types, raise appropriate error
 
     Args:
         node_type: Node type as string literal or enum value.
@@ -127,6 +128,7 @@ def coerce_to_node_kind(node_type: str | EnumNodeKind) -> EnumNodeKind:
         EnumNodeKind enum value.
 
     Raises:
+        TypeError: If node_type is None or not a string/EnumNodeKind.
         ValueError: If string value is not a valid EnumNodeKind member.
 
     Example:
@@ -135,11 +137,24 @@ def coerce_to_node_kind(node_type: str | EnumNodeKind) -> EnumNodeKind:
         >>> coerce_to_node_kind(EnumNodeKind.COMPUTE)
         <EnumNodeKind.COMPUTE: 'compute'>
     """
+    # Handle None explicitly
+    if node_type is None:
+        raise TypeError(
+            "node_type cannot be None. Expected EnumNodeKind or valid string value."
+        )
+
     # Enum-first: if already an enum, return directly
     if isinstance(node_type, EnumNodeKind):
         return node_type
 
-    # Type guard: validate string is a valid enum value
+    # Type guard: must be a string at this point
+    if not isinstance(node_type, str):
+        raise TypeError(
+            f"node_type must be EnumNodeKind or str, got {type(node_type).__name__}. "
+            f"Received value: {node_type!r}"
+        )
+
+    # Validate string is a valid enum value
     valid_values = {e.value for e in EnumNodeKind}
     if node_type not in valid_values:
         raise ValueError(
@@ -770,9 +785,10 @@ async def ensure_test_topic_exists(
         await admin_client.start()
 
         # Step 2: Describe the specific topic (validates existence and configuration)
-        # NOTE: describe_topics() returns List[Any] (not a dict as some docs suggest).
-        # Each element is a dict with 'error_code', 'topic', and 'partitions' fields.
-        # This is per the Kafka MetadataResponse protocol schema.
+        # NOTE: describe_topics() return type varies by aiokafka version:
+        # - Some versions return List[TopicMetadata] (list indexed by position)
+        # - Some versions return Dict[str, TopicMetadata] (dict keyed by topic name)
+        # We handle both formats for compatibility.
         logger.debug("Describing topic '%s'", TEST_INTROSPECTION_TOPIC)
         topic_descriptions = await admin_client.describe_topics(
             [TEST_INTROSPECTION_TOPIC]
@@ -786,8 +802,20 @@ async def ensure_test_topic_exists(
                 f"{topic_creation_hint}"
             )
 
-        # Get the first (and only) topic description
-        topic_metadata = topic_descriptions[0]
+        # Get the topic description - handle both list and dict return types
+        # Dict format: {"topic_name": TopicMetadata}
+        # List format: [TopicMetadata, ...]
+        if isinstance(topic_descriptions, dict):
+            topic_metadata = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
+            if topic_metadata is None:
+                pytest.fail(
+                    f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
+                    f"Available topics: {list(topic_descriptions.keys())}"
+                    f"{topic_creation_hint}"
+                )
+        else:
+            # List format - get first element
+            topic_metadata = topic_descriptions[0]
 
         # Fail-fast validation 2: Check for error codes
         # aiokafka may return error_code field for non-existent or inaccessible topics

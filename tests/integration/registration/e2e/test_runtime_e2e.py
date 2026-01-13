@@ -172,6 +172,38 @@ SKIP_PROCESSING_REASON = (
     "Without this, tests would wait 60-120s before timing out."
 )
 
+# =============================================================================
+# Output Event and Consul Registration Feature Flags
+# =============================================================================
+# These optional features may not be configured in all runtime deployments.
+# Tests for these features require explicit opt-in to avoid soft failures.
+
+RUNTIME_OUTPUT_EVENTS_ENABLED = os.getenv(
+    "RUNTIME_E2E_OUTPUT_EVENTS_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+
+SKIP_OUTPUT_EVENTS_REASON = (
+    "Runtime output event tests require explicit opt-in. "
+    "Set RUNTIME_E2E_OUTPUT_EVENTS_ENABLED=true to enable these tests after verifying: "
+    "1) Runtime is configured to publish completion events to ONEX_OUTPUT_TOPIC, "
+    "2) The output topic exists and is accessible. "
+    "Without this flag, tests would wait and timeout."
+)
+
+RUNTIME_CONSUL_ENABLED = os.getenv("RUNTIME_E2E_CONSUL_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
+SKIP_CONSUL_REASON = (
+    "Runtime Consul registration tests require explicit opt-in. "
+    "Set RUNTIME_E2E_CONSUL_ENABLED=true to enable these tests after verifying: "
+    "1) Runtime is configured for dual registration (Consul + PostgreSQL), "
+    "2) Consul is accessible at CONSUL_HOST:CONSUL_PORT. "
+    "Without this flag, tests would wait and timeout."
+)
+
 
 # Module-level markers
 # Note: conftest.py already applies pytest.mark.e2e and skipif(not ALL_INFRA_AVAILABLE)
@@ -384,13 +416,21 @@ class TestRuntimeE2EFlow:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        not RUNTIME_OUTPUT_EVENTS_ENABLED,
+        reason=SKIP_OUTPUT_EVENTS_REASON,
+    )
     async def test_runtime_publishes_completion_event(
         self,
         real_kafka_event_bus: KafkaEventBus,
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,
     ) -> None:
-        """Test that runtime publishes registration-completed event."""
+        """Test that runtime publishes registration-completed event.
+
+        This test requires RUNTIME_E2E_OUTPUT_EVENTS_ENABLED=true because output
+        event publishing may not be configured in all runtime deployments.
+        """
         # Track completion events
         completion_received = asyncio.Event()
         received_completions: list[dict] = []
@@ -438,34 +478,36 @@ class TestRuntimeE2EFlow:
                 envelope, topic=RUNTIME_INPUT_TOPIC
             )
 
-            # Wait for completion event
-            try:
-                await asyncio.wait_for(completion_received.wait(), timeout=30.0)
-                assert len(received_completions) > 0, (
-                    "Expected completion event from runtime"
-                )
+            # Wait for completion event - hard failure on timeout
+            await asyncio.wait_for(completion_received.wait(), timeout=30.0)
 
-                # Verify completion event structure
-                completion = received_completions[0]
-                assert completion.get("node_id") == str(unique_node_id)
+            assert len(received_completions) > 0, (
+                "Expected completion event from runtime"
+            )
 
-            except TimeoutError:
-                logger.warning(
-                    "Runtime did not publish completion event within timeout. "
-                    "This may indicate the output topic is not configured."
-                )
+            # Verify completion event structure
+            completion = received_completions[0]
+            assert completion.get("node_id") == str(unique_node_id)
 
         finally:
             await unsub()
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        not RUNTIME_CONSUL_ENABLED,
+        reason=SKIP_CONSUL_REASON,
+    )
     async def test_runtime_dual_registration_creates_consul_entry(
         self,
         real_kafka_event_bus: KafkaEventBus,
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,
     ) -> None:
-        """Test that runtime performs dual registration including Consul."""
+        """Test that runtime performs dual registration including Consul.
+
+        This test requires RUNTIME_E2E_CONSUL_ENABLED=true because Consul
+        dual registration may not be configured in all runtime deployments.
+        """
         # Publish introspection event wrapped in envelope
         envelope = wrap_event_in_envelope(introspection_event)
         await real_kafka_event_bus.publish_envelope(envelope, topic=RUNTIME_INPUT_TOPIC)
@@ -492,22 +534,25 @@ class TestRuntimeE2EFlow:
                         if services:
                             consul_entry = services[0]
                             break
-                except Exception:
+                except (
+                    httpx.ConnectError,
+                    httpx.TimeoutException,
+                    json.JSONDecodeError,
+                ):
+                    # Connection/timeout errors and JSON decode errors are expected
+                    # during polling - Consul may not have the service yet or be
+                    # temporarily unavailable
                     pass
 
                 # Polling interval - wait before checking Consul catalog again
                 await asyncio.sleep(0.5)
 
-        if consul_entry is None:
-            logger.warning(
-                "Service %s not found in Consul within %ss. "
-                "Dual registration may not be configured in runtime.",
-                service_name,
-                max_wait_seconds,
-            )
-            return  # Exit test early but don't fail
-
-        assert consul_entry is not None
+        # Hard failure - if Consul is enabled, registration must succeed
+        assert consul_entry is not None, (
+            f"Service '{service_name}' not found in Consul within {max_wait_seconds}s. "
+            f"Consul: http://{consul_host}:{consul_port}. "
+            f"Verify runtime has dual registration enabled and Consul is accessible."
+        )
 
 
 class TestRuntimeErrorHandling:
