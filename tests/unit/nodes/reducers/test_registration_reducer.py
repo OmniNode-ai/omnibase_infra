@@ -1914,7 +1914,7 @@ class TestPerformance:
         total_processing_time = 0.0
         num_events = 10
 
-        for i in range(num_events):
+        for _ in range(num_events):
             event = create_introspection_event()
             output = reducer.reduce(state, event)
 
@@ -3780,7 +3780,7 @@ class TestTimeoutScenarios:
         node_id = uuid4()
 
         # Simulate 3 failed attempts before success
-        for attempt in range(3):
+        for _attempt in range(3):
             # Start registration
             event = create_introspection_event(node_id=node_id)
             output = reducer.reduce(state, event)

@@ -585,10 +585,19 @@ class TestRuntimeErrorHandling:
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             while asyncio.get_running_loop().time() - start_time < max_wait:
-                response = await client.get(RUNTIME_HEALTH_URL)
-                if response.status_code != 200:
+                try:
+                    response = await client.get(RUNTIME_HEALTH_URL)
+                    if response.status_code != 200:
+                        health_ok = False
+                        break
+                except httpx.ConnectError:
+                    # Connection refused - runtime crashed or became unavailable
                     health_ok = False
                     break
+                except httpx.TimeoutException:
+                    # Request timeout - runtime may be overloaded but not crashed
+                    # Continue polling as timeout alone doesn't indicate crash
+                    pass
                 await asyncio.sleep(poll_interval)
 
         # Verify runtime remained healthy throughout the wait period
@@ -626,10 +635,19 @@ class TestRuntimeErrorHandling:
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             while asyncio.get_running_loop().time() - start_time < max_wait:
-                response = await client.get(RUNTIME_HEALTH_URL)
-                if response.status_code != 200:
+                try:
+                    response = await client.get(RUNTIME_HEALTH_URL)
+                    if response.status_code != 200:
+                        health_ok = False
+                        break
+                except httpx.ConnectError:
+                    # Connection refused - runtime crashed or became unavailable
                     health_ok = False
                     break
+                except httpx.TimeoutException:
+                    # Request timeout - runtime may be overloaded but not crashed
+                    # Continue polling as timeout alone doesn't indicate crash
+                    pass
                 await asyncio.sleep(poll_interval)
 
         # Verify runtime remained healthy throughout the wait period

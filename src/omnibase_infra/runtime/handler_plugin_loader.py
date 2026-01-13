@@ -311,8 +311,16 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         """
         self._allowed_namespaces: list[str] | None = allowed_namespaces
 
+        # Security best practice: warn if no namespace restriction is configured
+        if allowed_namespaces is None:
+            logger.info(
+                "HandlerPluginLoader initialized without namespace restrictions. "
+                "For production environments, consider setting allowed_namespaces to "
+                "restrict handler imports to trusted packages (e.g., "
+                "allowed_namespaces=['omnibase_infra.', 'omnibase_core.', 'mycompany.']).",
+            )
         # Warn if empty list is provided - this blocks ALL handler imports
-        if allowed_namespaces is not None and len(allowed_namespaces) == 0:
+        elif len(allowed_namespaces) == 0:
             logger.warning(
                 "HandlerPluginLoader initialized with empty allowed_namespaces list. "
                 "This will block ALL handler imports. If this is intentional, ignore "

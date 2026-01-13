@@ -556,7 +556,7 @@ class TestEffectRetryBackoff:
             }
 
             # Act: Execute 3 operations (each exhausts retries, records 1 failure)
-            for i in range(3):
+            for _ in range(3):
                 mock_consul_client.kv.get.reset_mock()
                 mock_consul_client.kv.get.side_effect = consul.ConsulException(
                     "Service unavailable"

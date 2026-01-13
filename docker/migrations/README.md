@@ -86,7 +86,7 @@ Indicates a migration designed for **production environments with live traffic**
 - Use the next sequential number: `005_new_feature.sql`
 
 **For a companion to an existing migration:**
-- Use the next available letter: `003b_capability_fields_rollback.sql`
+- Use the next available letter: `003a_capability_fields_rollback.sql` (003a is available since original was renamed to 004)
 
 **Current state:**
 ```
@@ -98,8 +98,10 @@ Indicates a migration designed for **production environments with live traffic**
 
 **Next available:**
 - Next main migration: `005_*.sql`
-- Next sub-migration for 003: `003b_*.sql`
+- Next sub-migration for 003: `003a_*.sql` (available - original 003a was renamed to 004)
 - Next sub-migration for 004: `004a_*.sql`
+
+> **Note**: While `003a` is technically available (the original `003a_capability_fields_concurrent.sql` was renamed to `004`), prefer using the next main sequence number (`005`) for new features. Letter suffixes are best reserved for rollback scripts or closely-related companion migrations.
 
 ## Migration Header Requirements
 

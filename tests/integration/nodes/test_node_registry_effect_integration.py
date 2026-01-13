@@ -417,7 +417,9 @@ class TestPartialFailureHandling:
 
         mock_postgres = AsyncMock()
         mock_postgres.upsert = AsyncMock(
-            return_value=ModelBackendResult(success=True, duration_ms=10.0)
+            return_value=ModelBackendResult(
+                success=True, duration_ms=10.0, backend_id="postgres"
+            )
         )
 
         node = NodeRegistryEffect(mock_consul, mock_postgres)
@@ -703,7 +705,9 @@ class TestExceptionHandling:
 
         mock_postgres = AsyncMock()
         mock_postgres.upsert = AsyncMock(
-            return_value=ModelBackendResult(success=True, duration_ms=10.0)
+            return_value=ModelBackendResult(
+                success=True, duration_ms=10.0, backend_id="postgres"
+            )
         )
 
         node = NodeRegistryEffect(mock_consul, mock_postgres)

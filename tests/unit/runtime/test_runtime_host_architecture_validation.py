@@ -18,7 +18,7 @@ Handler Semantics Note:
 
     1. **Fail-fast startup check** (process._handlers):
        Requires at least one handler INSTANCE in process._handlers for
-       the runtime to be useful. Tests use _setup_mock_handlers() to
+       the runtime to be useful. Tests use seed_mock_handlers() to
        satisfy this check by seeding a mock handler instance.
 
     2. **Architecture validation** (handler registry):

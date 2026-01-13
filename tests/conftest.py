@@ -988,11 +988,17 @@ def seed_mock_handlers(
     This helper sets up minimal mock handler(s) to satisfy that check, allowing
     tests to focus on other runtime functionality.
 
+    The default mock handler includes all async lifecycle methods:
+    - execute: AsyncMock for handling envelopes
+    - initialize: AsyncMock for handler initialization
+    - shutdown: AsyncMock for safe cleanup with await process.stop()
+    - health_check: AsyncMock returning {"healthy": True}
+
     Args:
         process: The RuntimeHostProcess instance to seed handlers on.
             Typed as object to avoid import dependency, but must have _handlers attr.
         handlers: Optional dict of handler name to mock handler. If not provided,
-            a default mock handler named "mock" is created.
+            a default mock handler named "mock" is created with all lifecycle methods.
         initialized: If True (default), marks the mock handler as initialized
             so health_check returns healthy status.
 
@@ -1009,13 +1015,20 @@ def seed_mock_handlers(
         This function directly sets the private _handlers attribute. This is
         intentional for testing purposes to bypass the normal handler registration
         flow. Do not use in production code.
+
+    Warning:
+        When providing custom handlers, ensure they have the required async methods
+        (shutdown, health_check) for safe cleanup during process.stop().
     """
     if handlers is not None:
         process._handlers = handlers  # type: ignore[attr-defined]
         return
 
     # Create default mock handler with required async methods
+    # These methods are needed for safe cleanup with await process.stop()
     mock_handler = MagicMock()
+    mock_handler.execute = AsyncMock(return_value={"success": True, "result": "mock"})
+    mock_handler.initialize = AsyncMock()
     mock_handler.shutdown = AsyncMock()
     mock_handler.health_check = AsyncMock(return_value={"healthy": True})
 
@@ -1031,7 +1044,9 @@ def mock_runtime_handler() -> MagicMock:
     """Create a pre-configured mock handler suitable for runtime handler seeding.
 
     Returns a MagicMock configured with:
-    - shutdown: AsyncMock
+    - execute: AsyncMock for handling envelopes
+    - initialize: AsyncMock for handler initialization
+    - shutdown: AsyncMock for cleanup
     - health_check: AsyncMock returning {"healthy": True}
     - initialized: True (for health check compatibility)
 
@@ -1049,6 +1064,8 @@ def mock_runtime_handler() -> MagicMock:
         ...     mock_runtime_handler.health_check.assert_called()
     """
     mock_handler = MagicMock()
+    mock_handler.execute = AsyncMock(return_value={"success": True, "result": "mock"})
+    mock_handler.initialize = AsyncMock()
     mock_handler.shutdown = AsyncMock()
     mock_handler.health_check = AsyncMock(return_value={"healthy": True})
     mock_handler.initialized = True

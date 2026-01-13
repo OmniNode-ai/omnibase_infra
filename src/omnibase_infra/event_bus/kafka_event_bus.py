@@ -1073,7 +1073,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 try:
                     # Find and remove the subscription
                     subs = self._subscribers.get(topic, [])
-                    for i, (gid, sid, _) in enumerate(subs):
+                    for i, (_gid, sid, _) in enumerate(subs):
                         if sid == subscription_id:
                             subs.pop(i)
                             break

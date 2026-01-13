@@ -1907,7 +1907,25 @@ class TestDiscoverHandlersFromContractsCorrelationTracking:
             "Discovery should report handlers discovered count"
         )
 
-        # Optionally, if correlation IDs are in logs, verify they match
+        # Verify correlation ID tracking in logs
+        # Note: Correlation IDs may be in record extra data, __dict__, or message text
+        # If no correlation logs are found, the discovery process still completed successfully
+        # - correlation tracking is observability-only and doesn't affect functionality.
+        # However, when present, correlation IDs should be valid UUIDs.
         if logs_with_correlation:
-            # At least some logs have correlation tracking
-            assert len(logs_with_correlation) > 0
+            for log_record in logs_with_correlation:
+                # Verify correlation ID is present in some form
+                # Check record extra dict if available
+                if hasattr(log_record, "__dict__"):
+                    record_dict = log_record.__dict__
+                    if "correlation_id" in record_dict:
+                        corr_id = record_dict["correlation_id"]
+                        # Verify it's a valid format (string or UUID)
+                        assert corr_id is not None, (
+                            "Correlation ID in log should not be None"
+                        )
+                        # If it's a string, verify it looks like a UUID
+                        if isinstance(corr_id, str):
+                            assert len(corr_id) >= 32, (
+                                f"Correlation ID '{corr_id}' should be UUID-like"
+                            )

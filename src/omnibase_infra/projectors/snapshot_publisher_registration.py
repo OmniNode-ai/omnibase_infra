@@ -897,7 +897,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                     if not messages:
                         break  # No more messages within timeout
 
-                    for tp, msgs in messages.items():
+                    for _tp, msgs in messages.items():
                         for message in msgs:
                             key = message.key.decode("utf-8") if message.key else None
 

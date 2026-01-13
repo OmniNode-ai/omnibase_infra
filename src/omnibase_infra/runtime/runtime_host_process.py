@@ -720,14 +720,32 @@ class RuntimeHostProcess:
         # This catches configuration issues early rather than silently starting a
         # runtime that cannot do anything useful.
         if not self._handlers:
+            correlation_id = uuid4()
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="validate_handlers",
                 target_name="runtime_host_process",
-                correlation_id=uuid4(),
+                correlation_id=correlation_id,
             )
+
+            # Build informative error message with context about what was attempted
+            contract_paths_info = (
+                f"  * contract_paths provided: {[str(p) for p in self._contract_paths]}\n"
+                if self._contract_paths
+                else "  * contract_paths: NOT PROVIDED (using ONEX_CONTRACTS_DIR env var)\n"
+            )
+
+            # Get registry count for additional context
+            handler_registry = await self._get_handler_registry()
+            registry_protocol_count = len(handler_registry.list_protocols())
+
             raise ProtocolConfigurationError(
-                "No handlers registered. The runtime cannot start without at least one handler. "
+                "No handlers registered. The runtime cannot start without at least one handler.\n\n"
+                "CURRENT CONFIGURATION:\n"
+                f"{contract_paths_info}"
+                f"  * Registry protocol count: {registry_protocol_count}\n"
+                f"  * Failed handlers: {len(self._failed_handlers)}\n"
+                f"  * Correlation ID: {correlation_id}\n\n"
                 "TROUBLESHOOTING STEPS:\n"
                 "  1. Verify ONEX_CONTRACTS_DIR points to a directory containing handler contracts:\n"
                 "     - Check: echo $ONEX_CONTRACTS_DIR\n"
@@ -739,11 +757,15 @@ class RuntimeHostProcess:
                 "  4. Check for import errors in application logs:\n"
                 "     - Look for MODULE_NOT_FOUND, CLASS_NOT_FOUND, or IMPORT_ERROR codes\n"
                 "  5. If using wire_handlers(), ensure it's called before start():\n"
-                "     - wire_handlers() registers handler classes in the binding registry",
+                "     - wire_handlers() registers handler classes in the binding registry\n"
+                "  6. Verify contract file paths exist and are readable:\n"
+                "     - Contract files must be valid YAML with handler configuration",
                 context=context,
                 registered_handler_count=0,
                 failed_handler_count=len(self._failed_handlers),
                 failed_handlers=list(self._failed_handlers.keys()),
+                contract_paths=[str(p) for p in self._contract_paths],
+                registry_protocol_count=registry_protocol_count,
             )
 
         # Step 4.5: Initialize idempotency store if configured (OMN-945)

@@ -2230,7 +2230,7 @@ class TestSuite6MultipleNodes:
         )
 
         # Verify data consistency across backends
-        for i, (node_id, service_id) in enumerate(
+        for i, (_node_id, _service_id) in enumerate(
             zip(node_ids, service_ids, strict=True)
         ):
             pg_result = postgres_results[i]

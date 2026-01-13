@@ -531,7 +531,7 @@ class TestConcurrentCacheAccess:
         assert len(errors) == 0, f"Thread errors: {errors}"
 
         # Verify all size readings were within limit
-        for hits, misses, size in read_results:
+        for _hits, _misses, size in read_results:
             assert size <= cache_size, f"Size {size} exceeded limit {cache_size}"
 
     def test_concurrent_eviction_correctness(self) -> None:

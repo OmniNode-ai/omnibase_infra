@@ -229,7 +229,7 @@ class TestCircuitBreakerOpens:
             3. Verify next request is blocked immediately
         """
         # Cause threshold failures
-        for i in range(3):
+        for _ in range(3):
             try:
                 await low_threshold_service.perform_operation(should_fail=True)
             except ValueError:

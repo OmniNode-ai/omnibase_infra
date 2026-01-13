@@ -1140,7 +1140,7 @@ class TestConcurrencyAndThreadSafety:
         assert mock_reducer.call_count == 10
 
         # Each result should have intents
-        for state, intents in results:
+        for _state, intents in results:
             assert len(intents) == 2  # consul and postgres
 
     @pytest.mark.asyncio

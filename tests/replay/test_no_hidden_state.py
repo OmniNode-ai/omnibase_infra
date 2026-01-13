@@ -431,7 +431,7 @@ class TestStateIsolation:
         """
         results: list[tuple] = []
 
-        for i in range(5):
+        for _ in range(5):
             node_id = id_generator.next_uuid()
             correlation_id = id_generator.next_uuid()
             clock.advance(60)
