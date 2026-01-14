@@ -526,26 +526,55 @@ class HandlerManifestPersistence(
         self._circuit_breaker_initialized = True
 
         # Parse retry_policy from configuration (matches contract defaults)
+        # Fail-fast: Invalid retry config raises ProtocolConfigurationError
         retry_policy = config.get("retry_policy")
         if isinstance(retry_policy, dict):
-            # max_retries (default: 3)
+            # max_retries (default: 3) - must be positive integer
             max_retries = retry_policy.get("max_retries")
-            if isinstance(max_retries, int) and max_retries > 0:
+            if max_retries is not None:
+                if not isinstance(max_retries, int) or max_retries <= 0:
+                    raise ProtocolConfigurationError(
+                        "Invalid retry_policy.max_retries: must be a positive "
+                        f"integer, got {type(max_retries).__name__}={max_retries!r}",
+                        context=ctx,
+                    )
                 self._retry_config["max_retries"] = max_retries
 
             # initial_delay_ms -> convert to seconds (default: 100ms = 0.1s)
             initial_delay_ms = retry_policy.get("initial_delay_ms")
-            if isinstance(initial_delay_ms, (int, float)) and initial_delay_ms > 0:
+            if initial_delay_ms is not None:
+                is_valid_type = isinstance(initial_delay_ms, (int, float))
+                if not is_valid_type or initial_delay_ms <= 0:
+                    raise ProtocolConfigurationError(
+                        "Invalid retry_policy.initial_delay_ms: must be a "
+                        f"positive number, got "
+                        f"{type(initial_delay_ms).__name__}={initial_delay_ms!r}",
+                        context=ctx,
+                    )
                 self._retry_config["initial_delay_seconds"] = initial_delay_ms / 1000.0
 
             # max_delay_ms -> convert to seconds (default: 5000ms = 5.0s)
             max_delay_ms = retry_policy.get("max_delay_ms")
-            if isinstance(max_delay_ms, (int, float)) and max_delay_ms > 0:
+            if max_delay_ms is not None:
+                if not isinstance(max_delay_ms, (int, float)) or max_delay_ms <= 0:
+                    raise ProtocolConfigurationError(
+                        "Invalid retry_policy.max_delay_ms: must be a positive "
+                        f"number, got {type(max_delay_ms).__name__}={max_delay_ms!r}",
+                        context=ctx,
+                    )
                 self._retry_config["max_delay_seconds"] = max_delay_ms / 1000.0
 
-            # exponential_base (default: 2.0)
+            # exponential_base (default: 2.0) - must be >= 1.0
             exponential_base = retry_policy.get("exponential_base")
-            if isinstance(exponential_base, (int, float)) and exponential_base >= 1.0:
+            if exponential_base is not None:
+                is_valid_type = isinstance(exponential_base, (int, float))
+                if not is_valid_type or exponential_base < 1.0:
+                    raise ProtocolConfigurationError(
+                        "Invalid retry_policy.exponential_base: must be a "
+                        f"number >= 1.0, got "
+                        f"{type(exponential_base).__name__}={exponential_base!r}",
+                        context=ctx,
+                    )
                 self._retry_config["exponential_base"] = float(exponential_base)
 
             logger.debug(
@@ -1034,16 +1063,22 @@ class HandlerManifestPersistence(
                     context=ctx,
                 )
 
-            # Scan year/month/day directories
+            # Scan year/month/day directories with performance tracking
+            scan_start_time = time.monotonic()
+            directories_scanned = 0
+
             for year_dir in sorted(self._storage_path.iterdir(), reverse=True):
                 if not year_dir.is_dir():
                     continue
+                directories_scanned += 1
                 for month_dir in sorted(year_dir.iterdir(), reverse=True):
                     if not month_dir.is_dir():
                         continue
+                    directories_scanned += 1
                     for day_dir in sorted(month_dir.iterdir(), reverse=True):
                         if not day_dir.is_dir():
                             continue
+                        directories_scanned += 1
                         manifest_file = day_dir / f"{manifest_id}.json"
                         if manifest_file.exists():
                             found_path = manifest_file
@@ -1052,6 +1087,18 @@ class HandlerManifestPersistence(
                         break
                 if found_path:
                     break
+
+            scan_duration = time.monotonic() - scan_start_time
+            logger.debug(
+                "Directory scan completed for retrieve",
+                extra={
+                    "duration_seconds": round(scan_duration, 6),
+                    "directories_scanned": directories_scanned,
+                    "manifest_found": found_path is not None,
+                    "manifest_id": str(manifest_id),
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
             if found_path:
                 # Check file size before reading
@@ -1285,21 +1332,29 @@ class HandlerManifestPersistence(
             manifests_data: list[dict[str, object]] = []
             count = 0
 
-            # Scan date directories
+            # Scan date directories with performance tracking
+            scan_start_time = time.monotonic()
+            files_scanned = 0
+            directories_scanned = 0
+
             for year_dir in sorted(self._storage_path.iterdir(), reverse=True):
                 if not year_dir.is_dir() or count >= limit:
                     continue
+                directories_scanned += 1
                 for month_dir in sorted(year_dir.iterdir(), reverse=True):
                     if not month_dir.is_dir() or count >= limit:
                         continue
+                    directories_scanned += 1
                     for day_dir in sorted(month_dir.iterdir(), reverse=True):
                         if not day_dir.is_dir() or count >= limit:
                             continue
+                        directories_scanned += 1
                         for manifest_file in sorted(
                             day_dir.glob("*.json"), reverse=True
                         ):
                             if count >= limit:
                                 break
+                            files_scanned += 1
 
                             try:
                                 file_stat = manifest_file.stat()
@@ -1408,6 +1463,19 @@ class HandlerManifestPersistence(
                                     },
                                 )
                                 continue
+
+            scan_duration = time.monotonic() - scan_start_time
+            logger.debug(
+                "Directory scan completed for query",
+                extra={
+                    "duration_seconds": round(scan_duration, 6),
+                    "directories_scanned": directories_scanned,
+                    "files_scanned": files_scanned,
+                    "matches_found": count,
+                    "limit": limit,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
             result = ModelManifestQueryResult(
                 manifests=manifests_metadata,

@@ -1492,29 +1492,67 @@ class TestRetryConfigurationFromInitialize:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_invalid_retry_config_values_ignored(
+    async def test_invalid_retry_config_values_raise_error(
         self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
-        """Invalid retry config values should be ignored.
+        """Invalid retry config values should raise ProtocolConfigurationError.
 
-        Invalid types or out-of-range values should fall back to defaults.
+        This is fail-fast behavior: configuration errors should fail during
+        initialize(), not silently be ignored at runtime.
         """
-        handler = await create_initialized_handler(
-            temp_storage_path,
-            mock_container,
-            retry_policy={
-                "max_retries": -1,  # Invalid: negative
-                "initial_delay_ms": "not_a_number",  # Invalid: wrong type
-                "exponential_base": 0.5,  # Invalid: < 1.0
-            },
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.handlers.handler_manifest_persistence import (
+            HandlerManifestPersistence,
         )
 
-        # All should fall back to defaults due to validation
-        assert handler._retry_config["max_retries"] == 3
-        assert handler._retry_config["initial_delay_seconds"] == 0.1
-        assert handler._retry_config["exponential_base"] == 2.0
+        handler = HandlerManifestPersistence(mock_container)
 
-        await handler.shutdown()
+        # Test invalid max_retries (negative)
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(
+                {
+                    "storage_path": str(temp_storage_path),
+                    "retry_policy": {"max_retries": -1},
+                }
+            )
+        assert "max_retries" in str(exc_info.value)
+        assert "positive integer" in str(exc_info.value)
+
+        # Test invalid initial_delay_ms (wrong type)
+        handler = HandlerManifestPersistence(mock_container)
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(
+                {
+                    "storage_path": str(temp_storage_path),
+                    "retry_policy": {"initial_delay_ms": "not_a_number"},
+                }
+            )
+        assert "initial_delay_ms" in str(exc_info.value)
+        assert "positive number" in str(exc_info.value)
+
+        # Test invalid exponential_base (< 1.0)
+        handler = HandlerManifestPersistence(mock_container)
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(
+                {
+                    "storage_path": str(temp_storage_path),
+                    "retry_policy": {"exponential_base": 0.5},
+                }
+            )
+        assert "exponential_base" in str(exc_info.value)
+        assert ">= 1.0" in str(exc_info.value)
+
+        # Test invalid max_delay_ms (zero)
+        handler = HandlerManifestPersistence(mock_container)
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(
+                {
+                    "storage_path": str(temp_storage_path),
+                    "retry_policy": {"max_delay_ms": 0},
+                }
+            )
+        assert "max_delay_ms" in str(exc_info.value)
+        assert "positive number" in str(exc_info.value)
 
 
 # =============================================================================
