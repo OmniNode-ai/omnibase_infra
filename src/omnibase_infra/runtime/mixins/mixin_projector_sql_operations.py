@@ -26,12 +26,14 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 import asyncpg
 
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
+from omnibase_infra.utils.util_datetime import ensure_timezone_aware
 
 if TYPE_CHECKING:
     from omnibase_core.models.projectors import (
@@ -111,6 +113,109 @@ class MixinProjectorSqlOperations:
         """Unique identifier for the projector (expected from implementing class)."""
         raise NotImplementedError("projector_id must be implemented by subclass")
 
+    def normalize_value(
+        self,
+        value: object,
+        column_name: str | None = None,
+    ) -> object:
+        """Normalize a value before SQL persistence.
+
+        Performs value normalization to ensure data consistency and prevent
+        common issues when persisting to PostgreSQL:
+
+        - **Datetime validation**: Ensures datetime values are timezone-aware.
+          Naive datetimes (without tzinfo) are automatically converted to UTC
+          with a warning log. This prevents subtle bugs when storing in
+          TIMESTAMPTZ columns.
+
+        - **Pass-through for other types**: Non-datetime values are returned
+          unchanged.
+
+        Args:
+            value: The value to normalize. Can be any type.
+            column_name: Optional column name for context in warning messages.
+                Helps identify the source of naive datetimes in logs.
+
+        Returns:
+            The normalized value. For datetimes, returns a timezone-aware
+            datetime. For other types, returns the original value unchanged.
+
+        Example:
+            >>> from datetime import datetime, UTC
+            >>> mixin = MixinProjectorSqlOperations()
+            >>>
+            >>> # Aware datetime passes through
+            >>> aware_dt = datetime.now(UTC)
+            >>> mixin.normalize_value(aware_dt, "updated_at") == aware_dt
+            True
+            >>>
+            >>> # Naive datetime is converted to UTC (with warning log)
+            >>> naive_dt = datetime(2025, 1, 15, 12, 0, 0)
+            >>> result = mixin.normalize_value(naive_dt, "created_at")
+            >>> result.tzinfo is not None
+            True
+            >>>
+            >>> # Non-datetime values pass through unchanged
+            >>> mixin.normalize_value("test", "name")
+            'test'
+            >>> mixin.normalize_value(123, "count")
+            123
+
+        Warning:
+            Naive datetimes are automatically converted to UTC to prevent
+            database errors, but this may mask timezone bugs in your code.
+            The warning log helps identify these issues. Prefer using
+            ``datetime.now(UTC)`` explicitly in your code.
+
+        Related:
+            - ensure_timezone_aware: The underlying datetime validation utility
+            - OMN-1170: Declarative contract projections
+            - PR #146: Datetime validation improvements
+        """
+        # Handle datetime timezone validation
+        if isinstance(value, datetime):
+            return ensure_timezone_aware(
+                value,
+                assume_utc=True,
+                warn_on_naive=True,
+                context=column_name,
+            )
+
+        # Pass through other types unchanged
+        return value
+
+    def _normalize_values(
+        self,
+        values: dict[str, object],
+    ) -> dict[str, object]:
+        """Normalize all values in a dictionary before SQL persistence.
+
+        Applies normalize_value() to each value in the dictionary, using the
+        key as the column_name context for any warnings.
+
+        Args:
+            values: Dictionary of column names to values.
+
+        Returns:
+            New dictionary with all values normalized.
+
+        Example:
+            >>> from datetime import datetime, UTC
+            >>> mixin = MixinProjectorSqlOperations()
+            >>> values = {
+            ...     "name": "test",
+            ...     "created_at": datetime(2025, 1, 15),  # Naive - will be converted
+            ...     "updated_at": datetime.now(UTC),      # Aware - passes through
+            ... }
+            >>> normalized = mixin._normalize_values(values)
+            >>> normalized["created_at"].tzinfo is not None  # Now timezone-aware
+            True
+        """
+        return {
+            column: self.normalize_value(value, column_name=column)
+            for column, value in values.items()
+        }
+
     async def _upsert(
         self,
         values: dict[str, object],
@@ -132,11 +237,15 @@ class MixinProjectorSqlOperations:
         Returns:
             Number of rows affected.
         """
+        # Normalize values (datetime timezone validation, etc.)
+        values = self._normalize_values(values)
+
         schema = self._contract.projection_schema
         behavior = self._contract.behavior
         table_quoted = quote_identifier(schema.table)
 
         # Normalize upsert_key to list for uniform handling
+        # schema.primary_key is a str field in omnibase_core.ModelProjectorSchema
         upsert_key = behavior.upsert_key or schema.primary_key
         upsert_key_list = [upsert_key] if isinstance(upsert_key, str) else upsert_key
         upsert_key_set = set(upsert_key_list)
@@ -205,6 +314,9 @@ class MixinProjectorSqlOperations:
             asyncpg.UniqueViolationError: On conflict (handled by caller
                 based on projection mode).
         """
+        # Normalize values (datetime timezone validation, etc.)
+        values = self._normalize_values(values)
+
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
 
@@ -386,10 +498,12 @@ class MixinProjectorSqlOperations:
         if not values:
             raise ValueError("values dict cannot be empty for partial_upsert")
 
+        # Normalize values (datetime timezone validation, etc.)
+        values = self._normalize_values(values)
+
         schema = self._contract.projection_schema
-        pk = schema.primary_key
-        # Normalize primary_key to list for composite key support
-        pk_list = [pk] if isinstance(pk, str) else list(pk)
+        # schema.primary_key is a str field in omnibase_core.ModelProjectorSchema
+        pk_list = [schema.primary_key]
 
         # Determine conflict columns (single or composite)
         conflict_cols = conflict_columns if conflict_columns else pk_list
@@ -539,12 +653,13 @@ class MixinProjectorSqlOperations:
         if not updates:
             raise ValueError("updates dict cannot be empty for partial_update")
 
+        # Normalize values (datetime timezone validation, etc.)
+        updates = self._normalize_values(updates)
+
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        # For composite keys, use first column as the single-value lookup key
-        pk = schema.primary_key
-        pk_column = pk if isinstance(pk, str) else pk[0]
-        pk_quoted = quote_identifier(pk_column)
+        # schema.primary_key is a str field in omnibase_core.ModelProjectorSchema
+        pk_quoted = quote_identifier(schema.primary_key)
 
         # Build SET clause with parameterized placeholders
         # Column names are quoted for SQL safety; values use $1, $2, etc.

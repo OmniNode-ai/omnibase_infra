@@ -4,6 +4,7 @@
 
 This package provides common utilities used across the infrastructure:
     - correlation: Correlation ID generation and propagation for distributed tracing
+    - util_datetime: Datetime validation and timezone normalization
     - util_dsn_validation: PostgreSQL DSN validation and sanitization
     - util_env_parsing: Type-safe environment variable parsing with validation
     - util_error_sanitization: Error message sanitization for secure logging and DLQ
@@ -16,6 +17,10 @@ from omnibase_infra.utils.correlation import (
     generate_correlation_id,
     get_correlation_id,
     set_correlation_id,
+)
+from omnibase_infra.utils.util_datetime import (
+    ensure_timezone_aware,
+    is_timezone_aware,
 )
 from omnibase_infra.utils.util_dsn_validation import (
     parse_and_validate_dsn,
@@ -44,8 +49,10 @@ __all__: list[str] = [
     "SEMVER_PATTERN",
     "SENSITIVE_PATTERNS",
     "clear_correlation_id",
+    "ensure_timezone_aware",
     "generate_correlation_id",
     "get_correlation_id",
+    "is_timezone_aware",
     "parse_and_validate_dsn",
     "parse_env_float",
     "parse_env_int",

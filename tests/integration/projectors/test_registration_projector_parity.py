@@ -53,8 +53,6 @@ from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
 from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 if TYPE_CHECKING:
-    from testcontainers.postgres import PostgresContainer
-
     # Type stub for deleted ProjectorRegistration - used only for type hints
     # in tests that are skipped due to missing legacy implementation.
     class ProjectorRegistration:
@@ -90,15 +88,36 @@ if TYPE_CHECKING:
 # contracts. Tests that compared legacy vs declarative behavior are marked with
 # `requires_legacy_projector` to indicate they need the legacy class to run.
 #
-# These tests are skipped until either:
-# 1. The legacy class is restored for parity verification, OR
-# 2. These tests are converted to test ProjectorShell directly
+# The availability is checked dynamically at import time. If the legacy class
+# is restored (e.g., for parity verification), these tests will run automatically.
 #
-LEGACY_PROJECTOR_AVAILABLE = False
+
+
+def _check_legacy_projector_available() -> bool:
+    """Check if legacy ProjectorRegistration is available.
+
+    This function attempts to import the legacy ProjectorRegistration class
+    to determine if parity tests should run. The import is done at module
+    load time to set the skip marker appropriately.
+
+    Returns:
+        bool: True if ProjectorRegistration can be imported, False otherwise.
+    """
+    try:
+        from omnibase_infra.projectors.projector_registration import (
+            ProjectorRegistration,
+        )
+
+        return True
+    except ImportError:
+        return False
+
+
+LEGACY_PROJECTOR_AVAILABLE = _check_legacy_projector_available()
 LEGACY_SKIP_REASON = (
-    "Legacy ProjectorRegistration was deleted in OMN-1170. "
+    "Legacy ProjectorRegistration not available. "
     "Parity tests require the legacy implementation to compare against. "
-    "See: src/omnibase_infra/projectors/projector_registration.py (deleted)"
+    "See: src/omnibase_infra/projectors/projector_registration.py"
 )
 
 # Marker for tests requiring legacy projector

@@ -217,18 +217,9 @@ async def projector(pg_pool: asyncpg.Pool) -> ProjectorShell:
     """
     from omnibase_infra.runtime import ProjectorPluginLoader
 
-    # Path to registration projector contract
-    contract_path = (
-        Path(__file__).parent.parent.parent.parent
-        / "src"
-        / "omnibase_infra"
-        / "projectors"
-        / "contracts"
-        / "registration_projector.yaml"
-    )
-
+    # Use exported constant for canonical contract location
     loader = ProjectorPluginLoader(pool=pg_pool)
-    projector = await loader.load_from_contract(contract_path)
+    projector = await loader.load_from_contract(REGISTRATION_PROJECTOR_CONTRACT)
 
     # Type narrowing - loader with pool returns ProjectorShell, not placeholder
     from omnibase_infra.runtime import ProjectorShell

@@ -467,10 +467,8 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        # For composite keys, use first column as the single-value lookup key
-        pk = schema.primary_key
-        pk_column = pk if isinstance(pk, str) else pk[0]
-        pk_quoted = quote_identifier(pk_column)
+        # primary_key is a str field in omnibase_core.ModelProjectorSchema
+        pk_quoted = quote_identifier(schema.primary_key)
 
         # Build SELECT query - table/column names from trusted contract
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
@@ -572,10 +570,8 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        # For composite keys, use first column as the single-value lookup key
-        pk = schema.primary_key
-        pk_column = pk if isinstance(pk, str) else pk[0]
-        pk_quoted = quote_identifier(pk_column)
+        # primary_key is a str field in omnibase_core.ModelProjectorSchema
+        pk_quoted = quote_identifier(schema.primary_key)
 
         # Build SELECT query with IN clause for bulk fetch
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
@@ -591,7 +587,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
             result: dict[UUID, dict[str, object]] = {}
             for row in rows:
                 row_dict: dict[str, object] = dict(row)
-                aggregate_id = row_dict.get(pk_column)
+                aggregate_id = row_dict.get(schema.primary_key)
                 if isinstance(aggregate_id, UUID):
                     result[aggregate_id] = row_dict
 

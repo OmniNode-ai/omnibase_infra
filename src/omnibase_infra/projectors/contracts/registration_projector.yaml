@@ -38,27 +38,12 @@ consumed_events:
   - node.liveness_expired.v1
 projection_schema:
   table: registration_projections
-  # Primary key column for contract validation and ON CONFLICT clause.
-  #
-  # COMPOSITE KEY HANDLING:
-  #   The SQL schema uses a composite PK (entity_id, domain) for multi-domain support.
-  #   However, omnibase-core's ModelProjectorSchema.primary_key only supports str,
-  #   not str | list[str]. Until composite key support is added to omnibase-core,
-  #   this contract specifies only the first key column.
-  #
-  # RUNTIME REQUIREMENTS:
-  #   For ON CONFLICT (entity_id) to work, the SQL schema MUST include:
-  #     UNIQUE (entity_id)  -- separate from the composite PK
-  #   This allows entity_id-based upserts while preserving composite PK semantics.
-  #
-  # ALTERNATIVE for composite key upserts:
-  #   Use ProjectorShell.upsert_partial() with explicit conflict_columns parameter:
-  #     await projector.upsert_partial(entity_id, values, correlation_id,
-  #                                    conflict_columns=["entity_id", "domain"])
-  #
-  # See: schema_registration_projection.sql for the unique constraint definition.
-  # See: projector_shell.py upsert_partial() for composite key support.
-  primary_key: entity_id
+  # Composite primary key for multi-domain support.
+  # The SQL schema defines: PRIMARY KEY (entity_id, domain)
+  # See: schema_registration_projection.sql
+  primary_key:
+    - entity_id
+    - domain
   columns:
     # ==========================================================================
     # IDENTITY COLUMNS (Composite Primary Key)
@@ -275,20 +260,12 @@ projection_schema:
 # ==============================================================================
 behavior:
   mode: upsert
-  # Upsert key column for ON CONFLICT clause in generated SQL.
-  #
-  # COMPOSITE KEY HANDLING:
-  #   The SQL schema uses a composite PK (entity_id, domain), but omnibase-core's
-  #   ModelProjectorBehavior.upsert_key only supports str, not str | list[str].
-  #
-  # RUNTIME REQUIREMENTS:
-  #   The SQL schema MUST include: UNIQUE (entity_id)
-  #   This allows ON CONFLICT (entity_id) DO UPDATE to work correctly.
-  #   Without this unique constraint, PostgreSQL will error:
-  #     "there is no unique or exclusion constraint matching the ON CONFLICT specification"
-  #
-  # See: projection_schema.primary_key comment above for composite key alternatives.
-  upsert_key: entity_id
+  # Composite upsert key matching the database primary key.
+  # ON CONFLICT (entity_id, domain) DO UPDATE will be used for upserts.
+  # See: projection_schema.primary_key for the composite key definition.
+  upsert_key:
+    - entity_id
+    - domain
   idempotency:
     enabled: true
     # Uses offset-based ordering for Kafka, sequence-based for other transports
