@@ -47,6 +47,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
+from omnibase_infra.runtime.mixins import MixinProjectorSqlOperations
 
 if TYPE_CHECKING:
     from omnibase_core.models.projectors.model_projector_column import (
@@ -56,7 +57,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ProjectorShell:
+class ProjectorShell(MixinProjectorSqlOperations):
     """Generic contract-driven projector implementation.
 
     Transforms events into persistent state projections based on a
@@ -625,157 +626,6 @@ class ProjectorShell:
         else:
             # This should never happen due to contract validation
             raise ValueError(f"Unknown projection mode: {mode}")
-
-    async def _upsert(
-        self,
-        values: dict[str, object],
-        correlation_id: UUID,
-    ) -> int:
-        """Execute upsert (INSERT ON CONFLICT DO UPDATE).
-
-        Uses the contract's upsert_key for conflict detection. When all columns
-        are part of the upsert key (i.e., no updatable columns), uses
-        DO NOTHING to avoid generating invalid SQL with empty SET clause.
-
-        Args:
-            values: Column name to value mapping.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            Number of rows affected.
-        """
-        schema = self._contract.projection_schema
-        behavior = self._contract.behavior
-        table_quoted = quote_identifier(schema.table)
-        upsert_key = behavior.upsert_key or schema.primary_key
-        upsert_key_quoted = quote_identifier(upsert_key)
-
-        # Build column lists
-        columns = list(values.keys())
-        if not columns:
-            logger.warning(
-                "No columns to upsert",
-                extra={
-                    "projector_id": self.projector_id,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return 0
-
-        # Build parameterized INSERT ... ON CONFLICT DO UPDATE
-        column_list = ", ".join(quote_identifier(col) for col in columns)
-        param_list = ", ".join(f"${i + 1}" for i in range(len(columns)))
-        updatable_columns = [col for col in columns if col != upsert_key]
-
-        # S608: Safe - identifiers quoted via quote_identifier(), not user input
-        if updatable_columns:
-            # Normal case: columns to update on conflict
-            update_list = ", ".join(
-                f"{quote_identifier(col)} = EXCLUDED.{quote_identifier(col)}"
-                for col in updatable_columns
-            )
-            sql = f"""
-                INSERT INTO {table_quoted} ({column_list})
-                VALUES ({param_list})
-                ON CONFLICT ({upsert_key_quoted}) DO UPDATE SET {update_list}
-            """  # noqa: S608
-        else:
-            # Edge case: all columns are part of primary key - no columns to update
-            # Use DO NOTHING to avoid invalid SQL with empty SET clause
-            sql = f"""
-                INSERT INTO {table_quoted} ({column_list})
-                VALUES ({param_list})
-                ON CONFLICT ({upsert_key_quoted}) DO NOTHING
-            """  # noqa: S608
-
-        params = list(values.values())
-
-        async with self._pool.acquire() as conn:
-            result = await conn.execute(sql, *params, timeout=self._query_timeout)
-
-        # Parse row count from result (e.g., "INSERT 0 1" -> 1)
-        return self._parse_row_count(result)
-
-    async def _insert(
-        self,
-        values: dict[str, object],
-        correlation_id: UUID,
-    ) -> int:
-        """Execute INSERT (fail on conflict).
-
-        Args:
-            values: Column name to value mapping.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            Number of rows affected.
-
-        Raises:
-            asyncpg.UniqueViolationError: On conflict (handled by caller
-                based on projection mode).
-        """
-        schema = self._contract.projection_schema
-        table_quoted = quote_identifier(schema.table)
-
-        columns = list(values.keys())
-        if not columns:
-            logger.warning(
-                "No columns to insert",
-                extra={
-                    "projector_id": self.projector_id,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return 0
-
-        column_list = ", ".join(quote_identifier(col) for col in columns)
-        param_list = ", ".join(f"${i + 1}" for i in range(len(columns)))
-
-        # S608: Safe - identifiers quoted via quote_identifier(), not user input
-        sql = f"INSERT INTO {table_quoted} ({column_list}) VALUES ({param_list})"  # noqa: S608
-
-        params = list(values.values())
-
-        async with self._pool.acquire() as conn:
-            result = await conn.execute(sql, *params, timeout=self._query_timeout)
-
-        return self._parse_row_count(result)
-
-    async def _append(
-        self,
-        values: dict[str, object],
-        correlation_id: UUID,
-    ) -> int:
-        """Execute INSERT (always append, event-log style).
-
-        Similar to insert, but semantically indicates this is an
-        append-only projection where conflicts are unexpected.
-
-        Args:
-            values: Column name to value mapping.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            Number of rows affected.
-        """
-        # Implementation is same as insert - semantic difference only
-        return await self._insert(values, correlation_id)
-
-    def _parse_row_count(self, result: str) -> int:
-        """Parse row count from asyncpg execute result.
-
-        Args:
-            result: Result string from conn.execute (e.g., "INSERT 0 1").
-
-        Returns:
-            Number of rows affected.
-        """
-        # asyncpg returns strings like "INSERT 0 1", "UPDATE 3", etc.
-        # The last number is the row count
-        parts = result.split()
-        if parts and parts[-1].isdigit():
-            return int(parts[-1])
-        return 0
 
     def __repr__(self) -> str:
         """Return string representation."""

@@ -1379,7 +1379,14 @@ class TestProjectorShellGetState:
         result = await projector.get_state(aggregate_id, correlation_id)
 
         assert result is not None
-        assert isinstance(result, dict)
+        # Duck typing: verify dict-like behavior instead of isinstance check
+        # per ONEX principle: "Protocol Resolution - Duck typing, never isinstance"
+        assert hasattr(result, "__getitem__"), (
+            f"get_state result should support item access, got {type(result)}"
+        )
+        assert hasattr(result, "keys") and callable(result.keys), (
+            f"get_state result should have keys() method, got {type(result)}"
+        )
         assert result["id"] == aggregate_id
         assert result["status"] == "confirmed"
 
