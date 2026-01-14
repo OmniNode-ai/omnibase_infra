@@ -668,12 +668,22 @@ class PolicyServiceValidationError(ProtocolConfigurationError):
     Extends ProtocolConfigurationError to integrate with ONEX error handling.
     Use this for custom validation that goes beyond namespace prefix matching.
 
+    IMPORTANT - Error Code Domain Separation:
+        This error uses POLICY_SERVICE_xxx codes which are DISTINCT from
+        EnumHandlerLoaderError (HANDLER_LOADER_xxx) codes. This separation
+        reflects different validation domains:
+
+        - HANDLER_LOADER_xxx: Built-in loader validation (file not found,
+          invalid YAML, protocol not implemented, namespace not allowed, etc.)
+        - POLICY_SERVICE_xxx: External policy service validation (approval
+          service rejection, hash verification, etc.)
+
     NOTE: For namespace validation, prefer the built-in `allowed_namespaces`
     parameter which uses EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED
     (HANDLER_LOADER_013). This custom error is for additional validation
     scenarios like external policy service integration.
 
-    Error Codes:
+    Error Codes (POLICY_SERVICE domain - not EnumHandlerLoaderError):
         POLICY_SERVICE_001: External policy service rejected handler
         POLICY_SERVICE_002: Policy service unavailable
         POLICY_SERVICE_003: Handler hash not in approved list
@@ -690,8 +700,9 @@ class PolicyServiceValidationError(ProtocolConfigurationError):
 
         Args:
             message: Human-readable error message
-            error_code: Error code for categorization (e.g., "POLICY_SERVICE_001")
-            context: Optional infrastructure error context
+            error_code: Error code for categorization (e.g., "POLICY_SERVICE_001").
+                        Uses POLICY_SERVICE_xxx codes, NOT EnumHandlerLoaderError.
+            context: Optional infrastructure error context with correlation_id
             **kwargs: Additional context fields
         """
         super().__init__(message, context=context, **kwargs)

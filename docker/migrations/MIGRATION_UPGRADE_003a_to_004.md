@@ -41,20 +41,21 @@ The renumbering to `004` makes it explicit that this is a standalone migration t
 
 For **new databases** or databases where **no ONEX migrations have been applied yet** (empty `registration_projections` table or table does not exist).
 
+**Key point**: Fresh deployments only need migrations 001-003. Migration 004 is NOT required because standard indexes on empty tables complete instantly.
+
 ```bash
-# Apply base schema
+# Apply all migrations in sequence
 psql -h $HOST -d $DB -f 001_registration_projection.sql
 psql -h $HOST -d $DB -f 002_updated_at_audit_index.sql
-
-# Apply capability fields with standard indexes
-# This is sufficient for ALL fresh deployments (dev, staging, and production)
 psql -h $HOST -d $DB -f 003_capability_fields.sql
-# Done - this creates columns AND standard indexes
+
+# Done - migration 003 creates columns AND indexes
+# Migration 004 is NOT needed for fresh deployments
 ```
 
-> **Why migration 003 is sufficient for fresh deployments**: On an empty or new table, `CREATE INDEX` completes instantly with no blocking. The concurrent index variant (migration 004) is only needed when adding indexes to **existing tables with data** where you cannot afford brief write locks.
+> **Why migration 003 is sufficient**: On an empty table, `CREATE INDEX` completes instantly with no blocking. The concurrent index variant (migration 004) is only needed when adding indexes to **existing tables with data** where you cannot afford brief write locks.
 
-**When to use migration 004 instead**: If you are adding migrations to a database that **already has data** in the `registration_projections` table (>100K rows), see Scenario 3 for the upgrade path using concurrent indexes.
+**When to use migration 004 instead**: Only if you are adding migrations to a database that **already has data** in the `registration_projections` table (>100K rows). See Scenario 3 for that upgrade path.
 
 ### Scenario 2: Production Database with 003a Already Applied
 

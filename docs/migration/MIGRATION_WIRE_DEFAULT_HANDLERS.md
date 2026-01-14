@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The `wire_default_handlers()` function and its companion `wire_handlers_from_contract()` are replaced by contract-driven handler discovery via `HandlerPluginLoader` and `ContractHandlerDiscovery`. This migration eliminates hardcoded handler registrations in favor of YAML-based handler contracts.
+The `wire_default_handlers()` function and its related helper `wire_handlers_from_contract()` (which loads handlers from a contract path) are replaced by contract-driven handler discovery via `HandlerPluginLoader` and `ContractHandlerDiscovery`. This migration eliminates hardcoded handler registrations in favor of YAML-based handler contracts.
 
 **Project Policy Reminder**: Per CLAUDE.md, there is NO backwards compatibility. Breaking changes are acceptable and encouraged. Old patterns should be removed immediately.
 

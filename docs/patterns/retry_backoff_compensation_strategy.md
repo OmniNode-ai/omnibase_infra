@@ -465,11 +465,14 @@ class SagaExecutor:
     """Execute saga with automatic compensation on failure.
 
     Transport Type Selection:
-        The transport_type parameter is used in CompensationFailedError context
-        for observability and categorization. Choose based on your use case:
+        The transport_type parameter is CONFIGURABLE via constructor (not hardcoded)
+        and is used in CompensationFailedError context for observability and
+        categorization. Choose based on your use case:
 
         **Recommended for Compensation Errors**:
         - RUNTIME: For saga orchestration errors (compensation is a runtime concern)
+          This is the default since saga compensation is an internal orchestration
+          concern, not tied to a specific external transport.
 
         **Alternative: Entry Point Transport**:
         - HTTP: REST API-triggered sagas (when correlation with trigger matters)
@@ -480,6 +483,13 @@ class SagaExecutor:
         accurate since compensation is an internal orchestration concern. Use
         the trigger transport (HTTP, KAFKA) when you need to correlate
         compensation failures with the original request source.
+
+        **Configuration Example**:
+            # Default: RUNTIME (recommended for most saga orchestration)
+            saga = SagaExecutor()
+
+            # Override for API-triggered sagas
+            saga = SagaExecutor(transport_type=EnumInfraTransportType.HTTP)
 
         Note: Individual saga steps may interact with multiple transports.
         The executor's transport_type represents the error categorization,

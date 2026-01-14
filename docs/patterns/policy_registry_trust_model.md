@@ -147,17 +147,42 @@ class PolicyRegistryError(RuntimeHostError):
     Extends RuntimeHostError to integrate with ONEX error handling.
     Provides policy-specific context for debugging and monitoring.
 
-    Error Codes:
+    Error Codes (POLICY_REG domain):
         POLICY_REG_001: Policy not registered (lookup failure)
+            - Use when: get() called for unregistered policy_id
+            - Context: Include policy_id in error
         POLICY_REG_002: Policy has async methods (sync enforcement violation)
+            - Use when: policy class has async methods but allow_async=False
+            - Context: Include policy_id and method names
         POLICY_REG_003: Invalid policy type identifier
+            - Use when: policy_type not in EnumPolicyType
+            - Context: Include provided policy_type value
         POLICY_REG_004: Policy protocol not implemented
+            - Use when: policy class missing required ProtocolPolicy methods
+            - Context: Include policy class name and missing methods
         POLICY_REG_005: Policy registration limit exceeded
+            - Use when: registry capacity exceeded (if limits configured)
+            - Context: Include current count and limit
         POLICY_REG_006: Code review not approved
+            - Use when: ReviewedPolicyRegistry rejects unreviewed policy
+            - Context: Include policy_id and code_hash
         POLICY_REG_007: Static analysis failed
+            - Use when: SecureRegistryWrapper security scan fails
+            - Context: Include policy_id and scan issues
         POLICY_REG_008: Not in allowlist
+            - Use when: AllowlistEnforcedRegistry rejects non-allowlisted policy
+            - Context: Include policy_id
         POLICY_REG_009: Timeout exceeded
+            - Use when: execute_policy_safely() times out
+            - Context: Include policy_id and timeout_seconds
         POLICY_REG_010: Memory exceeded
+            - Use when: execute_policy_safely() exceeds memory limit
+            - Context: Include policy_id and max_memory_mb
+
+    All errors should include:
+        - correlation_id: For request tracing (required in ModelInfraErrorContext)
+        - policy_id: The policy that caused the error (when available)
+        - error_code: The POLICY_REG_xxx code for categorization
     """
 
     def __init__(

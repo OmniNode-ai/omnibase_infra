@@ -49,8 +49,9 @@ Sub-migrations are companion scripts related to a main migration. They share the
 
 **Ordering:**
 - Sub-migrations (`003a`, `003b`, etc.) always relate to their parent (`003`)
-- Execute in alphabetical order: `003` -> `003a` -> `003b` (if multiple exist)
+- Execute in alphabetical order: `003` -> `003a` -> `003b` (when multiple sub-migrations exist)
 - Check migration header comments for specific ordering requirements
+- Example: A rollback script `003a_rollback.sql` would execute after `003_capability_fields.sql`
 
 ## Modifier Suffixes
 
@@ -99,15 +100,13 @@ Indicates a migration designed for **production environments with live traffic**
 
 **Next available:**
 - Next main migration: `005_*.sql`
-- Next sub-migration: `003a_*.sql` or `004a_*.sql` (for rollback/companion scripts)
+- Sub-migrations for rollback/companion scripts: `003a_*.sql`, `004a_*.sql`
 
-> **Slot availability**:
-> - `003a` slot is available (the original `003a_capability_fields_concurrent.sql` was promoted to `004`)
-> - `004a` slot is available for rollback/cleanup scripts related to migration 004
-> - Prefer main sequence numbers (`005`) for new features
-> - Use letter suffixes only for rollback scripts or optional companions closely related to their parent
+> **Slot availability**: Both `003a` and `004a` are available for rollback or companion scripts. The original `003a_capability_fields_concurrent.sql` was promoted to main sequence `004`, freeing the `003a` slot.
 >
-> **Upgrade path from 003a to 004**: If your database has the old `003a` applied, no action is needed - the SQL is identical to `004`. See `MIGRATION_UPGRADE_003a_to_004.md` for verification steps and detailed upgrade scenarios.
+> **Best practice**: Use main sequence numbers (`005`, `006`, etc.) for new features. Reserve letter suffixes for rollback scripts or optional companions that are tightly coupled to their parent migration.
+>
+> **Upgrade path from 003a to 004**: If your database has the old `003a` applied, no action is needed - the SQL is identical to `004`. See `MIGRATION_UPGRADE_003a_to_004.md` for verification steps.
 
 ## Migration Header Requirements
 
@@ -182,7 +181,7 @@ WHERE NOT indisvalid;
 **Decision tree for next migration:**
 
 1. Is this a production-optimized variant? -> Use next main number with `_concurrent` suffix
-2. Is this a rollback/cleanup for an existing migration? -> Use letter suffix (e.g., `003a` is available)
+2. Is this a rollback/cleanup for an existing migration? -> Use letter suffix (e.g., `003a_rollback.sql` for migration 003)
 3. Otherwise -> Use next main number (`005`)
 
 ## Migration Validation

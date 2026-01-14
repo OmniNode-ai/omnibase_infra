@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 logger = logging.getLogger(__name__)
 
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.runtime.model_contract_security_config import (
     ModelContractSecurityConfig,
 )
@@ -245,7 +246,7 @@ class ModelHandlerContract(BaseModel):
             if self.handler_name.startswith(prefix):
                 derived = self.handler_name[len(prefix) :]
                 if not derived:
-                    raise ValueError(
+                    raise ProtocolConfigurationError(
                         f"Cannot derive protocol_type from handler_name '{self.handler_name}': "
                         f"result would be empty. Either provide an explicit protocol_type "
                         f"or use a handler_name with content after the 'handler-' prefix."
@@ -256,11 +257,22 @@ class ModelHandlerContract(BaseModel):
 
         # Final guard: ensure protocol_type is never empty
         if not self.protocol_type:
-            raise ValueError(
+            raise ProtocolConfigurationError(
                 f"protocol_type cannot be empty. handler_name='{self.handler_name}', "
                 f"derived protocol_type='{self.protocol_type}'. "
                 f"Provide a non-empty protocol_type or handler_name."
             )
+
+        # Log successful protocol_type derivation for debugging
+        logger.debug(
+            "Handler contract validated successfully",
+            extra={
+                "handler_name": self.handler_name,
+                "handler_class": self.handler_class,
+                "protocol_type": self.protocol_type,
+                "handler_type": self.handler_type.value,
+            },
+        )
 
         return self
 

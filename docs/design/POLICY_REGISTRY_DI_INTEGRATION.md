@@ -696,7 +696,7 @@ registry.register_policy(
 2. Update examples and documentation
 3. Add integration tests with real ModelOnexContainer
 4. Update all consumers to container-based DI
-3. Update `ProtocolBindingRegistry` and `EventBusBindingRegistry` to use container
+5. Update `ProtocolBindingRegistry` and `EventBusBindingRegistry` to use container
 
 ## Risks and Mitigations
 

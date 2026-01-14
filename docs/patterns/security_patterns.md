@@ -560,13 +560,17 @@ ROLE_PERMISSIONS: Final[dict[EnumRole, frozenset[EnumPermission]]] = {
 
 
 class AuthorizationContext(BaseModel):
-    """Context for authorization decisions."""
+    """Context for authorization decisions.
+
+    All authorization decisions include a correlation_id for traceability
+    and integration with ONEX observability patterns.
+    """
 
     user_id: UUID
     roles: frozenset[EnumRole]
     resource_id: str
     action: EnumPermission
-    correlation_id: UUID | None = None
+    correlation_id: UUID  # Required for traceability per ONEX error patterns
 
     def is_authorized(self) -> bool:
         """Check if action is authorized for user's roles."""
@@ -594,7 +598,7 @@ def require_permission(permission: EnumPermission):
                     transport_type=EnumInfraTransportType.HTTP,
                     operation="authorization_check",
                     target_name="permission_guard",
-                    correlation_id=getattr(ctx, 'correlation_id', None),
+                    correlation_id=ctx.correlation_id,  # Required field, always present
                 )
                 raise InfraAuthenticationError(
                     f"Authorization denied: permission {permission.value} required",
