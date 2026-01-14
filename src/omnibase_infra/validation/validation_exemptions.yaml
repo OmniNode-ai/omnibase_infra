@@ -1537,10 +1537,10 @@ pattern_exemptions:
   # - Value extraction (_extract_values, _resolve_path, _get_event_type)
   # - Utility (_parse_row_count)
   # Total: 11 methods, all cohesive to the projector contract pattern.
-  # NOTE: Pattern uses (?:^|/) anchor which requires start-of-string or /
-  # before 'projector_shell.py'. This prevents matching test_projector_shell.py
-  # since 'test_' prefix means no / immediately before 'projector_shell'.
-  - file_pattern: '(?:^|/)projector_shell\.py'
+  # NOTE: Pattern anchored with runtime/ prefix and $ suffix to match only the
+  # production file at src/omnibase_infra/runtime/projector_shell.py.
+  # This prevents matching test files like test_projector_shell.py.
+  - file_pattern: 'runtime/projector_shell\.py$'
     class_pattern: "Class 'ProjectorShell'"
     violation_pattern: 'has \d+ methods'
     reason: >

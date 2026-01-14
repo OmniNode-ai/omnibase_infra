@@ -20,7 +20,8 @@ Expected Behavior:
     1. Filters events based on consumed_events in the contract
     2. Extracts values from event envelopes using source path expressions
     3. Writes projections to PostgreSQL using asyncpg with configurable modes
-    4. Supports idempotent event replay via sequence number tracking
+    4. Supports idempotent event replay via envelope-based deduplication
+       (configurable idempotency key, typically envelope_id)
     5. Implements ProtocolEventProjector for runtime integration
 """
 
@@ -369,12 +370,21 @@ class TestProjectorShellEventFiltering:
 
         assert result.success is True
         assert result.skipped is False
-        # Strict assertion: exactly 1 row should be affected to catch rowcount regressions
+        # Strict assertion: exactly 1 row should be affected
+        # to catch rowcount regressions
         assert result.rows_affected == 1, (
             f"Expected exactly 1 row affected, got {result.rows_affected}"
         )
         # Should interact with database for consumed events
         mock_pool.acquire.assert_called()
+        # Verify execute was actually called (not just acquire)
+        mock_conn = mock_pool._mock_conn
+        assert mock_conn.execute.called, (
+            "Database execute() should be called for consumed events"
+        )
+        assert mock_conn.execute.call_count == 1, (
+            f"Expected exactly 1 execute() call, got {mock_conn.execute.call_count}"
+        )
 
     @pytest.mark.asyncio
     async def test_filter_by_exact_event_type_match(
@@ -759,11 +769,20 @@ class TestProjectorShellProjectionModes:
 
         assert result.success is True
         assert result.rows_affected == 1
-        # Verify UPSERT SQL was generated - must include ON CONFLICT for upsert mode
+        # Verify UPSERT SQL was generated - strict assertions for upsert mode
         call_args = mock_conn.execute.call_args
         assert call_args is not None
         sql = call_args[0][0]
+        # Strict: Must have both ON CONFLICT and DO UPDATE for proper upsert behavior
         assert "ON CONFLICT" in sql, "Upsert mode must generate ON CONFLICT clause"
+        assert "DO UPDATE" in sql, (
+            "Upsert mode must generate DO UPDATE clause (not DO NOTHING)"
+        )
+        # Verify primary key is referenced in conflict target (quoted)
+        # quote_identifier wraps identifiers in double quotes for SQL safety
+        assert '("id")' in sql, (
+            "ON CONFLICT clause must reference quoted primary key column"
+        )
 
     @pytest.mark.asyncio
     async def test_upsert_mode_updates_existing_record(
@@ -1063,15 +1082,19 @@ class TestProjectorShellIdempotency:
         assert result3.success is True
 
     @pytest.mark.asyncio
-    async def test_sequence_number_tracked(
+    async def test_envelope_based_idempotency_tracking(
         self,
         mock_pool: AsyncMock,
     ) -> None:
-        """Sequence number is used for idempotency tracking.
+        """Envelope ID is used for idempotency tracking (deduplication).
 
-        Given: idempotency config with sequence tracking
-        When: events projected with sequence numbers
-        Then: duplicate sequences are handled correctly
+        Given: idempotency config with envelope_id key
+        When: events projected with idempotency enabled
+        Then: duplicate events (same envelope_id) are handled correctly
+
+        Note: The idempotency mechanism uses a configurable key (typically
+        envelope_id) for deduplication, not sequence numbers. This test
+        verifies the idempotency configuration is respected during projection.
         """
         from omnibase_core.models.projectors.model_idempotency_config import (
             ModelIdempotencyConfig,
@@ -1139,6 +1162,19 @@ class TestProjectorShellIdempotency:
 
         assert result.success is True
 
+        # Verify idempotency configuration is accessible and correctly set
+        assert projector.contract.behavior.idempotency is not None
+        assert projector.contract.behavior.idempotency.enabled is True
+        assert projector.contract.behavior.idempotency.key == "envelope_id"
+
+        # Verify the envelope_id was used in the projection
+        # (idempotency key should be extractable from envelope)
+        extracted_key = projector._resolve_path(envelope, "envelope_id")
+        assert extracted_key == envelope_id, (
+            f"Idempotency key (envelope_id) should resolve to "
+            f"{envelope_id}, got {extracted_key}"
+        )
+
 
 # =============================================================================
 # Protocol Compliance Tests
@@ -1152,10 +1188,12 @@ class TestProjectorShellProtocolCompliance:
     the ProtocolEventProjector interface.
     """
 
-    def test_implements_protocol_event_projector(
+    @pytest.mark.asyncio
+    async def test_implements_protocol_event_projector(
         self,
         sample_contract: ModelProjectorContract,
         mock_pool: AsyncMock,
+        sample_event_envelope: ModelEventEnvelope[OrderCreatedPayload],
     ) -> None:
         """ProjectorShell implements ProtocolEventProjector.
 
@@ -1164,7 +1202,7 @@ class TestProjectorShellProtocolCompliance:
         protocols, never isinstance.
 
         Verifies both structural compliance (hasattr/callable) and behavioral
-        compliance (properties return expected types).
+        compliance (actual method invocation to verify protocol contract).
         """
         from omnibase_infra.runtime.projector_shell import ProjectorShell
 
@@ -1184,25 +1222,64 @@ class TestProjectorShellProtocolCompliance:
         assert hasattr(projector, "get_state")
         assert callable(getattr(projector, "get_state", None))
 
-        # Behavioral checks: verify properties return expected types
-        # This catches implementation bugs where properties are defined but return wrong types
-        assert isinstance(projector.projector_id, str), (
-            f"projector_id should be str, got {type(projector.projector_id)}"
-        )
-        assert isinstance(projector.aggregate_type, str), (
-            f"aggregate_type should be str, got {type(projector.aggregate_type)}"
-        )
-        assert isinstance(projector.consumed_events, list), (
-            f"consumed_events should be list, got {type(projector.consumed_events)}"
-        )
-        assert isinstance(projector.is_placeholder, bool), (
-            f"is_placeholder should be bool, got {type(projector.is_placeholder)}"
+        # BEHAVIORAL CHECK: Actually invoke protocol methods to verify contract
+        # This catches implementation bugs where methods exist but don't work
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "INSERT 0 1"
+        mock_conn.fetchrow.return_value = None
+
+        correlation_id = uuid4()
+
+        # Invoke project() - verifies method signature and return type
+        project_result = await projector.project(sample_event_envelope, correlation_id)
+        assert project_result is not None, "project() must return a result"
+        assert hasattr(project_result, "success"), (
+            "project() result must have 'success' attribute"
         )
 
-        # Verify consumed_events contains strings (event type identifiers)
-        for event in projector.consumed_events:
-            assert isinstance(event, str), (
-                f"consumed_events items should be str, got {type(event)}"
+        # Invoke get_state() - verifies method signature and return type
+        # get_state returns None when not found, which is valid
+        # The key assertion is that it doesn't raise an exception
+        _ = await projector.get_state(uuid4(), correlation_id)
+
+        # Behavioral checks: verify properties return expected types via duck typing
+        # Uses duck typing (method/attribute checks) instead of isinstance
+        # per ONEX principle: "Protocol Resolution - Duck typing, never isinstance"
+
+        # String duck typing: verify str-like behavior via upper() method
+        projector_id_value = projector.projector_id
+        has_upper = hasattr(projector_id_value, "upper")
+        upper_callable = callable(getattr(projector_id_value, "upper", None))
+        assert has_upper and upper_callable, (
+            f"projector_id should behave like str, got {type(projector_id_value)}"
+        )
+
+        aggregate_type_value = projector.aggregate_type
+        has_upper = hasattr(aggregate_type_value, "upper")
+        upper_callable = callable(getattr(aggregate_type_value, "upper", None))
+        assert has_upper and upper_callable, (
+            f"aggregate_type should behave like str, got {type(aggregate_type_value)}"
+        )
+
+        # List duck typing: verify list-like behavior via iteration and __len__
+        consumed_events_value = projector.consumed_events
+        is_iterable = hasattr(consumed_events_value, "__iter__")
+        has_len = hasattr(consumed_events_value, "__len__")
+        assert is_iterable and has_len, (
+            f"consumed_events should behave like list, "
+            f"got {type(consumed_events_value)}"
+        )
+
+        # Bool duck typing: verify exact boolean values (not just truthy/falsy)
+        is_placeholder_value = projector.is_placeholder
+        assert is_placeholder_value in {True, False}, (
+            f"is_placeholder should be True or False, got {is_placeholder_value!r}"
+        )
+
+        # Verify consumed_events contains string-like items via duck typing
+        for event in consumed_events_value:
+            assert hasattr(event, "upper") and callable(event.upper), (
+                f"consumed_events items should behave like str, got {type(event)}"
             )
 
     def test_projector_id_from_contract(
@@ -1334,6 +1411,166 @@ class TestProjectorShellGetState:
 
 
 # =============================================================================
+# get_states Bulk Query Tests
+# =============================================================================
+
+
+class TestProjectorShellGetStates:
+    """Tests for get_states bulk aggregate state retrieval.
+
+    These tests verify that ProjectorShell correctly retrieves
+    multiple projected states in a single query for N+1 optimization.
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_states_returns_dict_of_states(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """get_states returns dict mapping aggregate_id to state.
+
+        Given: multiple aggregates exist in projection table
+        When: get_states() called with list of aggregate_ids
+        Then: returns dict mapping each found aggregate_id to its state
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_id_1 = uuid4()
+        aggregate_id_2 = uuid4()
+
+        # Mock multiple rows returned
+        mock_conn = mock_pool._mock_conn
+        mock_conn.fetch.return_value = [
+            MockAsyncpgRecord(
+                {
+                    "id": aggregate_id_1,
+                    "status": "confirmed",
+                    "total_amount": 150.0,
+                }
+            ),
+            MockAsyncpgRecord(
+                {
+                    "id": aggregate_id_2,
+                    "status": "pending",
+                    "total_amount": 200.0,
+                }
+            ),
+        ]
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+        correlation_id = uuid4()
+
+        result = await projector.get_states(
+            [aggregate_id_1, aggregate_id_2], correlation_id
+        )
+
+        assert len(result) == 2
+        assert aggregate_id_1 in result
+        assert aggregate_id_2 in result
+        assert result[aggregate_id_1]["status"] == "confirmed"
+        assert result[aggregate_id_2]["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_get_states_returns_empty_dict_for_empty_input(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """get_states returns empty dict for empty aggregate_ids list.
+
+        Given: empty list of aggregate_ids
+        When: get_states() called
+        Then: returns empty dict without database call
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+        correlation_id = uuid4()
+
+        result = await projector.get_states([], correlation_id)
+
+        assert result == {}
+        # Should not make database call for empty input
+        mock_pool.acquire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_states_omits_not_found_aggregates(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """get_states omits aggregates not found in database.
+
+        Given: some aggregate_ids don't exist in projection table
+        When: get_states() called with mixed found/not-found ids
+        Then: returns dict with only found aggregates
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_id_1 = uuid4()
+        aggregate_id_2 = uuid4()  # This one won't be found
+        aggregate_id_3 = uuid4()
+
+        # Only return rows for id_1 and id_3
+        mock_conn = mock_pool._mock_conn
+        mock_conn.fetch.return_value = [
+            MockAsyncpgRecord(
+                {
+                    "id": aggregate_id_1,
+                    "status": "confirmed",
+                }
+            ),
+            MockAsyncpgRecord(
+                {
+                    "id": aggregate_id_3,
+                    "status": "shipped",
+                }
+            ),
+        ]
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+        correlation_id = uuid4()
+
+        result = await projector.get_states(
+            [aggregate_id_1, aggregate_id_2, aggregate_id_3], correlation_id
+        )
+
+        assert len(result) == 2
+        assert aggregate_id_1 in result
+        assert aggregate_id_2 not in result  # Not found
+        assert aggregate_id_3 in result
+
+    @pytest.mark.asyncio
+    async def test_get_states_uses_any_clause_for_bulk_query(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """get_states uses PostgreSQL ANY() for efficient bulk query.
+
+        Given: list of aggregate_ids
+        When: get_states() called
+        Then: SQL uses ANY($1) syntax for efficient bulk lookup
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_ids = [uuid4(), uuid4(), uuid4()]
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.fetch.return_value = []
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+        await projector.get_states(aggregate_ids, uuid4())
+
+        # Verify ANY clause was used
+        call_args = mock_conn.fetch.call_args
+        assert call_args is not None
+        sql = call_args[0][0]
+        assert "ANY($1)" in sql, "Bulk query should use PostgreSQL ANY() syntax"
+
+
+# =============================================================================
 # Error Handling Tests
 # =============================================================================
 
@@ -1418,7 +1655,8 @@ class TestProjectorShellErrorHandling:
     ) -> None:
         """Unique constraint violations return failure result for insert_only mode.
 
-        Given: insert_only mode and SQL execution fails with asyncpg.UniqueViolationError
+        Given: insert_only mode and SQL execution fails with
+               asyncpg.UniqueViolationError
         When: project() called
         Then: returns ModelProjectionResult with success=False
 
@@ -1665,8 +1903,21 @@ class TestProjectorShellSQLGeneration:
 
         # Should have SQL and parameter values
         sql = call_args[0][0]
-        # Parameterized queries use $1, $2, etc. placeholders
-        assert "$" in sql or "?" in sql
+        # Parameterized queries use $1, $2, etc. placeholders (asyncpg format)
+        # Strict check: verify specific numbered placeholders exist
+        assert "$1" in sql, (
+            f"Parameterized query must use $1 placeholder (asyncpg format), "
+            f"got: {sql[:150]}"
+        )
+        # Verify at least $2 exists (most projections have multiple columns)
+        assert "$2" in sql, (
+            f"Parameterized query should use multiple placeholders "
+            f"($2 expected), got: {sql[:150]}"
+        )
+        # Verify parameters are passed as additional arguments (asyncpg style)
+        assert len(call_args[0]) > 1 or call_args[1], (
+            "execute() should be called with SQL and parameter values"
+        )
 
 
 # =============================================================================
@@ -1759,15 +2010,126 @@ class TestProjectorShellIntegrationReady:
         assert correlation_id is not None
 
 
+# =============================================================================
+# Query Timeout Configuration Tests
+# =============================================================================
+
+
+class TestProjectorShellQueryTimeout:
+    """Tests for query timeout configuration.
+
+    These tests verify that ProjectorShell correctly applies
+    configurable query timeouts to database operations.
+    """
+
+    def test_default_query_timeout_applied(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """Default query timeout is applied when not specified.
+
+        Given: no query_timeout_seconds parameter
+        When: ProjectorShell instantiated
+        Then: uses default timeout (30 seconds)
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        assert projector._query_timeout == ProjectorShell.DEFAULT_QUERY_TIMEOUT_SECONDS
+        assert projector._query_timeout == 30.0
+
+    def test_custom_query_timeout_applied(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """Custom query timeout is applied when specified.
+
+        Given: custom query_timeout_seconds parameter
+        When: ProjectorShell instantiated
+        Then: uses specified timeout
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        projector = ProjectorShell(
+            contract=sample_contract, pool=mock_pool, query_timeout_seconds=10.0
+        )
+
+        assert projector._query_timeout == 10.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_passed_to_execute(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+        sample_event_envelope: ModelEventEnvelope[OrderCreatedPayload],
+    ) -> None:
+        """Query timeout is passed to database execute calls.
+
+        Given: ProjectorShell with custom timeout
+        When: project() called
+        Then: timeout parameter is passed to conn.execute()
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "INSERT 0 1"
+
+        projector = ProjectorShell(
+            contract=sample_contract, pool=mock_pool, query_timeout_seconds=5.0
+        )
+        await projector.project(sample_event_envelope, uuid4())
+
+        # Verify timeout was passed to execute
+        call_kwargs = mock_conn.execute.call_args
+        assert call_kwargs is not None
+        # timeout is passed as keyword argument
+        assert "timeout" in call_kwargs.kwargs or (
+            len(call_kwargs.args) > 0 and 5.0 in call_kwargs.args
+        )
+
+    @pytest.mark.asyncio
+    async def test_timeout_passed_to_fetchrow(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """Query timeout is passed to database fetchrow calls.
+
+        Given: ProjectorShell with custom timeout
+        When: get_state() called
+        Then: timeout parameter is passed to conn.fetchrow()
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.fetchrow.return_value = None
+
+        projector = ProjectorShell(
+            contract=sample_contract, pool=mock_pool, query_timeout_seconds=15.0
+        )
+        await projector.get_state(uuid4(), uuid4())
+
+        # Verify timeout was passed to fetchrow
+        call_kwargs = mock_conn.fetchrow.call_args
+        assert call_kwargs is not None
+        # timeout is passed as keyword argument
+        assert "timeout" in call_kwargs.kwargs
+
+
 __all__ = [
     "TestProjectorShellContractAccess",
     "TestProjectorShellErrorHandling",
     "TestProjectorShellEventFiltering",
     "TestProjectorShellGetState",
+    "TestProjectorShellGetStates",
     "TestProjectorShellIdempotency",
     "TestProjectorShellIntegrationReady",
     "TestProjectorShellProjectionModes",
     "TestProjectorShellProtocolCompliance",
+    "TestProjectorShellQueryTimeout",
     "TestProjectorShellSQLGeneration",
     "TestProjectorShellValueExtraction",
 ]

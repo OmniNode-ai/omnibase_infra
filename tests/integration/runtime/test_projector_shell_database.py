@@ -13,12 +13,17 @@ These tests verify ProjectorShell against a real PostgreSQL database to validate
 4. Idempotency guarantees with real database state
 5. Value extraction from nested event payloads end-to-end
 
-Environment Variables (Required):
-    POSTGRES_HOST: Database host (default: 192.168.86.200)
-    POSTGRES_PORT: Database port (default: 5436)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+Environment Variables:
+    POSTGRES_HOST: Database host (default: localhost)
+    POSTGRES_PORT: Database port (default: 5432)
+    POSTGRES_DATABASE: Database name (default: postgres)
     POSTGRES_USER: Database user (default: postgres)
     POSTGRES_PASSWORD: Database password (REQUIRED - no default, tests skip if unset)
+
+    For OmniNode infrastructure, set:
+        POSTGRES_HOST=192.168.86.200
+        POSTGRES_PORT=5436
+        POSTGRES_DATABASE=omninode_bridge
 
 Test Isolation:
     Each test creates a unique table (test_projector_{uuid8}) and drops it
@@ -110,23 +115,21 @@ class OrderWithNestedPayload(BaseModel):
 def _get_database_dsn() -> str | None:
     """Build database DSN from environment variables.
 
-    Falls back to direct IP (192.168.86.200) if hostname resolution fails.
+    All database configuration comes from environment variables with portable
+    defaults suitable for CI/CD environments. Set POSTGRES_HOST, POSTGRES_PORT,
+    etc. to override for specific infrastructure.
 
     Returns:
         PostgreSQL connection string, or None if POSTGRES_PASSWORD is not set.
     """
-    host = os.getenv("POSTGRES_HOST", "192.168.86.200")
-    port = os.getenv("POSTGRES_PORT", "5436")
-    database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    database = os.getenv("POSTGRES_DATABASE", "postgres")
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD")
 
     if not password:
         return None
-
-    # If hostname is set, try direct IP as fallback
-    if host == "omninode-bridge-postgres":
-        host = "192.168.86.200"
 
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
@@ -166,6 +169,8 @@ async def test_table(db_pool: asyncpg.Pool) -> AsyncGenerator[str, None]:
     """Create and drop test table for projector tests.
 
     Creates a uniquely named table for each test to ensure isolation.
+    Teardown is shielded from exceptions to ensure cleanup always attempts
+    to run, even if setup partially failed.
 
     Args:
         db_pool: asyncpg connection pool fixture.
@@ -194,9 +199,16 @@ async def test_table(db_pool: asyncpg.Pool) -> AsyncGenerator[str, None]:
 
     yield table_name
 
-    # Drop test table
-    async with db_pool.acquire() as conn:
-        await conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+    # Drop test table - shielded from exceptions to ensure cleanup runs
+    # even if the test or other teardown code raised an exception.
+    # Uses DROP TABLE IF EXISTS to handle cases where table creation failed.
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+    except Exception:
+        # Swallow exceptions during cleanup to avoid masking test failures.
+        # The table will be orphaned but has a unique name, so no collision risk.
+        pass
 
 
 def _make_contract(

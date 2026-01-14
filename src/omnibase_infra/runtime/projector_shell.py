@@ -10,13 +10,16 @@ Features:
     - Dynamic column value extraction from nested event payloads
     - Three projection modes: upsert, insert_only, append
     - Parameterized SQL queries for injection protection
-
-Implements OMN-1169: ProjectorShell contract-driven projections.
+    - Bulk state queries for N+1 optimization
+    - Configurable query timeouts
 
 See Also:
     - ProtocolEventProjector: Protocol definition from omnibase_infra.protocols
     - ModelProjectorContract: Contract model from omnibase_core
     - ProjectorPluginLoader: Loader that instantiates ProjectorShell
+
+Related Tickets:
+    - OMN-1169: ProjectorShell contract-driven projections (implemented)
 
 .. versionadded:: 0.7.0
     Created as part of OMN-1169 projector shell implementation.
@@ -43,6 +46,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     RuntimeHostError,
 )
+from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 
 if TYPE_CHECKING:
     from omnibase_core.models.projectors.model_projector_column import (
@@ -70,26 +74,41 @@ class ProjectorShell:
 
     Security:
         All queries use parameterized statements for SQL injection protection.
-        Table and column names are validated by the contract model validators.
+        Table and column names are validated by the contract model validators
+        and quoted using ``quote_identifier()`` for safe SQL generation.
+
+    Query Timeout:
+        Configurable via ``query_timeout_seconds`` parameter. Defaults to 30
+        seconds. Set to None to disable timeout (not recommended for production).
+
+    Default Values:
+        Column defaults specified in the contract (``column.default``) are treated
+        as **runtime literal values**, not SQL expressions. They are inserted as
+        parameter values, not embedded in SQL. For database-level defaults (e.g.,
+        ``CURRENT_TIMESTAMP``), use PostgreSQL column defaults instead.
 
     Example:
         >>> from omnibase_core.models.projectors import ModelProjectorContract
         >>> contract = ModelProjectorContract.model_validate(yaml_data)
         >>> pool = await asyncpg.create_pool(dsn)
-        >>> projector = ProjectorShell(contract, pool)
+        >>> projector = ProjectorShell(contract, pool, query_timeout_seconds=10.0)
         >>> result = await projector.project(event_envelope, correlation_id)
         >>> if result.success:
         ...     print(f"Projected {result.rows_affected} rows")
 
     Related:
-        - OMN-1169: ProjectorShell (implemented)
+        - OMN-1169: ProjectorShell contract-driven projections (implemented)
         - OMN-1168: ProjectorPluginLoader contract discovery
     """
+
+    # Default query timeout in seconds (30s is reasonable for projections)
+    DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
 
     def __init__(
         self,
         contract: ModelProjectorContract,
         pool: asyncpg.Pool,
+        query_timeout_seconds: float | None = None,
     ) -> None:
         """Initialize projector shell with contract and database pool.
 
@@ -98,9 +117,17 @@ class ProjectorShell:
                 All projection rules (table, columns, modes) come from this.
             pool: asyncpg connection pool for database access.
                 Pool should be created by the caller (e.g., from container).
+            query_timeout_seconds: Timeout for individual database queries in
+                seconds. Defaults to 30.0 seconds. Set to None to disable
+                timeout (not recommended for production).
         """
         self._contract = contract
         self._pool = pool
+        self._query_timeout = (
+            query_timeout_seconds
+            if query_timeout_seconds is not None
+            else self.DEFAULT_QUERY_TIMEOUT_SECONDS
+        )
         logger.debug(
             "ProjectorShell initialized for projector '%s'",
             contract.projector_id,
@@ -109,6 +136,7 @@ class ProjectorShell:
                 "aggregate_type": contract.aggregate_type,
                 "consumed_events": contract.consumed_events,
                 "mode": contract.behavior.mode,
+                "query_timeout_seconds": self._query_timeout,
             },
         )
 
@@ -266,7 +294,7 @@ class ProjectorShell:
         """Get current projected state for an aggregate.
 
         Queries the projection table for the current state of the
-        specified aggregate.
+        specified aggregate. Uses configurable query timeout.
 
         Args:
             aggregate_id: The unique identifier of the aggregate.
@@ -292,16 +320,18 @@ class ProjectorShell:
         )
 
         schema = self._contract.projection_schema
-        table = schema.table
-        primary_key = schema.primary_key
+        table_quoted = quote_identifier(schema.table)
+        pk_quoted = quote_identifier(schema.primary_key)
 
         # Build SELECT query - table/column names from trusted contract
-        # S608: Safe - table/column names validated by contract model, not user input
-        query = f'SELECT * FROM "{table}" WHERE "{primary_key}" = $1'  # noqa: S608
+        # S608: Safe - identifiers quoted via quote_identifier(), not user input
+        query = f"SELECT * FROM {table_quoted} WHERE {pk_quoted} = $1"  # noqa: S608
 
         try:
             async with self._pool.acquire() as conn:
-                row = await conn.fetchrow(query, aggregate_id)
+                row = await conn.fetchrow(
+                    query, aggregate_id, timeout=self._query_timeout
+                )
 
             if row is None:
                 logger.debug(
@@ -341,6 +371,100 @@ class ProjectorShell:
         except Exception as e:
             raise RuntimeHostError(
                 f"Failed to get state: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def get_states(
+        self,
+        aggregate_ids: list[UUID],
+        correlation_id: UUID,
+    ) -> dict[UUID, dict[str, object]]:
+        """Get current projected states for multiple aggregates.
+
+        Bulk query for N+1 optimization. Fetches states for all provided
+        aggregate IDs in a single database query.
+
+        Args:
+            aggregate_ids: List of unique aggregate identifiers to query.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            Dictionary mapping aggregate_id (UUID) to its state (dict).
+            Aggregates with no state are omitted from the result.
+            Empty dict if no aggregate_ids provided or none found.
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If query times out.
+            RuntimeHostError: For other database errors.
+
+        Example:
+            >>> states = await projector.get_states(
+            ...     [order_id_1, order_id_2, order_id_3],
+            ...     correlation_id,
+            ... )
+            >>> for order_id, state in states.items():
+            ...     print(f"Order {order_id}: {state['status']}")
+        """
+        if not aggregate_ids:
+            return {}
+
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_states",
+            target_name=f"projector.{self.projector_id}",
+            correlation_id=correlation_id,
+        )
+
+        schema = self._contract.projection_schema
+        table_quoted = quote_identifier(schema.table)
+        pk_quoted = quote_identifier(schema.primary_key)
+
+        # Build SELECT query with IN clause for bulk fetch
+        # S608: Safe - identifiers quoted via quote_identifier(), not user input
+        query = f"SELECT * FROM {table_quoted} WHERE {pk_quoted} = ANY($1)"  # noqa: S608
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    query, aggregate_ids, timeout=self._query_timeout
+                )
+
+            # Build result dict keyed by aggregate ID
+            result: dict[UUID, dict[str, object]] = {}
+            pk_column = schema.primary_key
+            for row in rows:
+                row_dict: dict[str, object] = dict(row)
+                aggregate_id = row_dict.get(pk_column)
+                if isinstance(aggregate_id, UUID):
+                    result[aggregate_id] = row_dict
+
+            logger.debug(
+                "Bulk state retrieval completed",
+                extra={
+                    "projector_id": self.projector_id,
+                    "requested_count": len(aggregate_ids),
+                    "found_count": len(result),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return result
+
+        except asyncpg.PostgresConnectionError as e:
+            raise InfraConnectionError(
+                f"Failed to connect to database for bulk state query: {self.projector_id}",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            raise InfraTimeoutError(
+                f"Bulk state query timed out for: {self.projector_id}",
+                context=ctx,
+            ) from e
+
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Failed to get states: {type(e).__name__}",
                 context=ctx,
             ) from e
 
@@ -509,7 +633,9 @@ class ProjectorShell:
     ) -> int:
         """Execute upsert (INSERT ON CONFLICT DO UPDATE).
 
-        Uses the contract's upsert_key for conflict detection.
+        Uses the contract's upsert_key for conflict detection. When all columns
+        are part of the upsert key (i.e., no updatable columns), uses
+        DO NOTHING to avoid generating invalid SQL with empty SET clause.
 
         Args:
             values: Column name to value mapping.
@@ -520,8 +646,9 @@ class ProjectorShell:
         """
         schema = self._contract.projection_schema
         behavior = self._contract.behavior
-        table = schema.table
+        table_quoted = quote_identifier(schema.table)
         upsert_key = behavior.upsert_key or schema.primary_key
+        upsert_key_quoted = quote_identifier(upsert_key)
 
         # Build column lists
         columns = list(values.keys())
@@ -536,32 +663,35 @@ class ProjectorShell:
             return 0
 
         # Build parameterized INSERT ... ON CONFLICT DO UPDATE
-        column_list = ", ".join(f'"{col}"' for col in columns)
+        column_list = ", ".join(quote_identifier(col) for col in columns)
         param_list = ", ".join(f"${i + 1}" for i in range(len(columns)))
         updatable_columns = [col for col in columns if col != upsert_key]
 
-        # S608: Safe - table/column names validated by contract model, not user input
+        # S608: Safe - identifiers quoted via quote_identifier(), not user input
         if updatable_columns:
+            # Normal case: columns to update on conflict
             update_list = ", ".join(
-                f'"{col}" = EXCLUDED."{col}"' for col in updatable_columns
+                f"{quote_identifier(col)} = EXCLUDED.{quote_identifier(col)}"
+                for col in updatable_columns
             )
             sql = f"""
-                INSERT INTO "{table}" ({column_list})
+                INSERT INTO {table_quoted} ({column_list})
                 VALUES ({param_list})
-                ON CONFLICT ("{upsert_key}") DO UPDATE SET {update_list}
+                ON CONFLICT ({upsert_key_quoted}) DO UPDATE SET {update_list}
             """  # noqa: S608
         else:
-            # Only the upsert key column exists - no columns to update
+            # Edge case: all columns are part of primary key - no columns to update
+            # Use DO NOTHING to avoid invalid SQL with empty SET clause
             sql = f"""
-                INSERT INTO "{table}" ({column_list})
+                INSERT INTO {table_quoted} ({column_list})
                 VALUES ({param_list})
-                ON CONFLICT ("{upsert_key}") DO NOTHING
+                ON CONFLICT ({upsert_key_quoted}) DO NOTHING
             """  # noqa: S608
 
         params = list(values.values())
 
         async with self._pool.acquire() as conn:
-            result = await conn.execute(sql, *params)
+            result = await conn.execute(sql, *params, timeout=self._query_timeout)
 
         # Parse row count from result (e.g., "INSERT 0 1" -> 1)
         return self._parse_row_count(result)
@@ -581,10 +711,11 @@ class ProjectorShell:
             Number of rows affected.
 
         Raises:
-            asyncpg.UniqueViolationError: On conflict.
+            asyncpg.UniqueViolationError: On conflict (handled by caller
+                based on projection mode).
         """
         schema = self._contract.projection_schema
-        table = schema.table
+        table_quoted = quote_identifier(schema.table)
 
         columns = list(values.keys())
         if not columns:
@@ -597,16 +728,16 @@ class ProjectorShell:
             )
             return 0
 
-        column_list = ", ".join(f'"{col}"' for col in columns)
+        column_list = ", ".join(quote_identifier(col) for col in columns)
         param_list = ", ".join(f"${i + 1}" for i in range(len(columns)))
 
-        # S608: Safe - table/column names validated by contract model, not user input
-        sql = f'INSERT INTO "{table}" ({column_list}) VALUES ({param_list})'  # noqa: S608
+        # S608: Safe - identifiers quoted via quote_identifier(), not user input
+        sql = f"INSERT INTO {table_quoted} ({column_list}) VALUES ({param_list})"  # noqa: S608
 
         params = list(values.values())
 
         async with self._pool.acquire() as conn:
-            result = await conn.execute(sql, *params)
+            result = await conn.execute(sql, *params, timeout=self._query_timeout)
 
         return self._parse_row_count(result)
 
