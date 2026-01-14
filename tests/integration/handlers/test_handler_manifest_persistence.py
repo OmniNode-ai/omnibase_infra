@@ -11,10 +11,20 @@ Test Coverage:
     - TestFileBackendSpecifics: Filesystem-specific behaviors (partitioning, atomicity)
     - TestErrorHandling: Error cases and edge conditions
     - TestHandlerLifecycle: Handler initialization and shutdown
+    - TestQueryCombinations: Complex query scenarios with multiple filters
+
+TODO (Circuit Breaker Tests):
+    The handler uses MixinAsyncCircuitBreaker for resilient I/O operations, but
+    circuit breaker behavior is not explicitly tested. Future tests should verify:
+    - Circuit opens after threshold failures (default: 5)
+    - Operations blocked when circuit is open (raises InfraUnavailableError)
+    - Circuit resets after timeout (default: 60s)
+    - Half-open state allows single test request
+    See: docs/patterns/circuit_breaker_implementation.md for test patterns.
 
 Related:
     - OMN-1163: Manifest persistence handler implementation
-    - src/omnibase_infra/handlers/handler_manifest_persistence.py (to be created)
+    - src/omnibase_infra/handlers/handler_manifest_persistence.py
 
 Note:
     These tests follow TDD principles - tests are written before the handler

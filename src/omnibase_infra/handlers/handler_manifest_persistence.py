@@ -22,6 +22,12 @@ Security Features:
     - Idempotent storage (existing manifests are not overwritten)
     - Circuit breaker for resilient I/O operations
 
+Datetime Handling:
+    All datetime values (created_at, created_after, created_before) should be
+    timezone-aware for accurate comparisons. ISO 8601 strings with timezone info
+    (e.g., "2025-01-14T12:00:00+00:00" or "2025-01-14T12:00:00Z") are parsed
+    correctly. Naive datetimes may cause comparison issues when filtering.
+
 Note:
     Environment variable configuration (ONEX_MANIFEST_MAX_FILE_SIZE) is parsed
     at module import time, not at handler instantiation. This means:
@@ -124,10 +130,24 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
     def __init__(self, container: ModelONEXContainer | None = None) -> None:
         """Initialize HandlerManifestPersistence with optional container injection.
 
+        Note:
+            ONEX Pattern Deviation: The container parameter is optional here,
+            deviating from the strict ONEX guideline of required container injection
+            (``def __init__(self, container: ModelONEXContainer)``). This is an
+            intentional design choice because:
+
+            1. **Standalone testing**: Allows unit tests to instantiate the handler
+               without a full ONEX container, simplifying test setup.
+            2. **Integration flexibility**: The handler's core filesystem operations
+               do not depend on container-provided services.
+            3. **Gradual integration**: Enables incremental adoption in codebases
+               not fully migrated to ONEX container patterns.
+
         Args:
             container: Optional ONEX container for dependency injection.
-                When provided, enables full ONEX integration. When None,
-                handler operates in standalone mode for testing.
+                When provided, enables full ONEX integration (logging, metrics,
+                service discovery). When None, handler operates in standalone
+                mode suitable for testing and simple deployments.
         """
         self._container = container
         self._storage_path: Path | None = None
@@ -442,7 +462,6 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
         # Extract required fields from manifest
         manifest_id_raw = manifest_raw.get("manifest_id")
         created_at_raw = manifest_raw.get("created_at")
-        node_identity = manifest_raw.get("node_identity", {})
 
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.FILESYSTEM,
@@ -613,6 +632,15 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
 
         Retrieves a manifest by scanning date directories.
 
+        Complexity:
+            O(d) where d is the number of date directories (year/month/day).
+            This is a full directory scan because manifest_id does not encode
+            the creation date, requiring us to search all partitions. This is
+            acceptable for the current use case (low query volume, typically
+            recent manifests). For high-volume retrieval patterns, consider
+            maintaining a separate index file or using the query operation
+            with correlation_id filter.
+
         Payload:
             - manifest_id: UUID or string (required) - Manifest to retrieve
 
@@ -753,6 +781,15 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
 
         Queries manifests with filters and respects metadata_only flag.
 
+        Complexity:
+            O(n) where n is the total number of manifest files. Each file must
+            be read and parsed to apply filters. The limit parameter provides
+            early termination but worst case (few matches) scans all files.
+            This is acceptable for the current use case where:
+            - Query operations are infrequent (debugging, auditing)
+            - Date-based partitioning enables manual pruning of old directories
+            - Typical deployments have <10k manifests
+
         Payload:
             - correlation_id: UUID or string (optional) - Filter by correlation_id
             - node_id: string (optional) - Filter by node_id
@@ -868,8 +905,8 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                                 if file_size > self._max_file_size:
                                     continue
 
-                                # For metadata_only, try to extract just the
-                                # essential fields without full deserialization
+                                # Read and parse the full manifest to extract
+                                # fields for filtering
                                 manifest_json = manifest_file.read_text(
                                     encoding="utf-8"
                                 )
