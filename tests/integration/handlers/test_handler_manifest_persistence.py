@@ -39,6 +39,7 @@ import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -196,16 +197,18 @@ def temp_storage_path(tmp_path: Path) -> Path:
 @pytest.fixture
 async def handler(
     temp_storage_path: Path,
+    mock_container: MagicMock,
 ) -> AsyncGenerator[HandlerManifestPersistence, None]:
     """Create and initialize handler with temp storage.
 
     Args:
         temp_storage_path: Temporary storage directory.
+        mock_container: Mock ONEX container for dependency injection.
 
     Yields:
         Initialized HandlerManifestPersistence instance.
     """
-    h = HandlerManifestPersistence()
+    h = HandlerManifestPersistence(mock_container)
     await h.initialize({"storage_path": str(temp_storage_path)})
     yield h
     await h.shutdown()
@@ -638,14 +641,14 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     async def test_handler_not_initialized_raises_error(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Operations before initialize() raise RuntimeHostError.
 
         Validates that attempting operations on an uninitialized handler
         raises an appropriate error.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         # Do NOT call initialize()
 
         manifest = create_test_manifest()
@@ -791,14 +794,14 @@ class TestHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_describe_circuit_breaker_not_initialized_before_initialize(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """describe() shows circuit breaker not initialized before initialize().
 
         Circuit breaker is only set up during initialize(), so describe()
         should show initialized=False when called before initialization.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         description = handler.describe()
 
         # Circuit breaker info should be present but show not initialized
@@ -812,7 +815,7 @@ class TestHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_initialize_creates_storage_directory(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """initialize() creates storage_path if it doesn't exist.
 
@@ -821,7 +824,7 @@ class TestHandlerLifecycle:
         """
         assert not temp_storage_path.exists()
 
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         assert temp_storage_path.exists()
@@ -831,7 +834,7 @@ class TestHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_initialize_with_existing_directory(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """initialize() succeeds when storage_path already exists.
 
@@ -841,7 +844,7 @@ class TestHandlerLifecycle:
         temp_storage_path.mkdir(parents=True, exist_ok=True)
         assert temp_storage_path.exists()
 
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         assert handler.describe()["initialized"] is True
@@ -849,12 +852,14 @@ class TestHandlerLifecycle:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_initialize_missing_storage_path_raises_error(self) -> None:
+    async def test_initialize_missing_storage_path_raises_error(
+        self, mock_container: MagicMock
+    ) -> None:
         """initialize() without storage_path raises ProtocolConfigurationError.
 
         Validates that initialization requires the storage_path configuration.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.initialize({})
@@ -864,13 +869,13 @@ class TestHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_shutdown_clears_initialized_state(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """shutdown() clears the initialized state.
 
         Validates that shutdown properly resets the handler state.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
         assert handler.describe()["initialized"] is True
 
@@ -880,14 +885,14 @@ class TestHandlerLifecycle:
 
     @pytest.mark.asyncio
     async def test_operations_after_shutdown_raise_error(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Operations after shutdown() raise RuntimeHostError.
 
         Validates that attempting operations after shutdown
         raises an appropriate error.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
         await handler.shutdown()
 
@@ -1017,7 +1022,7 @@ class TestCircuitBreakerBehavior:
 
     @pytest.mark.asyncio
     async def test_circuit_opens_after_threshold_failures(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Circuit opens after 5 consecutive failures (default threshold).
 
@@ -1026,7 +1031,7 @@ class TestCircuitBreakerBehavior:
         """
         from omnibase_infra.errors import InfraUnavailableError
 
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         # Verify circuit breaker is configured with expected threshold
@@ -1057,7 +1062,7 @@ class TestCircuitBreakerBehavior:
 
     @pytest.mark.asyncio
     async def test_operations_blocked_when_circuit_open(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Operations raise InfraUnavailableError when circuit is open.
 
@@ -1066,7 +1071,7 @@ class TestCircuitBreakerBehavior:
         """
         from omnibase_infra.errors import InfraUnavailableError
 
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         # Force circuit to open state
@@ -1092,14 +1097,14 @@ class TestCircuitBreakerBehavior:
 
     @pytest.mark.asyncio
     async def test_circuit_resets_on_successful_operation(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Circuit resets to closed state on successful operation.
 
         Validates that after a successful operation, the circuit breaker
         resets its failure count and returns to closed state.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         # Record some failures (but not enough to trip the circuit)
@@ -1125,14 +1130,16 @@ class TestCircuitBreakerBehavior:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_half_open_state_after_timeout(self, temp_storage_path: Path) -> None:
+    async def test_half_open_state_after_timeout(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
         """Circuit transitions to half-open state after reset timeout.
 
         Validates that when the circuit is open and the reset timeout has
         elapsed, the circuit transitions to half-open state allowing a
         test request through.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         # Force circuit to open state with timeout in the past
@@ -1156,14 +1163,14 @@ class TestCircuitBreakerBehavior:
 
     @pytest.mark.asyncio
     async def test_circuit_failure_count_increments(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Each failure increments the circuit breaker failure count.
 
         Validates that failures are properly tracked by the circuit breaker
         and the count increases with each recorded failure.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         # Verify initial state
@@ -1181,13 +1188,15 @@ class TestCircuitBreakerBehavior:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_circuit_breaker_configuration(self, temp_storage_path: Path) -> None:
+    async def test_circuit_breaker_configuration(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
         """Circuit breaker is initialized with correct configuration.
 
         Validates that the circuit breaker is configured with the expected
         threshold, timeout, and service name during handler initialization.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         # Verify configuration values
@@ -1203,7 +1212,7 @@ class TestCircuitBreakerBehavior:
 
     @pytest.mark.asyncio
     async def test_infra_unavailable_error_contains_retry_after(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """InfraUnavailableError includes retry_after_seconds when circuit is open.
 
@@ -1212,7 +1221,7 @@ class TestCircuitBreakerBehavior:
         """
         from omnibase_infra.errors import InfraUnavailableError
 
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         # Force circuit to open state with specific timeout
@@ -1234,14 +1243,14 @@ class TestCircuitBreakerBehavior:
 
     @pytest.mark.asyncio
     async def test_circuit_opens_exactly_at_threshold(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Circuit opens exactly when failure count reaches threshold.
 
         Validates that the circuit stays closed at threshold-1 failures
         and opens exactly at threshold failures.
         """
-        handler = HandlerManifestPersistence()
+        handler = HandlerManifestPersistence(mock_container)
         await handler.initialize({"storage_path": str(temp_storage_path)})
 
         # Record threshold-1 failures (4 failures)

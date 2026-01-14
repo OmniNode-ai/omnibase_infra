@@ -22,6 +22,54 @@ Security Features:
     - Idempotent storage (existing manifests are not overwritten)
     - Circuit breaker for resilient I/O operations
 
+TOCTOU Race Condition Behavior:
+    This handler has inherent Time-Of-Check-Time-Of-Use (TOCTOU) race conditions
+    due to filesystem operations. These are documented for transparency:
+
+    **manifest.store (idempotency check)**:
+        The check ``file_path.exists()`` and subsequent write are not atomic.
+        Between the existence check and the write, another process could:
+        - Create the same file (harmless: atomic rename will overwrite or fail)
+        - Delete the file (harmless: write will succeed)
+
+        Mitigation: Atomic writes use temp file + rename. On POSIX systems, rename()
+        is atomic within the same filesystem. The worst case is two concurrent writes
+        for the same manifest_id both succeed, but they write identical content.
+
+    **manifest.retrieve/query (directory scan)**:
+        Directory iteration via ``iterdir()`` returns a point-in-time snapshot.
+        Files may be added or removed during iteration. This is acceptable because:
+        - Manifests are append-only (never deleted during normal operation)
+        - Query results are best-effort snapshots, not transactional reads
+
+    **Deployment Considerations**:
+        - For multi-process deployments writing to shared storage, use a database
+          backend instead of filesystem storage for strong consistency guarantees.
+        - Single-process deployments (typical ONEX node) have no TOCTOU concerns.
+        - NFS and network filesystems may have weaker atomicity guarantees than
+          local filesystems; test rename behavior on your target storage.
+
+Performance Characteristics (O(n) Directory Scan):
+    This handler uses O(n) directory scanning for retrieve and query operations,
+    where n is the total number of manifest files across all date partitions.
+
+    **Why O(n) is acceptable for current use case**:
+        - Manifest operations are low-frequency (debugging, auditing, troubleshooting)
+        - Date-based partitioning enables manual pruning of old directories
+        - Typical deployments have <10,000 manifests
+        - Recent manifests (most common access pattern) are found quickly due to
+          reverse-chronological iteration
+
+    **Scaling recommendations for high-volume deployments**:
+        - **>10k manifests**: Consider adding an index file (manifest_id -> path mapping)
+        - **>100k manifests**: Consider SQLite or PostgreSQL backend with indexed queries
+        - **>1M manifests**: Use dedicated manifest storage service with sharding
+
+    **Alternative approaches not implemented**:
+        - Bloom filter for fast negative lookups (adds complexity, marginal benefit)
+        - In-memory manifest_id index (memory overhead, persistence complexity)
+        - Filename encoding of creation date (breaks existing storage format)
+
 Datetime Handling:
     All datetime values (created_at, created_after, created_before) should be
     timezone-aware for accurate comparisons. ISO 8601 strings with timezone info
@@ -52,6 +100,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
@@ -173,7 +222,7 @@ class HandlerManifestPersistence(
         handler_category: Returns EFFECT (side-effecting I/O)
 
     Example:
-        >>> handler = HandlerManifestPersistence()
+        >>> handler = HandlerManifestPersistence(container)
         >>> await handler.initialize({"storage_path": "/data/manifests"})
         >>> result = await handler.execute({
         ...     "operation": "manifest.store",
@@ -181,27 +230,13 @@ class HandlerManifestPersistence(
         ... })
     """
 
-    def __init__(self, container: ModelONEXContainer | None = None) -> None:
-        """Initialize HandlerManifestPersistence with optional container injection.
-
-        Note:
-            ONEX Pattern Deviation: The container parameter is optional here,
-            deviating from the strict ONEX guideline of required container injection
-            (``def __init__(self, container: ModelONEXContainer)``). This is an
-            intentional design choice because:
-
-            1. **Standalone testing**: Allows unit tests to instantiate the handler
-               without a full ONEX container, simplifying test setup.
-            2. **Integration flexibility**: The handler's core filesystem operations
-               do not depend on container-provided services.
-            3. **Gradual integration**: Enables incremental adoption in codebases
-               not fully migrated to ONEX container patterns.
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize HandlerManifestPersistence with required container injection.
 
         Args:
-            container: Optional ONEX container for dependency injection.
-                When provided, enables full ONEX integration (logging, metrics,
-                service discovery). When None, handler operates in standalone
-                mode suitable for testing and simple deployments.
+            container: ONEX container for dependency injection. Required per ONEX
+                pattern (``def __init__(self, container: ModelONEXContainer)``).
+                Enables full ONEX integration (logging, metrics, service discovery).
 
         See Also:
             - CLAUDE.md "Container-Based Dependency Injection" section for the
@@ -1116,13 +1151,37 @@ class HandlerManifestPersistence(
                     filter_correlation_id = correlation_id_raw
                 elif isinstance(correlation_id_raw, str):
                     filter_correlation_id = UUID(correlation_id_raw)
-            except ValueError:
-                pass  # Invalid UUID, ignore filter
+                else:
+                    logger.warning(
+                        "Invalid correlation_id filter type, ignoring filter",
+                        extra={
+                            "provided_type": type(correlation_id_raw).__name__,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+            except ValueError as e:
+                logger.warning(
+                    "Invalid correlation_id filter format, ignoring filter",
+                    extra={
+                        "provided_value": str(correlation_id_raw)[:100],
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
 
         filter_node_id: str | None = None
         node_id_raw = payload.get("node_id")
-        if isinstance(node_id_raw, str):
-            filter_node_id = node_id_raw
+        if node_id_raw is not None:
+            if isinstance(node_id_raw, str):
+                filter_node_id = node_id_raw
+            else:
+                logger.warning(
+                    "Invalid node_id filter type, ignoring filter",
+                    extra={
+                        "provided_type": type(node_id_raw).__name__,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
 
         filter_created_after: datetime | None = None
         created_after_raw = payload.get("created_after")
@@ -1137,8 +1196,23 @@ class HandlerManifestPersistence(
                     filter_created_after = datetime.fromisoformat(
                         created_after_raw.replace("Z", "+00:00")
                     )
-            except ValueError:
-                pass  # Invalid datetime, ignore filter
+                else:
+                    logger.warning(
+                        "Invalid created_after filter type, ignoring filter",
+                        extra={
+                            "provided_type": type(created_after_raw).__name__,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+            except ValueError as e:
+                logger.warning(
+                    "Invalid created_after filter format, ignoring filter",
+                    extra={
+                        "provided_value": str(created_after_raw)[:100],
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
 
         filter_created_before: datetime | None = None
         created_before_raw = payload.get("created_before")
@@ -1153,17 +1227,51 @@ class HandlerManifestPersistence(
                     filter_created_before = datetime.fromisoformat(
                         created_before_raw.replace("Z", "+00:00")
                     )
-            except ValueError:
-                pass  # Invalid datetime, ignore filter
+                else:
+                    logger.warning(
+                        "Invalid created_before filter type, ignoring filter",
+                        extra={
+                            "provided_type": type(created_before_raw).__name__,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+            except ValueError as e:
+                logger.warning(
+                    "Invalid created_before filter format, ignoring filter",
+                    extra={
+                        "provided_value": str(created_before_raw)[:100],
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
 
-        metadata_only = payload.get("metadata_only", False)
-        if not isinstance(metadata_only, bool):
+        metadata_only_raw = payload.get("metadata_only", False)
+        if isinstance(metadata_only_raw, bool):
+            metadata_only = metadata_only_raw
+        else:
+            logger.warning(
+                "Invalid metadata_only filter type, using default False",
+                extra={
+                    "provided_type": type(metadata_only_raw).__name__,
+                    "provided_value": str(metadata_only_raw)[:100],
+                    "correlation_id": str(correlation_id),
+                },
+            )
             metadata_only = False
 
-        limit = payload.get("limit", 100)
-        if not isinstance(limit, int) or limit < 1:
+        limit_raw = payload.get("limit", 100)
+        if isinstance(limit_raw, int) and limit_raw >= 1:
+            limit = min(limit_raw, 10000)  # Cap at 10000
+        else:
+            logger.warning(
+                "Invalid limit filter value, using default 100",
+                extra={
+                    "provided_type": type(limit_raw).__name__,
+                    "provided_value": str(limit_raw)[:100],
+                    "correlation_id": str(correlation_id),
+                },
+            )
             limit = 100
-        limit = min(limit, 10000)  # Cap at 10000
 
         async def _do_query_io() -> ModelHandlerOutput[dict[str, object]]:
             """Inner function containing I/O operations (wrapped with retry)."""
@@ -1335,7 +1443,8 @@ class HandlerManifestPersistence(
         """Return handler metadata and capabilities for introspection.
 
         This method exposes the handler's type classification along with
-        its operational configuration and capabilities.
+        its operational configuration and capabilities, including detailed
+        circuit breaker state for operational observability.
 
         Returns:
             dict containing:
@@ -1347,10 +1456,54 @@ class HandlerManifestPersistence(
                 - version: Handler version string
                 - circuit_breaker: Circuit breaker state for observability
                     - initialized: Whether circuit breaker is initialized
-                    - state: Current state ("open" or "closed")
+                    - state: Current state ("closed", "open", or "half_open")
                     - failures: Current failure count
-                    - threshold: Configured failure threshold
+                    - threshold: Configured failure threshold before opening
+                    - reset_timeout_seconds: Configured timeout before half_open transition
+                    - seconds_until_half_open: Seconds remaining until half_open (only when open)
+
+        Circuit Breaker States:
+            - **closed**: Normal operation, requests allowed. Failures tracked.
+            - **open**: Circuit tripped after threshold failures. Requests blocked.
+              Will transition to half_open after reset_timeout_seconds.
+            - **half_open**: Recovery testing phase. Next success closes circuit,
+              next failure reopens it. This state is transient and detected when
+              the circuit is marked open but the reset timeout has elapsed.
         """
+        # Determine circuit breaker state with half_open detection
+        cb_initialized = self._circuit_breaker_initialized
+        cb_open = getattr(self, "_circuit_breaker_open", False)
+        cb_open_until = getattr(self, "_circuit_breaker_open_until", 0.0)
+        cb_failures = getattr(self, "_circuit_breaker_failures", 0)
+        cb_threshold = getattr(self, "circuit_breaker_threshold", 5)
+        cb_reset_timeout = getattr(self, "circuit_breaker_reset_timeout", 60.0)
+
+        # Calculate state: closed, open, or half_open
+        current_time = time.time()
+        if cb_open:
+            if current_time >= cb_open_until:
+                cb_state = "half_open"
+                seconds_until_half_open: float | None = None
+            else:
+                cb_state = "open"
+                seconds_until_half_open = round(cb_open_until - current_time, 2)
+        else:
+            cb_state = "closed"
+            seconds_until_half_open = None
+
+        # Build circuit breaker info dict
+        circuit_breaker_info: dict[str, object] = {
+            "initialized": cb_initialized,
+            "state": cb_state,
+            "failures": cb_failures,
+            "threshold": cb_threshold,
+            "reset_timeout_seconds": cb_reset_timeout,
+        }
+
+        # Only include seconds_until_half_open when circuit is open
+        if seconds_until_half_open is not None:
+            circuit_breaker_info["seconds_until_half_open"] = seconds_until_half_open
+
         result: dict[str, object] = {
             "handler_type": self.handler_type.value,
             "handler_category": self.handler_category.value,
@@ -1358,14 +1511,7 @@ class HandlerManifestPersistence(
             "storage_path": str(self._storage_path) if self._storage_path else None,
             "initialized": self._initialized,
             "version": "0.1.0",
-            "circuit_breaker": {
-                "initialized": self._circuit_breaker_initialized,
-                "state": "open"
-                if getattr(self, "_circuit_breaker_open", False)
-                else "closed",
-                "failures": getattr(self, "_circuit_breaker_failures", 0),
-                "threshold": getattr(self, "circuit_breaker_threshold", 5),
-            },
+            "circuit_breaker": circuit_breaker_info,
         }
 
         return result

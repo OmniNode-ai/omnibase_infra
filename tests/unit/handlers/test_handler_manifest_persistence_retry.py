@@ -88,11 +88,13 @@ def temp_storage_path(tmp_path: Path) -> Path:
 @pytest.fixture
 async def handler(
     temp_storage_path: Path,
+    mock_container: MagicMock,
 ) -> AsyncGenerator[HandlerManifestPersistence, None]:
     """Create and initialize handler with temp storage.
 
     Args:
         temp_storage_path: Temporary storage directory.
+        mock_container: Mock ONEX container for dependency injection.
 
     Yields:
         Initialized HandlerManifestPersistence instance.
@@ -102,7 +104,7 @@ async def handler(
         requirements. This attribute is expected by the retry mixin but not
         automatically set by MixinAsyncCircuitBreaker._init_circuit_breaker().
     """
-    h = HandlerManifestPersistence()
+    h = HandlerManifestPersistence(mock_container)
     await h.initialize({"storage_path": str(temp_storage_path)})
     # Set required attribute for MixinRetryExecution compatibility
     h._circuit_breaker_initialized = True
@@ -112,15 +114,37 @@ async def handler(
 
 @pytest.fixture
 def retry_state_initial() -> ModelRetryState:
-    """Create initial retry state matching contract configuration.
+    """Create initial retry state matching handler's _execute_with_retry initialization.
+
+    This fixture mirrors the exact ModelRetryState creation in
+    HandlerManifestPersistence._execute_with_retry (lines 593-598):
+
+        retry_state = ModelRetryState(
+            attempt=0,
+            max_attempts=int(self._retry_config["max_retries"]) + 1,
+            delay_seconds=float(self._retry_config["initial_delay_seconds"]),
+            backoff_multiplier=float(self._retry_config["exponential_base"]),
+        )
+
+    Contract configuration:
+        - max_retries: 3 (CONTRACT_MAX_RETRIES)
+        - initial_delay_ms: 100ms = 0.1s (CONTRACT_INITIAL_DELAY_SECONDS)
+        - exponential_base: 2 (CONTRACT_EXPONENTIAL_BASE)
+
+    Resulting max_attempts = max_retries + 1 = 4 total execution attempts:
+        - attempt=0: Initial execution
+        - attempt=1: First retry
+        - attempt=2: Second retry
+        - attempt=3: Third retry (final attempt)
+        - attempt=4: is_retriable() returns False (exhausted)
 
     Returns:
-        ModelRetryState configured with contract-defined parameters.
+        ModelRetryState configured identically to handler initialization.
     """
     return ModelRetryState(
         attempt=0,
-        max_attempts=CONTRACT_MAX_RETRIES
-        + 1,  # +1 for initial attempt (handler pattern)
+        # max_attempts = max_retries + 1 = total execution attempts including initial
+        max_attempts=CONTRACT_MAX_RETRIES + 1,
         delay_seconds=CONTRACT_INITIAL_DELAY_SECONDS,
         backoff_multiplier=CONTRACT_EXPONENTIAL_BASE,
     )
@@ -203,6 +227,7 @@ def create_retrieve_envelope(
 
 async def create_initialized_handler(
     storage_path: Path,
+    mock_container: MagicMock,
     retry_policy: dict[str, object] | None = None,
 ) -> HandlerManifestPersistence:
     """Create and initialize a handler with proper mixin compatibility.
@@ -212,12 +237,13 @@ async def create_initialized_handler(
 
     Args:
         storage_path: Path to storage directory.
+        mock_container: Mock ONEX container for dependency injection.
         retry_policy: Optional retry policy configuration.
 
     Returns:
         Initialized HandlerManifestPersistence with all required attributes.
     """
-    h = HandlerManifestPersistence()
+    h = HandlerManifestPersistence(mock_container)
     config: dict[str, object] = {"storage_path": str(storage_path)}
     if retry_policy:
         config["retry_policy"] = retry_policy
@@ -686,13 +712,13 @@ class TestRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_retry_succeeds_on_transient_failure(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Retry should succeed when transient failure recovers.
 
         Simulates a transient filesystem error that succeeds on retry.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         manifest = create_test_manifest()
         envelope = create_store_envelope(manifest)
@@ -720,14 +746,14 @@ class TestRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_retry_exhausted_raises_oserror(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Exhausted retries should raise OSError that propagates.
 
         When all retry attempts fail with OSError, the handler raises
         the original OSError (which gets re-raised in the retry loop).
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         manifest = create_test_manifest()
         envelope = create_store_envelope(manifest)
@@ -755,13 +781,13 @@ class TestRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_non_retriable_error_raises_immediately(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Non-retriable errors should raise immediately without retry.
 
         FileNotFoundError is not retriable and should propagate immediately.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         manifest = create_test_manifest()
         envelope = create_store_envelope(manifest)
@@ -787,12 +813,14 @@ class TestRetryIntegration:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_timeout_error_is_retried(self, temp_storage_path: Path) -> None:
+    async def test_timeout_error_is_retried(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
         """TimeoutError should trigger retry attempts.
 
         Timeout errors are transient and should be retried.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         manifest = create_test_manifest()
         envelope = create_store_envelope(manifest)
@@ -819,12 +847,14 @@ class TestRetryIntegration:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_permission_error_not_retried(self, temp_storage_path: Path) -> None:
+    async def test_permission_error_not_retried(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
         """PermissionError should not trigger retry attempts.
 
         Permission errors are not transient and should fail immediately.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         manifest = create_test_manifest()
         envelope = create_store_envelope(manifest)
@@ -866,13 +896,13 @@ class TestCircuitBreakerRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_checked_before_retry(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Circuit breaker should be checked before retry loop starts.
 
         If circuit is open, operations should fail fast without retry attempts.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         # Force circuit to open state
         handler._circuit_breaker_open = True
@@ -892,14 +922,14 @@ class TestCircuitBreakerRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_failure_recorded_on_exhaustion(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Circuit breaker failure should be recorded when retries exhausted.
 
         After all retry attempts fail, the circuit breaker failure count
         should be incremented.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         # Verify initial CB state
         initial_failures = handler._circuit_breaker_failures
@@ -926,13 +956,13 @@ class TestCircuitBreakerRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_not_recorded_for_file_not_found(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Circuit breaker failure should NOT be recorded for FileNotFoundError.
 
         FileNotFoundError (NOT_FOUND category) should not increment CB failures.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         # Verify initial CB state
         initial_failures = handler._circuit_breaker_failures
@@ -959,13 +989,13 @@ class TestCircuitBreakerRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_reset_on_success_after_retry(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Circuit breaker should reset on success after retry.
 
         If retries eventually succeed, the circuit breaker should be reset.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         # Set some initial failures
         handler._circuit_breaker_failures = 3
@@ -997,14 +1027,19 @@ class TestCircuitBreakerRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_permission_error_records_circuit_failure_immediately(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
-        """Permission errors should record CB failure immediately.
+        """Permission errors should record CB failure immediately without retries.
 
-        PermissionError (AUTHENTICATION category) should record CB failure
-        without retry attempts because record_circuit_failure=True for that category.
+        PermissionError (AUTHENTICATION category) has:
+        - should_retry=False (no retry attempts)
+        - record_circuit_failure=True (CB failure recorded)
+
+        This test verifies:
+        1. Only one execution attempt is made (no retries)
+        2. Circuit breaker failure count is incremented by exactly 1
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         # Verify initial CB state
         initial_failures = handler._circuit_breaker_failures
@@ -1012,11 +1047,14 @@ class TestCircuitBreakerRetryIntegration:
         manifest = create_test_manifest()
         envelope = create_store_envelope(manifest)
 
-        # Mock mkdir to fail with permission error
+        # Track call count to verify no retries
+        call_count = 0
         original_mkdir = Path.mkdir
 
         def mock_mkdir(self: Path, *args, **kwargs) -> None:
+            nonlocal call_count
             if "manifests" in str(self):
+                call_count += 1
                 raise PermissionError("Access denied")
             return original_mkdir(self, *args, **kwargs)
 
@@ -1024,14 +1062,171 @@ class TestCircuitBreakerRetryIntegration:
             with pytest.raises(PermissionError):
                 await handler.execute(envelope)
 
+        # Verify no retries occurred (PermissionError has should_retry=False)
+        assert call_count == 1, (
+            f"PermissionError should not be retried, expected 1 call, got {call_count}"
+        )
+
         # CB failure SHOULD be recorded for AUTHENTICATION category
         # (record_circuit_failure=True in classification)
-        # Note: The original exception is re-raised, but CB is recorded
-        # Verify CB failure was recorded (check failure count increased)
-        assert handler._circuit_breaker_failures > initial_failures, (
-            f"CB should record authentication failures: "
-            f"initial={initial_failures}, current={handler._circuit_breaker_failures}"
+        # Verify CB failure was recorded with exactly 1 increment
+        assert handler._circuit_breaker_failures == initial_failures + 1, (
+            f"CB should record exactly one authentication failure: "
+            f"expected {initial_failures + 1}, got {handler._circuit_breaker_failures}"
         )
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_opens_after_threshold_failures(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
+        """Circuit breaker should open after reaching failure threshold.
+
+        The circuit breaker threshold is 5 (configured in initialize()).
+        After 5 consecutive failures, subsequent operations should fail fast
+        with InfraUnavailableError without attempting the operation.
+        """
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
+
+        manifest = create_test_manifest()
+        envelope = create_store_envelope(manifest)
+
+        # Track calls to verify circuit breaker behavior
+        call_count = 0
+        original_mkdir = Path.mkdir
+
+        def mock_mkdir(self: Path, *args, **kwargs) -> None:
+            nonlocal call_count
+            if "manifests" in str(self):
+                call_count += 1
+                raise OSError("Persistent infrastructure failure")
+            return original_mkdir(self, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", mock_mkdir):
+            # Execute multiple times to trigger CB threshold (5 failures)
+            # Each execute() with OSError exhausts retries and records 1 CB failure
+            for i in range(5):
+                with pytest.raises(OSError):
+                    await handler.execute(envelope)
+
+            # Verify CB is now open (failures >= threshold)
+            assert handler._circuit_breaker_failures >= 5, (
+                f"Expected at least 5 CB failures, got {handler._circuit_breaker_failures}"
+            )
+
+            # Reset call count to verify next operation fails fast
+            calls_before_open_check = call_count
+
+            # Next operation should fail fast with InfraUnavailableError
+            # due to open circuit breaker
+            with pytest.raises(InfraUnavailableError) as exc_info:
+                await handler.execute(envelope)
+
+            # Verify no additional I/O attempts were made (fail fast)
+            assert call_count == calls_before_open_check, (
+                f"Circuit breaker should fail fast without I/O: "
+                f"calls before={calls_before_open_check}, after={call_count}"
+            )
+
+            # Verify error message indicates circuit breaker
+            error_msg = str(exc_info.value).lower()
+            assert "circuit breaker" in error_msg or "unavailable" in error_msg
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_half_open_success_resets(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
+        """Circuit breaker should reset to closed on successful operation after failures.
+
+        This tests the pattern where:
+        1. Circuit breaker accumulates some failures (but not enough to open)
+        2. A successful operation resets the failure count to 0
+
+        This is the "success resets circuit breaker" behavior already tested in
+        test_circuit_breaker_reset_on_success_after_retry, but this test
+        verifies the specific transition from partial failures to reset.
+        """
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
+
+        manifest = create_test_manifest()
+        envelope = create_store_envelope(manifest)
+
+        # Simulate 3 accumulated failures (below threshold of 5)
+        handler._circuit_breaker_failures = 3
+
+        # Track calls to verify behavior
+        call_count = 0
+        original_mkdir = Path.mkdir
+
+        def mock_mkdir(self: Path, *args, **kwargs) -> None:
+            nonlocal call_count
+            if "manifests" in str(self):
+                call_count += 1
+            return original_mkdir(self, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", mock_mkdir):
+            # Execute successfully
+            result = await handler.execute(envelope)
+
+            assert result.result["status"] == "success"
+
+        # Verify CB failures were reset to 0
+        assert handler._circuit_breaker_failures == 0, (
+            f"CB failures should be reset to 0 on success, "
+            f"got {handler._circuit_breaker_failures}"
+        )
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_failure_count_accurate_on_retry_exhaustion(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
+        """Verify CB failure is recorded exactly once when retries are exhausted.
+
+        When an operation exhausts all retry attempts (max_retries=3, total 4 attempts),
+        the circuit breaker failure count should be incremented by exactly 1,
+        not once per retry attempt.
+        """
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
+
+        # Verify initial state
+        initial_failures = handler._circuit_breaker_failures
+        assert initial_failures == 0
+
+        manifest = create_test_manifest()
+        envelope = create_store_envelope(manifest)
+
+        # Track calls to verify retry behavior
+        call_count = 0
+        original_mkdir = Path.mkdir
+
+        def mock_mkdir(self: Path, *args, **kwargs) -> None:
+            nonlocal call_count
+            if "manifests" in str(self):
+                call_count += 1
+                raise OSError("Persistent failure")
+            return original_mkdir(self, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", mock_mkdir):
+            with pytest.raises(OSError):
+                await handler.execute(envelope)
+
+        # Verify correct number of attempts (initial + 3 retries = 4)
+        expected_attempts = handler._retry_config["max_retries"] + 1
+        assert call_count == expected_attempts, (
+            f"Expected {expected_attempts} attempts, got {call_count}"
+        )
+
+        # Verify CB failure incremented by exactly 1
+        assert handler._circuit_breaker_failures == initial_failures + 1, (
+            f"CB failure should increment by exactly 1 after retry exhaustion: "
+            f"expected {initial_failures + 1}, got {handler._circuit_breaker_failures}"
+        )
+
         await handler.shutdown()
 
 
@@ -1054,7 +1249,9 @@ class TestRetryTiming:
     @pytest.mark.xfail(
         reason="Timing-based test may be flaky in CI - backoff timing is approximate"
     )
-    async def test_backoff_timing_approximate(self, temp_storage_path: Path) -> None:
+    async def test_backoff_timing_approximate(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
         """Verify backoff delay is approximately correct.
 
         Contract: initial_delay=0.1s, base=2
@@ -1064,7 +1261,7 @@ class TestRetryTiming:
         flaky in CI environments. The retry logic is also tested by other
         non-timing-based tests.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         manifest = create_test_manifest()
         envelope = create_store_envelope(manifest)
@@ -1224,12 +1421,14 @@ class TestRetryConfigurationFromInitialize:
     """Test that retry configuration is properly loaded from initialize config."""
 
     @pytest.mark.asyncio
-    async def test_default_retry_config_values(self, temp_storage_path: Path) -> None:
+    async def test_default_retry_config_values(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
         """Default retry config should match contract values.
 
         When no retry_policy is provided, defaults should apply.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         # Verify default configuration
         assert handler._retry_config["max_retries"] == 3
@@ -1241,7 +1440,7 @@ class TestRetryConfigurationFromInitialize:
 
     @pytest.mark.asyncio
     async def test_custom_retry_config_from_initialize(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Custom retry config should override defaults.
 
@@ -1249,6 +1448,7 @@ class TestRetryConfigurationFromInitialize:
         """
         handler = await create_initialized_handler(
             temp_storage_path,
+            mock_container,
             retry_policy={
                 "max_retries": 5,
                 "initial_delay_ms": 200,
@@ -1267,7 +1467,7 @@ class TestRetryConfigurationFromInitialize:
 
     @pytest.mark.asyncio
     async def test_partial_retry_config_preserves_defaults(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Partial retry config should preserve other defaults.
 
@@ -1275,6 +1475,7 @@ class TestRetryConfigurationFromInitialize:
         """
         handler = await create_initialized_handler(
             temp_storage_path,
+            mock_container,
             retry_policy={
                 "max_retries": 10,
                 # Other values not specified
@@ -1292,7 +1493,7 @@ class TestRetryConfigurationFromInitialize:
 
     @pytest.mark.asyncio
     async def test_invalid_retry_config_values_ignored(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Invalid retry config values should be ignored.
 
@@ -1300,6 +1501,7 @@ class TestRetryConfigurationFromInitialize:
         """
         handler = await create_initialized_handler(
             temp_storage_path,
+            mock_container,
             retry_policy={
                 "max_retries": -1,  # Invalid: negative
                 "initial_delay_ms": "not_a_number",  # Invalid: wrong type
@@ -1335,7 +1537,7 @@ class TestConcurrentWrites:
 
     @pytest.mark.asyncio
     async def test_concurrent_stores_same_manifest_idempotent(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Verify concurrent stores of same manifest are idempotent.
 
@@ -1348,7 +1550,7 @@ class TestConcurrentWrites:
         - No race conditions corrupt data
         - All concurrent requests complete successfully
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         manifest_id = str(uuid4())
         manifest = create_test_manifest(manifest_id=manifest_id)
@@ -1387,14 +1589,14 @@ class TestConcurrentWrites:
 
     @pytest.mark.asyncio
     async def test_concurrent_stores_different_manifests(
-        self, temp_storage_path: Path
+        self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
         """Verify concurrent stores of different manifests all succeed.
 
         When storing multiple different manifests concurrently, all should
         be created independently without interference.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         # Create 5 different manifests
         manifests = [create_test_manifest() for _ in range(5)]
@@ -1419,13 +1621,15 @@ class TestConcurrentWrites:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_concurrent_store_and_retrieve(self, temp_storage_path: Path) -> None:
+    async def test_concurrent_store_and_retrieve(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
         """Verify concurrent store and retrieve operations don't conflict.
 
         A store operation should complete such that subsequent retrieve
         operations (even concurrent ones) can read the manifest.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         manifest_id = str(uuid4())
         manifest = create_test_manifest(manifest_id=manifest_id)
@@ -1450,12 +1654,14 @@ class TestConcurrentWrites:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_concurrent_stores_high_volume(self, temp_storage_path: Path) -> None:
+    async def test_concurrent_stores_high_volume(
+        self, temp_storage_path: Path, mock_container: MagicMock
+    ) -> None:
         """Stress test with high volume of concurrent operations.
 
         Verifies system stability under load with many concurrent writes.
         """
-        handler = await create_initialized_handler(temp_storage_path)
+        handler = await create_initialized_handler(temp_storage_path, mock_container)
 
         # Create 20 concurrent store operations for the same manifest
         manifest_id = str(uuid4())
