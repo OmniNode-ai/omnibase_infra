@@ -950,7 +950,10 @@ class TestCircuitBreakerRetryIntegration:
                 await handler.execute(envelope)
 
         # CB failure should be recorded after exhaustion
-        assert handler._circuit_breaker_failures >= initial_failures
+        assert handler._circuit_breaker_failures > initial_failures, (
+            f"Circuit breaker failures should increase after retry exhaustion: "
+            f"expected > {initial_failures}, got {handler._circuit_breaker_failures}"
+        )
 
         await handler.shutdown()
 
