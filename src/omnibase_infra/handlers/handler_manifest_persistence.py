@@ -47,12 +47,15 @@ Note:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import tempfile
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
+from typing import TypeVar
 from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
@@ -62,6 +65,7 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
+    EnumRetryErrorCategory,
 )
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -70,6 +74,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
 from omnibase_infra.handlers.models.model_manifest_metadata import ModelManifestMetadata
 from omnibase_infra.handlers.models.model_manifest_query_result import (
     ModelManifestQueryResult,
@@ -81,6 +86,10 @@ from omnibase_infra.handlers.models.model_manifest_store_result import (
     ModelManifestStoreResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
+from omnibase_infra.models.model_retry_error_classification import (
+    ModelRetryErrorClassification,
+)
 from omnibase_infra.utils import parse_env_int
 
 logger = logging.getLogger(__name__)
@@ -141,7 +150,9 @@ def _warn_if_naive_datetime(
         )
 
 
-class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
+class HandlerManifestPersistence(
+    MixinEnvelopeExtraction, MixinAsyncCircuitBreaker, MixinRetryExecution
+):
     """Manifest persistence handler for storing/retrieving ModelExecutionManifest.
 
     This handler stores ModelExecutionManifest objects to the filesystem with:
@@ -150,6 +161,7 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
     - Idempotent storage (same manifest_id = no duplicate)
     - Query support with filters
     - Circuit breaker for resilient I/O operations
+    - Retry with exponential backoff for transient I/O errors
 
     Storage Pattern:
         {storage_path}/{year}/{month}/{day}/{manifest_id}.json
@@ -201,6 +213,21 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
         self._max_file_size: int = _DEFAULT_MAX_FILE_SIZE
         self._initialized: bool = False
 
+        # Retry configuration (populated from contract in initialize())
+        self._retry_config: dict[str, float | int] = {
+            "max_retries": 3,
+            "initial_delay_seconds": 0.1,  # 100ms
+            "max_delay_seconds": 5.0,  # 5000ms
+            "exponential_base": 2.0,
+        }
+
+        # Required by MixinRetryExecution (no thread pool needed for async I/O)
+        self._executor = None
+
+        # Required by MixinRetryExecution for circuit breaker integration check
+        # Set to True after _init_circuit_breaker() is called in initialize()
+        self._circuit_breaker_initialized: bool = False
+
     @property
     def handler_type(self) -> EnumHandlerType:
         """Return the architectural role of this handler.
@@ -241,6 +268,109 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             - handler_type: Architectural role (INFRA_HANDLER/NODE_HANDLER/etc.)
         """
         return EnumHandlerTypeCategory.EFFECT
+
+    # =========================================================================
+    # MixinRetryExecution Abstract Method Implementations
+    # =========================================================================
+
+    def _classify_error(
+        self, error: Exception, operation: str
+    ) -> ModelRetryErrorClassification:
+        """Classify filesystem errors for retry handling.
+
+        This method determines whether an error is retriable and how it should
+        affect the circuit breaker state.
+
+        Args:
+            error: The exception to classify.
+            operation: The operation name for context.
+
+        Returns:
+            ModelRetryErrorClassification with retry decision and error details.
+
+        Error Classification:
+            - TimeoutError: TIMEOUT category, retriable, records circuit failure
+            - BlockingIOError: TIMEOUT category, retriable, records circuit failure
+              (EAGAIN/EWOULDBLOCK - resource temporarily unavailable)
+            - FileNotFoundError: NOT_FOUND category, NOT retriable, NO circuit failure
+            - PermissionError: AUTHENTICATION category, NOT retriable, records circuit failure
+            - OSError/IOError: CONNECTION category, retriable, records circuit failure
+            - Other: UNKNOWN category, retriable, records circuit failure
+
+        Note:
+            BlockingIOError must be checked BEFORE OSError since it's a subclass.
+            We classify BlockingIOError as TIMEOUT rather than CONNECTION because
+            it indicates "resource temporarily unavailable" which is semantically
+            closer to a timeout condition than a connection error.
+        """
+        if isinstance(error, TimeoutError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.TIMEOUT,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Filesystem operation timed out: {operation}",
+            )
+
+        # BlockingIOError indicates EAGAIN/EWOULDBLOCK (resource temporarily unavailable)
+        # Must be checked before OSError since it's a subclass
+        if isinstance(error, BlockingIOError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.TIMEOUT,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Resource temporarily unavailable: {operation}",
+            )
+
+        if isinstance(error, FileNotFoundError):
+            # File not found is a user/logic error, not infrastructure failure
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.NOT_FOUND,
+                should_retry=False,
+                record_circuit_failure=False,
+                error_message=f"File not found: {error}",
+            )
+
+        if isinstance(error, PermissionError):
+            # Permission errors are not retriable and indicate config issues
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.AUTHENTICATION,
+                should_retry=False,
+                record_circuit_failure=True,
+                error_message=f"Permission denied: {operation}",
+            )
+
+        if isinstance(error, (OSError, IOError)):
+            # General I/O errors are retriable (disk full, temp unavailable, etc.)
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.CONNECTION,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Filesystem I/O error: {type(error).__name__}",
+            )
+
+        # Unknown errors - retry but record failure
+        return ModelRetryErrorClassification(
+            category=EnumRetryErrorCategory.UNKNOWN,
+            should_retry=True,
+            record_circuit_failure=True,
+            error_message=f"Unexpected error: {type(error).__name__}",
+        )
+
+    def _get_transport_type(self) -> EnumInfraTransportType:
+        """Return the transport type for error context.
+
+        Returns:
+            EnumInfraTransportType.FILESYSTEM for filesystem operations.
+        """
+        return EnumInfraTransportType.FILESYSTEM
+
+    def _get_target_name(self) -> str:
+        """Return the target name for error context.
+
+        Returns:
+            The handler identifier for error context and logging.
+        """
+        return "manifest_persistence_handler"
 
     async def initialize(self, config: dict[str, object]) -> None:
         """Initialize manifest persistence handler with storage path.
@@ -341,6 +471,44 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             service_name="manifest_persistence_handler",
             transport_type=EnumInfraTransportType.FILESYSTEM,
         )
+        # Mark circuit breaker as initialized for MixinRetryExecution integration
+        self._circuit_breaker_initialized = True
+
+        # Parse retry_policy from configuration (matches contract defaults)
+        retry_policy = config.get("retry_policy")
+        if isinstance(retry_policy, dict):
+            # max_retries (default: 3)
+            max_retries = retry_policy.get("max_retries")
+            if isinstance(max_retries, int) and max_retries > 0:
+                self._retry_config["max_retries"] = max_retries
+
+            # initial_delay_ms -> convert to seconds (default: 100ms = 0.1s)
+            initial_delay_ms = retry_policy.get("initial_delay_ms")
+            if isinstance(initial_delay_ms, int | float) and initial_delay_ms > 0:
+                self._retry_config["initial_delay_seconds"] = initial_delay_ms / 1000.0
+
+            # max_delay_ms -> convert to seconds (default: 5000ms = 5.0s)
+            max_delay_ms = retry_policy.get("max_delay_ms")
+            if isinstance(max_delay_ms, int | float) and max_delay_ms > 0:
+                self._retry_config["max_delay_seconds"] = max_delay_ms / 1000.0
+
+            # exponential_base (default: 2.0)
+            exponential_base = retry_policy.get("exponential_base")
+            if isinstance(exponential_base, int | float) and exponential_base >= 1.0:
+                self._retry_config["exponential_base"] = float(exponential_base)
+
+            logger.debug(
+                "Retry policy configured",
+                extra={
+                    "max_retries": self._retry_config["max_retries"],
+                    "initial_delay_seconds": self._retry_config[
+                        "initial_delay_seconds"
+                    ],
+                    "max_delay_seconds": self._retry_config["max_delay_seconds"],
+                    "exponential_base": self._retry_config["exponential_base"],
+                    "correlation_id": str(init_correlation_id),
+                },
+            )
 
         self._initialized = True
 
@@ -360,6 +528,105 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
         self._storage_path = None
         self._initialized = False
         logger.info("HandlerManifestPersistence shutdown complete")
+
+    # =========================================================================
+    # Retry Logic Helper
+    # =========================================================================
+
+    _T = TypeVar("_T")
+
+    async def _execute_with_retry(
+        self,
+        operation: str,
+        func: Callable[[], Awaitable[_T]],
+        correlation_id: UUID,
+    ) -> _T:
+        """Execute an async operation with exponential backoff retry logic.
+
+        This method wraps I/O operations with retry logic, integrating with the
+        circuit breaker for resilient operations.
+
+        Args:
+            operation: Operation name for logging and error context.
+            func: Async callable to execute (returns the result).
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            The result from func().
+
+        Raises:
+            InfraTimeoutError: If operation times out after retries exhausted.
+            InfraConnectionError: If connection fails after retries exhausted.
+            InfraAuthenticationError: If authentication fails (not retriable).
+            InfraUnavailableError: If circuit breaker is OPEN.
+
+        Circuit Breaker Integration:
+            - Checks circuit state before execution (raises if OPEN)
+            - Records success/failure for circuit state management
+            - Failure recorded only when retries are exhausted
+
+        Retry Logic:
+            - Uses exponential backoff with configurable parameters
+            - Classifies errors to determine retry eligibility
+            - Logs retry attempts with correlation tracking
+        """
+        # Check circuit breaker before execution
+        await self._check_circuit_if_enabled(operation, correlation_id)
+
+        # Initialize retry state from configuration
+        retry_state = ModelRetryState(
+            attempt=0,
+            max_attempts=int(self._retry_config["max_retries"]) + 1,  # +1 for initial
+            delay_seconds=float(self._retry_config["initial_delay_seconds"]),
+            backoff_multiplier=float(self._retry_config["exponential_base"]),
+        )
+
+        max_delay_seconds = float(self._retry_config["max_delay_seconds"])
+        last_error: Exception | None = None
+
+        while retry_state.is_retriable():
+            try:
+                result = await func()
+                # Reset circuit breaker on success
+                await self._reset_circuit_if_enabled()
+                return result
+
+            except Exception as e:
+                last_error = e
+                classification = self._classify_error(e, operation)
+
+                if not classification.should_retry:
+                    # Non-retriable error - record failure and raise immediately
+                    if classification.record_circuit_failure:
+                        await self._record_circuit_failure_if_enabled(
+                            operation, correlation_id
+                        )
+                    raise
+
+                # Update retry state for next attempt
+                retry_state = retry_state.next_attempt(
+                    error_message=classification.error_message,
+                    max_delay_seconds=max_delay_seconds,
+                )
+
+                if not retry_state.is_retriable():
+                    # Retries exhausted - record failure and raise
+                    if classification.record_circuit_failure:
+                        await self._record_circuit_failure_if_enabled(
+                            operation, correlation_id
+                        )
+                    raise
+
+                # Log retry attempt
+                await self._log_retry_attempt(operation, retry_state, correlation_id)
+
+                # Wait before next attempt
+                await asyncio.sleep(retry_state.delay_seconds)
+
+        # Should never reach here, but satisfy type checker
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(f"Retry loop completed without result for {operation}")
 
     def _get_manifest_path(self, manifest_id: UUID, created_at: datetime) -> Path:
         """Get the file path for a manifest based on ID and creation date.
@@ -475,7 +742,7 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[dict[str, object]]:
-        """Execute manifest.store operation.
+        """Execute manifest.store operation with retry logic.
 
         Stores a manifest with atomic write (temp file + rename) and
         idempotent behavior (existing manifests are not overwritten).
@@ -487,7 +754,7 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             Result with manifest_id, file_path, created, and bytes_written.
 
         Raises:
-            InfraConnectionError: If write fails
+            InfraConnectionError: If write fails after retries exhausted
             InfraUnavailableError: If circuit breaker is open
         """
         operation = "manifest.store"
@@ -558,17 +825,10 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
         # Get file path
         file_path = self._get_manifest_path(manifest_id, created_at)
 
-        # Check circuit breaker before I/O operation
-        async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker(operation, correlation_id)
-
-        try:
+        async def _do_store_io() -> ModelHandlerOutput[dict[str, object]]:
+            """Inner function containing I/O operations (wrapped with retry)."""
             # Check if manifest already exists (idempotent behavior)
             if file_path.exists():
-                # Reset circuit breaker on success
-                async with self._circuit_breaker_lock:
-                    await self._reset_circuit_breaker()
-
                 logger.debug(
                     "Manifest already exists, skipping write (idempotent)",
                     extra={
@@ -624,10 +884,6 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
 
             bytes_written = len(manifest_bytes)
 
-            # Reset circuit breaker on success
-            async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
-
             logger.debug(
                 "Manifest stored successfully",
                 extra={
@@ -656,19 +912,8 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                 },
             )
 
-        except (InfraConnectionError, InfraUnavailableError):
-            # Record failure for circuit breaker (infra-level failures only)
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation, correlation_id)
-            raise
-        except OSError as e:
-            # Record failure for circuit breaker
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation, correlation_id)
-            raise InfraConnectionError(
-                f"Failed to write manifest: {e}",
-                context=ctx,
-            ) from e
+        # Execute with retry logic (handles circuit breaker and backoff)
+        return await self._execute_with_retry(operation, _do_store_io, correlation_id)
 
     async def _execute_retrieve(
         self,
@@ -676,7 +921,7 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[dict[str, object]]:
-        """Execute manifest.retrieve operation.
+        """Execute manifest.retrieve operation with retry logic.
 
         Retrieves a manifest by scanning date directories.
 
@@ -696,7 +941,7 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             Result with manifest_id, manifest data, file_path, and found flag.
 
         Raises:
-            InfraConnectionError: If read fails
+            InfraConnectionError: If read fails after retries exhausted
             InfraUnavailableError: If circuit breaker is open
         """
         operation = "manifest.retrieve"
@@ -726,11 +971,8 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                 context=ctx,
             ) from e
 
-        # Check circuit breaker before I/O operation
-        async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker(operation, correlation_id)
-
-        try:
+        async def _do_retrieve_io() -> ModelHandlerOutput[dict[str, object]]:
+            """Inner function containing I/O operations (wrapped with retry)."""
             # Search for manifest in date directories
             found_path: Path | None = None
             manifest_data: dict[str, object] | None = None
@@ -773,10 +1015,6 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                 manifest_json = found_path.read_text(encoding="utf-8")
                 manifest_data = json.loads(manifest_json)
 
-            # Reset circuit breaker on success
-            async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
-
             result = ModelManifestRetrieveResult(
                 manifest_id=manifest_id,
                 manifest=manifest_data,
@@ -805,19 +1043,10 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                 },
             )
 
-        except (InfraConnectionError, InfraUnavailableError):
-            # Record failure for circuit breaker (infra-level failures only)
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation, correlation_id)
-            raise
-        except OSError as e:
-            # Record failure for circuit breaker
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation, correlation_id)
-            raise InfraConnectionError(
-                f"Failed to read manifest: {e}",
-                context=ctx,
-            ) from e
+        # Execute with retry logic (handles circuit breaker and backoff)
+        return await self._execute_with_retry(
+            operation, _do_retrieve_io, correlation_id
+        )
 
     async def _execute_query(
         self,
@@ -825,7 +1054,7 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[dict[str, object]]:
-        """Execute manifest.query operation.
+        """Execute manifest.query operation with retry logic.
 
         Queries manifests with filters and respects metadata_only flag.
 
@@ -850,7 +1079,7 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             Result with manifests list, total_count, and metadata_only flag.
 
         Raises:
-            InfraConnectionError: If read fails
+            InfraConnectionError: If read fails after retries exhausted
             InfraUnavailableError: If circuit breaker is open
         """
         operation = "manifest.query"
@@ -920,11 +1149,8 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             limit = 100
         limit = min(limit, 10000)  # Cap at 10000
 
-        # Check circuit breaker before I/O operation
-        async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker(operation, correlation_id)
-
-        try:
+        async def _do_query_io() -> ModelHandlerOutput[dict[str, object]]:
+            """Inner function containing I/O operations (wrapped with retry)."""
             if self._storage_path is None:
                 raise RuntimeHostError(
                     "Handler not initialized - storage_path is None",
@@ -1059,10 +1285,6 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                                 )
                                 continue
 
-            # Reset circuit breaker on success
-            async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
-
             result = ModelManifestQueryResult(
                 manifests=manifests_metadata,
                 manifest_data=manifests_data,
@@ -1090,19 +1312,8 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                 },
             )
 
-        except (InfraConnectionError, InfraUnavailableError):
-            # Record failure for circuit breaker (infra-level failures only)
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation, correlation_id)
-            raise
-        except OSError as e:
-            # Record failure for circuit breaker
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(operation, correlation_id)
-            raise InfraConnectionError(
-                f"Failed to query manifests: {e}",
-                context=ctx,
-            ) from e
+        # Execute with retry logic (handles circuit breaker and backoff)
+        return await self._execute_with_retry(operation, _do_query_io, correlation_id)
 
     def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
