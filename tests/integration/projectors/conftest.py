@@ -38,7 +38,11 @@ from typing import TYPE_CHECKING
 
 import asyncpg
 import pytest
+import yaml
+from omnibase_core.models.projectors import ModelProjectorContract
 from testcontainers.postgres import PostgresContainer
+
+from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
 
 if TYPE_CHECKING:
     from omnibase_infra.projectors import ProjectionReaderRegistration
@@ -286,3 +290,50 @@ def legacy_projector(pg_pool: asyncpg.Pool) -> ProjectorRegistration:
         )
 
     return ProjectorRegistration(pg_pool)
+
+
+@pytest.fixture
+def contract() -> ModelProjectorContract:
+    """Load the registration projector contract.
+
+    Uses the exported REGISTRATION_PROJECTOR_CONTRACT constant to ensure
+    tests always use the canonical contract location.
+
+    Note:
+        The contract YAML may contain extended fields (e.g., partial_updates)
+        that are not part of the base ModelProjectorContract model. These are
+        stripped before validation. The partial_updates definitions are used
+        for documentation and runtime behavior but not validated by the
+        base contract model.
+
+    Returns:
+        Parsed ModelProjectorContract from YAML.
+
+    Raises:
+        pytest.fail: If contract file doesn't exist.
+    """
+    if not REGISTRATION_PROJECTOR_CONTRACT.exists():
+        pytest.fail(f"Contract file not found: {REGISTRATION_PROJECTOR_CONTRACT}")
+
+    with open(REGISTRATION_PROJECTOR_CONTRACT) as f:
+        data = yaml.safe_load(f)
+
+    # Strip extended fields not in base ModelProjectorContract
+    # partial_updates is an extension for OMN-1170 that defines partial update operations
+    data.pop("partial_updates", None)
+
+    # Handle composite key fields: ModelProjectorContract expects strings, but the
+    # contract YAML uses lists for composite primary/upsert keys.
+    # Convert first element of list to string for model validation.
+    # The full composite key information is preserved in the SQL schema.
+    if isinstance(data.get("projection_schema", {}).get("primary_key"), list):
+        pk_list = data["projection_schema"]["primary_key"]
+        data["projection_schema"]["primary_key"] = (
+            pk_list[0] if pk_list else "entity_id"
+        )
+
+    if isinstance(data.get("behavior", {}).get("upsert_key"), list):
+        upsert_list = data["behavior"]["upsert_key"]
+        data["behavior"]["upsert_key"] = upsert_list[0] if upsert_list else None
+
+    return ModelProjectorContract.model_validate(data)

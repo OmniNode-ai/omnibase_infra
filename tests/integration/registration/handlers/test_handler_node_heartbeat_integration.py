@@ -204,11 +204,14 @@ async def seed_projection(
         "current_state": projection.current_state.value
         if hasattr(projection.current_state, "value")
         else str(projection.current_state),
-        "node_type": projection.node_type,
+        "node_type": projection.node_type.value
+        if hasattr(projection.node_type, "value")
+        else str(projection.node_type),
         "node_version": str(projection.node_version),
         "capabilities": projection.capabilities.model_dump_json()
         if projection.capabilities
         else "{}",
+        "ack_deadline": projection.ack_deadline,
         "liveness_deadline": projection.liveness_deadline,
         "last_heartbeat_at": projection.last_heartbeat_at,
         "last_applied_event_id": projection.last_applied_event_id,
@@ -823,14 +826,14 @@ class TestHandlerNodeHeartbeatErrors:
 
         with patch.object(
             projector,
-            "update_heartbeat",
+            "partial_update",
             new_callable=AsyncMock,
         ) as mock_update:
             mock_update.side_effect = InfraConnectionError(
                 "Database connection failed",
                 context=ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.DATABASE,
-                    operation="update_heartbeat",
+                    operation="partial_update",
                     target_name="test",
                 ),
             )
@@ -861,7 +864,7 @@ class TestHandlerNodeHeartbeatErrors:
         # Mock the projector to raise unexpected error
         with patch.object(
             projector,
-            "update_heartbeat",
+            "partial_update",
             new_callable=AsyncMock,
         ) as mock_update:
             mock_update.side_effect = ValueError("Unexpected error")
@@ -898,7 +901,7 @@ class TestHandlerNodeHeartbeatErrors:
         # Delete the entity after lookup but before update (simulated)
         with patch.object(
             projector,
-            "update_heartbeat",
+            "partial_update",
             new_callable=AsyncMock,
         ) as mock_update:
             mock_update.return_value = False  # Entity not found during update

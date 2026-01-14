@@ -106,6 +106,38 @@ class ProjectorShell(MixinProjectorSqlOperations):
             When a violation occurs in append mode, ``RuntimeHostError`` is raised
             to fail fast and signal the need for investigation.
 
+    Composite Primary Key Handling:
+        The contract model (``ModelProjectorContract``) only supports single-column
+        ``primary_key`` and ``upsert_key`` values (type: ``str``). For schemas with
+        composite primary keys, there are two approaches:
+
+        **Approach 1: Add UNIQUE constraint (Recommended)**
+            Add a UNIQUE constraint on the single column specified in the contract.
+            This allows ``ON CONFLICT (column)`` to work even with composite PKs.
+
+            Example SQL schema::
+
+                PRIMARY KEY (entity_id, domain),
+                UNIQUE (entity_id)  -- Enables ON CONFLICT (entity_id)
+
+        **Approach 2: Use upsert_partial() with explicit conflict_columns**
+            For operations requiring composite key semantics, use ``upsert_partial()``
+            with the ``conflict_columns`` parameter instead of ``project()``.
+
+            Example::
+
+                await projector.upsert_partial(
+                    aggregate_id=entity_id,
+                    values={"entity_id": entity_id, "domain": domain, ...},
+                    correlation_id=correlation_id,
+                    conflict_columns=["entity_id", "domain"],  # Composite key
+                )
+
+        **get_state() / get_states() behavior with composite keys**:
+            These methods use only the first column of the primary key for lookups.
+            For schemas where the single-column lookup is not unique, the results
+            may be ambiguous. Consider querying the database directly in such cases.
+
     Thread Safety:
         This implementation is coroutine-safe for concurrent async calls.
         Uses asyncpg connection pool for connection management.
@@ -417,6 +449,14 @@ class ProjectorShell(MixinProjectorSqlOperations):
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If query times out.
             RuntimeHostError: For other database errors.
+
+        Note:
+            **Composite Primary Key Handling**: For schemas with composite primary
+            keys (e.g., ``(entity_id, domain)``), this method queries using only
+            the first key column. This works correctly when the first column is
+            globally unique (e.g., UUID), but may return arbitrary results if
+            multiple rows share the same first-column value. For composite key
+            queries, use a direct database query with all key columns.
         """
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
@@ -506,6 +546,11 @@ class ProjectorShell(MixinProjectorSqlOperations):
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If query times out.
             RuntimeHostError: For other database errors.
+
+        Note:
+            **Composite Primary Key Handling**: For schemas with composite primary
+            keys, this method queries using only the first key column. See the
+            note on ``get_state()`` for implications and alternatives.
 
         Example:
             >>> states = await projector.get_states(

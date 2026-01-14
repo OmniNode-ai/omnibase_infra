@@ -39,7 +39,6 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-import yaml
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.projectors import ModelProjectorContract
@@ -160,49 +159,9 @@ PROJECTION_COLUMNS = [
 # Fixtures
 # =============================================================================
 
-
-@pytest.fixture
-def contract() -> ModelProjectorContract:
-    """Load the registration projector contract.
-
-    Note:
-        The contract YAML may contain extended fields (e.g., partial_updates)
-        that are not part of the base ModelProjectorContract model. These are
-        stripped before validation. The partial_updates definitions are used
-        for documentation and runtime behavior but not validated by the
-        base contract model.
-
-    Returns:
-        Parsed ModelProjectorContract from YAML.
-
-    Raises:
-        FileNotFoundError: If contract file doesn't exist.
-    """
-    if not CONTRACT_PATH.exists():
-        pytest.fail(f"Contract file not found: {CONTRACT_PATH}")
-
-    with open(CONTRACT_PATH) as f:
-        data = yaml.safe_load(f)
-
-    # Strip extended fields not in base ModelProjectorContract
-    # partial_updates is an extension for OMN-1170 that defines partial update operations
-    data.pop("partial_updates", None)
-
-    # Handle composite key fields: ModelProjectorContract expects strings, but the
-    # contract YAML uses lists for composite primary/upsert keys.
-    # Convert first element of list to string for model validation.
-    # The full composite key information is preserved in the SQL schema.
-    if isinstance(data.get("projection_schema", {}).get("primary_key"), list):
-        pk_list = data["projection_schema"]["primary_key"]
-        data["projection_schema"]["primary_key"] = (
-            pk_list[0] if pk_list else "entity_id"
-        )
-
-    if isinstance(data.get("behavior", {}).get("upsert_key"), list):
-        upsert_list = data["behavior"]["upsert_key"]
-        data["behavior"]["upsert_key"] = upsert_list[0] if upsert_list else None
-
-    return ModelProjectorContract.model_validate(data)
+# NOTE: The `contract` fixture is defined in conftest.py to allow reuse across
+# multiple test files in this directory. It loads the registration projector
+# contract using the REGISTRATION_PROJECTOR_CONTRACT constant.
 
 
 @pytest.fixture

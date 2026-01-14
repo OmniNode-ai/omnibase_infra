@@ -516,6 +516,12 @@ class MixinProjectorSqlOperations:
             enables updating columns that may not be in the projection schema
             (e.g., internal tracking columns like updated_at).
 
+            **Composite Primary Key Handling**: For schemas with composite primary
+            keys, this method uses only the first column for the WHERE clause.
+            This works when the first column is globally unique (e.g., UUID).
+            For true composite key updates, build a custom UPDATE query or use
+            ``_partial_upsert()`` with explicit ``conflict_columns``.
+
         Example:
             >>> # Update heartbeat tracking fields
             >>> updated = await projector.partial_update(
