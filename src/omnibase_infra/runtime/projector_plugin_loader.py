@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+import asyncpg
 import yaml
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -66,20 +67,28 @@ MAX_DISCOVERY_FILES = 10000
 
 
 # =============================================================================
-# Placeholder Projector (until ProjectorShell is implemented in OMN-1169)
+# ProjectorShell Import (OMN-1169)
+# =============================================================================
+from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+# =============================================================================
+# Placeholder Projector (used when no database pool is provided)
 # =============================================================================
 
 
 class ProjectorShellPlaceholder:
-    """Placeholder projector shell until OMN-1169 is implemented.
+    """Placeholder projector shell used when no database pool is provided.
 
     This class provides a stub implementation that holds contract metadata
-    but cannot actually project events. It will be replaced by the full
-    ProjectorShell implementation in OMN-1169.
+    but cannot actually project events. It is used by the loader for
+    discovery-only scenarios where database access is not needed.
+
+    For full projection functionality, provide a database pool to the
+    ProjectorPluginLoader constructor, which will instantiate ProjectorShell.
 
     Note:
-        This is a temporary implementation. Do NOT use in production.
-        The project() method will raise NotImplementedError.
+        The project() and get_state() methods will raise NotImplementedError.
+        Use ProjectorShell with a database pool for actual projections.
     """
 
     def __init__(self, contract: ModelProjectorContract) -> None:
@@ -89,9 +98,9 @@ class ProjectorShellPlaceholder:
             contract: The parsed and validated projector contract.
         """
         self._contract = contract
-        logger.warning(
+        logger.debug(
             "ProjectorShellPlaceholder loaded for '%s' - "
-            "projection methods will raise NotImplementedError until OMN-1169",
+            "no database pool provided, projection methods will raise NotImplementedError",
             contract.projector_id,
         )
 
@@ -130,18 +139,18 @@ class ProjectorShellPlaceholder:
         event: ModelEventEnvelope,
         correlation_id: UUID,
     ) -> ModelProjectionResult:
-        """Placeholder - not implemented until OMN-1169.
+        """Placeholder - requires database pool for actual projections.
 
         Args:
             event: The event envelope to project.
             correlation_id: Correlation ID for distributed tracing.
 
         Raises:
-            NotImplementedError: Always, as this is a placeholder.
+            NotImplementedError: Always, as this is a placeholder without DB access.
         """
         raise NotImplementedError(
-            f"ProjectorShell for '{self.projector_id}' not yet implemented. "
-            "See OMN-1169 for full implementation."
+            f"ProjectorShellPlaceholder for '{self.projector_id}' cannot project events. "
+            "Provide a database pool to ProjectorPluginLoader to use ProjectorShell."
         )
 
     async def get_state(
@@ -149,18 +158,18 @@ class ProjectorShellPlaceholder:
         aggregate_id: UUID,
         correlation_id: UUID,
     ) -> object | None:
-        """Placeholder - not implemented until OMN-1169.
+        """Placeholder - requires database pool for state queries.
 
         Args:
             aggregate_id: The unique identifier of the aggregate.
             correlation_id: Correlation ID for distributed tracing.
 
         Raises:
-            NotImplementedError: Always, as this is a placeholder.
+            NotImplementedError: Always, as this is a placeholder without DB access.
         """
         raise NotImplementedError(
-            f"ProjectorShell for '{self.projector_id}' not yet implemented. "
-            "See OMN-1169 for full implementation."
+            f"ProjectorShellPlaceholder for '{self.projector_id}' cannot query state. "
+            "Provide a database pool to ProjectorPluginLoader to use ProjectorShell."
         )
 
     def __repr__(self) -> str:
@@ -235,6 +244,7 @@ class ProjectorPluginLoader:
         schema_manager: ProtocolProjectorSchemaValidator | None = None,
         graceful_mode: bool = False,
         base_paths: list[Path] | None = None,
+        pool: asyncpg.Pool | None = None,
     ) -> None:
         """Initialize the projector plugin loader.
 
@@ -243,24 +253,29 @@ class ProjectorPluginLoader:
                 can be used to resolve dependencies like schema_manager.
             schema_manager: Schema validator for validating database schemas.
                 If None, schema validation is skipped during loading.
-                NOTE: Currently stored for future use by ProjectorShell (OMN-1169).
-                When ProjectorShell is implemented, schema validation will occur
-                during projector initialization to ensure the target table exists.
             graceful_mode: If True, collect errors and continue discovery.
                 If False (default), raise on first error.
             base_paths: Optional list of base paths for security validation.
                 Symlinks are only allowed if they resolve within these paths.
                 If None, uses the paths provided to discovery methods.
+            pool: Optional asyncpg connection pool for database access.
+                If provided, loaded projectors will be full ProjectorShell
+                instances capable of actual projections. If None (default),
+                loaded projectors will be ProjectorShellPlaceholder instances
+                that hold contract metadata but cannot perform projections.
         """
         self._container = container
-        # NOTE: schema_manager is stored for future use by ProjectorShell (OMN-1169).
-        # When ProjectorShell is implemented, it will use this to validate that
-        # the target projection table exists before the projector starts.
         self._schema_manager = schema_manager
         if schema_manager is not None:
+            logger.debug("Schema manager provided - will be used for schema validation")
+        self._pool = pool
+        if pool is not None:
             logger.debug(
-                "Schema manager provided - will be used for schema validation "
-                "when ProjectorShell is implemented (OMN-1169)"
+                "Database pool provided - will create ProjectorShell instances"
+            )
+        else:
+            logger.debug(
+                "No database pool provided - will create placeholder instances"
             )
         self._graceful_mode = graceful_mode
 
@@ -278,6 +293,25 @@ class ProjectorPluginLoader:
                     )
 
         self._base_paths = base_paths or []
+
+    def _create_projector(
+        self,
+        contract: ModelProjectorContract,
+    ) -> ProtocolEventProjector:
+        """Create a projector instance from a contract.
+
+        If a database pool was provided to the loader, creates a full
+        ProjectorShell instance. Otherwise, creates a placeholder.
+
+        Args:
+            contract: The validated projector contract.
+
+        Returns:
+            Either ProjectorShell (if pool available) or ProjectorShellPlaceholder.
+        """
+        if self._pool is not None:
+            return ProjectorShell(contract, self._pool)
+        return ProjectorShellPlaceholder(contract)
 
     def _sanitize_path_for_logging(self, path: Path) -> str:
         """Sanitize a file path for safe inclusion in logs and error messages.
@@ -681,7 +715,7 @@ class ProjectorPluginLoader:
         )
 
         # Return placeholder until OMN-1169 implements ProjectorShell
-        return ProjectorShellPlaceholder(contract)
+        return self._create_projector(contract)
 
     async def load_from_directory(
         self,
@@ -772,7 +806,7 @@ class ProjectorPluginLoader:
 
             try:
                 contract = self._load_contract(contract_file)
-                projector = ProjectorShellPlaceholder(contract)
+                projector = self._create_projector(contract)
                 projectors.append(projector)
                 logger.debug(
                     "Successfully parsed contract: %s",
@@ -1120,7 +1154,7 @@ class ProjectorPluginLoader:
 
             try:
                 contract = self._load_contract(contract_file)
-                projector = ProjectorShellPlaceholder(contract)
+                projector = self._create_projector(contract)
                 projectors.append(projector)
                 logger.debug(
                     "Successfully loaded contract from pattern: %s",
@@ -1284,7 +1318,7 @@ class ProjectorPluginLoader:
 
             try:
                 contract = self._load_contract(contract_file)
-                projector = ProjectorShellPlaceholder(contract)
+                projector = self._create_projector(contract)
                 projectors.append(projector)
                 logger.debug(
                     "Successfully parsed contract: %s",
@@ -1400,7 +1434,8 @@ __all__ = [
     "ModelProjectorValidationError",  # Re-exported from omnibase_infra.models.projectors
     "PROJECTOR_CONTRACT_PATTERNS",
     "ProjectorPluginLoader",
-    "ProjectorShellPlaceholder",
+    "ProjectorShell",  # Full implementation with database access (OMN-1169)
+    "ProjectorShellPlaceholder",  # Placeholder when no pool is provided
     "ProtocolEventProjector",  # Re-exported from omnibase_infra.protocols
     "ProtocolProjectorSchemaValidator",  # Re-exported from omnibase_infra.protocols
 ]
