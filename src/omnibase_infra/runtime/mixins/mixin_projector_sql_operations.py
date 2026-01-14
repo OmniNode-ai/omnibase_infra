@@ -119,7 +119,8 @@ class MixinProjectorSqlOperations:
     ) -> int:
         """Execute upsert (INSERT ON CONFLICT DO UPDATE).
 
-        Uses the contract's upsert_key for conflict detection. When all columns
+        Uses the contract's upsert_key for conflict detection. Supports both
+        single-column keys (str) and composite keys (list[str]). When all columns
         are part of the upsert key (i.e., no updatable columns), uses
         DO NOTHING to avoid generating invalid SQL with empty SET clause.
 
@@ -134,8 +135,14 @@ class MixinProjectorSqlOperations:
         schema = self._contract.projection_schema
         behavior = self._contract.behavior
         table_quoted = quote_identifier(schema.table)
+
+        # Normalize upsert_key to list for uniform handling
         upsert_key = behavior.upsert_key or schema.primary_key
-        upsert_key_quoted = quote_identifier(upsert_key)
+        upsert_key_list = [upsert_key] if isinstance(upsert_key, str) else upsert_key
+        upsert_key_set = set(upsert_key_list)
+
+        # Build quoted upsert key column list for ON CONFLICT clause
+        upsert_key_quoted = ", ".join(quote_identifier(col) for col in upsert_key_list)
 
         # Build column lists
         columns = list(values.keys())
@@ -146,7 +153,8 @@ class MixinProjectorSqlOperations:
         # Build parameterized INSERT ... ON CONFLICT DO UPDATE
         column_list = ", ".join(quote_identifier(col) for col in columns)
         param_list = ", ".join(f"${i + 1}" for i in range(len(columns)))
-        updatable_columns = [col for col in columns if col != upsert_key]
+        # Exclude all upsert key columns from updatable columns
+        updatable_columns = [col for col in columns if col not in upsert_key_set]
 
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
         if updatable_columns:
@@ -380,9 +388,11 @@ class MixinProjectorSqlOperations:
 
         schema = self._contract.projection_schema
         pk = schema.primary_key
+        # Normalize primary_key to list for composite key support
+        pk_list = [pk] if isinstance(pk, str) else list(pk)
 
         # Determine conflict columns (single or composite)
-        conflict_cols = conflict_columns if conflict_columns else [pk]
+        conflict_cols = conflict_columns if conflict_columns else pk_list
 
         # Verify all conflict columns are in values
         for col in conflict_cols:
@@ -525,7 +535,10 @@ class MixinProjectorSqlOperations:
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        pk_quoted = quote_identifier(schema.primary_key)
+        # For composite keys, use first column as the single-value lookup key
+        pk = schema.primary_key
+        pk_column = pk if isinstance(pk, str) else pk[0]
+        pk_quoted = quote_identifier(pk_column)
 
         # Build SET clause with parameterized placeholders
         # Column names are quoted for SQL safety; values use $1, $2, etc.

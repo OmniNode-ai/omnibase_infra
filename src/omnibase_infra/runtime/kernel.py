@@ -58,6 +58,7 @@ from collections.abc import Awaitable, Callable
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 
 import asyncpg
 import yaml
@@ -178,7 +179,10 @@ def _get_contracts_dir() -> Path:
     return Path(DEFAULT_CONTRACTS_DIR)
 
 
-def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
+def load_runtime_config(
+    contracts_dir: Path,
+    correlation_id: UUID | None = None,
+) -> ModelRuntimeConfig:
     """Load runtime configuration from contract file or return defaults.
 
     Attempts to load runtime_config.yaml from the contracts directory.
@@ -199,6 +203,10 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
     Args:
         contracts_dir: Path to the contracts directory containing runtime_config.yaml.
             Example: Path("./contracts") or Path("/app/contracts")
+        correlation_id: Optional correlation ID for distributed tracing. If not
+            provided, a new one will be generated. Passing a correlation_id from
+            the caller (e.g., bootstrap) ensures consistent tracing across the
+            initialization sequence.
 
     Returns:
         ModelRuntimeConfig: Fully validated configuration model with runtime settings.
@@ -225,19 +233,20 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
         (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
     """
     config_path = contracts_dir / DEFAULT_RUNTIME_CONFIG
-    correlation_id = generate_correlation_id()
+    # Use passed correlation_id for consistent tracing, or generate new one
+    effective_correlation_id = correlation_id or generate_correlation_id()
     context = ModelInfraErrorContext(
         transport_type=EnumInfraTransportType.RUNTIME,
         operation="load_config",
         target_name=str(config_path),
-        correlation_id=correlation_id,
+        correlation_id=effective_correlation_id,
     )
 
     if config_path.exists():
         logger.info(
             "Loading runtime config from %s (correlation_id=%s)",
             config_path,
-            correlation_id,
+            effective_correlation_id,
         )
         try:
             with config_path.open(encoding="utf-8") as f:
@@ -263,13 +272,13 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
                 )
             logger.debug(
                 "Contract validation passed (correlation_id=%s)",
-                correlation_id,
+                effective_correlation_id,
             )
 
             config = ModelRuntimeConfig.model_validate(raw_config)
             logger.debug(
                 "Runtime config loaded successfully (correlation_id=%s)",
-                correlation_id,
+                effective_correlation_id,
                 extra={
                     "input_topic": config.input_topic,
                     "output_topic": config.output_topic,
@@ -322,7 +331,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
     logger.info(
         "No runtime config found at %s, using environment/defaults (correlation_id=%s)",
         config_path,
-        correlation_id,
+        effective_correlation_id,
     )
     config = ModelRuntimeConfig(
         input_topic=os.getenv("ONEX_INPUT_TOPIC", DEFAULT_INPUT_TOPIC),
@@ -331,7 +340,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
     )
     logger.debug(
         "Runtime config constructed from environment/defaults (correlation_id=%s)",
-        correlation_id,
+        effective_correlation_id,
         extra={
             "input_topic": config.input_topic,
             "output_topic": config.output_topic,
@@ -430,8 +439,9 @@ async def bootstrap() -> int:
         )
 
         # 2. Load runtime configuration (may raise ProtocolConfigurationError)
+        # Pass correlation_id for consistent tracing across initialization sequence
         config_start_time = time.time()
-        config = load_runtime_config(contracts_dir)
+        config = load_runtime_config(contracts_dir, correlation_id=correlation_id)
         config_duration = time.time() - config_start_time
         logger.debug(
             "Runtime config loaded in %.3fs (correlation_id=%s)",

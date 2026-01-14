@@ -487,6 +487,45 @@ class MockProjector:
             self.store.projections[key] = updated
             return True
 
+    async def partial_update(
+        self,
+        aggregate_id: UUID,
+        updates: dict[str, object],
+        correlation_id: UUID,
+    ) -> bool:
+        """Perform a partial update on specific columns.
+
+        Mirrors the ProjectorShell.partial_update() interface for testing.
+
+        Args:
+            aggregate_id: The entity UUID identifying the projection to update.
+            updates: Dictionary mapping column names to their new values.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            True if a row was updated (entity found and modified).
+            False if no row was found matching the aggregate_id.
+        """
+        async with self.store._lock:
+            # Search for the projection by entity_id (aggregate_id)
+            key = (aggregate_id, "registration")
+            existing = self.store.projections.get(key)
+            if existing is None:
+                return False
+
+            # Build update dict from existing projection
+            projection_dict = existing.model_dump()
+
+            # Apply updates
+            for field_name, value in updates.items():
+                if field_name in projection_dict:
+                    projection_dict[field_name] = value
+
+            # Create updated projection
+            updated = ModelRegistrationProjection(**projection_dict)
+            self.store.projections[key] = updated
+            return True
+
 
 # =============================================================================
 # RuntimeTick Factory

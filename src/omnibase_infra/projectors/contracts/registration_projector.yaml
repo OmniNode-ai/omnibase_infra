@@ -38,7 +38,10 @@ consumed_events:
   - node.liveness_expired.v1
 projection_schema:
   table: registration_projections
-  primary_key: entity_id
+  # Composite primary key for multi-domain support (matches SQL schema)
+  primary_key:
+    - entity_id
+    - domain
   columns:
     # ==========================================================================
     # IDENTITY COLUMNS (Composite Primary Key)
@@ -255,7 +258,10 @@ projection_schema:
 # ==============================================================================
 behavior:
   mode: upsert
-  upsert_key: entity_id
+  # Composite upsert key matches database PRIMARY KEY (entity_id, domain)
+  upsert_key:
+    - entity_id
+    - domain
   idempotency:
     enabled: true
     # Uses offset-based ordering for Kafka, sequence-based for other transports

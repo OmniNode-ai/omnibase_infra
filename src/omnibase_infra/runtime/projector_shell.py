@@ -28,7 +28,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
@@ -48,11 +47,6 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 from omnibase_infra.runtime.mixins import MixinProjectorSqlOperations
-
-if TYPE_CHECKING:
-    from omnibase_core.models.projectors.model_projector_column import (
-        ModelProjectorColumn,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -433,7 +427,10 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        pk_quoted = quote_identifier(schema.primary_key)
+        # For composite keys, use first column as the single-value lookup key
+        pk = schema.primary_key
+        pk_column = pk if isinstance(pk, str) else pk[0]
+        pk_quoted = quote_identifier(pk_column)
 
         # Build SELECT query - table/column names from trusted contract
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
@@ -530,7 +527,10 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        pk_quoted = quote_identifier(schema.primary_key)
+        # For composite keys, use first column as the single-value lookup key
+        pk = schema.primary_key
+        pk_column = pk if isinstance(pk, str) else pk[0]
+        pk_quoted = quote_identifier(pk_column)
 
         # Build SELECT query with IN clause for bulk fetch
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
@@ -544,7 +544,6 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
             # Build result dict keyed by aggregate ID
             result: dict[UUID, dict[str, object]] = {}
-            pk_column = schema.primary_key
             for row in rows:
                 row_dict: dict[str, object] = dict(row)
                 aggregate_id = row_dict.get(pk_column)

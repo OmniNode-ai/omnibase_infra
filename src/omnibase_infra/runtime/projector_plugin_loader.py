@@ -442,6 +442,13 @@ class ProjectorPluginLoader:
         with contract_path.open("r", encoding="utf-8") as f:
             raw_data = yaml.safe_load(f)
 
+        # Strip extension fields not in base ModelProjectorContract.
+        # partial_updates is an extension field for OMN-1170 that defines
+        # partial update operations. It is used by the runtime for optimized
+        # UPDATE statements but is not part of the core contract schema.
+        if isinstance(raw_data, dict):
+            raw_data.pop("partial_updates", None)
+
         # Validate against ModelProjectorContract
         contract = ModelProjectorContract.model_validate(raw_data)
         return contract
