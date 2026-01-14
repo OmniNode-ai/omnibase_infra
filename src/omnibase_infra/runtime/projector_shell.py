@@ -11,7 +11,7 @@ Features:
     - Three projection modes: upsert, insert_only, append
     - Parameterized SQL queries for injection protection
 
-Part of OMN-1169: ProjectorShell implementation.
+Implements OMN-1169: ProjectorShell contract-driven projections.
 
 See Also:
     - ProtocolEventProjector: Protocol definition from omnibase_infra.protocols
@@ -82,7 +82,7 @@ class ProjectorShell:
         ...     print(f"Projected {result.rows_affected} rows")
 
     Related:
-        - OMN-1169: ProjectorShell implementation
+        - OMN-1169: ProjectorShell (implemented)
         - OMN-1168: ProjectorPluginLoader contract discovery
     """
 
@@ -225,23 +225,27 @@ class ProjectorShell:
                 context=ctx,
             ) from e
 
-        except asyncpg.UniqueViolationError as e:
-            # For insert_only mode, conflict is a data error, not infrastructure
-            logger.warning(
-                "Unique constraint violation during projection",
-                extra={
-                    "projector_id": self.projector_id,
-                    "event_type": event_type,
-                    "correlation_id": str(correlation_id),
-                    "error": str(e),
-                },
-            )
-            return ModelProjectionResult(
-                success=False,
-                skipped=False,
-                rows_affected=0,
-                error=f"Unique constraint violation: {e}",
-            )
+        except asyncpg.UniqueViolationError:
+            # Only handle UniqueViolationError for insert_only mode
+            # For upsert mode, this should never happen (ON CONFLICT handles it)
+            # For append mode, this indicates an unexpected duplicate
+            if self._contract.behavior.mode == "insert_only":
+                logger.warning(
+                    "Unique constraint violation during insert_only projection",
+                    extra={
+                        "projector_id": self.projector_id,
+                        "event_type": event_type,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return ModelProjectionResult(
+                    success=False,
+                    skipped=False,
+                    rows_affected=0,
+                    error="Unique constraint violation: duplicate key for insert_only mode",
+                )
+            # Re-raise for other modes - this is unexpected behavior
+            raise
 
         except Exception as e:
             raise RuntimeHostError(
@@ -253,7 +257,7 @@ class ProjectorShell:
         self,
         aggregate_id: UUID,
         correlation_id: UUID,
-    ) -> object | None:
+    ) -> dict[str, object] | None:
         """Get current projected state for an aggregate.
 
         Queries the projection table for the current state of the
@@ -433,20 +437,15 @@ class ProjectorShell:
                 current = current.get(part)
                 continue
 
-            # Try Pydantic model
-            if isinstance(current, BaseModel):
-                # First check if it's an explicit field
-                if hasattr(current, part):
-                    current = getattr(current, part)
-                    continue
-                # Fall back to model_dump for nested access
-                dumped = current.model_dump()
-                current = dumped.get(part)
-                continue
-
-            # Try attribute access
+            # Try attribute access first (avoids Pydantic model_dump side effects)
             if hasattr(current, part):
                 current = getattr(current, part)
+                continue
+
+            # Fall back to Pydantic model_dump for nested access
+            if isinstance(current, BaseModel):
+                dumped = current.model_dump()
+                current = dumped.get(part)
                 continue
 
             # Path resolution failed
@@ -530,16 +529,25 @@ class ProjectorShell:
         # Build parameterized INSERT ... ON CONFLICT DO UPDATE
         column_list = ", ".join(f'"{col}"' for col in columns)
         param_list = ", ".join(f"${i + 1}" for i in range(len(columns)))
-        update_list = ", ".join(
-            f'"{col}" = EXCLUDED."{col}"' for col in columns if col != upsert_key
-        )
+        updatable_columns = [col for col in columns if col != upsert_key]
 
         # S608: Safe - table/column names validated by contract model, not user input
-        sql = f"""
-            INSERT INTO "{table}" ({column_list})
-            VALUES ({param_list})
-            ON CONFLICT ("{upsert_key}") DO UPDATE SET {update_list}
-        """  # noqa: S608
+        if updatable_columns:
+            update_list = ", ".join(
+                f'"{col}" = EXCLUDED."{col}"' for col in updatable_columns
+            )
+            sql = f"""
+                INSERT INTO "{table}" ({column_list})
+                VALUES ({param_list})
+                ON CONFLICT ("{upsert_key}") DO UPDATE SET {update_list}
+            """  # noqa: S608
+        else:
+            # Only the upsert key column exists - no columns to update
+            sql = f"""
+                INSERT INTO "{table}" ({column_list})
+                VALUES ({param_list})
+                ON CONFLICT ("{upsert_key}") DO NOTHING
+            """  # noqa: S608
 
         params = list(values.values())
 

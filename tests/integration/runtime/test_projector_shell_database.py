@@ -98,19 +98,22 @@ class OrderWithNestedPayload(BaseModel):
 # =============================================================================
 
 
-def _get_database_dsn() -> str:
+def _get_database_dsn() -> str | None:
     """Build database DSN from environment variables.
 
     Falls back to direct IP (192.168.86.200) if hostname resolution fails.
 
     Returns:
-        PostgreSQL connection string.
+        PostgreSQL connection string, or None if POSTGRES_PASSWORD is not set.
     """
     host = os.getenv("POSTGRES_HOST", "192.168.86.200")
     port = os.getenv("POSTGRES_PORT", "5436")
     database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
     user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "omninode_remote_2024_secure")
+    password = os.getenv("POSTGRES_PASSWORD")
+
+    if not password:
+        return None
 
     # If hostname is set, try direct IP as fallback
     if host == "omninode-bridge-postgres":
@@ -127,9 +130,12 @@ async def db_pool() -> AsyncGenerator[asyncpg.Pool, None]:
         asyncpg.Pool connected to the test database.
 
     Raises:
-        pytest.skip: If database is not reachable.
+        pytest.skip: If database is not reachable or POSTGRES_PASSWORD not set.
     """
     dsn = _get_database_dsn()
+
+    if not dsn:
+        pytest.skip("POSTGRES_PASSWORD environment variable not set")
 
     try:
         pool = await asyncpg.create_pool(
@@ -167,7 +173,7 @@ async def test_table(db_pool: asyncpg.Pool) -> AsyncGenerator[str, None]:
                 id UUID PRIMARY KEY,
                 name TEXT,
                 status TEXT,
-                amount INTEGER,
+                amount NUMERIC,
                 customer_email TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -215,7 +221,7 @@ def _make_contract(
         ),
         ModelProjectorColumn(
             name="amount",
-            type="INTEGER",
+            type="NUMERIC",
             source="payload.total_amount",
         ),
         ModelProjectorColumn(
@@ -582,7 +588,7 @@ class TestProjectionModes:
             ),
             ModelProjectorColumn(
                 name="amount",
-                type="INTEGER",
+                type="NUMERIC",
                 source="payload.total_amount",
             ),
         ]
@@ -658,8 +664,8 @@ class TestStateRetrieval:
         assert isinstance(state, dict)
         assert state["id"] == order_id
         assert state["status"] == "confirmed"
-        # amount is stored as integer (150)
-        assert state["amount"] == 150
+        # amount is stored as NUMERIC (preserves decimal precision)
+        assert float(state["amount"]) == 150.0
 
     async def test_get_state_returns_none_for_missing(
         self,

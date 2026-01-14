@@ -730,11 +730,11 @@ class TestProjectorShellProjectionModes:
 
         assert result.success is True
         assert result.rows_affected == 1
-        # Verify UPSERT SQL was generated (ON CONFLICT)
+        # Verify UPSERT SQL was generated - must include ON CONFLICT for upsert mode
         call_args = mock_conn.execute.call_args
         assert call_args is not None
         sql = call_args[0][0]
-        assert "ON CONFLICT" in sql or "INSERT" in sql
+        assert "ON CONFLICT" in sql, "Upsert mode must generate ON CONFLICT clause"
 
     @pytest.mark.asyncio
     async def test_upsert_mode_updates_existing_record(
@@ -1128,14 +1128,29 @@ class TestProjectorShellProtocolCompliance:
         sample_contract: ModelProjectorContract,
         mock_pool: AsyncMock,
     ) -> None:
-        """ProjectorShell implements ProtocolEventProjector."""
-        from omnibase_infra.protocols import ProtocolEventProjector
+        """ProjectorShell implements ProtocolEventProjector.
+
+        Uses duck typing verification instead of isinstance check
+        per ONEX principle: Protocol Resolution - Duck typing through
+        protocols, never isinstance.
+        """
         from omnibase_infra.runtime.projector_shell import ProjectorShell
 
         projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
 
-        # Check protocol compliance
-        assert isinstance(projector, ProtocolEventProjector)
+        # Verify protocol compliance via duck typing (hasattr/callable checks)
+        # Required properties
+        assert hasattr(projector, "projector_id")
+        assert hasattr(projector, "aggregate_type")
+        assert hasattr(projector, "consumed_events")
+        assert hasattr(projector, "is_placeholder")
+
+        # Required methods must be callable
+        assert hasattr(projector, "project")
+        assert callable(getattr(projector, "project", None))
+
+        assert hasattr(projector, "get_state")
+        assert callable(getattr(projector, "get_state", None))
 
     def test_projector_id_from_contract(
         self,
@@ -1339,26 +1354,59 @@ class TestProjectorShellErrorHandling:
     @pytest.mark.asyncio
     async def test_unique_violation_returns_failure_result(
         self,
-        sample_contract: ModelProjectorContract,
         mock_pool: MagicMock,
         sample_event_envelope: ModelEventEnvelope[OrderCreatedPayload],
     ) -> None:
-        """Unique constraint violations return failure result (not exception).
+        """Unique constraint violations return failure result for insert_only mode.
 
-        Given: SQL execution fails with asyncpg.UniqueViolationError
+        Given: insert_only mode and SQL execution fails with asyncpg.UniqueViolationError
         When: project() called
         Then: returns ModelProjectionResult with success=False
+
+        Note: UniqueViolationError is only caught and returned as failure for
+        insert_only mode. For upsert mode, the error is re-raised as it indicates
+        unexpected behavior (upsert should handle conflicts via ON CONFLICT).
         """
         import asyncpg
 
         from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        # Create insert_only mode contract - UniqueViolationError is only
+        # caught for this mode (expected behavior for duplicate key rejection)
+        columns = [
+            ModelProjectorColumn(
+                name="id",
+                type="UUID",
+                source="payload.order_id",
+            ),
+            ModelProjectorColumn(
+                name="status",
+                type="TEXT",
+                source="payload.status",
+            ),
+        ]
+        schema = ModelProjectorSchema(
+            table="order_projections",
+            primary_key="id",
+            columns=columns,
+        )
+        insert_only_contract = ModelProjectorContract(
+            projector_kind="materialized_view",
+            projector_id="order-projector",
+            name="Order Projector",
+            version="1.0.0",
+            aggregate_type="Order",
+            consumed_events=["order.created.v1"],
+            projection_schema=schema,
+            behavior=ModelProjectorBehavior(mode="insert_only"),
+        )
 
         mock_conn = mock_pool._mock_conn
         mock_conn.execute.side_effect = asyncpg.UniqueViolationError(
             "duplicate key value violates unique constraint"
         )
 
-        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+        projector = ProjectorShell(contract=insert_only_contract, pool=mock_pool)
         result = await projector.project(sample_event_envelope, uuid4())
 
         assert result.success is False
