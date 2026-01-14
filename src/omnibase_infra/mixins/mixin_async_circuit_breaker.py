@@ -558,5 +558,76 @@ class MixinAsyncCircuitBreaker:
         self._circuit_breaker_failures = 0
         self._circuit_breaker_open_until = 0.0
 
+    def _get_circuit_breaker_state(self) -> dict[str, object]:
+        """Return current circuit breaker state for introspection.
+
+        This method encapsulates circuit breaker internals for safe access
+        by subclasses implementing describe() or other introspection methods.
+        It provides a stable interface for reading circuit breaker state without
+        exposing internal attribute names.
+
+        Note:
+            This method does NOT require holding _circuit_breaker_lock because
+            it only performs reads for observability purposes. The state may be
+            slightly stale in concurrent scenarios, which is acceptable for
+            introspection use cases.
+
+        Returns:
+            dict containing:
+                - initialized: Whether circuit breaker has been initialized
+                - state: Current state ("closed", "open", or "half_open")
+                - failures: Current failure count
+                - threshold: Configured failure threshold
+                - reset_timeout_seconds: Configured reset timeout
+                - seconds_until_half_open: Seconds until half_open (only when open)
+
+        Example:
+            ```python
+            def describe(self) -> dict[str, object]:
+                circuit_breaker_info = self._get_circuit_breaker_state()
+                return {
+                    "handler_type": self.handler_type.value,
+                    "circuit_breaker": circuit_breaker_info,
+                }
+            ```
+        """
+        # Check if circuit breaker has been initialized by looking for key attributes
+        cb_initialized = hasattr(self, "_circuit_breaker_lock") and hasattr(
+            self, "circuit_breaker_threshold"
+        )
+
+        # Read state variables with safe defaults for uninitialized state
+        cb_open = getattr(self, "_circuit_breaker_open", False)
+        cb_open_until = getattr(self, "_circuit_breaker_open_until", 0.0)
+        cb_failures = getattr(self, "_circuit_breaker_failures", 0)
+        cb_threshold = getattr(self, "circuit_breaker_threshold", 5)
+        cb_reset_timeout = getattr(self, "circuit_breaker_reset_timeout", 60.0)
+
+        # Calculate state: closed, open, or half_open
+        current_time = time.time()
+        if cb_open:
+            if current_time >= cb_open_until:
+                cb_state = "half_open"
+                seconds_until_half_open: float | None = None
+            else:
+                cb_state = "open"
+                seconds_until_half_open = round(cb_open_until - current_time, 2)
+        else:
+            cb_state = "closed"
+            seconds_until_half_open = None
+
+        result: dict[str, object] = {
+            "initialized": cb_initialized,
+            "state": cb_state,
+            "failures": cb_failures,
+            "threshold": cb_threshold,
+            "reset_timeout_seconds": cb_reset_timeout,
+        }
+
+        if seconds_until_half_open is not None:
+            result["seconds_until_half_open"] = seconds_until_half_open
+
+        return result
+
 
 __all__ = ["EnumCircuitState", "MixinAsyncCircuitBreaker", "ModelCircuitBreakerConfig"]

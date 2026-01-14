@@ -1538,39 +1538,12 @@ class HandlerManifestPersistence(
               next failure reopens it. This state is transient and detected when
               the circuit is marked open but the reset timeout has elapsed.
         """
-        # Determine circuit breaker state with half_open detection
-        cb_initialized = self._circuit_breaker_initialized
-        cb_open = getattr(self, "_circuit_breaker_open", False)
-        cb_open_until = getattr(self, "_circuit_breaker_open_until", 0.0)
-        cb_failures = getattr(self, "_circuit_breaker_failures", 0)
-        cb_threshold = getattr(self, "circuit_breaker_threshold", 5)
-        cb_reset_timeout = getattr(self, "circuit_breaker_reset_timeout", 60.0)
+        # Get circuit breaker state from mixin (encapsulated access)
+        circuit_breaker_info = self._get_circuit_breaker_state()
 
-        # Calculate state: closed, open, or half_open
-        current_time = time.time()
-        if cb_open:
-            if current_time >= cb_open_until:
-                cb_state = "half_open"
-                seconds_until_half_open: float | None = None
-            else:
-                cb_state = "open"
-                seconds_until_half_open = round(cb_open_until - current_time, 2)
-        else:
-            cb_state = "closed"
-            seconds_until_half_open = None
-
-        # Build circuit breaker info dict
-        circuit_breaker_info: dict[str, object] = {
-            "initialized": cb_initialized,
-            "state": cb_state,
-            "failures": cb_failures,
-            "threshold": cb_threshold,
-            "reset_timeout_seconds": cb_reset_timeout,
-        }
-
-        # Only include seconds_until_half_open when circuit is open
-        if seconds_until_half_open is not None:
-            circuit_breaker_info["seconds_until_half_open"] = seconds_until_half_open
+        # Override initialized with handler's own flag for precise tracking
+        # (handler may track initialization more granularly than mixin detection)
+        circuit_breaker_info["initialized"] = self._circuit_breaker_initialized
 
         result: dict[str, object] = {
             "handler_type": self.handler_type.value,
