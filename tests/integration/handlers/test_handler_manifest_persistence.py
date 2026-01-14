@@ -13,14 +13,14 @@ Test Coverage:
     - TestHandlerLifecycle: Handler initialization and shutdown
     - TestQueryCombinations: Complex query scenarios with multiple filters
 
-TODO (Circuit Breaker Tests):
-    The handler uses MixinAsyncCircuitBreaker for resilient I/O operations, but
-    circuit breaker behavior is not explicitly tested. Future tests should verify:
+Circuit Breaker Tests (TestCircuitBreakerBehavior):
+    The handler uses MixinAsyncCircuitBreaker for resilient I/O operations.
+    Tests verify the following behaviors:
     - Circuit opens after threshold failures (default: 5)
     - Operations blocked when circuit is open (raises InfraUnavailableError)
-    - Circuit resets after timeout (default: 60s)
-    - Half-open state allows single test request
-    See: docs/patterns/circuit_breaker_implementation.md for test patterns.
+    - Circuit resets on successful operation
+    - Half-open state allows test request after timeout
+    See: docs/patterns/circuit_breaker_implementation.md for implementation details.
 
 Related:
     - OMN-1163: Manifest persistence handler implementation
@@ -34,6 +34,7 @@ Note:
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -943,6 +944,281 @@ class TestQueryCombinations:
         assert len(result.result["payload"]["manifest_data"]) == 5
 
 
+# =============================================================================
+# TestCircuitBreakerBehavior
+# =============================================================================
+
+
+class TestCircuitBreakerBehavior:
+    """Test circuit breaker behavior for resilient I/O operations.
+
+    The handler uses MixinAsyncCircuitBreaker for resilient I/O operations with:
+    - Threshold: 5 failures before circuit opens
+    - Reset timeout: 60 seconds before half-open transition
+    - Transport type: FILESYSTEM
+
+    These tests verify:
+    - Circuit opens after threshold failures
+    - Operations blocked when circuit is open (raises InfraUnavailableError)
+    - Circuit resets on successful operation
+    - Half-open state behavior (after timeout)
+    """
+
+    @pytest.mark.asyncio
+    async def test_circuit_opens_after_threshold_failures(
+        self, temp_storage_path: Path
+    ) -> None:
+        """Circuit opens after 5 consecutive failures (default threshold).
+
+        Validates that the circuit breaker opens after the configured threshold
+        of failures is reached, preventing further operations.
+        """
+        from omnibase_infra.errors import InfraUnavailableError
+
+        handler = HandlerManifestPersistence()
+        await handler.initialize({"storage_path": str(temp_storage_path)})
+
+        # Verify circuit breaker is configured with expected threshold
+        assert handler.circuit_breaker_threshold == 5
+
+        # Manually record failures to trip the circuit
+        # We simulate 5 failures to reach the threshold
+        for i in range(5):
+            async with handler._circuit_breaker_lock:
+                await handler._record_circuit_failure(
+                    operation="test_operation",
+                    correlation_id=uuid4(),
+                )
+
+        # Verify circuit is now open
+        assert handler._circuit_breaker_open is True
+
+        # Verify operations are blocked
+        manifest = create_test_manifest()
+        with pytest.raises(InfraUnavailableError) as exc_info:
+            await handler.execute(create_store_envelope(manifest))
+
+        # Verify error context
+        error_msg = str(exc_info.value).lower()
+        assert "circuit breaker" in error_msg or "unavailable" in error_msg
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_operations_blocked_when_circuit_open(
+        self, temp_storage_path: Path
+    ) -> None:
+        """Operations raise InfraUnavailableError when circuit is open.
+
+        Validates that all operations (store, retrieve, query) are blocked
+        when the circuit breaker is in the open state.
+        """
+        from omnibase_infra.errors import InfraUnavailableError
+
+        handler = HandlerManifestPersistence()
+        await handler.initialize({"storage_path": str(temp_storage_path)})
+
+        # Force circuit to open state
+        handler._circuit_breaker_open = True
+        handler._circuit_breaker_open_until = (
+            time.time() + 60.0
+        )  # Open for 60 more seconds
+
+        # Test that store operation is blocked
+        manifest = create_test_manifest()
+        with pytest.raises(InfraUnavailableError):
+            await handler.execute(create_store_envelope(manifest))
+
+        # Test that retrieve operation is blocked
+        with pytest.raises(InfraUnavailableError):
+            await handler.execute(create_retrieve_envelope(uuid4()))
+
+        # Test that query operation is blocked
+        with pytest.raises(InfraUnavailableError):
+            await handler.execute(create_query_envelope())
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_circuit_resets_on_successful_operation(
+        self, temp_storage_path: Path
+    ) -> None:
+        """Circuit resets to closed state on successful operation.
+
+        Validates that after a successful operation, the circuit breaker
+        resets its failure count and returns to closed state.
+        """
+        handler = HandlerManifestPersistence()
+        await handler.initialize({"storage_path": str(temp_storage_path)})
+
+        # Record some failures (but not enough to trip the circuit)
+        for _ in range(3):
+            async with handler._circuit_breaker_lock:
+                await handler._record_circuit_failure(
+                    operation="test_operation",
+                    correlation_id=uuid4(),
+                )
+
+        # Verify failures are recorded
+        assert handler._circuit_breaker_failures == 3
+
+        # Perform a successful operation
+        manifest = create_test_manifest()
+        result = await handler.execute(create_store_envelope(manifest))
+        assert result.result["status"] == "success"
+
+        # Verify circuit has been reset
+        assert handler._circuit_breaker_failures == 0
+        assert handler._circuit_breaker_open is False
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_half_open_state_after_timeout(self, temp_storage_path: Path) -> None:
+        """Circuit transitions to half-open state after reset timeout.
+
+        Validates that when the circuit is open and the reset timeout has
+        elapsed, the circuit transitions to half-open state allowing a
+        test request through.
+        """
+        handler = HandlerManifestPersistence()
+        await handler.initialize({"storage_path": str(temp_storage_path)})
+
+        # Force circuit to open state with timeout in the past
+        handler._circuit_breaker_open = True
+        handler._circuit_breaker_failures = 5
+        # Set open_until to a time in the past (simulating timeout elapsed)
+        handler._circuit_breaker_open_until = time.time() - 1.0
+
+        # Perform an operation - should transition to half-open and succeed
+        manifest = create_test_manifest()
+        result = await handler.execute(create_store_envelope(manifest))
+
+        # Operation should succeed (half-open allows test request)
+        assert result.result["status"] == "success"
+
+        # Circuit should be reset after successful operation
+        assert handler._circuit_breaker_open is False
+        assert handler._circuit_breaker_failures == 0
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_circuit_failure_count_increments(
+        self, temp_storage_path: Path
+    ) -> None:
+        """Each failure increments the circuit breaker failure count.
+
+        Validates that failures are properly tracked by the circuit breaker
+        and the count increases with each recorded failure.
+        """
+        handler = HandlerManifestPersistence()
+        await handler.initialize({"storage_path": str(temp_storage_path)})
+
+        # Verify initial state
+        assert handler._circuit_breaker_failures == 0
+
+        # Record failures incrementally
+        for expected_count in range(1, 4):
+            async with handler._circuit_breaker_lock:
+                await handler._record_circuit_failure(
+                    operation="test_operation",
+                    correlation_id=uuid4(),
+                )
+            assert handler._circuit_breaker_failures == expected_count
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_configuration(self, temp_storage_path: Path) -> None:
+        """Circuit breaker is initialized with correct configuration.
+
+        Validates that the circuit breaker is configured with the expected
+        threshold, timeout, and service name during handler initialization.
+        """
+        handler = HandlerManifestPersistence()
+        await handler.initialize({"storage_path": str(temp_storage_path)})
+
+        # Verify configuration values
+        assert handler.circuit_breaker_threshold == 5
+        assert handler.circuit_breaker_reset_timeout == 60.0
+        assert handler.service_name == "manifest_persistence_handler"
+
+        # Verify initial state
+        assert handler._circuit_breaker_open is False
+        assert handler._circuit_breaker_failures == 0
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_infra_unavailable_error_contains_retry_after(
+        self, temp_storage_path: Path
+    ) -> None:
+        """InfraUnavailableError includes retry_after_seconds when circuit is open.
+
+        Validates that when the circuit is open, the raised error contains
+        information about when to retry (seconds remaining until timeout).
+        """
+        from omnibase_infra.errors import InfraUnavailableError
+
+        handler = HandlerManifestPersistence()
+        await handler.initialize({"storage_path": str(temp_storage_path)})
+
+        # Force circuit to open state with specific timeout
+        handler._circuit_breaker_open = True
+        handler._circuit_breaker_open_until = time.time() + 30.0  # 30 seconds remaining
+
+        manifest = create_test_manifest()
+        with pytest.raises(InfraUnavailableError) as exc_info:
+            await handler.execute(create_store_envelope(manifest))
+
+        # Verify error has retry_after information in model context
+        error = exc_info.value
+        assert "retry_after_seconds" in error.model.context
+        # retry_after should be approximately 30 seconds (allow some tolerance)
+        retry_after = error.model.context["retry_after_seconds"]
+        assert 25 <= retry_after <= 31
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_circuit_opens_exactly_at_threshold(
+        self, temp_storage_path: Path
+    ) -> None:
+        """Circuit opens exactly when failure count reaches threshold.
+
+        Validates that the circuit stays closed at threshold-1 failures
+        and opens exactly at threshold failures.
+        """
+        handler = HandlerManifestPersistence()
+        await handler.initialize({"storage_path": str(temp_storage_path)})
+
+        # Record threshold-1 failures (4 failures)
+        for _ in range(4):
+            async with handler._circuit_breaker_lock:
+                await handler._record_circuit_failure(
+                    operation="test_operation",
+                    correlation_id=uuid4(),
+                )
+
+        # Circuit should still be closed
+        assert handler._circuit_breaker_open is False
+        assert handler._circuit_breaker_failures == 4
+
+        # Record one more failure to reach threshold
+        async with handler._circuit_breaker_lock:
+            await handler._record_circuit_failure(
+                operation="test_operation",
+                correlation_id=uuid4(),
+            )
+
+        # Circuit should now be open
+        assert handler._circuit_breaker_open is True
+        assert handler._circuit_breaker_failures == 5
+
+        await handler.shutdown()
+
+
 __all__: list[str] = [
     "TestCoreOperations",
     "TestMetadataOnlyQuery",
@@ -950,4 +1226,5 @@ __all__: list[str] = [
     "TestErrorHandling",
     "TestHandlerLifecycle",
     "TestQueryCombinations",
+    "TestCircuitBreakerBehavior",
 ]

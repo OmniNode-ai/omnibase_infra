@@ -20,10 +20,10 @@ class ModelManifestStoreResult(BaseModel):
     the storage location and whether a new manifest was created.
 
     Attributes:
-        manifest_id: The unique identifier of the stored manifest.
-            This is extracted from the manifest's manifest_id field.
-        file_path: The resolved absolute path where the manifest was stored.
-            For file backend, this is the full filesystem path.
+        manifest_id: The unique identifier of the stored manifest,
+            extracted from the input manifest's manifest_id field.
+        file_path: The resolved absolute filesystem path where the manifest
+            was stored (e.g., /var/lib/onex/manifests/2025/01/14/{id}.json).
         created: True if a new manifest was created, False if a manifest
             with the same ID already existed (idempotent operation).
             When False, the existing manifest is not overwritten.

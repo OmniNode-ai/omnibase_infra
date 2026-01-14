@@ -28,6 +28,13 @@ Datetime Handling:
     (e.g., "2025-01-14T12:00:00+00:00" or "2025-01-14T12:00:00Z") are parsed
     correctly. Naive datetimes may cause comparison issues when filtering.
 
+    Timezone Awareness:
+        - ISO strings with "Z" suffix are converted to UTC (+00:00)
+        - ISO strings with explicit offset (e.g., "+05:00") are preserved
+        - Naive datetime objects passed directly are accepted but logged as warnings
+        - Comparisons between aware and naive datetimes will raise TypeError in Python 3
+        - Best practice: Always use timezone-aware datetimes (e.g., datetime.now(timezone.utc))
+
 Note:
     Environment variable configuration (ONEX_MANIFEST_MAX_FILE_SIZE) is parsed
     at module import time, not at handler instantiation. This means:
@@ -99,6 +106,41 @@ _SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 HANDLER_ID_MANIFEST_PERSISTENCE: str = "manifest-persistence-handler"
 
 
+def _warn_if_naive_datetime(
+    dt: datetime,
+    field_name: str,
+    correlation_id: UUID,
+) -> None:
+    """Log a warning if the datetime is naive (lacks timezone info).
+
+    This helper supports the timezone awareness policy documented in the module
+    docstring. Naive datetimes are accepted for backwards compatibility but
+    logged as warnings to encourage migration to timezone-aware datetimes.
+
+    Args:
+        dt: The datetime to check.
+        field_name: Name of the field (for logging context).
+        correlation_id: Correlation ID for tracing.
+
+    Note:
+        This is a non-blocking warning. The datetime is still used, but users
+        are alerted that comparisons may behave unexpectedly if mixed with
+        timezone-aware datetimes from stored manifests.
+    """
+    if dt.tzinfo is None:
+        logger.warning(
+            "Naive datetime detected for '%s'. For accurate comparisons, use "
+            "timezone-aware datetimes (e.g., datetime.now(timezone.utc)). "
+            "See module docstring for timezone handling details.",
+            field_name,
+            extra={
+                "field_name": field_name,
+                "datetime_value": dt.isoformat(),
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+
 class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
     """Manifest persistence handler for storing/retrieving ModelExecutionManifest.
 
@@ -148,6 +190,11 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                 When provided, enables full ONEX integration (logging, metrics,
                 service discovery). When None, handler operates in standalone
                 mode suitable for testing and simple deployments.
+
+        See Also:
+            - CLAUDE.md "Container-Based Dependency Injection" section for the
+              standard ONEX container injection pattern.
+            - docs/patterns/container_dependency_injection.md for detailed DI patterns.
         """
         self._container = container
         self._storage_path: Path | None = None
@@ -491,8 +538,9 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
         try:
             if isinstance(created_at_raw, datetime):
                 created_at = created_at_raw
+                _warn_if_naive_datetime(created_at, "created_at", correlation_id)
             elif isinstance(created_at_raw, str):
-                # Try ISO format parsing
+                # Try ISO format parsing (Z suffix converted to +00:00)
                 created_at = datetime.fromisoformat(
                     created_at_raw.replace("Z", "+00:00")
                 )
@@ -837,6 +885,9 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             try:
                 if isinstance(created_after_raw, datetime):
                     filter_created_after = created_after_raw
+                    _warn_if_naive_datetime(
+                        filter_created_after, "created_after", correlation_id
+                    )
                 elif isinstance(created_after_raw, str):
                     filter_created_after = datetime.fromisoformat(
                         created_after_raw.replace("Z", "+00:00")
@@ -850,6 +901,9 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             try:
                 if isinstance(created_before_raw, datetime):
                     filter_created_before = created_before_raw
+                    _warn_if_naive_datetime(
+                        filter_created_before, "created_before", correlation_id
+                    )
                 elif isinstance(created_before_raw, str):
                     filter_created_before = datetime.fromisoformat(
                         created_before_raw.replace("Z", "+00:00")
@@ -905,8 +959,10 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                                 if file_size > self._max_file_size:
                                     continue
 
-                                # Read and parse the full manifest to extract
-                                # fields for filtering
+                                # Read the full manifest to extract fields needed
+                                # for filtering (correlation_id, node_id, created_at).
+                                # This is required even when metadata_only=True because
+                                # filter fields are stored within the manifest JSON.
                                 manifest_json = manifest_file.read_text(
                                     encoding="utf-8"
                                 )
