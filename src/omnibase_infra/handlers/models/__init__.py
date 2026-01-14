@@ -62,6 +62,16 @@ Filesystem Models:
     ModelEnsureDirectoryResult: Result from filesystem.ensure_directory operation
     ModelDeleteFilePayload: Payload for filesystem.delete_file operation
     ModelDeleteFileResult: Result from filesystem.delete_file operation
+
+Manifest Persistence Models:
+    ModelManifestPersistenceConfig: Configuration for HandlerManifestPersistence
+    ModelManifestStorePayload: Payload for manifest.store operation
+    ModelManifestStoreResult: Result from manifest.store operation
+    ModelManifestRetrievePayload: Payload for manifest.retrieve operation
+    ModelManifestRetrieveResult: Result from manifest.retrieve operation
+    ModelManifestQueryPayload: Payload for manifest.query operation
+    ModelManifestQueryResult: Result from manifest.query operation
+    ModelManifestMetadata: Lightweight metadata for manifest queries
 """
 
 from omnibase_infra.handlers.models.consul import (
@@ -133,6 +143,32 @@ from omnibase_infra.handlers.models.model_handler_response import (
 )
 from omnibase_infra.handlers.models.model_http_handler_response import (
     ModelHttpHandlerResponse,
+)
+
+# Manifest persistence models (one model per file per ONEX convention)
+from omnibase_infra.handlers.models.model_manifest_metadata import (
+    ModelManifestMetadata,
+)
+from omnibase_infra.handlers.models.model_manifest_persistence_config import (
+    ModelManifestPersistenceConfig,
+)
+from omnibase_infra.handlers.models.model_manifest_query_payload import (
+    ModelManifestQueryPayload,
+)
+from omnibase_infra.handlers.models.model_manifest_query_result import (
+    ModelManifestQueryResult,
+)
+from omnibase_infra.handlers.models.model_manifest_retrieve_payload import (
+    ModelManifestRetrievePayload,
+)
+from omnibase_infra.handlers.models.model_manifest_retrieve_result import (
+    ModelManifestRetrieveResult,
+)
+from omnibase_infra.handlers.models.model_manifest_store_payload import (
+    ModelManifestStorePayload,
+)
+from omnibase_infra.handlers.models.model_manifest_store_result import (
+    ModelManifestStoreResult,
 )
 from omnibase_infra.handlers.models.model_operation_context import (
     ModelOperationContext,
@@ -210,4 +246,13 @@ __all__: list[str] = [
     "ModelEnsureDirectoryResult",
     "ModelDeleteFilePayload",
     "ModelDeleteFileResult",
+    # Manifest persistence models
+    "ModelManifestPersistenceConfig",
+    "ModelManifestStorePayload",
+    "ModelManifestStoreResult",
+    "ModelManifestRetrievePayload",
+    "ModelManifestRetrieveResult",
+    "ModelManifestQueryPayload",
+    "ModelManifestQueryResult",
+    "ModelManifestMetadata",
 ]
