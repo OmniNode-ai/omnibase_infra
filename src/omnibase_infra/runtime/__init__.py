@@ -162,7 +162,7 @@ from omnibase_infra.runtime.contract_handler_discovery import (
     ContractHandlerDiscovery,
 )
 
-# Projector plugin loading and schema validation (OMN-1168)
+# Projector plugin loading and schema validation (OMN-1168, OMN-1169)
 from omnibase_infra.runtime.projector_plugin_loader import (
     ProjectorPluginLoader,
 )
@@ -170,6 +170,7 @@ from omnibase_infra.runtime.projector_schema_manager import (
     ProjectorSchemaError,
     ProjectorSchemaValidator,
 )
+from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 # Invocation security enforcer (OMN-1098)
 from omnibase_infra.runtime.invocation_security_enforcer import (
@@ -286,10 +287,11 @@ __all__: list[str] = [
     # Handler discovery protocol and implementation (OMN-1133)
     "ContractHandlerDiscovery",
     "ProtocolHandlerDiscovery",
-    # Projector schema validation (OMN-1168)
+    # Projector schema validation (OMN-1168) and shell (OMN-1169)
     "ProjectorSchemaError",
     "ProjectorPluginLoader",
     "ProjectorSchemaValidator",
+    "ProjectorShell",
     # Invocation security enforcer (OMN-1098)
     "InvocationSecurityEnforcer",
     "SecurityViolationError",

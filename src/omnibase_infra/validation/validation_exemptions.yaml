@@ -1528,6 +1528,29 @@ pattern_exemptions:
       - src/omnibase_infra/runtime/handler_contract_source.py (reference pattern)
     ticket: OMN-1168
   # ==========================================================================
+  # ProjectorShell Exemptions (OMN-1169)
+  # ==========================================================================
+  # ProjectorShell implements ProtocolEventProjector protocol which requires:
+  # - Protocol properties (projector_id, aggregate_type, consumed_events, is_placeholder)
+  # - Core methods (project, get_state)
+  # - SQL execution modes (_upsert, _insert, _append, _execute_projection)
+  # - Value extraction (_extract_values, _resolve_path, _get_event_type)
+  # - Utility (_parse_row_count)
+  # Total: 11 methods, all cohesive to the projector contract pattern.
+  # NOTE: Pattern anchored with omnibase_infra/runtime/ prefix and $ suffix to
+  # match only the production file at src/omnibase_infra/runtime/projector_shell.py.
+  # This prevents matching test files in tests/unit/runtime/ or tests/integration/runtime/.
+  - file_pattern: 'omnibase_infra/runtime/projector_shell\.py$'
+    class_pattern: "Class 'ProjectorShell'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Implements ProtocolEventProjector protocol requiring protocol properties (projector_id, aggregate_type, consumed_events, is_placeholder), core methods (project, get_state), three SQL execution modes (_upsert, _insert, _append), value extraction helpers (_extract_values, _resolve_path, _get_event_type), and utility method (_parse_row_count). All methods are cohesive to the contract-driven projector pattern.
+
+    documentation:
+      - src/omnibase_infra/runtime/projector_shell.py (class docstring)
+      - omnibase_spi/protocols/projectors/protocol_event_projector.py (protocol definition)
+    ticket: OMN-1169
+  # ==========================================================================
   # Projector Schema Model Exemptions (OMN-1168)
   # ==========================================================================
   # table_name is a standard database identifier, not an entity reference.
