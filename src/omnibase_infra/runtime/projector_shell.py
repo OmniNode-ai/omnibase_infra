@@ -225,7 +225,7 @@ class ProjectorShell:
                 context=ctx,
             ) from e
 
-        except asyncpg.UniqueViolationError:
+        except asyncpg.UniqueViolationError as e:
             # Only handle UniqueViolationError for insert_only mode
             # For upsert mode, this should never happen (ON CONFLICT handles it)
             # For append mode, this indicates an unexpected duplicate
@@ -244,8 +244,13 @@ class ProjectorShell:
                     rows_affected=0,
                     error="Unique constraint violation: duplicate key for insert_only mode",
                 )
-            # Re-raise for other modes - this is unexpected behavior
-            raise
+            # Wrap as RuntimeHostError for other modes - unexpected behavior
+            # should not expose raw asyncpg exceptions at runtime boundary
+            raise RuntimeHostError(
+                f"Unexpected unique constraint violation in "
+                f"{self._contract.behavior.mode} mode for projector: {self.projector_id}",
+                context=ctx,
+            ) from e
 
         except Exception as e:
             raise RuntimeHostError(
@@ -268,7 +273,11 @@ class ProjectorShell:
             correlation_id: Correlation ID for distributed tracing.
 
         Returns:
-            Dictionary of column values if found, None if no state exists.
+            Dictionary mapping column names (str) to their values if found,
+            None if no state exists. Values are typed as ``object`` because
+            asyncpg can return various PostgreSQL types (str, int, float,
+            datetime, UUID, etc.) and the schema is defined at runtime via
+            the projector contract.
 
         Raises:
             InfraConnectionError: If database connection fails.

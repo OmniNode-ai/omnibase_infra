@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -169,9 +170,25 @@ def sample_contract(
     )
 
 
+class MockAsyncpgRecord(dict):
+    """Mock that mimics asyncpg.Record behavior.
+
+    asyncpg.Record objects behave like both dicts (key access via []) and
+    support attribute-style access. This mock enables more realistic testing
+    without requiring a real database connection.
+    """
+
+    def __getattr__(self, name: str) -> object:
+        """Enable attribute-style access like asyncpg.Record."""
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(f"Record has no field '{name}'") from None
+
+
 @pytest.fixture
 def mock_pool() -> MagicMock:
-    """Create mocked asyncpg.Pool.
+    """Create mocked asyncpg.Pool with spec for type safety.
 
     Returns:
         MagicMock configured to simulate asyncpg.Pool behavior with
@@ -180,9 +197,16 @@ def mock_pool() -> MagicMock:
     The mock uses a context manager pattern that mimics asyncpg's pool.acquire():
         async with pool.acquire() as conn:
             await conn.execute(...)
+
+    Note: Uses spec_set on connection mock to catch typos and regressions.
+    The pool mock uses spec=asyncpg.Pool for the same purpose.
     """
-    mock_pool = MagicMock()
-    mock_conn = AsyncMock()
+    # Use spec to catch typos on pool methods (acquire, close, etc.)
+    mock_pool = MagicMock(spec=asyncpg.Pool)
+
+    # Use spec_set on connection to catch typos on connection methods
+    # spec_set is stricter - prevents setting attributes not on the spec
+    mock_conn = AsyncMock(spec_set=asyncpg.Connection)
 
     # Create an async context manager for acquire()
     class MockAcquireContext:
@@ -197,8 +221,10 @@ def mock_pool() -> MagicMock:
     # acquire() returns the async context manager
     mock_pool.acquire.return_value = MockAcquireContext()
 
-    # Default execute returns success
+    # Default execute returns success (mimics asyncpg status string)
     mock_conn.execute.return_value = "INSERT 0 1"
+    # Default fetchrow returns None (no row found) - use MockAsyncpgRecord in tests
+    # that need to verify field access patterns
     mock_conn.fetchrow.return_value = None
     mock_conn.fetch.return_value = []
 
@@ -343,7 +369,10 @@ class TestProjectorShellEventFiltering:
 
         assert result.success is True
         assert result.skipped is False
-        assert result.rows_affected >= 0
+        # Strict assertion: exactly 1 row should be affected to catch rowcount regressions
+        assert result.rows_affected == 1, (
+            f"Expected exactly 1 row affected, got {result.rows_affected}"
+        )
         # Should interact with database for consumed events
         mock_pool.acquire.assert_called()
 
@@ -1133,6 +1162,9 @@ class TestProjectorShellProtocolCompliance:
         Uses duck typing verification instead of isinstance check
         per ONEX principle: Protocol Resolution - Duck typing through
         protocols, never isinstance.
+
+        Verifies both structural compliance (hasattr/callable) and behavioral
+        compliance (properties return expected types).
         """
         from omnibase_infra.runtime.projector_shell import ProjectorShell
 
@@ -1151,6 +1183,27 @@ class TestProjectorShellProtocolCompliance:
 
         assert hasattr(projector, "get_state")
         assert callable(getattr(projector, "get_state", None))
+
+        # Behavioral checks: verify properties return expected types
+        # This catches implementation bugs where properties are defined but return wrong types
+        assert isinstance(projector.projector_id, str), (
+            f"projector_id should be str, got {type(projector.projector_id)}"
+        )
+        assert isinstance(projector.aggregate_type, str), (
+            f"aggregate_type should be str, got {type(projector.aggregate_type)}"
+        )
+        assert isinstance(projector.consumed_events, list), (
+            f"consumed_events should be list, got {type(projector.consumed_events)}"
+        )
+        assert isinstance(projector.is_placeholder, bool), (
+            f"is_placeholder should be bool, got {type(projector.is_placeholder)}"
+        )
+
+        # Verify consumed_events contains strings (event type identifiers)
+        for event in projector.consumed_events:
+            assert isinstance(event, str), (
+                f"consumed_events items should be str, got {type(event)}"
+            )
 
     def test_projector_id_from_contract(
         self,
@@ -1224,15 +1277,21 @@ class TestProjectorShellGetState:
         Given: aggregate exists in projection table
         When: get_state() called with aggregate_id
         Then: returns dict with projected state
+
+        Note: Uses MockAsyncpgRecord to simulate asyncpg.Record behavior,
+        which supports both dict-style and attribute-style access.
         """
         from omnibase_infra.runtime.projector_shell import ProjectorShell
 
         aggregate_id = uuid4()
-        expected_state = {
-            "id": aggregate_id,
-            "status": "confirmed",
-            "total_amount": 150.0,
-        }
+        # Use MockAsyncpgRecord to simulate asyncpg.Record behavior
+        expected_state = MockAsyncpgRecord(
+            {
+                "id": aggregate_id,
+                "status": "confirmed",
+                "total_amount": 150.0,
+            }
+        )
 
         mock_conn = mock_pool._mock_conn
         mock_conn.fetchrow.return_value = expected_state
@@ -1412,6 +1471,136 @@ class TestProjectorShellErrorHandling:
         assert result.success is False
         assert result.error is not None
         assert "unique" in result.error.lower() or "constraint" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_unique_violation_raises_runtime_error_for_upsert_mode(
+        self,
+        mock_pool: MagicMock,
+        sample_event_envelope: ModelEventEnvelope[OrderCreatedPayload],
+    ) -> None:
+        """Unique constraint violations raise RuntimeHostError for upsert mode.
+
+        Given: upsert mode and SQL execution fails with asyncpg.UniqueViolationError
+        When: project() called
+        Then: raises RuntimeHostError (unexpected - upsert should handle conflicts)
+
+        Note: This tests the fix for PR #144 - raw asyncpg exceptions should not
+        leak through the runtime boundary in non-insert_only modes.
+        """
+        import asyncpg
+
+        from omnibase_infra.errors import RuntimeHostError
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        # Create upsert mode contract - UniqueViolationError is unexpected
+        # and should be wrapped as RuntimeHostError
+        columns = [
+            ModelProjectorColumn(
+                name="id",
+                type="UUID",
+                source="payload.order_id",
+            ),
+            ModelProjectorColumn(
+                name="status",
+                type="TEXT",
+                source="payload.status",
+            ),
+        ]
+        schema = ModelProjectorSchema(
+            table="order_projections",
+            primary_key="id",
+            columns=columns,
+        )
+        upsert_contract = ModelProjectorContract(
+            projector_kind="materialized_view",
+            projector_id="order-projector",
+            name="Order Projector",
+            version="1.0.0",
+            aggregate_type="Order",
+            consumed_events=["order.created.v1"],
+            projection_schema=schema,
+            behavior=ModelProjectorBehavior(mode="upsert"),
+        )
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.side_effect = asyncpg.UniqueViolationError(
+            "duplicate key value violates unique constraint"
+        )
+
+        projector = ProjectorShell(contract=upsert_contract, pool=mock_pool)
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await projector.project(sample_event_envelope, uuid4())
+
+        # Verify the error message includes mode and projector info
+        error_msg = str(exc_info.value).lower()
+        assert "upsert" in error_msg
+        assert "unique" in error_msg or "constraint" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_unique_violation_raises_runtime_error_for_append_mode(
+        self,
+        mock_pool: MagicMock,
+        sample_event_envelope: ModelEventEnvelope[OrderCreatedPayload],
+    ) -> None:
+        """Unique constraint violations raise RuntimeHostError for append mode.
+
+        Given: append mode and SQL execution fails with asyncpg.UniqueViolationError
+        When: project() called
+        Then: raises RuntimeHostError (unexpected - append is event-log style)
+
+        Note: This tests the fix for PR #144 - raw asyncpg exceptions should not
+        leak through the runtime boundary in non-insert_only modes.
+        """
+        import asyncpg
+
+        from omnibase_infra.errors import RuntimeHostError
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        # Create append mode contract - UniqueViolationError is unexpected
+        # and should be wrapped as RuntimeHostError
+        columns = [
+            ModelProjectorColumn(
+                name="id",
+                type="UUID",
+                source="envelope_id",  # Use envelope_id for uniqueness
+            ),
+            ModelProjectorColumn(
+                name="status",
+                type="TEXT",
+                source="payload.status",
+            ),
+        ]
+        schema = ModelProjectorSchema(
+            table="order_events",
+            primary_key="id",
+            columns=columns,
+        )
+        append_contract = ModelProjectorContract(
+            projector_kind="materialized_view",
+            projector_id="order-events-projector",
+            name="Order Events Projector",
+            version="1.0.0",
+            aggregate_type="Order",
+            consumed_events=["order.created.v1"],
+            projection_schema=schema,
+            behavior=ModelProjectorBehavior(mode="append"),
+        )
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.side_effect = asyncpg.UniqueViolationError(
+            "duplicate key value violates unique constraint"
+        )
+
+        projector = ProjectorShell(contract=append_contract, pool=mock_pool)
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await projector.project(sample_event_envelope, uuid4())
+
+        # Verify the error message includes mode and projector info
+        error_msg = str(exc_info.value).lower()
+        assert "append" in error_msg
+        assert "unique" in error_msg or "constraint" in error_msg
 
 
 # =============================================================================

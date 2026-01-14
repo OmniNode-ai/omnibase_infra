@@ -13,20 +13,29 @@ These tests verify ProjectorShell against a real PostgreSQL database to validate
 4. Idempotency guarantees with real database state
 5. Value extraction from nested event payloads end-to-end
 
-Database Configuration:
-    Uses remote PostgreSQL at 192.168.86.200:5436 (omninode_bridge database).
-    Test tables are created/dropped per test to ensure isolation.
+Environment Variables (Required):
+    POSTGRES_HOST: Database host (default: 192.168.86.200)
+    POSTGRES_PORT: Database port (default: 5436)
+    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_USER: Database user (default: postgres)
+    POSTGRES_PASSWORD: Database password (REQUIRED - no default, tests skip if unset)
 
 Test Isolation:
     Each test creates a unique table (test_projector_{uuid8}) and drops it
     after the test completes. This prevents test interference and avoids
     affecting production data.
 
+Type Mapping Notes:
+    - Python float -> PostgreSQL NUMERIC: Intentional for precision preservation.
+      asyncpg returns NUMERIC as Decimal, tests use float() for comparison.
+
 Related Tickets:
     - OMN-1169: ProjectorShell implementation
     - OMN-1168: ProjectorPluginLoader contract discovery
 
 Usage:
+    # Ensure POSTGRES_PASSWORD is set
+    export POSTGRES_PASSWORD=your_password
     pytest -m integration tests/integration/runtime/test_projector_shell_database.py
 """
 
@@ -167,6 +176,9 @@ async def test_table(db_pool: asyncpg.Pool) -> AsyncGenerator[str, None]:
     table_name = f"test_projector_{uuid4().hex[:8]}"
 
     # Create test table
+    # NOTE: amount is NUMERIC to match payload.total_amount (Python float).
+    # PostgreSQL NUMERIC preserves precision; asyncpg returns as Decimal.
+    # Tests use float() for comparison (see TestStateRetrieval).
     async with db_pool.acquire() as conn:
         await conn.execute(f"""
             CREATE TABLE "{table_name}" (
@@ -219,6 +231,8 @@ def _make_contract(
             type="TEXT",
             source="payload.status",
         ),
+        # NOTE: NUMERIC type maps from Python float (payload.total_amount).
+        # asyncpg returns NUMERIC as Decimal; use float() for comparison.
         ModelProjectorColumn(
             name="amount",
             type="NUMERIC",
@@ -367,19 +381,20 @@ class TestDatabaseConnection:
         assert db_pool.get_size() >= 1
 
         # Acquire multiple connections
-        connections = []
-        for _ in range(3):
-            conn = await db_pool.acquire()
-            connections.append(conn)
+        connections: list[asyncpg.Connection] = []
+        try:
+            for _ in range(3):
+                conn = await db_pool.acquire()
+                connections.append(conn)
 
-        # All connections should be valid
-        for conn in connections:
-            result = await conn.fetchval("SELECT 1")
-            assert result == 1
-
-        # Release connections
-        for conn in connections:
-            await db_pool.release(conn)
+            # All connections should be valid
+            for conn in connections:
+                result = await conn.fetchval("SELECT 1")
+                assert result == 1
+        finally:
+            # Release connections even if assertions fail
+            for conn in connections:
+                await db_pool.release(conn)
 
     async def test_test_table_creation(
         self,
