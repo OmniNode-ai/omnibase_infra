@@ -1,0 +1,184 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Handler Contract
+# Handler: HandlerManifestPersistence
+#
+# This contract defines the interface for the manifest persistence handler,
+# which stores ModelExecutionManifest objects to the filesystem with
+# date-based partitioning, atomic writes, and query support.
+#
+# Contract identifiers
+name: "handler_manifest_persistence"
+contract_name: "handler_manifest_persistence"
+handler_name: "HandlerManifestPersistence"
+# Version (semantic versioning)
+version:
+  major: 0
+  minor: 1
+  patch: 0
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Handler type and category
+handler_type: "INFRA_HANDLER"
+handler_category: "EFFECT"
+transport_type: "FILESYSTEM"
+# Description
+description: >
+  Manifest persistence handler for storing ModelExecutionManifest objects to the filesystem. Provides atomic writes via temp-file-rename pattern, idempotent storage by manifest_id, date-based partitioning for efficient archival, and query support with multiple filter options.
+
+# Handler module location
+handler:
+  name: "HandlerManifestPersistence"
+  module: "omnibase_infra.handlers.handler_manifest_persistence"
+# Supported operations
+operations:
+  - operation: "manifest.store"
+    description: "Store a manifest with atomic write and idempotent behavior"
+    input_fields:
+      - manifest: "dict (serialized ModelExecutionManifest)"
+    output_model:
+      name: "ModelManifestStoreResult"
+      module: "omnibase_infra.handlers.models.model_manifest_store_result"
+    idempotent: true
+    notes: >
+      Uses atomic write (temp file + rename) to prevent partial writes. If manifest_id already exists, returns created=False without overwriting.
+
+  - operation: "manifest.retrieve"
+    description: "Retrieve a manifest by ID (scans date directories)"
+    input_fields:
+      - manifest_id: "UUID or string"
+    output_model:
+      name: "ModelManifestRetrieveResult"
+      module: "omnibase_infra.handlers.models.model_manifest_retrieve_result"
+    idempotent: true
+    complexity: "O(d) where d is number of date directories"
+    notes: >
+      Scans year/month/day directories in reverse chronological order. Returns found=False if manifest does not exist.
+
+  - operation: "manifest.query"
+    description: "Query manifests with filters (correlation_id, node_id, date range)"
+    input_fields:
+      - correlation_id: "UUID | None - Filter by correlation_id"
+      - node_id: "str | None - Filter by node_id"
+      - created_after: "datetime | None - Filter by creation time"
+      - created_before: "datetime | None - Filter by creation time"
+      - metadata_only: "bool (default False) - Return only metadata summary"
+      - limit: "int (default 100, max 10000) - Maximum results"
+    output_model:
+      name: "ModelManifestQueryResult"
+      module: "omnibase_infra.handlers.models.model_manifest_query_result"
+    idempotent: true
+    complexity: "O(n) where n is total manifest files"
+    notes: >
+      Full deserialization required to access filter fields stored within manifest JSON. The metadata_only flag controls RETURN format, not read pattern (filesystem limitation).
+
+# Result models
+result_models:
+  - name: "ModelManifestStoreResult"
+    module: "omnibase_infra.handlers.models.model_manifest_store_result"
+    fields:
+      - manifest_id: "UUID"
+      - file_path: "str"
+      - created: "bool"
+      - bytes_written: "int"
+  - name: "ModelManifestRetrieveResult"
+    module: "omnibase_infra.handlers.models.model_manifest_retrieve_result"
+    fields:
+      - manifest_id: "UUID"
+      - manifest: "dict | None"
+      - file_path: "str | None"
+      - found: "bool"
+  - name: "ModelManifestQueryResult"
+    module: "omnibase_infra.handlers.models.model_manifest_query_result"
+    fields:
+      - manifests: "list[ModelManifestMetadata]"
+      - manifest_data: "list[dict]"
+      - total_count: "int"
+      - metadata_only: "bool"
+  - name: "ModelManifestMetadata"
+    module: "omnibase_infra.handlers.models.model_manifest_metadata"
+    fields:
+      - manifest_id: "UUID"
+      - created_at: "datetime"
+      - correlation_id: "UUID | None"
+      - node_id: "str | None"
+      - file_path: "str"
+      - file_size: "int"
+# Configuration requirements
+configuration:
+  required:
+    - name: "storage_path"
+      type: "str"
+      description: "Path to manifest storage directory"
+  optional:
+    - name: "max_file_size"
+      type: "int"
+      default: 52428800
+      description: "Maximum file size in bytes (default 50MB)"
+      env_var: "ONEX_MANIFEST_MAX_FILE_SIZE"
+# Storage structure
+storage:
+  pattern: "{storage_path}/{year}/{month:02d}/{day:02d}/{manifest_id}.json"
+  example: "/data/manifests/2025/01/14/550e8400-e29b-41d4-a716-446655440000.json"
+  partitioning: "date-based (year/month/day)"
+# Error handling configuration
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+    transport_type: "FILESYSTEM"
+  error_types:
+    - name: "ProtocolConfigurationError"
+      description: "Invalid configuration or payload"
+      recoverable: false
+    - name: "RuntimeHostError"
+      description: "Handler not initialized"
+      recoverable: false
+    - name: "InfraConnectionError"
+      description: "Filesystem I/O failure"
+      recoverable: true
+    - name: "InfraUnavailableError"
+      description: "Circuit breaker open or file too large"
+      recoverable: true
+# Security features
+security:
+  atomic_writes: true
+  idempotent_storage: true
+  file_size_validation: true
+  notes: >
+    Atomic writes prevent partial/corrupted files on crash. Idempotent storage prevents duplicate manifests. File size validation prevents memory exhaustion on read.
+
+# Datetime handling
+datetime_handling:
+  timezone_awareness: "recommended"
+  iso_parsing: true
+  z_suffix_handling: "converted to +00:00"
+  naive_datetime_behavior: "accepted with warning logged"
+  notes: >
+    Best practice is timezone-aware datetimes. Naive datetimes may cause comparison issues.
+
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2025-01-14"
+  ticket: "OMN-1163"
+  tags:
+    - handler
+    - effect
+    - manifest
+    - persistence
+    - filesystem
+    - atomic-writes

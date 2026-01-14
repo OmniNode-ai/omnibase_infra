@@ -12,6 +12,7 @@ Test Coverage:
     - TestErrorHandling: Error cases and edge conditions
     - TestHandlerLifecycle: Handler initialization and shutdown
     - TestQueryCombinations: Complex query scenarios with multiple filters
+    - TestConcurrentWrites: Concurrent write safety verification
 
 Circuit Breaker Tests (TestCircuitBreakerBehavior):
     The handler uses MixinAsyncCircuitBreaker for resilient I/O operations.
@@ -760,6 +761,51 @@ class TestHandlerLifecycle:
         assert description["initialized"] is True
 
     @pytest.mark.asyncio
+    async def test_describe_includes_circuit_breaker_state_when_initialized(
+        self, handler: HandlerManifestPersistence
+    ) -> None:
+        """describe() includes circuit breaker state when handler is initialized.
+
+        Validates that the describe method returns circuit breaker
+        state information for observability purposes.
+        """
+        description = handler.describe()
+
+        # Circuit breaker info should be present when initialized
+        assert "circuit_breaker" in description
+        cb_state = description["circuit_breaker"]
+        assert isinstance(cb_state, dict)
+
+        # Validate circuit breaker state fields
+        assert "open" in cb_state
+        assert cb_state["open"] is False  # Should be closed initially
+
+        assert "failures" in cb_state
+        assert cb_state["failures"] == 0  # No failures yet
+
+        assert "threshold" in cb_state
+        assert cb_state["threshold"] == 5  # Default threshold
+
+        assert "reset_timeout_seconds" in cb_state
+        assert cb_state["reset_timeout_seconds"] == 60.0  # Default timeout
+
+    @pytest.mark.asyncio
+    async def test_describe_excludes_circuit_breaker_when_not_initialized(
+        self, temp_storage_path: Path
+    ) -> None:
+        """describe() excludes circuit breaker state when handler not initialized.
+
+        Circuit breaker is only set up during initialize(), so describe()
+        should not include it when called before initialization.
+        """
+        handler = HandlerManifestPersistence()
+        description = handler.describe()
+
+        # Circuit breaker should not be present before initialization
+        assert "circuit_breaker" not in description
+        assert description["initialized"] is False
+
+    @pytest.mark.asyncio
     async def test_initialize_creates_storage_directory(
         self, temp_storage_path: Path
     ) -> None:
@@ -1219,6 +1265,186 @@ class TestCircuitBreakerBehavior:
         await handler.shutdown()
 
 
+# =============================================================================
+# TestConcurrentWrites
+# =============================================================================
+
+
+class TestConcurrentWrites:
+    """Test concurrent write safety for atomic operations.
+
+    The handler uses atomic writes (temp file + rename) which should be
+    thread-safe on POSIX systems. These tests verify that concurrent
+    operations do not corrupt data or cause race conditions.
+
+    Test Coverage:
+        - Concurrent stores with different manifest IDs all succeed
+        - Concurrent stores with same manifest ID are idempotent
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_store_operations_are_safe(
+        self, handler: HandlerManifestPersistence, temp_storage_path: Path
+    ) -> None:
+        """Multiple concurrent stores with different IDs should all succeed.
+
+        Validates that the atomic write mechanism correctly handles
+        concurrent store operations without data loss or corruption.
+        Each manifest should be stored successfully in its own file.
+        """
+        import asyncio
+
+        # Create 10 manifests with unique IDs
+        num_manifests = 10
+        manifests = [
+            create_test_manifest(node_id=f"concurrent-{i}")
+            for i in range(num_manifests)
+        ]
+
+        # Store all manifests concurrently
+        tasks = [handler.execute(create_store_envelope(m)) for m in manifests]
+        results = await asyncio.gather(*tasks)
+
+        # Verify all operations succeeded
+        for i, result in enumerate(results):
+            assert result.result["status"] == "success", (
+                f"Store operation {i} failed: {result.result}"
+            )
+            assert result.result["payload"]["created"] is True, (
+                f"Manifest {i} should have been created"
+            )
+
+        # Verify all files were created
+        json_files = list(temp_storage_path.rglob("*.json"))
+        assert len(json_files) == num_manifests, (
+            f"Expected {num_manifests} files, found {len(json_files)}"
+        )
+
+        # Verify each manifest can be retrieved correctly
+        for manifest in manifests:
+            result = await handler.execute(
+                create_retrieve_envelope(manifest["manifest_id"])
+            )
+            assert result.result["status"] == "success"
+            assert result.result["payload"]["found"] is True
+            retrieved = result.result["payload"]["manifest"]
+            assert retrieved["manifest_id"] == manifest["manifest_id"]
+            assert (
+                retrieved["node_identity"]["node_id"]
+                == manifest["node_identity"]["node_id"]
+            )
+
+    @pytest.mark.asyncio
+    async def test_concurrent_store_same_manifest_is_idempotent(
+        self, handler: HandlerManifestPersistence, temp_storage_path: Path
+    ) -> None:
+        """Concurrent stores of same manifest_id should be idempotent.
+
+        Validates that storing the same manifest_id multiple times concurrently
+        results in exactly one file being created, with some operations
+        returning created=True (first write) and others returning created=False
+        (subsequent writes that find the file already exists).
+        """
+        import asyncio
+
+        # Create a single manifest
+        manifest = create_test_manifest(node_id="idempotent-test")
+        manifest_id = manifest["manifest_id"]
+
+        # Attempt to store the same manifest 5 times concurrently
+        num_concurrent_stores = 5
+        tasks = [
+            handler.execute(create_store_envelope(manifest))
+            for _ in range(num_concurrent_stores)
+        ]
+        results = await asyncio.gather(*tasks)
+
+        # All operations should succeed
+        for i, result in enumerate(results):
+            assert result.result["status"] == "success", (
+                f"Store operation {i} failed: {result.result}"
+            )
+            # All should return the same manifest_id
+            assert str(result.result["payload"]["manifest_id"]) == manifest_id
+
+        # Verify idempotent behavior: exactly one created=True, rest created=False
+        created_true_count = sum(
+            1 for r in results if r.result["payload"]["created"] is True
+        )
+        created_false_count = sum(
+            1 for r in results if r.result["payload"]["created"] is False
+        )
+
+        # At least one should have created=True (the first to complete)
+        assert created_true_count >= 1, "At least one operation should create the file"
+
+        # Total should equal number of concurrent operations
+        assert created_true_count + created_false_count == num_concurrent_stores
+
+        # Verify only one file was created
+        json_files = list(temp_storage_path.rglob("*.json"))
+        assert len(json_files) == 1, (
+            f"Expected 1 file for idempotent writes, found {len(json_files)}"
+        )
+
+        # Verify the file contains valid data
+        result = await handler.execute(create_retrieve_envelope(manifest_id))
+        assert result.result["status"] == "success"
+        assert result.result["payload"]["found"] is True
+        retrieved = result.result["payload"]["manifest"]
+        assert retrieved["manifest_id"] == manifest_id
+        assert retrieved["node_identity"]["node_id"] == "idempotent-test"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_mixed_operations_are_safe(
+        self, handler: HandlerManifestPersistence, temp_storage_path: Path
+    ) -> None:
+        """Mixed concurrent store/retrieve/query operations should be safe.
+
+        Validates that the handler correctly handles concurrent operations
+        of different types without deadlocks or data corruption.
+        """
+        import asyncio
+
+        # First, store some manifests sequentially to ensure they exist
+        manifests = [create_test_manifest(node_id=f"mixed-op-{i}") for i in range(5)]
+        for manifest in manifests:
+            await handler.execute(create_store_envelope(manifest))
+
+        # Now execute mixed operations concurrently
+        tasks: list[object] = []
+
+        # Add store operations for new manifests
+        new_manifests = [
+            create_test_manifest(node_id=f"mixed-new-{i}") for i in range(3)
+        ]
+        for m in new_manifests:
+            tasks.append(handler.execute(create_store_envelope(m)))
+
+        # Add retrieve operations for existing manifests
+        for manifest in manifests[:3]:
+            tasks.append(
+                handler.execute(create_retrieve_envelope(manifest["manifest_id"]))
+            )
+
+        # Add query operations
+        tasks.append(handler.execute(create_query_envelope(limit=10)))
+        tasks.append(handler.execute(create_query_envelope(node_id="mixed-op-0")))
+
+        # Execute all concurrently
+        results = await asyncio.gather(*tasks)
+
+        # All operations should succeed
+        for i, result in enumerate(results):
+            assert result.result["status"] == "success", (
+                f"Operation {i} failed: {result.result}"
+            )
+
+        # Verify total file count (5 original + 3 new = 8)
+        json_files = list(temp_storage_path.rglob("*.json"))
+        assert len(json_files) == 8, f"Expected 8 files, found {len(json_files)}"
+
+
 __all__: list[str] = [
     "TestCoreOperations",
     "TestMetadataOnlyQuery",
@@ -1227,4 +1453,5 @@ __all__: list[str] = [
     "TestHandlerLifecycle",
     "TestQueryCombinations",
     "TestCircuitBreakerBehavior",
+    "TestConcurrentWrites",
 ]

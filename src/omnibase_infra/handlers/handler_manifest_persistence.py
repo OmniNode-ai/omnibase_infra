@@ -959,10 +959,15 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                                 if file_size > self._max_file_size:
                                     continue
 
-                                # Read the full manifest to extract fields needed
-                                # for filtering (correlation_id, node_id, created_at).
-                                # This is required even when metadata_only=True because
-                                # filter fields are stored within the manifest JSON.
+                                # Full deserialization required to access filter
+                                # fields (correlation_id, node_id, created_at)
+                                # stored within the manifest JSON.
+                                #
+                                # The `metadata_only` flag controls the RETURN
+                                # format (full manifest vs. summary), not the
+                                # read pattern. This is a limitation of
+                                # filesystem storage: filter fields are not
+                                # available as external file metadata.
                                 manifest_json = manifest_file.read_text(
                                     encoding="utf-8"
                                 )
@@ -1113,8 +1118,13 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
                 - storage_path: Storage directory path (when initialized)
                 - initialized: Whether the handler is initialized
                 - version: Handler version string
+                - circuit_breaker: Circuit breaker state (when initialized)
+                    - open: Whether circuit is currently open
+                    - failures: Current failure count
+                    - threshold: Configured failure threshold
+                    - reset_timeout_seconds: Configured reset timeout
         """
-        return {
+        result: dict[str, object] = {
             "handler_type": self.handler_type.value,
             "handler_category": self.handler_category.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
@@ -1122,6 +1132,18 @@ class HandlerManifestPersistence(MixinEnvelopeExtraction, MixinAsyncCircuitBreak
             "initialized": self._initialized,
             "version": "0.1.0",
         }
+
+        # Include circuit breaker state only when handler is initialized
+        # (CB is set up during initialize() call)
+        if self._initialized:
+            result["circuit_breaker"] = {
+                "open": self._circuit_breaker_open,
+                "failures": self._circuit_breaker_failures,
+                "threshold": self.circuit_breaker_threshold,
+                "reset_timeout_seconds": self.circuit_breaker_reset_timeout,
+            }
+
+        return result
 
 
 __all__: list[str] = ["HandlerManifestPersistence", "HANDLER_ID_MANIFEST_PERSISTENCE"]
