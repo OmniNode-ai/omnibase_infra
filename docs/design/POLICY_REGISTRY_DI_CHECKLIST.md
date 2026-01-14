@@ -119,10 +119,10 @@
   ruff check src/omnibase_infra/runtime/policy_registry.py
   ```
 
-- [ ] **Verify backwards compatibility**:
-  - [ ] All existing tests pass unchanged
-  - [ ] Old singleton pattern still works
-  - [ ] No breaking changes to public API
+- [ ] **Verify container-based DI**:
+  - [ ] All tests updated to use container DI
+  - [ ] Singleton pattern removed (per no-backwards-compatibility policy)
+  - [ ] All consumers updated to use container
 
 ## Phase 2: Integration Tests (Next Sprint)
 
@@ -239,10 +239,10 @@
 
 ## Risk Mitigation Checklist
 
-- [ ] **Backwards compatibility verified**:
-  - [ ] Existing tests pass without changes
-  - [ ] Old singleton pattern still works
-  - [ ] No changes to public API signatures
+- [ ] **Migration complete**:
+  - [ ] All tests updated for container DI
+  - [ ] Singleton pattern removed entirely
+  - [ ] All consumers use container DI
 
 - [ ] **Container API verified**:
   - [ ] ModelOnexContainer imports successfully
@@ -279,7 +279,7 @@
 ## Notes
 
 - Keep each phase small and independently deliverable
-- Maintain backwards compatibility until Phase 5
+- No backwards compatibility maintained (per CLAUDE.md policy)
 - Test thoroughly at each phase
 - Document as you go
 - Get feedback early and often

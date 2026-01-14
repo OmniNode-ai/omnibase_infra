@@ -566,9 +566,27 @@ async def transfer_funds(
     to_account: str,
     amount: float,
     correlation_id: UUID,
+    trigger_transport: EnumInfraTransportType | None = None,
 ) -> None:
-    """Transfer funds between accounts with saga compensation."""
-    saga = SagaExecutor()
+    """Transfer funds between accounts with saga compensation.
+
+    Args:
+        from_account: Source account ID
+        to_account: Destination account ID
+        amount: Transfer amount
+        correlation_id: Request correlation ID for tracing
+        trigger_transport: Transport that triggered this saga (HTTP, KAFKA, etc.).
+            If None, defaults to RUNTIME (recommended for internal orchestration).
+            Set explicitly when you need to correlate compensation failures
+            with the original request source in observability tools.
+    """
+    # Configure transport type based on trigger source
+    # RUNTIME (default): Generic orchestration context
+    # HTTP: REST API-triggered sagas - correlate with API errors
+    # KAFKA: Event-driven sagas - correlate with message processing
+    saga = SagaExecutor(
+        transport_type=trigger_transport or EnumInfraTransportType.RUNTIME
+    )
 
     debit_result = None
 

@@ -594,10 +594,21 @@ class TestRuntimeErrorHandling:
                     # Connection refused - runtime crashed or became unavailable
                     health_ok = False
                     break
-                except httpx.TimeoutException:
-                    # Request timeout - runtime may be overloaded but not crashed
-                    # Continue polling as timeout alone doesn't indicate crash
-                    pass
+                except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout):
+                    # Specific timeout types - runtime may be overloaded but not crashed.
+                    # Continue polling as timeout alone doesn't indicate crash.
+                    # Note: httpx.WriteTimeout excluded as health GET has no request body.
+                    logger.debug(
+                        "Health check timed out during polling (expected during load)"
+                    )
+                except (httpx.ReadError, httpx.ProtocolError) as e:
+                    # Network read errors or protocol violations indicate runtime issues
+                    logger.warning(
+                        "Health check failed with network/protocol error: %s",
+                        type(e).__name__,
+                    )
+                    health_ok = False
+                    break
                 await asyncio.sleep(poll_interval)
 
         # Verify runtime remained healthy throughout the wait period
@@ -644,10 +655,21 @@ class TestRuntimeErrorHandling:
                     # Connection refused - runtime crashed or became unavailable
                     health_ok = False
                     break
-                except httpx.TimeoutException:
-                    # Request timeout - runtime may be overloaded but not crashed
-                    # Continue polling as timeout alone doesn't indicate crash
-                    pass
+                except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout):
+                    # Specific timeout types - runtime may be overloaded but not crashed.
+                    # Continue polling as timeout alone doesn't indicate crash.
+                    # Note: httpx.WriteTimeout excluded as health GET has no request body.
+                    logger.debug(
+                        "Health check timed out during polling (expected during load)"
+                    )
+                except (httpx.ReadError, httpx.ProtocolError) as e:
+                    # Network read errors or protocol violations indicate runtime issues
+                    logger.warning(
+                        "Health check failed with network/protocol error: %s",
+                        type(e).__name__,
+                    )
+                    health_ok = False
+                    break
                 await asyncio.sleep(poll_interval)
 
         # Verify runtime remained healthy throughout the wait period

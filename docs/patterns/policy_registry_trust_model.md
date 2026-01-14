@@ -153,6 +153,11 @@ class PolicyRegistryError(RuntimeHostError):
         POLICY_REG_003: Invalid policy type identifier
         POLICY_REG_004: Policy protocol not implemented
         POLICY_REG_005: Policy registration limit exceeded
+        POLICY_REG_006: Code review not approved
+        POLICY_REG_007: Static analysis failed
+        POLICY_REG_008: Not in allowlist
+        POLICY_REG_009: Timeout exceeded
+        POLICY_REG_010: Memory exceeded
     """
 
     def __init__(
@@ -161,6 +166,7 @@ class PolicyRegistryError(RuntimeHostError):
         policy_id: str | None = None,
         policy_type: str | EnumPolicyType | None = None,
         context: ModelInfraErrorContext | None = None,
+        error_code: str | None = None,
         **kwargs: object,
     ) -> None:
         """Initialize PolicyRegistryError with policy-specific context.
@@ -170,6 +176,7 @@ class PolicyRegistryError(RuntimeHostError):
             policy_id: The policy ID that caused the error
             policy_type: The policy type (EnumPolicyType or string)
             context: Infrastructure error context with correlation ID
+            error_code: Error code for categorization (e.g., "POLICY_REG_001")
             **kwargs: Additional context fields
         """
         super().__init__(message, context=context, **kwargs)
@@ -177,6 +184,7 @@ class PolicyRegistryError(RuntimeHostError):
         self.policy_type = (
             policy_type.value if isinstance(policy_type, EnumPolicyType) else policy_type
         )
+        self.error_code = error_code
 ```
 
 ### 1. Code Review Gate

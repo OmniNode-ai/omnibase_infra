@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S310
+# S106 disabled: Test credential fixtures are intentional for integration testing
+# S310 disabled: URL scheme validation happens at fixture level; Vault health check is internal
 """Pytest configuration and fixtures for handler integration tests.
 
 This module provides fixtures for testing infrastructure handlers.
@@ -452,10 +455,10 @@ def _check_vault_reachable() -> bool:
     try:
         # Use health check endpoint (doesn't require auth)
         health_url = f"{VAULT_ADDR}/v1/sys/health"
-        req = urllib.request.Request(health_url, method="GET")  # noqa: S310
+        req = urllib.request.Request(health_url, method="GET")
         req.add_header("X-Vault-Request", "true")
 
-        with urllib.request.urlopen(req, timeout=5) as response:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=5) as response:
             # 200 = initialized, unsealed, active
             # 429 = standby (but reachable)
             # 472 = DR secondary

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S106
+# S106 disabled: Test password fixtures are intentional for integration testing
 """Pytest fixtures for projector integration tests.
 
 This module provides shared fixtures for projector integration tests using
@@ -113,7 +115,7 @@ def postgres_container(
     container = PostgresContainer(
         image="postgres:16-alpine",
         username="test_user",
-        password="test_password",  # noqa: S106 - Test-only credentials
+        password="test_password",
         dbname="test_projections",
     )
 

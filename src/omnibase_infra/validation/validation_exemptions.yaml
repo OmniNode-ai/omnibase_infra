@@ -108,7 +108,7 @@ pattern_exemptions:
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
-      Backwards compatibility during config migration from direct parameters to ModelKafkaConfig object. Threshold: 5 params, KafkaEventBus has 10+.
+      Configuration migration from direct parameters to ModelKafkaConfig object. Threshold: 5 params, KafkaEventBus has 10+ due to flexible configuration requirements.
 
     documentation:
       - CLAUDE.md (Accepted Pattern Exceptions - KafkaEventBus Complexity)
@@ -451,7 +451,7 @@ pattern_exemptions:
     method_pattern: "Function 'initialize_introspection'"
     violation_pattern: 'has \d+ parameters'
     reason: >
-      Legacy interface kept for backward compatibility. A new preferred method initialize_introspection_from_config() was added that takes ModelIntrospectionConfig, reducing parameter count to 2 (self, config). Legacy method preserved.
+      Flexible initialization interface. The preferred method initialize_introspection_from_config() takes ModelIntrospectionConfig with parameter count of 2. Direct parameters method provides fine-grained control when needed.
 
     documentation:
       - CLAUDE.md (Node Introspection Security Considerations)

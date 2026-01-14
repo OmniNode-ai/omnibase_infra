@@ -46,10 +46,9 @@ async def wait_for_consumer_ready(
         3. If max_wait exceeded: returns True anyway (graceful fallback)
 
     Why Always Return True?
-        This function maintains backwards compatibility with existing test code
-        that expects it to always succeed. The purpose is to REDUCE flakiness
-        by waiting for actual readiness when possible, not to DETECT failures.
-        Test assertions should verify expected outcomes, not this helper's return.
+        The purpose is to REDUCE flakiness by waiting for actual readiness when
+        possible, not to DETECT failures. Test assertions should verify expected
+        outcomes, not this helper's return value.
 
     Implementation:
         Uses exponential backoff polling (initial_backoff * backoff_multiplier^n)
@@ -71,8 +70,8 @@ async def wait_for_consumer_ready(
         backoff_multiplier: Multiplier for exponential backoff (default 1.5).
 
     Returns:
-        Always True. This is intentional for backwards compatibility.
-        Do not use return value for failure detection.
+        Always True. Do not use return value for failure detection.
+        Use test assertions to verify expected outcomes.
 
     Example:
         # Best-effort wait for consumer readiness (default max_wait=10.0s)
@@ -112,7 +111,7 @@ async def wait_for_consumer_ready(
         await asyncio.sleep(current_backoff)
         current_backoff = min(current_backoff * backoff_multiplier, max_backoff)
 
-    # Return True for backwards compatibility even on timeout
+    # Return True even on timeout (graceful fallback)
     # Log at debug level for diagnostics
     logger.debug(
         "wait_for_consumer_ready timed out after %.2fs for topic %s",

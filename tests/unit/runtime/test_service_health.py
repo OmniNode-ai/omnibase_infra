@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S104
+# S104 disabled: Tests verify 0.0.0.0 binding for container networking
 """Unit tests for the ONEX runtime health service.
 
 Tests the HTTP health service including:
@@ -367,7 +369,7 @@ class TestServiceHealthConstants:
     def test_default_host(self) -> None:
         """Test default HTTP host value (0.0.0.0 required for container networking)."""
         # S104: Binding to all interfaces is intentional for Docker/K8s health checks
-        assert DEFAULT_HTTP_HOST == "0.0.0.0"  # noqa: S104
+        assert DEFAULT_HTTP_HOST == "0.0.0.0"
 
 
 @pytest.mark.unit

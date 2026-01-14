@@ -112,7 +112,7 @@ class ModelDispatchError(BaseModel):
         - None for error_code (unavoidable for enum type safety)
         - Empty dict for error_details means "no additional details"
 
-    Backwards Compatibility:
+    Null Coercion:
         Constructors accept ``None`` for string fields and convert to sentinel.
 
     Attributes:
@@ -158,7 +158,7 @@ class ModelDispatchError(BaseModel):
     @field_validator("error_message", mode="before")
     @classmethod
     def _convert_none_to_str_sentinel(cls, v: object) -> str:
-        """Convert None to empty string sentinel for backwards compatibility."""
+        """Convert None to empty string sentinel for null coercion."""
         if v is None:
             return _SENTINEL_STR
         if isinstance(v, str):

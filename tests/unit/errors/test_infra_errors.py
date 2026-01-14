@@ -1,3 +1,5 @@
+# ruff: noqa: S106
+# S106 disabled: Hardcoded passwords are intentional test fixtures for security sanitization testing
 """
 Comprehensive tests for infrastructure error classes.
 
@@ -223,7 +225,7 @@ class TestSecretResolutionError:
         error = SecretResolutionError(
             "Secret not found",
             context=context,
-            secret_key="db_password",  # noqa: S106
+            secret_key="db_password",
         )
         assert error.model.context["target_name"] == "vault"
         assert error.model.context["operation"] == "get_secret"
@@ -1258,7 +1260,7 @@ class TestErrorContextSecretSanitization:
         # Demonstrate what NOT to do - this simulates a code review violation
         bad_error = RuntimeHostError(
             "Authentication failed",
-            password="secret123",  # noqa: S106 - intentional for test
+            password="secret123",
         )
 
         # Verify our detection logic works
@@ -1512,7 +1514,7 @@ class TestErrorContextSecretSanitization:
         with pytest.raises(ValidationError) as exc_info:
             ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
-                password="should_not_be_allowed",  # type: ignore[call-arg]  # noqa: S106
+                password="should_not_be_allowed",  # type: ignore[call-arg]
             )
 
         # Verify the error mentions the unexpected field

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S108
+# S108 disabled: /tmp paths are intentional - tests verify COMPUTE layer rejects file I/O
 """ONEX Architecture Compliance Tests for Compute Plugins.
 
 Tests verify that compute plugins adhere to ONEX 4-node architecture principles:
@@ -80,7 +82,7 @@ class TestOnexArchitectureCompliance:
                 self, input_data: ModelPluginInputData, context: ModelPluginContext
             ) -> ModelPluginOutputData:
                 # ARCHITECTURAL VIOLATION: File I/O in COMPUTE layer
-                with open("/tmp/data.txt", encoding="utf-8") as f:  # noqa: S108 - Intentional violation for testing
+                with open("/tmp/data.txt", encoding="utf-8") as f:
                     return ModelPluginOutputData.model_validate({"data": f.read()})
 
         plugin = FileIOViolator()

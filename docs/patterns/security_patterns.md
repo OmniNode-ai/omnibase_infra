@@ -566,6 +566,7 @@ class AuthorizationContext(BaseModel):
     roles: frozenset[EnumRole]
     resource_id: str
     action: EnumPermission
+    correlation_id: UUID | None = None
 
     def is_authorized(self) -> bool:
         """Check if action is authorized for user's roles."""

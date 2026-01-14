@@ -798,10 +798,8 @@ async def ensure_test_topic_exists(
         await admin_client.start()
 
         # Step 2: Describe the specific topic (validates existence and configuration)
-        # NOTE: describe_topics() return type varies by aiokafka version:
-        # - Some versions return List[TopicMetadata] (list indexed by position)
-        # - Some versions return Dict[str, TopicMetadata] (dict keyed by topic name)
-        # We handle both formats for compatibility.
+        # NOTE: aiokafka.describe_topics() returns Dict[str, TopicDescription] keyed by
+        # topic name. If the API changes, this code will fail fast with a clear error.
         logger.debug("Describing topic '%s'", TEST_INTROSPECTION_TOPIC)
         topic_descriptions = await admin_client.describe_topics(
             [TEST_INTROSPECTION_TOPIC]
@@ -1277,7 +1275,7 @@ class TestFullOrchestratorFlow:
         # Allow time for pipeline to process and reject the malformed message.
         # This ensures the pipeline is ready for the next valid message.
         #
-        # TODO(OMN-XXX): Replace with deterministic wait once pipeline exposes
+        # TODO(OMN-1327): Replace with deterministic wait once pipeline exposes
         # a "message processed" signal or callback. Options:
         # 1. Pipeline.wait_until_idle() method that tracks in-flight messages
         # 2. Counter-based approach: wait until processed_count increments

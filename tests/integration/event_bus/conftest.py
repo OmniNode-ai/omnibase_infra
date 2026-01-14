@@ -24,9 +24,6 @@ import pytest
 # Module-level logger for test cleanup diagnostics
 logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-
 # =============================================================================
 # Module-Level Markers
 # =============================================================================
@@ -48,7 +45,7 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:2
 # =============================================================================
 # Consumer Readiness Helper (shared implementation)
 # =============================================================================
-# Re-exported from tests.helpers.kafka_utils for backwards compatibility.
+# Re-exported from tests.helpers.kafka_utils for convenience.
 # See tests/helpers/kafka_utils.py for the canonical implementation.
 from tests.helpers.kafka_utils import wait_for_consumer_ready
 

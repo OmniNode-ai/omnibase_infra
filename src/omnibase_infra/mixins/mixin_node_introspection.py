@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: G201
+# G201 disabled: Logging extra dict is intentional for structured logging with correlation IDs
 """Node introspection mixin providing automatic capability discovery.
 
 This module provides a reusable mixin for ONEX nodes to implement automatic
@@ -1495,7 +1497,7 @@ class MixinNodeIntrospection:
             except Exception as e:
                 # Use error() with exc_info=True instead of exception() to include
                 # structured error_type and error_message fields for log aggregation
-                logger.error(  # noqa: G201
+                logger.error(
                     f"Failed to publish introspection for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
@@ -1609,7 +1611,7 @@ class MixinNodeIntrospection:
         except Exception as e:
             # Use error() with exc_info=True instead of exception() to include
             # structured error_type and error_message fields for log aggregation
-            logger.error(  # noqa: G201
+            logger.error(
                 f"Failed to publish heartbeat for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
@@ -1653,7 +1655,7 @@ class MixinNodeIntrospection:
             except Exception as e:
                 # Use error() with exc_info=True instead of exception() to include
                 # structured error_type and error_message fields for log aggregation
-                logger.error(  # noqa: G201
+                logger.error(
                     f"Error in heartbeat loop for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,

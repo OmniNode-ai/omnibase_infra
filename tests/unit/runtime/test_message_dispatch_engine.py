@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: N803
+# N803 disabled: Uppercase parameter names are intentional for testing case sensitivity
 """
 Comprehensive tests for MessageDispatchEngine.
 
@@ -3496,7 +3498,7 @@ class TestContextAwareDispatch:
         # Dispatcher with CONTEXT in uppercase
         def dispatcher_with_uppercase_context(
             envelope: ModelEventEnvelope[object],
-            DISPATCH_CONTEXT: object,  # noqa: N803 - intentional uppercase for test
+            DISPATCH_CONTEXT: object,
         ) -> str:
             return "output"
 

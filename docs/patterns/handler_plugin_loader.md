@@ -623,13 +623,13 @@ loader = HandlerPluginLoader(
 )
 ```
 
-##### Legacy Wrapper Pattern (for custom validation)
+##### External Policy Service Integration (Advanced)
 
-For environments requiring additional validation beyond namespace prefixes, you can wrap the loader:
+For environments requiring external policy service validation (e.g., OPA, custom approval service), you can wrap the loader. Note that for simple namespace validation, use the built-in `allowed_namespaces` parameter instead (see above).
 
 ```python
 from pathlib import Path
-from typing import Final
+from typing import Protocol
 from uuid import UUID
 
 import yaml
@@ -637,26 +637,46 @@ import yaml
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 from omnibase_infra.models.runtime import ModelLoadedHandler
 
-# Define trusted namespace prefixes
-ALLOWED_MODULE_PREFIXES: Final[tuple[str, ...]] = (
-    "omnibase_infra.handlers.",     # First-party handlers
-    "myapp.handlers.",              # Application handlers
-    "approved_plugins.",            # Vetted third-party
-)
+
+class PolicyServiceClient(Protocol):
+    """Protocol for external policy service integration."""
+
+    async def check_handler_approval(
+        self,
+        handler_class: str,
+        contract_path: str,
+        correlation_id: UUID,
+    ) -> "ApprovalResult":
+        """Check if handler is approved for loading."""
+        ...
+
+
+class ApprovalResult(Protocol):
+    """Result from policy service approval check."""
+
+    approved: bool
+    reason: str
 
 
 from omnibase_infra.errors import ProtocolConfigurationError, ModelInfraErrorContext
-from omnibase_infra.enums import EnumInfraTransportType, EnumHandlerLoaderError
+from omnibase_infra.enums import EnumInfraTransportType
 
 
-class SecurityValidationError(ProtocolConfigurationError):
-    """Raised when security validation fails.
+class PolicyServiceValidationError(ProtocolConfigurationError):
+    """Raised when external policy service rejects handler loading.
 
     Extends ProtocolConfigurationError to integrate with ONEX error handling.
+    Use this for custom validation that goes beyond namespace prefix matching.
+
+    NOTE: For namespace validation, prefer the built-in `allowed_namespaces`
+    parameter which uses EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED
+    (HANDLER_LOADER_013). This custom error is for additional validation
+    scenarios like external policy service integration.
 
     Error Codes:
-        SECURITY_NAMESPACE_VIOLATION (SECURITY_001): Handler module not in allowed namespaces
-        SECURITY_POLICY_VIOLATION (SECURITY_002): External policy service rejected handler
+        POLICY_SERVICE_001: External policy service rejected handler
+        POLICY_SERVICE_002: Policy service unavailable
+        POLICY_SERVICE_003: Handler hash not in approved list
     """
 
     def __init__(
@@ -666,11 +686,11 @@ class SecurityValidationError(ProtocolConfigurationError):
         context: ModelInfraErrorContext | None = None,
         **kwargs: object,
     ) -> None:
-        """Initialize SecurityValidationError with required error code.
+        """Initialize PolicyServiceValidationError with required error code.
 
         Args:
             message: Human-readable error message
-            error_code: Error code for categorization (e.g., "SECURITY_001")
+            error_code: Error code for categorization (e.g., "POLICY_SERVICE_001")
             context: Optional infrastructure error context
             **kwargs: Additional context fields
         """
@@ -678,64 +698,75 @@ class SecurityValidationError(ProtocolConfigurationError):
         self.error_code = error_code
 
 
-def secure_load_from_contract(
+async def load_with_policy_service_validation(
     loader: HandlerPluginLoader,
     path: Path,
+    policy_service: PolicyServiceClient,
     correlation_id: UUID | None = None,
 ) -> ModelLoadedHandler:
-    """Load handler with additional custom validation.
+    """Load handler with external policy service validation.
 
-    This wrapper pattern is useful when you need validation logic beyond
-    simple namespace prefix matching. For most use cases, the built-in
-    `allowed_namespaces` parameter is simpler and equally secure.
-
-    Both approaches validate BEFORE any import occurs:
-    - Built-in `allowed_namespaces`: validates inside `load_from_contract()`
-    - This wrapper: validates at the caller level before calling the loader
+    This wrapper pattern is for advanced scenarios requiring external
+    policy service integration. For simple namespace validation, use
+    the built-in `allowed_namespaces` parameter instead.
 
     Use this wrapper when you need:
-    - Custom validation rules beyond namespace prefixes
-    - Integration with external policy services
-    - Additional audit logging before loading
+    - External policy service approval (e.g., OPA, custom approval service)
+    - Handler code hash verification against approved list
+    - Audit logging to external compliance system
+
+    NOTE: For namespace-based validation, prefer:
+        loader = HandlerPluginLoader(
+            allowed_namespaces=["omnibase_infra.", "myapp.handlers."]
+        )
+    This uses the built-in HANDLER_LOADER_013 (NAMESPACE_NOT_ALLOWED) error.
 
     Args:
-        loader: The handler plugin loader
+        loader: The handler plugin loader (should have allowed_namespaces set)
         path: Path to contract file
+        policy_service: External policy service client
         correlation_id: Optional correlation ID for tracing
 
     Returns:
-        Loaded handler if path passes validation
+        Loaded handler if policy service approves
 
     Raises:
-        SecurityValidationError: If module path is not in allowlist (SECURITY_001)
+        PolicyServiceValidationError: If policy service rejects handler
     """
     from uuid import uuid4
+    import hashlib
 
-    # Pre-validate module path before loader processes it
+    corr_id = correlation_id or uuid4()
+
+    # Read contract to get handler class path
     with open(path) as f:
         contract_data = yaml.safe_load(f)
 
     handler_class = contract_data.get("handler_class", "")
 
-    # Check against allowlist
-    if not any(handler_class.startswith(prefix) for prefix in ALLOWED_MODULE_PREFIXES):
+    # Consult external policy service for approval
+    approval_result = await policy_service.check_handler_approval(
+        handler_class=handler_class,
+        contract_path=str(path),
+        correlation_id=corr_id,
+    )
+
+    if not approval_result.approved:
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.RUNTIME,
-            operation="validate_handler_namespace",
-            correlation_id=correlation_id or uuid4(),
+            operation="policy_service_validation",
+            correlation_id=corr_id,
         )
-        raise SecurityValidationError(
-            f"Handler module path not in allowlist. "
-            f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}",
-            error_code="SECURITY_001",
+        raise PolicyServiceValidationError(
+            f"Policy service rejected handler: {approval_result.reason}",
+            error_code="POLICY_SERVICE_001",
             context=context,
-            handler_class=handler_class,  # Safe to include - just the class path
+            handler_class=handler_class,
         )
 
-    # Additional custom validation can go here
-
-    # Path validated, proceed with loading
-    return loader.load_from_contract(path, correlation_id)
+    # Policy service approved, proceed with loading
+    # The loader's built-in allowed_namespaces will also validate
+    return loader.load_from_contract(path, corr_id)
 ```
 
 ##### Import Hook Monitoring
