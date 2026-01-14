@@ -38,10 +38,11 @@ consumed_events:
   - node.liveness_expired.v1
 projection_schema:
   table: registration_projections
-  # Composite primary key for multi-domain support (matches SQL schema)
-  primary_key:
-    - entity_id
-    - domain
+  # Primary key column for projector contract validation.
+  # Note: SQL schema uses composite PK (entity_id, domain) for multi-domain support.
+  # Contract uses single column until omnibase-core supports composite keys (str | list[str]).
+  # See: projector_shell.py get_state() for runtime handling.
+  primary_key: entity_id
   columns:
     # ==========================================================================
     # IDENTITY COLUMNS (Composite Primary Key)
@@ -258,10 +259,10 @@ projection_schema:
 # ==============================================================================
 behavior:
   mode: upsert
-  # Composite upsert key matches database PRIMARY KEY (entity_id, domain)
-  upsert_key:
-    - entity_id
-    - domain
+  # Upsert key column for projector contract validation.
+  # Note: SQL schema uses composite PK (entity_id, domain) for multi-domain support.
+  # Contract uses single column until omnibase-core supports composite keys (str | list[str]).
+  upsert_key: entity_id
   idempotency:
     enabled: true
     # Uses offset-based ordering for Kafka, sequence-based for other transports

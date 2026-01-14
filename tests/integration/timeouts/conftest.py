@@ -241,7 +241,11 @@ class InMemoryProjectionStore:
             if existing is not None:
                 # Check for stale update
                 existing_offset = existing.last_applied_offset
-                incoming_offset = sequence_info.offset or sequence_info.sequence
+                incoming_offset = (
+                    sequence_info.sequence
+                    if sequence_info.offset is None
+                    else sequence_info.offset
+                )
                 if incoming_offset <= existing_offset:
                     return False
 

@@ -791,7 +791,7 @@ def validate_any_types_in_file(filepath: Path) -> list[ModelAnyTypeViolation]:
             ModelAnyTypeViolation(
                 file_path=filepath,
                 line_number=e.lineno or 1,
-                column=e.offset or 0,
+                column=0 if e.offset is None else e.offset,
                 violation_type=EnumAnyTypeViolation.SYNTAX_ERROR,
                 code_snippet=f"Syntax error: {e.msg}",
                 suggestion=EnumAnyTypeViolation.SYNTAX_ERROR.suggestion,

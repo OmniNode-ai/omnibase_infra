@@ -32,7 +32,6 @@ Usage:
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -47,7 +46,6 @@ from omnibase_core.models.projectors import ModelProjectorContract
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection import (
-    ModelCapabilityFields,
     ModelRegistrationProjection,
     ModelSequenceInfo,
 )
@@ -205,23 +203,6 @@ def contract() -> ModelProjectorContract:
         data["behavior"]["upsert_key"] = upsert_list[0] if upsert_list else None
 
     return ModelProjectorContract.model_validate(data)
-
-
-@pytest.fixture
-def declarative_projector(
-    contract: ModelProjectorContract,
-    pg_pool: asyncpg.Pool,
-) -> ProjectorShell:
-    """Create declarative ProjectorShell instance.
-
-    Args:
-        contract: Loaded projector contract.
-        pg_pool: asyncpg connection pool from conftest.
-
-    Returns:
-        Declarative projector shell instance.
-    """
-    return ProjectorShell(contract=contract, pool=pg_pool)
 
 
 @pytest.fixture
@@ -416,7 +397,7 @@ class TestPersistOutputMatchesLegacy:
         self,
         pg_pool: asyncpg.Pool,
         legacy_projector: ProjectorRegistration,
-        declarative_projector: ProjectorShell,
+        projector: ProjectorShell,
         sample_projection: ModelRegistrationProjection,
         sample_sequence_info: ModelSequenceInfo,
     ) -> None:
@@ -513,7 +494,7 @@ class TestGetStateMatchesLegacy:
         self,
         pg_pool: asyncpg.Pool,
         legacy_projector: ProjectorRegistration,
-        declarative_projector: ProjectorShell,
+        projector: ProjectorShell,
         sample_projection: ModelRegistrationProjection,
         sample_sequence_info: ModelSequenceInfo,
     ) -> None:
@@ -535,7 +516,7 @@ class TestGetStateMatchesLegacy:
         )
 
         # Get state with declarative
-        state = await declarative_projector.get_state(
+        state = await projector.get_state(
             aggregate_id=sample_projection.entity_id,
             correlation_id=correlation_id,
         )
@@ -549,7 +530,7 @@ class TestGetStateMatchesLegacy:
 
     async def test_get_state_none_for_missing(
         self,
-        declarative_projector: ProjectorShell,
+        projector: ProjectorShell,
     ) -> None:
         """get_state() returns None for non-existent entity.
 
@@ -560,7 +541,7 @@ class TestGetStateMatchesLegacy:
         correlation_id = uuid4()
         non_existent_id = uuid4()
 
-        state = await declarative_projector.get_state(
+        state = await projector.get_state(
             aggregate_id=non_existent_id,
             correlation_id=correlation_id,
         )
@@ -576,7 +557,7 @@ class TestUpdateHeartbeatMatchesLegacy:
         self,
         pg_pool: asyncpg.Pool,
         legacy_projector: ProjectorRegistration,
-        declarative_projector: ProjectorShell,
+        projector: ProjectorShell,
         sample_projection: ModelRegistrationProjection,
         sample_sequence_info: ModelSequenceInfo,
     ) -> None:
@@ -658,7 +639,7 @@ class TestUpdateHeartbeatMatchesLegacy:
     async def test_update_heartbeat_entity_not_found(
         self,
         legacy_projector: ProjectorRegistration,
-        declarative_projector: ProjectorShell,
+        projector: ProjectorShell,
     ) -> None:
         """update_heartbeat() returns False when entity not found.
 
@@ -682,7 +663,7 @@ class TestUpdateHeartbeatMatchesLegacy:
         assert legacy_result is False
 
         # Declarative behavior (using partial_update)
-        declarative_result = await declarative_projector.partial_update(
+        declarative_result = await projector.partial_update(
             aggregate_id=non_existent_id,
             updates={
                 "last_heartbeat_at": now,
@@ -703,7 +684,7 @@ class TestUpdateAckTimeoutMarkerMatchesLegacy:
         self,
         pg_pool: asyncpg.Pool,
         legacy_projector: ProjectorRegistration,
-        declarative_projector: ProjectorShell,
+        projector: ProjectorShell,
         sample_projection: ModelRegistrationProjection,
         sample_sequence_info: ModelSequenceInfo,
     ) -> None:
@@ -1114,7 +1095,7 @@ class TestPartialUpdateParity:
         self,
         pg_pool: asyncpg.Pool,
         legacy_projector: ProjectorRegistration,
-        declarative_projector: ProjectorShell,
+        projector: ProjectorShell,
         sample_projection: ModelRegistrationProjection,
         sample_sequence_info: ModelSequenceInfo,
     ) -> None:
@@ -1165,7 +1146,7 @@ class TestPartialUpdateParity:
         )
 
         # Update entity_2 with DECLARATIVE
-        await declarative_projector.partial_update(
+        await projector.partial_update(
             aggregate_id=entity_id_2,
             updates={
                 "last_heartbeat_at": new_heartbeat_at,
@@ -1190,7 +1171,7 @@ class TestPartialUpdateParity:
         self,
         pg_pool: asyncpg.Pool,
         legacy_projector: ProjectorRegistration,
-        declarative_projector: ProjectorShell,
+        projector: ProjectorShell,
         sample_projection: ModelRegistrationProjection,
         sample_sequence_info: ModelSequenceInfo,
     ) -> None:
@@ -1239,7 +1220,7 @@ class TestPartialUpdateParity:
         )
 
         # Update entity_2 with DECLARATIVE
-        await declarative_projector.partial_update(
+        await projector.partial_update(
             aggregate_id=entity_id_2,
             updates={
                 "ack_timeout_emitted_at": emitted_at,

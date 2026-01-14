@@ -197,8 +197,6 @@ async def seed_projection(
         projector: ProjectorShell instance for persistence.
         projection: Projection to seed.
     """
-    from uuid import uuid4
-
     # Convert projection to values dict for upsert_partial
     values: dict[str, object] = {
         "entity_id": projection.entity_id,

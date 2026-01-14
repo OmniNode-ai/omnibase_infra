@@ -151,7 +151,9 @@ async def persist_projection_via_shell(
         "liveness_deadline": projection.liveness_deadline,
         "last_heartbeat_at": projection.last_heartbeat_at,
         "last_applied_event_id": projection.last_applied_event_id,
-        "last_applied_offset": projection.last_applied_offset or 1,
+        "last_applied_offset": 1
+        if projection.last_applied_offset is None
+        else projection.last_applied_offset,
         "registered_at": projection.registered_at,
         "updated_at": projection.updated_at,
     }
