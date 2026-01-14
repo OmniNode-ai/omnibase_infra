@@ -119,7 +119,8 @@ def retry_state_initial() -> ModelRetryState:
     """
     return ModelRetryState(
         attempt=0,
-        max_attempts=CONTRACT_MAX_RETRIES,
+        max_attempts=CONTRACT_MAX_RETRIES
+        + 1,  # +1 for initial attempt (handler pattern)
         delay_seconds=CONTRACT_INITIAL_DELAY_SECONDS,
         backoff_multiplier=CONTRACT_EXPONENTIAL_BASE,
     )
@@ -446,7 +447,8 @@ class TestRetryStateProgression:
         contract-defined parameters.
         """
         assert retry_state_initial.attempt == 0
-        assert retry_state_initial.max_attempts == CONTRACT_MAX_RETRIES
+        # max_attempts = max_retries + 1 (for initial attempt)
+        assert retry_state_initial.max_attempts == CONTRACT_MAX_RETRIES + 1
         assert retry_state_initial.delay_seconds == CONTRACT_INITIAL_DELAY_SECONDS
         assert retry_state_initial.backoff_multiplier == CONTRACT_EXPONENTIAL_BASE
         assert retry_state_initial.last_error is None
@@ -547,17 +549,17 @@ class TestRetryStateProgression:
     ) -> None:
         """is_retriable() should return False after max_attempts reached.
 
-        Contract: max_retries=3
-        After 3 attempts (0, 1, 2), is_retriable() should return False.
+        Contract: max_retries=3, max_attempts=4 (including initial attempt)
+        After 4 attempts (0, 1, 2, 3), is_retriable() should return False.
         """
         state = retry_state_initial
 
-        # Execute all 3 attempts
-        for i in range(CONTRACT_MAX_RETRIES):
+        # Execute all 4 attempts (max_retries + 1 for initial attempt)
+        for i in range(CONTRACT_MAX_RETRIES + 1):
             state = state.next_attempt(f"Error {i + 1}")
 
-        # Now at attempt=3, which equals max_attempts
-        assert state.attempt == CONTRACT_MAX_RETRIES
+        # Now at attempt=4, which equals max_attempts
+        assert state.attempt == CONTRACT_MAX_RETRIES + 1
         assert state.is_retriable() is False
 
     def test_last_error_is_updated(self, retry_state_initial: ModelRetryState) -> None:
@@ -596,8 +598,8 @@ class TestRetryStateProgression:
     def test_is_final_attempt(self, retry_state_initial: ModelRetryState) -> None:
         """is_final_attempt() should return True on the last allowed attempt.
 
-        Contract: max_retries=3
-        is_final_attempt() should be True at attempt=2 (0-indexed).
+        Contract: max_retries=3, max_attempts=4 (including initial attempt)
+        is_final_attempt() should be True at attempt=3 (0-indexed).
         """
         state = retry_state_initial
 
@@ -608,8 +610,12 @@ class TestRetryStateProgression:
         state = state.next_attempt("Error 1")
         assert state.is_final_attempt() is False
 
-        # Attempt 2 - THIS IS FINAL (max_attempts - 1)
+        # Attempt 2 - not final (with max_attempts=4)
         state = state.next_attempt("Error 2")
+        assert state.is_final_attempt() is False
+
+        # Attempt 3 - THIS IS FINAL (max_attempts - 1)
+        state = state.next_attempt("Error 3")
         assert state.is_final_attempt() is True
 
     def test_retry_state_is_immutable(
@@ -1021,7 +1027,11 @@ class TestCircuitBreakerRetryIntegration:
         # CB failure SHOULD be recorded for AUTHENTICATION category
         # (record_circuit_failure=True in classification)
         # Note: The original exception is re-raised, but CB is recorded
-        # This may depend on where exactly the exception is caught
+        # Verify CB failure was recorded (check failure count increased)
+        assert handler._circuit_breaker_failures > initial_failures, (
+            f"CB should record authentication failures: "
+            f"initial={initial_failures}, current={handler._circuit_breaker_failures}"
+        )
         await handler.shutdown()
 
 
@@ -1305,6 +1315,180 @@ class TestRetryConfigurationFromInitialize:
         await handler.shutdown()
 
 
+# =============================================================================
+# TestConcurrentWrites
+# =============================================================================
+
+
+class TestConcurrentWrites:
+    """Test concurrent write behavior and idempotency.
+
+    These tests verify that:
+    - Multiple concurrent stores of the same manifest are idempotent
+    - Only one store operation actually creates the manifest
+    - Subsequent stores detect existing manifest and skip creation
+    - No race conditions or data corruption occurs
+
+    Related:
+        - OMN-1163: Manifest persistence handler implementation
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_stores_same_manifest_idempotent(
+        self, temp_storage_path: Path
+    ) -> None:
+        """Verify concurrent stores of same manifest are idempotent.
+
+        When multiple concurrent requests attempt to store the same manifest
+        (identified by manifest_id), only the first should actually create it.
+        Subsequent stores should detect the existing file and return created=False.
+
+        This ensures:
+        - No duplicate manifests are created
+        - No race conditions corrupt data
+        - All concurrent requests complete successfully
+        """
+        handler = await create_initialized_handler(temp_storage_path)
+
+        manifest_id = str(uuid4())
+        manifest = create_test_manifest(manifest_id=manifest_id)
+        envelope = create_store_envelope(manifest)
+
+        # Run 5 concurrent stores of same manifest
+        tasks = [handler.execute(envelope) for _ in range(5)]
+        results = await asyncio.gather(*tasks)
+
+        # All should succeed
+        for result in results:
+            assert result.result["status"] == "success"
+
+        # Only first should create, rest should be idempotent (created=False)
+        created_count = sum(
+            1 for r in results if r.result["payload"].get("created", False)
+        )
+        assert created_count == 1, (
+            f"Only one concurrent store should create manifest, "
+            f"but {created_count} reported created=True"
+        )
+
+        # Verify manifest was written correctly (only one file exists)
+        # Note: Handler stores in date-based structure: {year}/{month}/{day}/{id}.json
+        manifest_files = list(temp_storage_path.glob(f"**/{manifest_id}.json"))
+        assert len(manifest_files) == 1, (
+            f"Expected exactly 1 manifest file, found {len(manifest_files)}"
+        )
+
+        # Verify content is valid
+        with open(manifest_files[0]) as f:
+            stored_manifest = json.load(f)
+        assert stored_manifest["manifest_id"] == manifest_id
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_stores_different_manifests(
+        self, temp_storage_path: Path
+    ) -> None:
+        """Verify concurrent stores of different manifests all succeed.
+
+        When storing multiple different manifests concurrently, all should
+        be created independently without interference.
+        """
+        handler = await create_initialized_handler(temp_storage_path)
+
+        # Create 5 different manifests
+        manifests = [create_test_manifest() for _ in range(5)]
+        envelopes = [create_store_envelope(m) for m in manifests]
+
+        # Run concurrent stores
+        tasks = [handler.execute(env) for env in envelopes]
+        results = await asyncio.gather(*tasks)
+
+        # All should succeed with created=True
+        for result in results:
+            assert result.result["status"] == "success"
+            assert result.result["payload"].get("created", False) is True
+
+        # Verify all manifest files exist
+        # Note: Handler stores in date-based structure: {year}/{month}/{day}/{id}.json
+        manifest_files = list(temp_storage_path.glob("**/*.json"))
+        assert len(manifest_files) == 5, (
+            f"Expected 5 manifest files, found {len(manifest_files)}"
+        )
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_store_and_retrieve(self, temp_storage_path: Path) -> None:
+        """Verify concurrent store and retrieve operations don't conflict.
+
+        A store operation should complete such that subsequent retrieve
+        operations (even concurrent ones) can read the manifest.
+        """
+        handler = await create_initialized_handler(temp_storage_path)
+
+        manifest_id = str(uuid4())
+        manifest = create_test_manifest(manifest_id=manifest_id)
+        store_envelope = create_store_envelope(manifest)
+        retrieve_envelope = create_retrieve_envelope(manifest_id)
+
+        # First, store the manifest
+        store_result = await handler.execute(store_envelope)
+        assert store_result.result["status"] == "success"
+        assert store_result.result["payload"]["created"] is True
+
+        # Now run multiple concurrent retrieves
+        retrieve_tasks = [handler.execute(retrieve_envelope) for _ in range(5)]
+        retrieve_results = await asyncio.gather(*retrieve_tasks)
+
+        # All retrieves should succeed and return same manifest
+        for result in retrieve_results:
+            assert result.result["status"] == "success"
+            retrieved = result.result["payload"]["manifest"]
+            assert retrieved["manifest_id"] == manifest_id
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_stores_high_volume(self, temp_storage_path: Path) -> None:
+        """Stress test with high volume of concurrent operations.
+
+        Verifies system stability under load with many concurrent writes.
+        """
+        handler = await create_initialized_handler(temp_storage_path)
+
+        # Create 20 concurrent store operations for the same manifest
+        manifest_id = str(uuid4())
+        manifest = create_test_manifest(manifest_id=manifest_id)
+        envelope = create_store_envelope(manifest)
+
+        tasks = [handler.execute(envelope) for _ in range(20)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # All should complete (either success or exception, not hang)
+        assert len(results) == 20
+
+        # Filter out any exceptions and count successes
+        successes = [r for r in results if not isinstance(r, Exception)]
+        exceptions = [r for r in results if isinstance(r, Exception)]
+
+        # At least one should succeed
+        assert len(successes) >= 1, (
+            f"Expected at least 1 success, got {len(successes)} successes "
+            f"and {len(exceptions)} exceptions"
+        )
+
+        # Exactly one should report created=True
+        created_count = sum(
+            1 for r in successes if r.result["payload"].get("created", False)
+        )
+        assert created_count == 1, (
+            f"Expected exactly 1 created=True, got {created_count}"
+        )
+
+        await handler.shutdown()
+
+
 __all__: list[str] = [
     "TestErrorClassification",
     "TestRetryStateProgression",
@@ -1313,4 +1497,5 @@ __all__: list[str] = [
     "TestRetryTiming",
     "TestExecuteWithRetryDirect",
     "TestRetryConfigurationFromInitialize",
+    "TestConcurrentWrites",
 ]

@@ -214,7 +214,7 @@ class HandlerManifestPersistence(
         self._initialized: bool = False
 
         # Retry configuration (populated from contract in initialize())
-        self._retry_config: dict[str, float | int] = {
+        self._retry_config: dict[str, float] = {
             "max_retries": 3,
             "initial_delay_seconds": 0.1,  # 100ms
             "max_delay_seconds": 5.0,  # 5000ms
@@ -450,6 +450,22 @@ class HandlerManifestPersistence(
 
         self._storage_path = storage_path
 
+        # Verify storage path is writable (fail fast on permission issues)
+        test_file = self._storage_path / ".write_test"
+        try:
+            test_file.touch()
+            test_file.unlink()
+        except (PermissionError, OSError) as e:
+            raise ProtocolConfigurationError(
+                f"Storage path is not writable: {self._storage_path}",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.FILESYSTEM,
+                    operation="initialize",
+                    target_name="manifest_persistence_handler",
+                    correlation_id=init_correlation_id,
+                ),
+            ) from e
+
         # Extract optional max_file_size
         max_file_size_raw = config.get("max_file_size")
         if max_file_size_raw is not None:
@@ -484,17 +500,17 @@ class HandlerManifestPersistence(
 
             # initial_delay_ms -> convert to seconds (default: 100ms = 0.1s)
             initial_delay_ms = retry_policy.get("initial_delay_ms")
-            if isinstance(initial_delay_ms, int | float) and initial_delay_ms > 0:
+            if isinstance(initial_delay_ms, (int, float)) and initial_delay_ms > 0:
                 self._retry_config["initial_delay_seconds"] = initial_delay_ms / 1000.0
 
             # max_delay_ms -> convert to seconds (default: 5000ms = 5.0s)
             max_delay_ms = retry_policy.get("max_delay_ms")
-            if isinstance(max_delay_ms, int | float) and max_delay_ms > 0:
+            if isinstance(max_delay_ms, (int, float)) and max_delay_ms > 0:
                 self._retry_config["max_delay_seconds"] = max_delay_ms / 1000.0
 
             # exponential_base (default: 2.0)
             exponential_base = retry_policy.get("exponential_base")
-            if isinstance(exponential_base, int | float) and exponential_base >= 1.0:
+            if isinstance(exponential_base, (int, float)) and exponential_base >= 1.0:
                 self._retry_config["exponential_base"] = float(exponential_base)
 
             logger.debug(
@@ -1329,11 +1345,11 @@ class HandlerManifestPersistence(
                 - storage_path: Storage directory path (when initialized)
                 - initialized: Whether the handler is initialized
                 - version: Handler version string
-                - circuit_breaker: Circuit breaker state (when initialized)
-                    - open: Whether circuit is currently open
+                - circuit_breaker: Circuit breaker state for observability
+                    - initialized: Whether circuit breaker is initialized
+                    - state: Current state ("open" or "closed")
                     - failures: Current failure count
                     - threshold: Configured failure threshold
-                    - reset_timeout_seconds: Configured reset timeout
         """
         result: dict[str, object] = {
             "handler_type": self.handler_type.value,
@@ -1342,17 +1358,15 @@ class HandlerManifestPersistence(
             "storage_path": str(self._storage_path) if self._storage_path else None,
             "initialized": self._initialized,
             "version": "0.1.0",
+            "circuit_breaker": {
+                "initialized": self._circuit_breaker_initialized,
+                "state": "open"
+                if getattr(self, "_circuit_breaker_open", False)
+                else "closed",
+                "failures": getattr(self, "_circuit_breaker_failures", 0),
+                "threshold": getattr(self, "circuit_breaker_threshold", 5),
+            },
         }
-
-        # Include circuit breaker state only when handler is initialized
-        # (CB is set up during initialize() call)
-        if self._initialized:
-            result["circuit_breaker"] = {
-                "open": self._circuit_breaker_open,
-                "failures": self._circuit_breaker_failures,
-                "threshold": self.circuit_breaker_threshold,
-                "reset_timeout_seconds": self.circuit_breaker_reset_timeout,
-            }
 
         return result
 

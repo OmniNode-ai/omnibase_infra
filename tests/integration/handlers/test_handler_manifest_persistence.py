@@ -771,14 +771,17 @@ class TestHandlerLifecycle:
         """
         description = handler.describe()
 
-        # Circuit breaker info should be present when initialized
+        # Circuit breaker info should be present
         assert "circuit_breaker" in description
         cb_state = description["circuit_breaker"]
         assert isinstance(cb_state, dict)
 
         # Validate circuit breaker state fields
-        assert "open" in cb_state
-        assert cb_state["open"] is False  # Should be closed initially
+        assert "initialized" in cb_state
+        assert cb_state["initialized"] is True  # Should be initialized
+
+        assert "state" in cb_state
+        assert cb_state["state"] == "closed"  # Should be closed initially
 
         assert "failures" in cb_state
         assert cb_state["failures"] == 0  # No failures yet
@@ -786,23 +789,25 @@ class TestHandlerLifecycle:
         assert "threshold" in cb_state
         assert cb_state["threshold"] == 5  # Default threshold
 
-        assert "reset_timeout_seconds" in cb_state
-        assert cb_state["reset_timeout_seconds"] == 60.0  # Default timeout
-
     @pytest.mark.asyncio
-    async def test_describe_excludes_circuit_breaker_when_not_initialized(
+    async def test_describe_circuit_breaker_not_initialized_before_initialize(
         self, temp_storage_path: Path
     ) -> None:
-        """describe() excludes circuit breaker state when handler not initialized.
+        """describe() shows circuit breaker not initialized before initialize().
 
         Circuit breaker is only set up during initialize(), so describe()
-        should not include it when called before initialization.
+        should show initialized=False when called before initialization.
         """
         handler = HandlerManifestPersistence()
         description = handler.describe()
 
-        # Circuit breaker should not be present before initialization
-        assert "circuit_breaker" not in description
+        # Circuit breaker info should be present but show not initialized
+        assert "circuit_breaker" in description
+        cb_state = description["circuit_breaker"]
+        assert cb_state["initialized"] is False
+        assert cb_state["state"] == "closed"  # Default state
+        assert cb_state["failures"] == 0  # Default failures
+        assert cb_state["threshold"] == 5  # Default threshold
         assert description["initialized"] is False
 
     @pytest.mark.asyncio
