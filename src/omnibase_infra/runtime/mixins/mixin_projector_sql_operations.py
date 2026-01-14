@@ -115,6 +115,7 @@ class MixinProjectorSqlOperations:
         self,
         values: dict[str, object],
         correlation_id: UUID,
+        event_type: str | None = None,
     ) -> int:
         """Execute upsert (INSERT ON CONFLICT DO UPDATE).
 
@@ -125,6 +126,7 @@ class MixinProjectorSqlOperations:
         Args:
             values: Column name to value mapping.
             correlation_id: Correlation ID for tracing.
+            event_type: The event type being projected (for logging context).
 
         Returns:
             Number of rows affected.
@@ -138,13 +140,7 @@ class MixinProjectorSqlOperations:
         # Build column lists
         columns = list(values.keys())
         if not columns:
-            logger.warning(
-                "No columns to upsert",
-                extra={
-                    "projector_id": self.projector_id,
-                    "correlation_id": str(correlation_id),
-                },
-            )
+            self._log_empty_columns_skip("upsert", event_type, correlation_id)
             return 0
 
         # Build parameterized INSERT ... ON CONFLICT DO UPDATE
@@ -185,12 +181,14 @@ class MixinProjectorSqlOperations:
         self,
         values: dict[str, object],
         correlation_id: UUID,
+        event_type: str | None = None,
     ) -> int:
         """Execute INSERT (fail on conflict).
 
         Args:
             values: Column name to value mapping.
             correlation_id: Correlation ID for tracing.
+            event_type: The event type being projected (for logging context).
 
         Returns:
             Number of rows affected.
@@ -204,13 +202,7 @@ class MixinProjectorSqlOperations:
 
         columns = list(values.keys())
         if not columns:
-            logger.warning(
-                "No columns to insert",
-                extra={
-                    "projector_id": self.projector_id,
-                    "correlation_id": str(correlation_id),
-                },
-            )
+            self._log_empty_columns_skip("insert", event_type, correlation_id)
             return 0
 
         column_list = ", ".join(quote_identifier(col) for col in columns)
@@ -230,6 +222,7 @@ class MixinProjectorSqlOperations:
         self,
         values: dict[str, object],
         correlation_id: UUID,
+        event_type: str | None = None,
     ) -> int:
         """Execute INSERT (always append, event-log style).
 
@@ -239,12 +232,74 @@ class MixinProjectorSqlOperations:
         Args:
             values: Column name to value mapping.
             correlation_id: Correlation ID for tracing.
+            event_type: The event type being projected (for logging context).
 
         Returns:
             Number of rows affected.
         """
         # Implementation is same as insert - semantic difference only
-        return await self._insert(values, correlation_id)
+        return await self._insert(values, correlation_id, event_type)
+
+    def _log_empty_columns_skip(
+        self,
+        operation: str,
+        event_type: str | None,
+        correlation_id: UUID,
+    ) -> None:
+        """Log appropriate message when skipping due to empty columns.
+
+        Differentiates between expected skips (on_event filtering) and
+        unexpected skips (empty value extraction) to help identify
+        configuration errors.
+
+        Args:
+            operation: The SQL operation being attempted (upsert/insert).
+            event_type: The event type being projected.
+            correlation_id: Correlation ID for tracing.
+        """
+        extra = {
+            "projector_id": self.projector_id,
+            "operation": operation,
+            "correlation_id": str(correlation_id),
+        }
+
+        if event_type is None:
+            # No event type context - use warning as we can't determine reason
+            logger.warning(
+                "No columns to %s - missing event type context",
+                operation,
+                extra=extra,
+            )
+            return
+
+        extra["event_type"] = event_type
+        schema = self._contract.projection_schema
+
+        # Count columns that SHOULD have values for this event type
+        # (no on_event filter OR matching on_event filter)
+        expected_columns = [
+            col
+            for col in schema.columns
+            if col.on_event is None or col.on_event == event_type
+        ]
+
+        if not expected_columns:
+            # All columns have on_event filters that don't match this event type
+            # This is expected behavior when using event-specific column filtering
+            logger.info(
+                "Skipping projection for event type '%s' - no columns match on_event filters",
+                event_type,
+                extra=extra,
+            )
+        else:
+            # Columns should have values but all were extracted as empty
+            # This likely indicates a configuration error (wrong source paths)
+            logger.warning(
+                "Skipping projection - all column values extracted as empty. "
+                "Check source paths in contract for event type '%s'",
+                event_type,
+                extra=extra,
+            )
 
     def _parse_row_count(self, result: str) -> int:
         """Parse row count from asyncpg execute result.

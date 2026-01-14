@@ -69,6 +69,49 @@ class ProjectorShell(MixinProjectorSqlOperations):
         - insert_only: INSERT only, fail on conflict
         - append: Always INSERT, event-log style
 
+    UniqueViolationError Handling:
+        The projector handles ``asyncpg.UniqueViolationError`` differently based
+        on the projection mode. Understanding these semantics is critical for
+        correct schema design and error handling.
+
+        **insert_only mode**:
+            A unique violation indicates duplicate event processing (idempotency).
+            This is expected behavior when replaying events or when at-least-once
+            delivery causes duplicates. Returns ``ModelProjectionResult(success=False)``
+            with an error message. The caller can decide whether to log, retry,
+            or ignore based on their requirements.
+
+        **upsert mode**:
+            Unique violations should NEVER occur because the generated SQL uses
+            ``ON CONFLICT ... DO UPDATE``. If a violation is raised, it indicates
+            a schema mismatch (e.g., the ``upsert_key`` in the contract doesn't
+            match the actual unique constraint). Raises ``RuntimeHostError`` to
+            signal a configuration error that needs investigation.
+
+        **append mode**:
+            This mode assumes **event-driven primary keys** where each row is
+            uniquely identified by event-specific data (e.g., ``envelope_id``,
+            ``event_sequence``, or composite keys including timestamp). With this
+            assumption, a unique violation indicates duplicate event processing -
+            the same event was projected twice.
+
+            **IMPORTANT ASSUMPTION**: Append mode primary key design must ensure
+            that each event produces a unique key. Common patterns:
+                - ``envelope_id`` (UUID from event envelope)
+                - ``(aggregate_id, event_sequence)`` composite key
+                - ``(aggregate_id, event_type, timestamp)`` composite key
+
+            If your schema uses **non-event primary keys** (e.g., auto-increment,
+            domain-specific business keys), a ``UniqueViolationError`` in append
+            mode may indicate a **legitimate conflict** rather than a duplicate
+            event. In such cases, you should either:
+                1. Switch to ``upsert`` mode with appropriate conflict resolution
+                2. Redesign the primary key to be event-driven
+                3. Implement custom projection logic outside ProjectorShell
+
+            When a violation occurs in append mode, ``RuntimeHostError`` is raised
+            to fail fast and signal the need for investigation.
+
     Thread Safety:
         This implementation is coroutine-safe for concurrent async calls.
         Uses asyncpg connection pool for connection management.
@@ -224,7 +267,9 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         # Execute projection based on mode
         try:
-            rows_affected = await self._execute_projection(values, correlation_id)
+            rows_affected = await self._execute_projection(
+                values, correlation_id, event_type
+            )
 
             logger.debug(
                 "Projection completed",
@@ -255,16 +300,55 @@ class ProjectorShell(MixinProjectorSqlOperations):
             ) from e
 
         except asyncpg.UniqueViolationError as e:
-            # Only handle UniqueViolationError for insert_only mode
-            # For upsert mode, this should never happen (ON CONFLICT handles it)
-            # For append mode, this indicates an unexpected duplicate
+            # ============================================================
+            # UniqueViolationError Handling by Projection Mode
+            # ============================================================
+            #
+            # Different projection modes have different semantics for unique
+            # constraint violations. See class docstring for full documentation.
+            #
+            # insert_only mode:
+            #   - EXPECTED: Duplicate events (idempotency, at-least-once delivery)
+            #   - BEHAVIOR: Return failure result, let caller decide how to handle
+            #   - RATIONALE: insert_only is designed for idempotent projections
+            #     where duplicates are tolerated but should be reported
+            #
+            # upsert mode:
+            #   - UNEXPECTED: Should NEVER occur (ON CONFLICT handles duplicates)
+            #   - BEHAVIOR: Raise RuntimeHostError
+            #   - RATIONALE: If we get here, the upsert_key in the contract doesn't
+            #     match the actual unique constraint in the database schema
+            #   - ACTION REQUIRED: Verify contract.upsert_key matches DB constraint
+            #
+            # append mode:
+            #   - UNEXPECTED: Assumes event-driven primary keys (envelope_id, etc.)
+            #   - BEHAVIOR: Raise RuntimeHostError
+            #   - RATIONALE: With event-driven PKs, duplicates indicate either:
+            #     (a) Same event processed twice (infrastructure issue), or
+            #     (b) Schema uses non-event PKs (design mismatch)
+            #   - ACTION REQUIRED:
+            #     * If (a): Investigate event delivery/replay logic
+            #     * If (b): Consider switching to upsert mode or redesigning PK
+            #
+            # IMPORTANT ASSUMPTION for append mode:
+            #   The primary key MUST be derived from event data (e.g., envelope_id,
+            #   event_sequence) such that each unique event produces a unique key.
+            #   If using auto-increment or business keys, append mode violations
+            #   may indicate legitimate conflicts, not duplicates.
+            #
+            # ============================================================
+
             if self._contract.behavior.mode == "insert_only":
+                # insert_only: Expected duplicate - report as failure, don't raise
                 logger.warning(
-                    "Unique constraint violation during insert_only projection",
+                    "Unique constraint violation during insert_only projection "
+                    "(likely duplicate event - expected for idempotent processing)",
                     extra={
                         "projector_id": self.projector_id,
                         "event_type": event_type,
                         "correlation_id": str(correlation_id),
+                        "mode": "insert_only",
+                        "hint": "This is expected behavior for at-least-once delivery",
                     },
                 )
                 return ModelProjectionResult(
@@ -273,11 +357,38 @@ class ProjectorShell(MixinProjectorSqlOperations):
                     rows_affected=0,
                     error="Unique constraint violation: duplicate key for insert_only mode",
                 )
-            # Wrap as RuntimeHostError for other modes - unexpected behavior
-            # should not expose raw asyncpg exceptions at runtime boundary
+
+            # upsert/append modes: Unexpected violation - fail fast with error
+            # For upsert: indicates contract.upsert_key doesn't match DB constraint
+            # For append: indicates either duplicate event or non-event-driven PK
+            mode = self._contract.behavior.mode
+            if mode == "upsert":
+                hint = (
+                    "Verify that contract.behavior.upsert_key matches the actual "
+                    "unique constraint in the database schema"
+                )
+            else:  # append mode
+                hint = (
+                    "Append mode assumes event-driven primary keys (e.g., envelope_id). "
+                    "If using non-event PKs, consider switching to upsert mode or "
+                    "redesigning the primary key to be event-derived"
+                )
+
+            logger.exception(
+                "Unexpected unique constraint violation in %s mode",
+                mode,
+                extra={
+                    "projector_id": self.projector_id,
+                    "event_type": event_type,
+                    "correlation_id": str(correlation_id),
+                    "mode": mode,
+                    "hint": hint,
+                },
+            )
+
             raise RuntimeHostError(
-                f"Unexpected unique constraint violation in "
-                f"{self._contract.behavior.mode} mode for projector: {self.projector_id}",
+                f"Unexpected unique constraint violation in {mode} mode "
+                f"for projector: {self.projector_id}. {hint}",
                 context=ctx,
             ) from e
 
@@ -509,6 +620,12 @@ class ProjectorShell(MixinProjectorSqlOperations):
         Iterates through the contract's column definitions and resolves
         each column's source path to extract the value from the event.
 
+        Path Resolution Failures:
+            When path resolution fails (returns None), a WARNING is logged
+            to alert operators of potential contract configuration issues.
+            This is critical for production monitoring as silent None values
+            could indicate typos in contract source paths.
+
         Args:
             event: The event envelope containing the data.
             event_type: The resolved event type for filtering.
@@ -527,9 +644,45 @@ class ProjectorShell(MixinProjectorSqlOperations):
             # Resolve the source path
             value = self._resolve_path(event, column.source)
 
-            # Use default if value is None and default is specified
-            if value is None and column.default is not None:
-                value = column.default
+            # Log warning for path resolution failures
+            if value is None:
+                if column.default is not None:
+                    # Default will be applied - less critical but still noteworthy
+                    logger.warning(
+                        "Path resolution failed for column '%s' with source '%s' on "
+                        "event type '%s'. Using default value '%s'. "
+                        "Check contract source path for typos.",
+                        column.name,
+                        column.source,
+                        event_type,
+                        column.default,
+                        extra={
+                            "projector_id": self.projector_id,
+                            "column_name": column.name,
+                            "source_path": column.source,
+                            "event_type": event_type,
+                            "default_applied": True,
+                            "default_value": column.default,
+                        },
+                    )
+                    value = column.default
+                else:
+                    # No default - value will be None, potentially risky
+                    logger.warning(
+                        "Path resolution failed for column '%s' with source '%s' on "
+                        "event type '%s'. Value will be None. "
+                        "Check contract source path for typos.",
+                        column.name,
+                        column.source,
+                        event_type,
+                        extra={
+                            "projector_id": self.projector_id,
+                            "column_name": column.name,
+                            "source_path": column.source,
+                            "event_type": event_type,
+                            "default_applied": False,
+                        },
+                    )
 
             values[column.name] = value
 
@@ -599,6 +752,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
         self,
         values: dict[str, object],
         correlation_id: UUID,
+        event_type: str,
     ) -> int:
         """Execute the projection based on behavior mode.
 
@@ -608,6 +762,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
         Args:
             values: Column name to value mapping.
             correlation_id: Correlation ID for tracing.
+            event_type: The event type being projected (for logging context).
 
         Returns:
             Number of rows affected.
@@ -618,11 +773,11 @@ class ProjectorShell(MixinProjectorSqlOperations):
         mode = self._contract.behavior.mode
 
         if mode == "upsert":
-            return await self._upsert(values, correlation_id)
+            return await self._upsert(values, correlation_id, event_type)
         elif mode == "insert_only":
-            return await self._insert(values, correlation_id)
+            return await self._insert(values, correlation_id, event_type)
         elif mode == "append":
-            return await self._append(values, correlation_id)
+            return await self._append(values, correlation_id, event_type)
         else:
             # This should never happen due to contract validation
             raise ValueError(f"Unknown projection mode: {mode}")

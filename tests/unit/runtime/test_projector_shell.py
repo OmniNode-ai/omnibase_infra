@@ -705,6 +705,186 @@ class TestProjectorShellValueExtraction:
 
         assert extracted == sample_event_envelope.envelope_timestamp
 
+    @pytest.mark.asyncio
+    async def test_extract_path_not_found_logs_warning_no_default(
+        self,
+        mock_pool: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Path resolution failure logs WARNING when no default is specified.
+
+        Given: Column with source path that doesn't exist in event
+        And: No default value specified
+        When: _extract_values is called
+        Then: WARNING is logged with column name, source path, and event type
+        """
+        import logging
+
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        columns = [
+            ModelProjectorColumn(
+                name="id",
+                type="UUID",
+                source="payload.order_id",
+            ),
+            ModelProjectorColumn(
+                name="missing_field",
+                type="TEXT",
+                source="payload.nonexistent_path",  # This path doesn't exist
+            ),
+        ]
+        schema = ModelProjectorSchema(
+            table="test_projections",
+            primary_key="id",
+            columns=columns,
+        )
+        contract = ModelProjectorContract(
+            projector_kind="materialized_view",
+            projector_id="test-projector",
+            name="Test Projector",
+            version="1.0.0",
+            aggregate_type="Order",
+            consumed_events=["order.created.v1"],
+            projection_schema=schema,
+            behavior=ModelProjectorBehavior(mode="upsert"),
+        )
+
+        order_id = uuid4()
+        payload = OrderCreatedPayload(
+            order_id=order_id,
+            customer_id=uuid4(),
+            status="pending",
+            total_amount=99.99,
+            created_at=datetime.now(tz=UTC),
+        )
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            source="test",
+            source_version=ModelSemVer(major=1, minor=0, patch=0),
+            payload=payload,
+            metadata=ModelEnvelopeMetadata(tags={"event_type": "order.created.v1"}),
+        )
+
+        projector = ProjectorShell(contract=contract, pool=mock_pool)
+
+        with caplog.at_level(
+            logging.WARNING, logger="omnibase_infra.runtime.projector_shell"
+        ):
+            values = projector._extract_values(envelope, "order.created.v1")
+
+        # Value should be None (path resolution failed)
+        assert values["missing_field"] is None
+
+        # WARNING should have been logged
+        assert len([r for r in caplog.records if r.levelno == logging.WARNING]) >= 1
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno == logging.WARNING
+        ]
+        # Check the warning message contains the expected information
+        found_warning = False
+        for msg in warning_messages:
+            if (
+                "missing_field" in msg
+                and "payload.nonexistent_path" in msg
+                and "order.created.v1" in msg
+                and "Value will be None" in msg
+            ):
+                found_warning = True
+                break
+        assert found_warning, f"Expected warning not found. Got: {warning_messages}"
+
+    @pytest.mark.asyncio
+    async def test_extract_path_not_found_logs_warning_with_default(
+        self,
+        mock_pool: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Path resolution failure logs WARNING when default is applied.
+
+        Given: Column with source path that doesn't exist in event
+        And: Default value is specified
+        When: _extract_values is called
+        Then: WARNING is logged mentioning the default value being applied
+        """
+        import logging
+
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        columns = [
+            ModelProjectorColumn(
+                name="id",
+                type="UUID",
+                source="payload.order_id",
+            ),
+            ModelProjectorColumn(
+                name="optional_field",
+                type="TEXT",
+                source="payload.nonexistent_path",  # This path doesn't exist
+                default="fallback_value",  # Default will be applied
+            ),
+        ]
+        schema = ModelProjectorSchema(
+            table="test_projections",
+            primary_key="id",
+            columns=columns,
+        )
+        contract = ModelProjectorContract(
+            projector_kind="materialized_view",
+            projector_id="test-projector",
+            name="Test Projector",
+            version="1.0.0",
+            aggregate_type="Order",
+            consumed_events=["order.created.v1"],
+            projection_schema=schema,
+            behavior=ModelProjectorBehavior(mode="upsert"),
+        )
+
+        order_id = uuid4()
+        payload = OrderCreatedPayload(
+            order_id=order_id,
+            customer_id=uuid4(),
+            status="pending",
+            total_amount=99.99,
+            created_at=datetime.now(tz=UTC),
+        )
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            source="test",
+            source_version=ModelSemVer(major=1, minor=0, patch=0),
+            payload=payload,
+            metadata=ModelEnvelopeMetadata(tags={"event_type": "order.created.v1"}),
+        )
+
+        projector = ProjectorShell(contract=contract, pool=mock_pool)
+
+        with caplog.at_level(
+            logging.WARNING, logger="omnibase_infra.runtime.projector_shell"
+        ):
+            values = projector._extract_values(envelope, "order.created.v1")
+
+        # Default value should have been applied
+        assert values["optional_field"] == "fallback_value"
+
+        # WARNING should have been logged
+        assert len([r for r in caplog.records if r.levelno == logging.WARNING]) >= 1
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno == logging.WARNING
+        ]
+        # Check the warning message mentions the default being used
+        found_warning = False
+        for msg in warning_messages:
+            if (
+                "optional_field" in msg
+                and "payload.nonexistent_path" in msg
+                and "order.created.v1" in msg
+                and "Using default value" in msg
+                and "fallback_value" in msg
+            ):
+                found_warning = True
+                break
+        assert found_warning, f"Expected warning not found. Got: {warning_messages}"
+
 
 # =============================================================================
 # Projection Mode Tests (mock database)
