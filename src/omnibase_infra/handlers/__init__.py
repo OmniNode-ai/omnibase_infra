@@ -16,6 +16,7 @@ Available Handlers:
 - HandlerConsul: HashiCorp Consul service discovery handler (MVP: KV, service registration)
 - HandlerMCP: Model Context Protocol handler for AI agent tool integration
 - HandlerFileSystem: Filesystem handler with path whitelisting and size limits
+- HandlerManifestPersistence: Execution manifest persistence with filesystem storage
 
 Response Models:
 - ModelDbQueryPayload: Database query result payload
@@ -29,6 +30,9 @@ from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
 from omnibase_infra.handlers.handler_http import HttpRestHandler
+from omnibase_infra.handlers.handler_manifest_persistence import (
+    HandlerManifestPersistence,
+)
 from omnibase_infra.handlers.handler_mcp import HandlerMCP
 from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.handlers.models import (
@@ -43,6 +47,7 @@ __all__: list[str] = [
     "HandlerConsul",
     "HandlerDb",
     "HandlerFileSystem",
+    "HandlerManifestPersistence",
     "HandlerMCP",
     "HandlerVault",
     "HttpRestHandler",
