@@ -2,8 +2,12 @@
 # Copyright (c) 2025 OmniNode Team
 """Integration tests for registration projection using testcontainers.
 
-These tests verify the ProjectorRegistration and ProjectionReaderRegistration
-against a real PostgreSQL database using testcontainers. They test:
+These tests verify the legacy ProjectorRegistration and ProjectionReaderRegistration
+against a real PostgreSQL database using testcontainers. The tests use the
+legacy_projector fixture which provides ProjectorRegistration for persist() operations.
+Future migration to ProjectorShell will use event-based projections.
+
+They test:
 
 1. Schema initialization from SQL file
 2. Projection persistence with database verification
@@ -41,10 +45,12 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 if TYPE_CHECKING:
     import asyncpg
 
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import ProjectorShell
+
+    # Legacy type alias - ProjectorRegistration has been superseded by ProjectorShell
+    # Tests using this type require the legacy_projector fixture
+    ProjectorRegistration = object  # type: ignore[misc]
 
 # Test markers
 pytestmark = [
@@ -196,11 +202,11 @@ class TestSchemaInitialization:
 
     async def test_schema_is_idempotent(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
     ) -> None:
         """Verify schema can be re-applied without errors (idempotent)."""
         # Schema already applied by fixture; re-apply should succeed
-        await projector.initialize_schema()
+        await legacy_projector.initialize_schema()
 
         # No exception means success
 
@@ -215,14 +221,14 @@ class TestProjectorPersistence:
 
     async def test_persist_inserts_new_projection(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
         """Verify persist creates new projection in database."""
         projection = make_projection(offset=100)
         sequence = make_sequence(100)
 
-        result = await projector.persist(
+        result = await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -251,14 +257,14 @@ class TestProjectorPersistence:
 
     async def test_persist_updates_existing_projection(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
     ) -> None:
         """Verify persist updates existing projection with newer sequence."""
         projection = make_projection(offset=100)
         sequence1 = make_sequence(100)
 
         # Initial insert
-        result1 = await projector.persist(
+        result1 = await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -271,7 +277,7 @@ class TestProjectorPersistence:
         projection.last_applied_offset = 200
         sequence2 = make_sequence(200)
 
-        result2 = await projector.persist(
+        result2 = await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -281,14 +287,14 @@ class TestProjectorPersistence:
 
     async def test_persist_rejects_stale_update(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
     ) -> None:
         """Verify persist rejects stale updates (older sequence)."""
         projection = make_projection(offset=200)
         sequence_newer = make_sequence(200)
 
         # Insert with offset 200
-        result1 = await projector.persist(
+        result1 = await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -301,7 +307,7 @@ class TestProjectorPersistence:
         projection.last_applied_offset = 100
         sequence_older = make_sequence(100)
 
-        result2 = await projector.persist(
+        result2 = await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -313,7 +319,7 @@ class TestProjectorPersistence:
 
     async def test_persist_stores_capabilities_as_jsonb(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
         """Verify capabilities are stored as JSONB and can be queried."""
@@ -326,7 +332,7 @@ class TestProjectorPersistence:
         )
         sequence = make_sequence(100)
 
-        await projector.persist(
+        await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -347,7 +353,7 @@ class TestProjectorPersistence:
 
     async def test_persist_stores_deadlines(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
         """Verify ack and liveness deadlines are stored correctly."""
@@ -362,7 +368,7 @@ class TestProjectorPersistence:
         )
         sequence = make_sequence(100)
 
-        await projector.persist(
+        await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -394,7 +400,7 @@ class TestIdempotency:
 
     async def test_same_sequence_is_idempotent(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify re-projecting same sequence is idempotent (no update).
@@ -409,7 +415,7 @@ class TestIdempotency:
         sequence = make_sequence(100)
 
         # First persist
-        result1 = await projector.persist(
+        result1 = await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -421,7 +427,7 @@ class TestIdempotency:
         projection.node_version = "2.0.0"
 
         # Second persist with same sequence
-        result2 = await projector.persist(
+        result2 = await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -438,14 +444,14 @@ class TestIdempotency:
 
     async def test_is_stale_check(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
     ) -> None:
         """Verify is_stale() correctly identifies stale sequences."""
         projection = make_projection(offset=100)
         sequence = make_sequence(100)
 
         # Insert projection
-        await projector.persist(
+        await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -454,7 +460,7 @@ class TestIdempotency:
 
         # Check older sequence is stale
         older_seq = make_sequence(50)
-        older_is_stale = await projector.is_stale(
+        older_is_stale = await legacy_projector.is_stale(
             entity_id=projection.entity_id,
             domain=projection.domain,
             sequence_info=older_seq,
@@ -463,7 +469,7 @@ class TestIdempotency:
 
         # Check newer sequence is not stale
         newer_seq = make_sequence(150)
-        newer_is_stale = await projector.is_stale(
+        newer_is_stale = await legacy_projector.is_stale(
             entity_id=projection.entity_id,
             domain=projection.domain,
             sequence_info=newer_seq,
@@ -472,13 +478,13 @@ class TestIdempotency:
 
     async def test_is_stale_for_nonexistent_entity(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
     ) -> None:
         """Verify is_stale returns False for non-existent entity."""
         non_existent_id = uuid4()
         sequence = make_sequence(100)
 
-        is_stale = await projector.is_stale(
+        is_stale = await legacy_projector.is_stale(
             entity_id=non_existent_id,
             domain="registration",
             sequence_info=sequence,
@@ -498,7 +504,7 @@ class TestReaderQueries:
 
     async def test_get_entity_state(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify get_entity_state retrieves full projection."""
@@ -508,7 +514,7 @@ class TestReaderQueries:
         )
         sequence = make_sequence(100)
 
-        await projector.persist(
+        await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -533,7 +539,7 @@ class TestReaderQueries:
 
     async def test_get_registration_status(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify get_registration_status returns just the state."""
@@ -543,7 +549,7 @@ class TestReaderQueries:
         )
         sequence = make_sequence(100)
 
-        await projector.persist(
+        await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -556,7 +562,7 @@ class TestReaderQueries:
 
     async def test_get_by_state(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify get_by_state filters by FSM state."""
@@ -568,7 +574,7 @@ class TestReaderQueries:
         )
 
         for proj in [active1, active2, pending]:
-            await projector.persist(
+            await legacy_projector.persist(
                 projection=proj,
                 entity_id=proj.entity_id,
                 domain=proj.domain,
@@ -583,7 +589,7 @@ class TestReaderQueries:
 
     async def test_count_by_state(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify count_by_state returns correct counts per state."""
@@ -599,7 +605,7 @@ class TestReaderQueries:
         ]
 
         for proj in projections:
-            await projector.persist(
+            await legacy_projector.persist(
                 projection=proj,
                 entity_id=proj.entity_id,
                 domain=proj.domain,
@@ -623,7 +629,7 @@ class TestDeadlineScans:
 
     async def test_get_overdue_ack_registrations(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify get_overdue_ack_registrations finds overdue ack deadlines."""
@@ -653,7 +659,7 @@ class TestDeadlineScans:
         )
 
         for proj in [overdue, not_due, wrong_state]:
-            await projector.persist(
+            await legacy_projector.persist(
                 projection=proj,
                 entity_id=proj.entity_id,
                 domain=proj.domain,
@@ -667,7 +673,7 @@ class TestDeadlineScans:
 
     async def test_get_overdue_ack_excludes_already_emitted(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
@@ -682,7 +688,7 @@ class TestDeadlineScans:
             ack_deadline=past,
         )
 
-        await projector.persist(
+        await legacy_projector.persist(
             projection=overdue,
             entity_id=overdue.entity_id,
             domain=overdue.domain,
@@ -707,7 +713,7 @@ class TestDeadlineScans:
 
     async def test_get_overdue_liveness_registrations(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify get_overdue_liveness_registrations finds expired liveness."""
@@ -737,7 +743,7 @@ class TestDeadlineScans:
         )
 
         for proj in [overdue, not_due, wrong_state]:
-            await projector.persist(
+            await legacy_projector.persist(
                 projection=proj,
                 entity_id=proj.entity_id,
                 domain=proj.domain,
@@ -760,7 +766,7 @@ class TestOrdering:
 
     async def test_out_of_order_events_handled_correctly(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify out-of-order events are handled correctly."""
@@ -803,7 +809,7 @@ class TestOrdering:
         )
 
         # Apply events out of order: 100, 200, 150
-        result_100 = await projector.persist(
+        result_100 = await legacy_projector.persist(
             projection=proj_offset_100,
             entity_id=entity_id,
             domain="registration",
@@ -811,7 +817,7 @@ class TestOrdering:
         )
         assert result_100 is True
 
-        result_200 = await projector.persist(
+        result_200 = await legacy_projector.persist(
             projection=proj_offset_200,
             entity_id=entity_id,
             domain="registration",
@@ -820,7 +826,7 @@ class TestOrdering:
         assert result_200 is True
 
         # Out-of-order event at 150 should be rejected
-        result_150 = await projector.persist(
+        result_150 = await legacy_projector.persist(
             projection=proj_offset_150,
             entity_id=entity_id,
             domain="registration",
@@ -836,7 +842,7 @@ class TestOrdering:
 
     async def test_sequence_progression_through_states(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify correct state progression with increasing sequences."""
@@ -862,7 +868,7 @@ class TestOrdering:
                 updated_at=now,
             )
 
-            result = await projector.persist(
+            result = await legacy_projector.persist(
                 projection=proj,
                 entity_id=entity_id,
                 domain="registration",
@@ -887,7 +893,7 @@ class TestMultiDomain:
 
     async def test_same_entity_different_domains(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify same entity can have projections in different domains."""
@@ -918,14 +924,14 @@ class TestMultiDomain:
             updated_at=now,
         )
 
-        await projector.persist(
+        await legacy_projector.persist(
             projection=proj_reg,
             entity_id=entity_id,
             domain="registration",
             sequence_info=make_sequence(100),
         )
 
-        await projector.persist(
+        await legacy_projector.persist(
             projection=proj_test,
             entity_id=entity_id,
             domain="test-domain",
@@ -953,7 +959,7 @@ class TestConcurrency:
 
     async def test_concurrent_projections_for_different_entities(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify concurrent projections for different entities succeed."""
@@ -961,7 +967,7 @@ class TestConcurrency:
         projections = [make_projection(offset=100) for _ in range(10)]
 
         async def persist_projection(proj: ModelRegistrationProjection) -> bool:
-            return await projector.persist(
+            return await legacy_projector.persist(
                 projection=proj,
                 entity_id=proj.entity_id,
                 domain=proj.domain,
@@ -979,7 +985,7 @@ class TestConcurrency:
 
     async def test_concurrent_updates_same_entity(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify concurrent updates to same entity handle ordering correctly."""
@@ -1007,7 +1013,7 @@ class TestConcurrency:
         async def persist_projection(
             proj: ModelRegistrationProjection, offset: int
         ) -> bool:
-            return await projector.persist(
+            return await legacy_projector.persist(
                 projection=proj,
                 entity_id=entity_id,
                 domain="registration",

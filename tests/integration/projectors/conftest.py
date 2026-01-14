@@ -15,7 +15,7 @@ Session-scoped:
 
 Function-scoped:
     - pg_pool: Fresh connection pool with clean schema per test
-    - projector: ProjectorRegistration instance
+    - projector: ProjectorShell instance (contract-driven)
     - reader: ProjectionReaderRegistration instance
 
 Usage:
@@ -24,6 +24,9 @@ Usage:
     2. Schema creation from SQL files
     3. Connection pool management
     4. Cleanup between tests
+
+Related Tickets:
+    - OMN-1169: ProjectorShell for contract-driven projections
 """
 
 from __future__ import annotations
@@ -38,10 +41,12 @@ import pytest
 from testcontainers.postgres import PostgresContainer
 
 if TYPE_CHECKING:
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import ProjectorShell
+
+    # Legacy type alias for backward compatibility
+    # ProjectorRegistration has been superseded by ProjectorShell
+    ProjectorRegistration = object  # type: ignore[misc]
 
 
 # Path to SQL schema file
@@ -189,23 +194,54 @@ async def pg_pool(
 
 
 @pytest.fixture
-def projector(pg_pool: asyncpg.Pool) -> ProjectorRegistration:
-    """Function-scoped ProjectorRegistration instance.
+async def projector(pg_pool: asyncpg.Pool) -> ProjectorShell:
+    """Function-scoped ProjectorShell instance loaded from contract.
+
+    Uses ProjectorPluginLoader to load the registration projector from
+    its YAML contract definition. This ensures the test uses the same
+    contract-driven configuration as production.
 
     Args:
         pg_pool: asyncpg connection pool fixture.
 
     Returns:
-        ProjectorRegistration configured with the test pool.
-    """
-    from omnibase_infra.projectors import ProjectorRegistration
+        ProjectorShell configured with the test pool and registration contract.
 
-    return ProjectorRegistration(pg_pool)
+    Related:
+        - OMN-1169: ProjectorShell for contract-driven projections
+        - OMN-1168: ProjectorPluginLoader contract discovery
+    """
+    from omnibase_infra.runtime import ProjectorPluginLoader
+
+    # Path to registration projector contract
+    contract_path = (
+        Path(__file__).parent.parent.parent.parent
+        / "src"
+        / "omnibase_infra"
+        / "projectors"
+        / "contracts"
+        / "registration_projector.yaml"
+    )
+
+    loader = ProjectorPluginLoader(pool=pg_pool)
+    projector = await loader.load_from_contract(contract_path)
+
+    # Type narrowing - loader with pool returns ProjectorShell, not placeholder
+    from omnibase_infra.runtime import ProjectorShell
+
+    assert isinstance(projector, ProjectorShell), (
+        "Expected ProjectorShell instance when pool is provided"
+    )
+    return projector
 
 
 @pytest.fixture
 def reader(pg_pool: asyncpg.Pool) -> ProjectionReaderRegistration:
     """Function-scoped ProjectionReaderRegistration instance.
+
+    Note: The reader is kept as ProjectionReaderRegistration (not a generic shell)
+    because it provides domain-specific query methods for registration state
+    (get_by_state, get_overdue_ack_registrations, capability queries, etc.).
 
     Args:
         pg_pool: asyncpg connection pool fixture.
@@ -216,3 +252,37 @@ def reader(pg_pool: asyncpg.Pool) -> ProjectionReaderRegistration:
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
     return ProjectionReaderRegistration(pg_pool)
+
+
+@pytest.fixture
+def legacy_projector(pg_pool: asyncpg.Pool) -> ProjectorRegistration:
+    """Function-scoped legacy ProjectorRegistration instance.
+
+    This fixture provides the legacy ProjectorRegistration for tests that
+    still require the old persist() interface.
+
+    Note:
+        The ProjectorRegistration class has been superseded by ProjectorShell.
+        This fixture attempts to import the legacy class and skips the test
+        if it's not available. Tests should be migrated to use ProjectorShell.
+
+    Args:
+        pg_pool: asyncpg connection pool fixture.
+
+    Returns:
+        ProjectorRegistration configured with the test pool.
+
+    Raises:
+        pytest.skip: If ProjectorRegistration is not available.
+    """
+    try:
+        from omnibase_infra.projectors.projector_registration import (
+            ProjectorRegistration,
+        )
+    except ImportError:
+        pytest.skip(
+            "ProjectorRegistration not available - "
+            "tests should be migrated to use ProjectorShell"
+        )
+
+    return ProjectorRegistration(pg_pool)

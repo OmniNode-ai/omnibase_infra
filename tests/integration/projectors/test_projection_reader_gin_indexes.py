@@ -59,7 +59,11 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 if TYPE_CHECKING:
     import asyncpg
 
-    from omnibase_infra.projectors import ProjectorRegistration
+    from omnibase_infra.runtime import ProjectorShell
+
+    # Legacy type alias - ProjectorRegistration has been superseded by ProjectorShell
+    # Tests using this type require the legacy_projector fixture
+    ProjectorRegistration = object  # type: ignore[misc]
 
 
 # Test markers
@@ -240,7 +244,7 @@ async def gin_index_exists(
 
 @pytest.fixture
 async def populated_db_for_gin_tests(
-    projector: ProjectorRegistration,
+    legacy_projector: ProjectorRegistration,
     pg_pool: asyncpg.Pool,
 ) -> asyncpg.Pool:
     """Populate database with test data for GIN index verification tests.
@@ -300,7 +304,7 @@ async def populated_db_for_gin_tests(
             protocols=protocol_options[i % len(protocol_options)],
             offset=5000 + i,
         )
-        await projector.persist(
+        await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,

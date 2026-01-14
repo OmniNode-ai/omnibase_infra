@@ -74,7 +74,6 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.projectors import ProjectorRegistration
 from omnibase_infra.runtime.container_wiring import (
     wire_infrastructure_services,
     wire_registration_handlers,
@@ -85,6 +84,11 @@ from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 from omnibase_infra.runtime.models import ModelRuntimeConfig
+from omnibase_infra.runtime.projector_plugin_loader import (
+    ProjectorPluginLoader,
+    ProjectorShell,
+    ProtocolEventProjector,
+)
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 # Circular Import Note (OMN-529):
@@ -582,7 +586,7 @@ async def bootstrap() -> int:
 
         # 4.5. Create PostgreSQL pool for projections
         # Only create if POSTGRES_HOST is set (indicates registration should be enabled)
-        projector: ProjectorRegistration | None = None
+        projector: ProjectorShell | None = None
         introspection_dispatcher: DispatcherNodeIntrospected | None = None
         consul_handler = None  # Will be initialized if Consul is configured
 
@@ -614,13 +618,152 @@ async def bootstrap() -> int:
                     },
                 )
 
-                # 4.6. Create ProjectorRegistration and initialize schema
-                projector = ProjectorRegistration(postgres_pool)
-                await projector.initialize_schema(correlation_id=correlation_id)
-                logger.info(
-                    "ProjectorRegistration schema initialized (correlation_id=%s)",
-                    correlation_id,
+                # 4.6. Load projectors from contracts via ProjectorPluginLoader (OMN-1170/1169)
+                #
+                # This section implements fully contract-driven projector management. The
+                # loader discovers projector contracts from the package's projectors/contracts
+                # directory and creates ProjectorShell instances for runtime use.
+                #
+                # Contract-driven approach:
+                # - Projector behavior defined in YAML contracts (registration_projector.yaml)
+                # - ProjectorPluginLoader discovers and loads projectors from contracts
+                # - ProjectorShell provides generic projection operations (project, partial_update)
+                # - Schema initialization is decoupled - SQL executed directly from schema file
+                #
+                # The registration projector is identified by projector_id="registration-projector"
+                # and is passed to wire_registration_handlers() for handler injection.
+                #
+                projector_contracts_dir = (
+                    Path(__file__).parent.parent / "projectors" / "contracts"
                 )
+
+                # Try to discover projectors from contracts
+                projector_loader = ProjectorPluginLoader(
+                    container=container,
+                    pool=postgres_pool,
+                    graceful_mode=True,  # Continue on errors during discovery
+                )
+
+                discovered_projectors: list[ProtocolEventProjector] = []
+                if projector_contracts_dir.exists():
+                    try:
+                        discovered_projectors = (
+                            await projector_loader.load_from_directory(
+                                projector_contracts_dir
+                            )
+                        )
+                        if discovered_projectors:
+                            logger.info(
+                                "Discovered %d projector(s) from contracts (correlation_id=%s)",
+                                len(discovered_projectors),
+                                correlation_id,
+                                extra={
+                                    "discovered_count": len(discovered_projectors),
+                                    "contracts_dir": str(projector_contracts_dir),
+                                    "projector_ids": [
+                                        getattr(p, "projector_id", "unknown")
+                                        for p in discovered_projectors
+                                    ],
+                                },
+                            )
+                        else:
+                            logger.warning(
+                                "No projector contracts found in %s (correlation_id=%s)",
+                                projector_contracts_dir,
+                                correlation_id,
+                                extra={
+                                    "contracts_dir": str(projector_contracts_dir),
+                                },
+                            )
+                    except Exception as discovery_error:
+                        # Log warning but continue - projector discovery is best-effort
+                        # Registration features will be unavailable if discovery fails
+                        logger.warning(
+                            "Projector contract discovery failed: %s (correlation_id=%s)",
+                            sanitize_error_message(discovery_error),
+                            correlation_id,
+                            extra={
+                                "error_type": type(discovery_error).__name__,
+                                "contracts_dir": str(projector_contracts_dir),
+                            },
+                        )
+                else:
+                    logger.debug(
+                        "Projector contracts directory not found, skipping discovery "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "contracts_dir": str(projector_contracts_dir),
+                        },
+                    )
+
+                # Extract registration projector from discovered projectors (OMN-1169)
+                # This replaces the legacy ProjectorRegistration with contract-loaded ProjectorShell
+                registration_projector_id = "registration-projector"
+                for discovered in discovered_projectors:
+                    if (
+                        getattr(discovered, "projector_id", None)
+                        == registration_projector_id
+                    ):
+                        # Cast to ProjectorShell (loader creates ProjectorShell when pool provided)
+                        if isinstance(discovered, ProjectorShell):
+                            projector = discovered
+                            logger.info(
+                                "Using contract-loaded ProjectorShell for registration "
+                                "(correlation_id=%s)",
+                                correlation_id,
+                                extra={
+                                    "projector_id": registration_projector_id,
+                                    "aggregate_type": projector.aggregate_type,
+                                },
+                            )
+                        break
+
+                if projector is None:
+                    # Fallback: No registration projector discovered from contracts
+                    logger.warning(
+                        "Registration projector not found in contracts, "
+                        "registration features will be unavailable (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "expected_projector_id": registration_projector_id,
+                            "discovered_count": len(discovered_projectors),
+                        },
+                    )
+
+                # Initialize schema by executing SQL file directly
+                # Schema initialization is decoupled from the projector - it just ensures
+                # the table and indexes exist. The ProjectorShell uses the schema at runtime.
+                schema_file = (
+                    Path(__file__).parent.parent
+                    / "schemas"
+                    / "schema_registration_projection.sql"
+                )
+                if schema_file.exists():
+                    try:
+                        schema_sql = schema_file.read_text()
+                        async with postgres_pool.acquire() as conn:
+                            await conn.execute(schema_sql)
+                        logger.info(
+                            "Registration projection schema initialized (correlation_id=%s)",
+                            correlation_id,
+                        )
+                    except Exception as schema_error:
+                        # Log warning but continue - schema may already exist
+                        logger.warning(
+                            "Schema initialization encountered error: %s (correlation_id=%s)",
+                            sanitize_error_message(schema_error),
+                            correlation_id,
+                            extra={
+                                "error_type": type(schema_error).__name__,
+                            },
+                        )
+                else:
+                    logger.warning(
+                        "Schema file not found: %s (correlation_id=%s)",
+                        schema_file,
+                        correlation_id,
+                    )
 
                 # 4.6.5. Initialize HandlerConsul if Consul is configured
                 # CONSUL_HOST determines whether to enable Consul registration

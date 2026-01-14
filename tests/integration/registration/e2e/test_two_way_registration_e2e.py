@@ -87,16 +87,15 @@ if TYPE_CHECKING:
 
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.handlers import HandlerConsul
+    from omnibase_infra.models.projection import ModelRegistrationProjection
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
     )
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import ProjectorShell
 
     from .conftest import ProtocolIntrospectableTestNode
 
@@ -107,6 +106,62 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
 ]
+
+
+# =============================================================================
+# Helper Function: Projection to upsert_partial
+# =============================================================================
+
+
+async def persist_projection_via_shell(
+    projector: ProjectorShell,
+    projection: ModelRegistrationProjection,
+    correlation_id: UUID | None = None,
+) -> bool:
+    """Convert ModelRegistrationProjection to values dict and upsert via ProjectorShell.
+
+    This helper provides a migration path from ProjectorRegistration.persist() to
+    ProjectorShell.upsert_partial(). It extracts values from the projection model
+    and calls the contract-driven projector.
+
+    Args:
+        projector: ProjectorShell instance for persistence.
+        projection: ModelRegistrationProjection to persist.
+        correlation_id: Optional correlation ID (generated if not provided).
+
+    Returns:
+        True if upsert succeeded, False otherwise.
+    """
+    cid = correlation_id or uuid4()
+
+    # Convert projection to values dict for upsert_partial
+    values: dict[str, object] = {
+        "entity_id": projection.entity_id,
+        "domain": projection.domain,
+        "current_state": projection.current_state.value
+        if hasattr(projection.current_state, "value")
+        else str(projection.current_state),
+        "node_type": projection.node_type.value
+        if hasattr(projection.node_type, "value")
+        else str(projection.node_type),
+        "node_version": str(projection.node_version),
+        "capabilities": projection.capabilities.model_dump_json()
+        if projection.capabilities
+        else "{}",
+        "liveness_deadline": projection.liveness_deadline,
+        "last_heartbeat_at": projection.last_heartbeat_at,
+        "last_applied_event_id": projection.last_applied_event_id,
+        "last_applied_offset": projection.last_applied_offset or 1,
+        "registered_at": projection.registered_at,
+        "updated_at": projection.updated_at,
+    }
+
+    return await projector.upsert_partial(
+        aggregate_id=projection.entity_id,
+        values=values,
+        correlation_id=cid,
+        conflict_columns=["entity_id", "domain"],
+    )
 
 
 # =============================================================================
@@ -486,7 +541,7 @@ class TestSuite2RegistryDualRegistration:
     async def test_postgres_registration_succeeds(
         self,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
         cleanup_projections: None,
@@ -524,12 +579,7 @@ class TestSuite2RegistryDualRegistration:
         )
 
         # Persist via projector
-        await real_projector.persist(
-            projection=projection,
-            entity_id=projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
-        )
+        await persist_projection_via_shell(real_projector, projection)
 
         # Wait for and verify registration in PostgreSQL
         pg_result = await wait_for_postgres_registration(
@@ -551,7 +601,7 @@ class TestSuite2RegistryDualRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         cleanup_consul_services: list[str],
         cleanup_projections: None,
         unique_node_id: UUID,
@@ -612,12 +662,7 @@ class TestSuite2RegistryDualRegistration:
             last_applied_event_id=unique_node_id,
         )
 
-        await real_projector.persist(
-            projection=projection,
-            entity_id=projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
-        )
+        await persist_projection_via_shell(real_projector, projection)
 
         # Step 3: Verify dual registration
         consul_result, postgres_result = await verify_dual_registration(
@@ -640,7 +685,7 @@ class TestSuite2RegistryDualRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         cleanup_consul_services: list[str],
         cleanup_projections: None,
         unique_node_id: UUID,
@@ -700,12 +745,7 @@ class TestSuite2RegistryDualRegistration:
                 last_applied_event_id=unique_node_id,
             )
 
-            await real_projector.persist(
-                projection=projection,
-                entity_id=projection.entity_id,
-                domain="registration",
-                sequence_info=ModelSequenceInfo.from_sequence(1),
-            )
+            await persist_projection_via_shell(real_projector, projection)
 
         # Verify registrations completed
         consul_result, postgres_result = await verify_dual_registration(
@@ -726,7 +766,7 @@ class TestSuite2RegistryDualRegistration:
     async def test_handler_idempotency_blocking_states(
         self,
         wired_container: ModelONEXContainer,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -776,12 +816,7 @@ class TestSuite2RegistryDualRegistration:
             last_applied_event_id=unique_node_id,
         )
 
-        await real_projector.persist(
-            projection=projection,
-            entity_id=projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
-        )
+        await persist_projection_via_shell(real_projector, projection)
 
         # Wait for PostgreSQL write to complete using deterministic polling
         write_result = await wait_for_postgres_write(
@@ -817,7 +852,7 @@ class TestSuite2RegistryDualRegistration:
     async def test_handler_allows_retriable_states(
         self,
         wired_container: ModelONEXContainer,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -869,12 +904,7 @@ class TestSuite2RegistryDualRegistration:
             last_applied_event_id=unique_node_id,
         )
 
-        await real_projector.persist(
-            projection=projection,
-            entity_id=projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
-        )
+        await persist_projection_via_shell(real_projector, projection)
 
         # Wait for PostgreSQL write to complete using deterministic polling
         write_result = await wait_for_postgres_write(
@@ -1426,7 +1456,7 @@ class TestSuite4HeartbeatPublishing:
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         introspectable_test_node: ProtocolIntrospectableTestNode,
         unique_node_id: UUID,
     ) -> None:
@@ -1473,14 +1503,9 @@ class TestSuite4HeartbeatPublishing:
             last_applied_partition=None,
         )
 
-        # Persist the projection using ModelSequenceInfo (for ordering)
-        sequence_info = ModelSequenceInfo.from_sequence(1)
-        await real_projector.persist(
-            projection=initial_projection,
-            entity_id=unique_node_id,
-            domain="registration",
-            sequence_info=sequence_info,
-            correlation_id=correlation_id,
+        # Persist the projection using upsert_partial
+        await persist_projection_via_shell(
+            real_projector, initial_projection, correlation_id=correlation_id
         )
 
         # Record time before sending heartbeat
@@ -1651,35 +1676,53 @@ class TestSuite5RegistryRecovery:
             - New orchestrator can query existing registration
             - Registration state is preserved across restart
         """
-        from omnibase_infra.models.projection.model_registration_projection import (
-            ModelRegistrationProjection,
-        )
-        from omnibase_infra.projectors import ProjectorRegistration
+        from pathlib import Path
+
+        from omnibase_infra.runtime import ProjectorPluginLoader, ProjectorShell
         from omnibase_infra.runtime.container_wiring import (
             get_projection_reader_from_container,
         )
 
         # Step 1: Register a node using the first orchestrator
         projection_reader = await get_projection_reader_from_container(wired_container)
-        projector = ProjectorRegistration(postgres_pool)
 
-        # Create initial registration
-        now = datetime.now(UTC)
-        initial_projection = ModelRegistrationProjection(
-            entity_id=unique_node_id,
-            domain="registration",
-            current_state=EnumRegistrationState.ACTIVE,
-            registered_at=now,
-            updated_at=now,
-            node_type=EnumNodeKind.EFFECT,
-            node_version=ModelSemVer.parse("1.0.0"),
-            last_applied_event_id=unique_node_id,
+        # Load ProjectorShell from contract (same pattern as fixture)
+        contract_path = (
+            Path(__file__).parent.parent.parent.parent.parent
+            / "src"
+            / "omnibase_infra"
+            / "projectors"
+            / "contracts"
+            / "registration_projector.yaml"
         )
-        await projector.persist(
-            projection=initial_projection,
-            entity_id=initial_projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
+        loader = ProjectorPluginLoader(pool=postgres_pool)
+        projector_instance = await loader.load_from_contract(contract_path)
+
+        # Type narrowing - loader with pool returns ProjectorShell, not placeholder
+        assert isinstance(projector_instance, ProjectorShell), (
+            "Expected ProjectorShell instance when pool is provided"
+        )
+        projector = projector_instance
+
+        # Create initial registration using upsert_partial
+        now = datetime.now(UTC)
+        values: dict[str, object] = {
+            "entity_id": unique_node_id,
+            "domain": "registration",
+            "current_state": EnumRegistrationState.ACTIVE.value,
+            "node_type": EnumNodeKind.EFFECT.value,
+            "node_version": "1.0.0",
+            "capabilities": "{}",
+            "registered_at": now,
+            "updated_at": now,
+            "last_applied_event_id": unique_node_id,
+            "last_applied_offset": 1,
+        }
+        await projector.upsert_partial(
+            aggregate_id=unique_node_id,
+            values=values,
+            correlation_id=uuid4(),
+            conflict_columns=["entity_id", "domain"],
         )
 
         # Wait for PostgreSQL write to complete using deterministic polling
@@ -1728,7 +1771,7 @@ class TestSuite5RegistryRecovery:
         wired_container: ModelONEXContainer,
         postgres_pool: asyncpg.Pool,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -1772,12 +1815,7 @@ class TestSuite5RegistryRecovery:
             node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
-        await real_projector.persist(
-            projection=initial_projection,
-            entity_id=initial_projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
-        )
+        await persist_projection_via_shell(real_projector, initial_projection)
 
         # Wait for PostgreSQL write to complete using deterministic polling
         write_result = await wait_for_postgres_write(
@@ -1833,7 +1871,7 @@ class TestSuite5RegistryRecovery:
         self,
         registration_orchestrator: NodeRegistrationOrchestrator,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -1870,12 +1908,7 @@ class TestSuite5RegistryRecovery:
             node_version=ModelSemVer.parse("1.0.0"),
             last_applied_event_id=unique_node_id,
         )
-        await real_projector.persist(
-            projection=initial_projection,
-            entity_id=initial_projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
-        )
+        await persist_projection_via_shell(real_projector, initial_projection)
 
         # Verify initial registration (polling already handles retry)
         first_result = await wait_for_postgres_registration(
@@ -1898,12 +1931,7 @@ class TestSuite5RegistryRecovery:
             node_version=ModelSemVer.parse("2.0.0"),  # Updated version
             last_applied_event_id=unique_node_id,
         )
-        await real_projector.persist(
-            projection=updated_projection,
-            entity_id=updated_projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(2),
-        )
+        await persist_projection_via_shell(real_projector, updated_projection)
 
         # Step 3: Verify single record with updated data (polling already handles retry)
         final_result = await wait_for_postgres_registration(
@@ -1954,7 +1982,7 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
@@ -2001,12 +2029,7 @@ class TestSuite6MultipleNodes:
                 node_version=ModelSemVer.parse("1.0.0"),
                 last_applied_event_id=node_ids[idx],
             )
-            await real_projector.persist(
-                projection=projection,
-                entity_id=projection.entity_id,
-                domain="registration",
-                sequence_info=ModelSequenceInfo.from_sequence(1),
-            )
+            await persist_projection_via_shell(real_projector, projection)
 
         # Step 2: Submit all concurrently
         tasks = [register_node(i) for i in range(node_count)]
@@ -2034,7 +2057,7 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         cleanup_projections: None,
@@ -2075,12 +2098,7 @@ class TestSuite6MultipleNodes:
                 node_version=f"1.0.{attempt}",  # Different version each time
                 last_applied_event_id=unique_node_id,
             )
-            await real_projector.persist(
-                projection=projection,
-                entity_id=projection.entity_id,
-                domain="registration",
-                sequence_info=ModelSequenceInfo.from_sequence(attempt + 1),
-            )
+            await persist_projection_via_shell(real_projector, projection)
 
         # Step 2: Submit all 10 concurrently
         tasks = [concurrent_upsert(i) for i in range(concurrent_count)]
@@ -2118,7 +2136,7 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
@@ -2171,12 +2189,7 @@ class TestSuite6MultipleNodes:
                 node_version=f"1.{i}.0",
                 last_applied_event_id=node_id,
             )
-            await real_projector.persist(
-                projection=projection,
-                entity_id=projection.entity_id,
-                domain="registration",
-                sequence_info=ModelSequenceInfo.from_sequence(1),
-            )
+            await persist_projection_via_shell(real_projector, projection)
 
             # Register in Consul
             consul_data = {
@@ -2347,33 +2360,48 @@ class TestSuite7GracefulDegradation:
         Note: This test directly tests the projection persistence path,
         bypassing Consul to simulate unavailability.
         """
-        from omnibase_infra.models.projection.model_registration_projection import (
-            ModelRegistrationProjection,
-        )
+        from pathlib import Path
+
+        from omnibase_infra.runtime import ProjectorPluginLoader, ProjectorShell
 
         now = datetime.now(UTC)
 
-        # Create projection directly (simulating PostgreSQL-only registration)
-        projection = ModelRegistrationProjection(
-            entity_id=unique_node_id,
-            domain="registration",
-            current_state=EnumRegistrationState.PENDING_REGISTRATION,
-            registered_at=now,
-            updated_at=now,
-            node_type=EnumNodeKind.EFFECT,
-            node_version=ModelSemVer.parse("1.0.0"),
-            last_applied_event_id=unique_node_id,
+        # Load ProjectorShell from contract (same pattern as fixture)
+        contract_path = (
+            Path(__file__).parent.parent.parent.parent.parent
+            / "src"
+            / "omnibase_infra"
+            / "projectors"
+            / "contracts"
+            / "registration_projector.yaml"
         )
+        loader = ProjectorPluginLoader(pool=postgres_pool)
+        projector_instance = await loader.load_from_contract(contract_path)
 
-        # Use projector directly to persist
-        from omnibase_infra.projectors import ProjectorRegistration
+        # Type narrowing - loader with pool returns ProjectorShell, not placeholder
+        assert isinstance(projector_instance, ProjectorShell), (
+            "Expected ProjectorShell instance when pool is provided"
+        )
+        projector = projector_instance
 
-        projector = ProjectorRegistration(postgres_pool)
-        await projector.persist(
-            projection=projection,
-            entity_id=projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
+        # Create projection directly (simulating PostgreSQL-only registration)
+        values: dict[str, object] = {
+            "entity_id": unique_node_id,
+            "domain": "registration",
+            "current_state": EnumRegistrationState.PENDING_REGISTRATION.value,
+            "node_type": EnumNodeKind.EFFECT.value,
+            "node_version": "1.0.0",
+            "capabilities": "{}",
+            "registered_at": now,
+            "updated_at": now,
+            "last_applied_event_id": unique_node_id,
+            "last_applied_offset": 1,
+        }
+        await projector.upsert_partial(
+            aggregate_id=unique_node_id,
+            values=values,
+            correlation_id=uuid4(),
+            conflict_columns=["entity_id", "domain"],
         )
 
         # Verify PostgreSQL registration succeeded
@@ -2643,7 +2671,7 @@ class TestSuite8RegistrySelfRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         wired_container: ModelONEXContainer,
         cleanup_consul_services: list[str],
         cleanup_projections: None,
@@ -2713,12 +2741,7 @@ class TestSuite8RegistrySelfRegistration:
             last_applied_event_id=registry_node_id,
         )
 
-        await real_projector.persist(
-            projection=projection,
-            entity_id=projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
-        )
+        await persist_projection_via_shell(real_projector, projection)
 
         # Step 3: Verify dual registration
         consul_result, postgres_result = await verify_dual_registration(
@@ -2742,7 +2765,7 @@ class TestSuite8RegistrySelfRegistration:
     async def test_self_registration_in_database(
         self,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         wired_container: ModelONEXContainer,
         postgres_pool: asyncpg.Pool,
         unique_node_id: UUID,
@@ -2775,12 +2798,7 @@ class TestSuite8RegistrySelfRegistration:
         )
 
         # Persist via projector
-        await real_projector.persist(
-            projection=projection,
-            entity_id=projection.entity_id,
-            domain="registration",
-            sequence_info=ModelSequenceInfo.from_sequence(1),
-        )
+        await persist_projection_via_shell(real_projector, projection)
 
         # Read via projection_reader
         result = await wait_for_postgres_registration(
