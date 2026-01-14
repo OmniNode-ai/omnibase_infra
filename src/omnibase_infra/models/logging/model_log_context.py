@@ -17,7 +17,7 @@ Design Pattern:
     - Extensible context (extra dict with string values)
 
     The model provides builder methods for common use cases and a ``to_dict()``
-    method for backwards compatibility with standard logging formatters.
+    method for integration with standard logging formatters.
 
 Thread Safety:
     ModelLogContext is immutable (frozen=True) after creation,
@@ -46,7 +46,7 @@ Union Reduction:
     With a structured approach that:
     - Eliminates unions in favor of typed fields with sentinel defaults
     - Provides IDE autocompletion and type checking
-    - Maintains backwards compatibility via ``to_dict()``
+    - Integrates with standard logging via ``to_dict()``
     - Ensures consistent log context structure across components
 
 Example:
@@ -234,8 +234,8 @@ class ModelLogContext(BaseModel):
         sentinel values), suitable for passing to ``logging.Logger`` methods
         via the ``extra`` parameter.
 
-        This method provides backwards compatibility with code that expects
-        ``dict[str, str | int | float]`` for logging context.
+        This method provides integration with standard logging interfaces that
+        expect ``dict[str, str | int | float]`` for logging context.
 
         Returns:
             Dictionary with string keys and string/int/float values.

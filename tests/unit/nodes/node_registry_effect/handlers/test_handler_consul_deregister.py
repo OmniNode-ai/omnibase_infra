@@ -37,7 +37,9 @@ def create_mock_consul_client() -> AsyncMock:
     """Create a mock ProtocolConsulClient."""
     mock = AsyncMock()
     mock.deregister_service = AsyncMock(
-        return_value=ModelBackendResult(success=True, duration_ms=10.0)
+        return_value=ModelBackendResult(
+            success=True, duration_ms=10.0, backend_id="consul"
+        )
     )
     return mock
 
@@ -65,7 +67,7 @@ class TestHandlerConsulDeregisterSuccess:
         # Arrange
         mock_client = create_mock_consul_client()
         mock_client.deregister_service.return_value = ModelBackendResult(
-            success=True, duration_ms=15.5
+            success=True, duration_ms=15.5, backend_id="consul"
         )
 
         handler = HandlerConsulDeregister(mock_client)

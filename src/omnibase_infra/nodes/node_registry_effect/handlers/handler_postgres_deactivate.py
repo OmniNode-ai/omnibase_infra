@@ -72,7 +72,7 @@ class HandlerPostgresDeactivate:
     Example:
         >>> from unittest.mock import AsyncMock
         >>> adapter = AsyncMock()
-        >>> adapter.deactivate.return_value = ModelBackendResult(success=True)
+        >>> adapter.deactivate.return_value = ModelBackendResult(success=True, backend_id="postgres")
         >>> handler = HandlerPostgresDeactivate(adapter)
         >>> result = await handler.handle(request, correlation_id)
         >>> result.success

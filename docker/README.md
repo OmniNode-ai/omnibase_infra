@@ -510,7 +510,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | **ONEX Runtime**             |                                    |                                        |
 | `ONEX_LOG_LEVEL`             | `INFO`                             | Logging level (DEBUG, INFO, etc.)      |
 | `ONEX_ENVIRONMENT`           | `development`                      | Environment name                       |
-| `CONTRACTS_DIR`              | `/app/contracts`                   | Path to contract files                 |
+| `ONEX_CONTRACTS_DIR`         | `/app/contracts`                   | Path to contract files                 |
 | **Service Ports**            |                                    |                                        |
 | `RUNTIME_MAIN_PORT`          | `8085`                             | Main runtime exposed port              |
 | `RUNTIME_EFFECTS_PORT`       | `8086`                             | Effects runtime exposed port           |
@@ -581,8 +581,33 @@ docker compose -f docker-compose.runtime.yml logs -f runtime-main
 | "Password authentication failed"   | Missing/wrong `POSTGRES_PASSWORD`             | Check .env file, verify password              |
 | "Address already in use"           | Port 8085 already bound                       | Change `RUNTIME_MAIN_PORT` or free port       |
 | "Connection refused"               | Infrastructure services not running           | Start omninode-bridge services first          |
-| "No such file or directory"        | Missing contracts directory                   | Create `contracts/` or adjust `CONTRACTS_DIR` |
+| "No such file or directory"        | Missing contracts directory                   | Create `contracts/` or adjust `ONEX_CONTRACTS_DIR` |
 | "Permission denied"                | Volume permission issues                      | Check UID 1000 has write access               |
+| "No handlers registered"           | Handler contracts not found or invalid        | See "No Handlers Registered" section below    |
+
+### No Handlers Registered
+
+If you see "No handlers registered" error, follow these troubleshooting steps:
+
+```bash
+# 1. Check ONEX_CONTRACTS_DIR is set correctly
+docker exec omnibase-infra-runtime-main printenv ONEX_CONTRACTS_DIR
+
+# 2. Verify contracts directory exists and contains handler contracts
+docker exec omnibase-infra-runtime-main ls -la /app/contracts
+docker exec omnibase-infra-runtime-main find /app/contracts -name "handler_contract.yaml" -o -name "contract.yaml"
+
+# 3. Validate handler contract syntax
+docker exec omnibase-infra-runtime-main cat /app/contracts/handlers/*/handler_contract.yaml
+
+# 4. Check for import errors in logs
+docker logs omnibase-infra-runtime-main 2>&1 | grep -E "(MODULE_NOT_FOUND|CLASS_NOT_FOUND|IMPORT_ERROR)"
+```
+
+**Required handler contract fields:**
+- `handler_name`: Unique identifier for the handler
+- `handler_class`: Fully-qualified Python class path (e.g., `myapp.handlers.MyHandler`)
+- `handler_type`: One of: `effect`, `compute`, `reducer`, `orchestrator`
 
 ### Health Check Failing
 

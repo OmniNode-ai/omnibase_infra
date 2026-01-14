@@ -38,15 +38,17 @@ from __future__ import annotations
 import asyncio
 import json
 import warnings
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumIntrospectionReason, EnumRegistrationState
 from omnibase_infra.models.discovery import (
     DEFAULT_HEARTBEAT_TOPIC,
     DEFAULT_INTROSPECTION_TOPIC,
@@ -59,6 +61,7 @@ from omnibase_infra.models.registration import (
 )
 
 # Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
+from .conftest import wait_for_consumer_ready
 from .performance_utils import (
     PerformanceThresholds,
     assert_heartbeat_interval,
@@ -75,9 +78,11 @@ from .verification_helpers import (
     verify_postgres_registration,
     wait_for_consul_registration,
     wait_for_postgres_registration,
+    wait_for_postgres_write,
 )
 
 if TYPE_CHECKING:
+    import asyncpg
     from omnibase_core.container import ModelONEXContainer
 
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
@@ -136,7 +141,7 @@ class TestSuite1NodeStartupIntrospection:
 
         Expected Behavior:
             1. Node initializes with introspection mixin configured
-            2. Node calls publish_introspection(reason="startup")
+            2. Node calls publish_introspection(reason=EnumIntrospectionReason.STARTUP)
             3. Introspection event appears on INTROSPECTION_TOPIC
 
         Assertions:
@@ -146,7 +151,7 @@ class TestSuite1NodeStartupIntrospection:
         """
         # Publish introspection event on startup
         success = await introspectable_test_node.publish_introspection(
-            reason="startup",
+            reason=EnumIntrospectionReason.STARTUP,
             correlation_id=unique_correlation_id,
         )
 
@@ -169,7 +174,7 @@ class TestSuite1NodeStartupIntrospection:
     @pytest.mark.asyncio
     async def test_introspection_event_structure_and_completeness(
         self,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test introspection event has all required fields.
 
@@ -208,7 +213,7 @@ class TestSuite1NodeStartupIntrospection:
     @pytest.mark.asyncio
     async def test_introspection_event_with_custom_endpoints(
         self,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test introspection event correctly includes custom endpoints.
 
@@ -258,7 +263,7 @@ class TestSuite1NodeStartupIntrospection:
             threshold_ms=PerformanceThresholds.INTROSPECTION_BROADCAST_MS,
         ) as timing:
             success = await introspectable_test_node.publish_introspection(
-                reason="performance_test",
+                reason=EnumIntrospectionReason.REQUEST,
                 correlation_id=uuid4(),
             )
 
@@ -346,7 +351,7 @@ class TestSuite2RegistryDualRegistration:
         self,
         registration_orchestrator: NodeRegistrationOrchestrator,
         wired_container: ModelONEXContainer,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
     ) -> None:
@@ -384,13 +389,17 @@ class TestSuite2RegistryDualRegistration:
             correlation_id=unique_correlation_id,
         )
 
-        # Process the event through the handler
+        # Process the event through the handler using envelope API
         now = datetime.now(UTC)
-        result_events = await handler.handle(
-            event=event,
-            now=now,
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
+        handler_output = await handler.handle(envelope)
+        result_events = handler_output.events
 
         # For a new node, handler should emit NodeRegistrationInitiated
         assert len(result_events) == 1, (
@@ -477,10 +486,10 @@ class TestSuite2RegistryDualRegistration:
     async def test_postgres_registration_succeeds(
         self,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test PostgreSQL registration succeeds.
 
@@ -542,9 +551,9 @@ class TestSuite2RegistryDualRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         cleanup_consul_services: list[str],
-        cleanup_projections,
+        cleanup_projections: None,
         unique_node_id: UUID,
     ) -> None:
         """Test dual registration to both Consul and PostgreSQL.
@@ -631,9 +640,9 @@ class TestSuite2RegistryDualRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         cleanup_consul_services: list[str],
-        cleanup_projections,
+        cleanup_projections: None,
         unique_node_id: UUID,
     ) -> None:
         """Test dual registration completes under 300ms.
@@ -717,11 +726,11 @@ class TestSuite2RegistryDualRegistration:
     async def test_handler_idempotency_blocking_states(
         self,
         wired_container: ModelONEXContainer,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test handler idempotency for blocking registration states.
 
@@ -774,8 +783,13 @@ class TestSuite2RegistryDualRegistration:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for projection to be persisted
-        await asyncio.sleep(0.1)
+        # Wait for PostgreSQL write to complete using deterministic polling
+        write_result = await wait_for_postgres_write(
+            projection_reader, unique_node_id, timeout_seconds=2.0
+        )
+        assert write_result is not None, (
+            f"PostgreSQL write did not complete in time for node {unique_node_id}"
+        )
 
         # Create introspection event for the same node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
@@ -783,12 +797,16 @@ class TestSuite2RegistryDualRegistration:
             correlation_id=unique_correlation_id,
         )
 
-        # Process the event through the handler
-        result_events = await handler.handle(
-            event=event,
-            now=now,
+        # Process the event through the handler using envelope API
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
+        handler_output = await handler.handle(envelope)
+        result_events = handler_output.events
 
         # For a node in blocking state, handler should return empty list (no-op)
         assert len(result_events) == 0, (
@@ -799,11 +817,11 @@ class TestSuite2RegistryDualRegistration:
     async def test_handler_allows_retriable_states(
         self,
         wired_container: ModelONEXContainer,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test handler allows re-registration for retriable states.
 
@@ -858,8 +876,13 @@ class TestSuite2RegistryDualRegistration:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for projection to be persisted
-        await asyncio.sleep(0.1)
+        # Wait for PostgreSQL write to complete using deterministic polling
+        write_result = await wait_for_postgres_write(
+            projection_reader, unique_node_id, timeout_seconds=2.0
+        )
+        assert write_result is not None, (
+            f"PostgreSQL write did not complete in time for node {unique_node_id}"
+        )
 
         # Create introspection event for the same node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
@@ -867,12 +890,16 @@ class TestSuite2RegistryDualRegistration:
             correlation_id=unique_correlation_id,
         )
 
-        # Process the event through the handler
-        result_events = await handler.handle(
-            event=event,
-            now=now,
+        # Process the event through the handler using envelope API
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
+        handler_output = await handler.handle(envelope)
+        result_events = handler_output.events
 
         # For a node in retriable state, handler should emit NodeRegistrationInitiated
         assert len(result_events) == 1, (
@@ -997,9 +1024,15 @@ class TestSuite3ReIntrospection:
             enable_registry_listener=True,
         )
 
-        # Allow time for the registry listener to establish Kafka subscription
-        # This is necessary because the listener subscribes asynchronously
-        await asyncio.sleep(2.0)
+        # Wait for registry listener's Kafka consumer to be ready.
+        # The listener subscribes to DEFAULT_REQUEST_INTROSPECTION_TOPIC internally.
+        # RATIONALE: This uses wait_for_consumer_ready for consistency with other
+        # consumer waits, though we can't access the internal event bus directly.
+        # The wait_for_consumer_ready helper documents the known limitation that
+        # true readiness polling would require KafkaEventBus API changes.
+        await wait_for_consumer_ready(
+            real_kafka_event_bus, DEFAULT_REQUEST_INTROSPECTION_TOPIC, max_wait=2.0
+        )
 
         try:
             # Collect introspection events for our node
@@ -1096,8 +1129,11 @@ class TestSuite3ReIntrospection:
             enable_registry_listener=True,
         )
 
-        # Allow time for the registry listener to establish Kafka subscription
-        await asyncio.sleep(2.0)
+        # Wait for registry listener's Kafka consumer to be ready.
+        # See wait_for_consumer_ready docstring for known limitations.
+        await wait_for_consumer_ready(
+            real_kafka_event_bus, DEFAULT_REQUEST_INTROSPECTION_TOPIC, max_wait=2.0
+        )
 
         try:
             # Track responses with matching correlation_id
@@ -1235,6 +1271,13 @@ class TestSuite4HeartbeatPublishing:
         )
 
         try:
+            # Wait for consumer to be ready before starting heartbeats.
+            # Using max_wait=1.0 to ensure the first "immediate" heartbeat is captured.
+            # See wait_for_consumer_ready docstring for known limitations.
+            await wait_for_consumer_ready(
+                real_kafka_event_bus, heartbeat_topic, max_wait=1.0
+            )
+
             # Start heartbeat with 30s interval
             await introspectable_test_node.start_introspection_tasks(
                 enable_heartbeat=True,
@@ -1242,8 +1285,11 @@ class TestSuite4HeartbeatPublishing:
                 enable_registry_listener=False,
             )
 
-            # Wait for 2 heartbeat intervals (65 seconds to be safe)
-            # First heartbeat happens immediately on start
+            # RATIONALE: This is a heartbeat interval test - we MUST wait for
+            # at least 2 heartbeat cycles (30s interval) to verify the timing.
+            # A shorter wait would not test the actual heartbeat interval behavior.
+            # Wait for 2 heartbeat intervals (65 seconds to be safe).
+            # First heartbeat happens immediately on start.
             await asyncio.sleep(65.0)
 
             # Verify we received at least 2 heartbeats
@@ -1362,7 +1408,7 @@ class TestSuite4HeartbeatPublishing:
         ) as timing:
             # _publish_heartbeat is the internal method that does the actual work
             # Since we're testing overhead, we call it directly
-            success = await introspectable_test_node._publish_heartbeat()
+            await introspectable_test_node._publish_heartbeat()
 
         # Verify the operation completed (success depends on event bus availability)
         # In E2E tests, event bus is connected so this should succeed
@@ -1441,19 +1487,27 @@ class TestSuite4HeartbeatPublishing:
         min_heartbeat_time = datetime.now(UTC)
 
         # Create heartbeat event - preserve test's correlation_id for tracing
+        heartbeat_timestamp = datetime.now(UTC)
         heartbeat_event = ModelNodeHeartbeatEvent(
             node_id=unique_node_id,
             node_type=introspectable_test_node.node_type,
             uptime_seconds=10.0,
             active_operations_count=0,
             correlation_id=correlation_id,
-            timestamp=datetime.now(UTC),
+            timestamp=heartbeat_timestamp,
         )
 
-        # Process heartbeat through the handler directly
+        # Process heartbeat through the handler directly using envelope API
         # OMN-1102: Orchestrator is declarative - test handler directly
         # (In full E2E with runtime, this would come from Kafka consumer)
-        await heartbeat_handler.handle(heartbeat_event)
+        heartbeat_envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=heartbeat_event,
+            envelope_timestamp=heartbeat_timestamp,
+            correlation_id=correlation_id,
+            source="e2e-test",
+        )
+        await heartbeat_handler.handle(heartbeat_envelope)
 
         # Query the projection to verify heartbeat was processed
         projection = await projection_reader.get_entity_state(
@@ -1523,7 +1577,10 @@ class TestHeartbeatPerformanceExtended:
                 enable_registry_listener=False,
             )
 
-            # Wait for 3+ intervals (100 seconds)
+            # RATIONALE: This is a heartbeat consistency test - we MUST wait for
+            # at least 3 heartbeat cycles (30s interval each) to verify interval
+            # stability. A shorter wait would not test the actual timing consistency.
+            # Wait for 3+ intervals (100 seconds).
             await asyncio.sleep(100.0)
 
             # Verify we have enough heartbeats
@@ -1572,12 +1629,12 @@ class TestSuite5RegistryRecovery:
     async def test_registry_recovery_after_restart(
         self,
         wired_container: ModelONEXContainer,
-        postgres_pool,
+        postgres_pool: asyncpg.Pool,
         real_kafka_event_bus: KafkaEventBus,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test registry recovers state after simulated restart.
 
@@ -1625,8 +1682,13 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for persistence
-        await asyncio.sleep(0.2)
+        # Wait for PostgreSQL write to complete using deterministic polling
+        write_result = await wait_for_postgres_write(
+            projection_reader, unique_node_id, timeout_seconds=2.0
+        )
+        assert write_result is not None, (
+            f"PostgreSQL write did not complete in time for node {unique_node_id}"
+        )
 
         # Step 2: Create a NEW container and orchestrator (simulating restart)
         from omnibase_core.container import ModelONEXContainer as ContainerClass
@@ -1664,13 +1726,13 @@ class TestSuite5RegistryRecovery:
     async def test_re_registration_after_recovery(
         self,
         wired_container: ModelONEXContainer,
-        postgres_pool,
+        postgres_pool: asyncpg.Pool,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test nodes can re-register after registry recovery.
 
@@ -1717,8 +1779,13 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for persistence
-        await asyncio.sleep(0.2)
+        # Wait for PostgreSQL write to complete using deterministic polling
+        write_result = await wait_for_postgres_write(
+            projection_reader, unique_node_id, timeout_seconds=2.0
+        )
+        assert write_result is not None, (
+            f"PostgreSQL write did not complete in time for node {unique_node_id}"
+        )
 
         # Step 2: Create handler and process same introspection event (simulating re-registration)
         handler_projection_reader = await get_projection_reader_from_container(
@@ -1731,11 +1798,17 @@ class TestSuite5RegistryRecovery:
             correlation_id=unique_correlation_id,
         )
 
-        result_events = await handler.handle(
-            event=event,
-            now=datetime.now(UTC),
+        # Process the event through the handler using envelope API
+        now = datetime.now(UTC)
+        envelope = ModelEventEnvelope(
+            envelope_id=uuid4(),
+            payload=event,
+            envelope_timestamp=now,
             correlation_id=unique_correlation_id,
+            source="e2e-test",
         )
+        handler_output = await handler.handle(envelope)
+        result_events = handler_output.events
 
         # Step 3: Verify idempotent behavior
         # For a node in ACTIVE state (blocking), handler should return empty list (no-op)
@@ -1760,11 +1833,11 @@ class TestSuite5RegistryRecovery:
         self,
         registration_orchestrator: NodeRegistrationOrchestrator,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test registration uses UPSERT semantics (idempotent).
 
@@ -1804,10 +1877,7 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(1),
         )
 
-        # Wait for initial persistence
-        await asyncio.sleep(0.2)
-
-        # Verify initial registration
+        # Verify initial registration (polling already handles retry)
         first_result = await wait_for_postgres_registration(
             projection_reader=projection_reader,
             node_id=unique_node_id,
@@ -1835,10 +1905,7 @@ class TestSuite5RegistryRecovery:
             sequence_info=ModelSequenceInfo.from_sequence(2),
         )
 
-        # Wait for update
-        await asyncio.sleep(0.2)
-
-        # Step 3: Verify single record with updated data
+        # Step 3: Verify single record with updated data (polling already handles retry)
         final_result = await wait_for_postgres_registration(
             projection_reader=projection_reader,
             node_id=unique_node_id,
@@ -1887,11 +1954,11 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test multiple nodes can register simultaneously.
 
@@ -1950,9 +2017,7 @@ class TestSuite6MultipleNodes:
             if isinstance(result, Exception):
                 pytest.fail(f"Node {node_ids[i]} registration failed: {result}")
 
-        # Step 3: Verify all nodes appear in PostgreSQL
-        await asyncio.sleep(0.5)  # Allow propagation
-
+        # Step 3: Verify all nodes appear in PostgreSQL (polling already handles retry)
         for i, node_id in enumerate(node_ids):
             projection = await verify_postgres_registration(
                 projection_reader=projection_reader,
@@ -1969,10 +2034,10 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
-        introspection_event_factory,
+        real_projector: ProjectorRegistration,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test no race conditions when registering same node concurrently.
 
@@ -2028,9 +2093,7 @@ class TestSuite6MultipleNodes:
             for ex in exceptions:
                 print(f"Concurrent operation exception (may be expected): {ex}")
 
-        # Step 3: Verify exactly one registration exists
-        await asyncio.sleep(0.5)  # Allow final state to settle
-
+        # Step 3: Verify exactly one registration exists (polling already handles retry)
         projection = await verify_postgres_registration(
             projection_reader=projection_reader,
             node_id=unique_node_id,
@@ -2043,7 +2106,8 @@ class TestSuite6MultipleNodes:
         assert projection.current_state == EnumRegistrationState.ACTIVE
 
         # Verify no corruption - version should be one of the submitted values
-        version_int = int(projection.node_version.split(".")[-1])
+        # node_version is a ModelSemVer object, access patch directly
+        version_int = projection.node_version.patch
         assert 0 <= version_int < concurrent_count, (
             f"Version {projection.node_version} should be from one of the "
             f"concurrent operations (0-{concurrent_count - 1})"
@@ -2054,11 +2118,11 @@ class TestSuite6MultipleNodes:
         self,
         wired_container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         real_consul_handler: HandlerConsul,
         cleanup_consul_services: list[str],
         cleanup_node_ids: list[UUID],
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test all registered nodes appear in both Consul and PostgreSQL.
 
@@ -2131,10 +2195,7 @@ class TestSuite6MultipleNodes:
             }
             await real_consul_handler.execute(consul_envelope)
 
-        # Allow propagation
-        await asyncio.sleep(0.5)
-
-        # Step 2: Verify all 3 in Consul
+        # Step 2: Verify all 3 in Consul (polling already handles retry)
         consul_results = []
         for service_id in service_ids:
             result = await verify_consul_registration(
@@ -2151,15 +2212,17 @@ class TestSuite6MultipleNodes:
         )
 
         # Step 3: Verify all 3 in PostgreSQL
-        postgres_results = []
+        postgres_results: list[ModelRegistrationProjection | None] = []
         for node_id in node_ids:
-            result = await verify_postgres_registration(
+            pg_result = await verify_postgres_registration(
                 projection_reader=projection_reader,
                 node_id=node_id,
             )
-            postgres_results.append(result)
-            assert result is not None, f"Node {node_id} should be found in PostgreSQL"
-            assert result.current_state == EnumRegistrationState.ACTIVE
+            postgres_results.append(pg_result)
+            assert pg_result is not None, (
+                f"Node {node_id} should be found in PostgreSQL"
+            )
+            assert pg_result.current_state == EnumRegistrationState.ACTIVE
 
         assert len([r for r in postgres_results if r is not None]) == node_count, (
             f"Expected {node_count} registrations in PostgreSQL, "
@@ -2167,7 +2230,7 @@ class TestSuite6MultipleNodes:
         )
 
         # Verify data consistency across backends
-        for i, (node_id, service_id) in enumerate(
+        for i, (_node_id, _service_id) in enumerate(
             zip(node_ids, service_ids, strict=True)
         ):
             pg_result = postgres_results[i]
@@ -2252,7 +2315,9 @@ class TestSuite7GracefulDegradation:
         assert event.node_id == unique_node_id
 
         # Verify publish returns False gracefully (no event bus)
-        success = await node.publish_introspection(reason="test")
+        success = await node.publish_introspection(
+            reason=EnumIntrospectionReason.REQUEST
+        )
         assert success is False, (
             "Publish should return False when no event bus available"
         )
@@ -2265,12 +2330,12 @@ class TestSuite7GracefulDegradation:
     async def test_registry_works_when_consul_unavailable(
         self,
         wired_container: ModelONEXContainer,
-        postgres_pool,
+        postgres_pool: asyncpg.Pool,
         projection_reader: ProjectionReaderRegistration,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test registry can still register in PostgreSQL when Consul is unavailable.
 
@@ -2330,7 +2395,7 @@ class TestSuite7GracefulDegradation:
     async def test_registry_works_when_postgres_unavailable(
         self,
         real_consul_handler: HandlerConsul,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         cleanup_consul_services: list[str],
     ) -> None:
@@ -2416,12 +2481,14 @@ class TestSuite7GracefulDegradation:
         consul_success = ModelBackendResult(
             success=True,
             duration_ms=45.0,
+            backend_id="consul",
         )
         postgres_failure = ModelBackendResult(
             success=False,
             error="Connection refused",
             error_code="DATABASE_CONNECTION_ERROR",
             duration_ms=5000.0,
+            backend_id="postgres",
         )
 
         response = ModelRegistryResponse.from_backend_results(
@@ -2459,10 +2526,12 @@ class TestSuite7GracefulDegradation:
             error="Service unavailable",
             error_code="SERVICE_UNAVAILABLE",
             duration_ms=3000.0,
+            backend_id="consul",
         )
         postgres_success = ModelBackendResult(
             success=True,
             duration_ms=30.0,
+            backend_id="postgres",
         )
 
         response2 = ModelRegistryResponse.from_backend_results(
@@ -2574,10 +2643,10 @@ class TestSuite8RegistrySelfRegistration:
         self,
         real_consul_handler: HandlerConsul,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         wired_container: ModelONEXContainer,
         cleanup_consul_services: list[str],
-        cleanup_projections,
+        cleanup_projections: None,
         unique_node_id: UUID,
     ) -> None:
         """Test registry can register itself as a service.
@@ -2673,11 +2742,11 @@ class TestSuite8RegistrySelfRegistration:
     async def test_self_registration_in_database(
         self,
         projection_reader: ProjectionReaderRegistration,
-        real_projector,
+        real_projector: ProjectorRegistration,
         wired_container: ModelONEXContainer,
-        postgres_pool,
+        postgres_pool: asyncpg.Pool,
         unique_node_id: UUID,
-        cleanup_projections,
+        cleanup_projections: None,
     ) -> None:
         """Test registry self-registration persists in database.
 
@@ -2735,7 +2804,7 @@ class TestSuite8RegistrySelfRegistration:
     async def test_registry_introspection_data_complete(
         self,
         wired_container: ModelONEXContainer,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test registry's own introspection data is complete.
 
@@ -2778,35 +2847,39 @@ class TestSuite8RegistrySelfRegistration:
     @pytest.mark.asyncio
     async def test_registry_introspection_with_custom_capabilities(
         self,
-        introspection_event_factory,
+        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
     ) -> None:
         """Test registry introspection includes custom capabilities.
 
         Verifies:
-        - Registry can specify handler capabilities
-        - Timeout coordination capability is included
+        - Registry can specify handler capabilities via supported_types
+        - Processing and routing capabilities can be enabled
+        - Custom capabilities work via model_extra
         """
         from omnibase_infra.models.registration.model_node_capabilities import (
             ModelNodeCapabilities,
         )
 
         # Create capabilities typical for a registry orchestrator
+        # Use supported_types for handler names (valid list[str] field)
         registry_capabilities = ModelNodeCapabilities(
-            handlers=[
+            supported_types=[
                 "HandlerNodeIntrospected",
                 "HandlerRuntimeTick",
                 "HandlerNodeHeartbeat",
             ],
-            supports_timeout_coordination=True,
-            supports_batch_operations=True,
+            processing=True,
+            routing=True,
         )
 
         # Verify capabilities are structured correctly
-        assert registry_capabilities.handlers is not None
-        assert len(registry_capabilities.handlers) == 3
-        assert "HandlerNodeIntrospected" in registry_capabilities.handlers
-        assert "HandlerRuntimeTick" in registry_capabilities.handlers
-        assert "HandlerNodeHeartbeat" in registry_capabilities.handlers
+        assert registry_capabilities.supported_types is not None
+        assert len(registry_capabilities.supported_types) == 3
+        assert "HandlerNodeIntrospected" in registry_capabilities.supported_types
+        assert "HandlerRuntimeTick" in registry_capabilities.supported_types
+        assert "HandlerNodeHeartbeat" in registry_capabilities.supported_types
+        assert registry_capabilities.processing is True
+        assert registry_capabilities.routing is True
 
     @pytest.mark.asyncio
     async def test_registry_discoverable_by_other_nodes(
@@ -2872,7 +2945,8 @@ class TestSuite8RegistrySelfRegistration:
 
             if isinstance(value, bytes):
                 value = value.decode("utf-8")
-            stored_data = json_mod.loads(value)
-            assert stored_data.get("service_type") == "registry"
-            assert stored_data.get("node_type") == "orchestrator"
-            assert "registration" in stored_data.get("endpoints", {})
+            if isinstance(value, str):
+                stored_data = json_mod.loads(value)
+                assert stored_data.get("service_type") == "registry"
+                assert stored_data.get("node_type") == "orchestrator"
+                assert "registration" in stored_data.get("endpoints", {})

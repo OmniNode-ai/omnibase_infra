@@ -608,7 +608,6 @@ class TestCacheReadAfterWrite:
     ) -> None:
         """Test that published snapshot is immediately available in cache."""
         # First load empty cache
-        mock_tp = MagicMock()
         mock_consumer.getmany = AsyncMock(return_value={})
 
         with patch(

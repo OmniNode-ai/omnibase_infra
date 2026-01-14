@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: G201
+# G201 disabled: Logging extra dict is intentional for structured logging with correlation IDs
 """Node introspection mixin providing automatic capability discovery.
 
 This module provides a reusable mixin for ONEX nodes to implement automatic
@@ -669,7 +671,9 @@ class MixinNodeIntrospection:
                 f"Introspection initialized without event bus for {config.node_id}",
                 extra={
                     "node_id": config.node_id,
-                    "node_type": config.node_type,
+                    "node_type": config.node_type.value
+                    if hasattr(config.node_type, "value")
+                    else str(config.node_type),
                 },
             )
 
@@ -677,7 +681,9 @@ class MixinNodeIntrospection:
             f"Introspection initialized for {config.node_id}",
             extra={
                 "node_id": config.node_id,
-                "node_type": config.node_type,
+                "node_type": config.node_type.value
+                if hasattr(config.node_type, "value")
+                else str(config.node_type),
                 "version": config.version,
                 "cache_ttl": config.cache_ttl,
                 "has_event_bus": config.event_bus is not None,
@@ -1368,7 +1374,7 @@ class MixinNodeIntrospection:
 
     async def publish_introspection(
         self,
-        reason: str = "startup",
+        reason: str | EnumIntrospectionReason = EnumIntrospectionReason.STARTUP,
         correlation_id: UUID | None = None,
     ) -> bool:
         """Publish introspection event to the event bus.
@@ -1381,8 +1387,10 @@ class MixinNodeIntrospection:
         for integrating operation tracking into node operations.
 
         Args:
-            reason: Reason for the introspection event
-                (startup, shutdown, request, heartbeat)
+            reason: Reason for the introspection event. Can be an
+                EnumIntrospectionReason or a string matching enum values
+                (startup, shutdown, request, heartbeat, health_change,
+                capability_change). Invalid strings default to HEARTBEAT.
             correlation_id: Optional correlation ID for tracing
 
         Returns:
@@ -1393,20 +1401,47 @@ class MixinNodeIntrospection:
 
         Example:
             ```python
-            # On startup
-            success = await node.publish_introspection(reason="startup")
+            # On startup (using enum - preferred)
+            success = await node.publish_introspection(
+                reason=EnumIntrospectionReason.STARTUP
+            )
 
-            # On shutdown
+            # On shutdown (using string - backwards compatible)
             success = await node.publish_introspection(reason="shutdown")
             ```
         """
         self._ensure_initialized()
+
+        # Convert reason to enum - check Enum first since EnumIntrospectionReason
+        # inherits from str, so isinstance(..., str) would match both types.
+        # Normalize string inputs with strip().lower() for robust matching.
+        reason_enum: EnumIntrospectionReason
+        if isinstance(reason, EnumIntrospectionReason):
+            reason_enum = reason
+        elif isinstance(reason, str):
+            try:
+                # Normalize: strip whitespace, lowercase for case-insensitive match
+                reason_enum = EnumIntrospectionReason(reason.strip().lower())
+            except ValueError:
+                logger.warning(
+                    f"Unknown introspection reason '{reason}', defaulting to HEARTBEAT",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "provided_reason": reason,
+                    },
+                )
+                reason_enum = EnumIntrospectionReason.HEARTBEAT
+        else:
+            raise TypeError(
+                f"reason must be str or EnumIntrospectionReason, got {type(reason).__name__}"
+            )
+
         if self._introspection_event_bus is None:
             logger.warning(
                 f"Cannot publish introspection - no event bus configured for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
-                    "reason": reason,
+                    "reason": reason_enum.value,
                 },
             )
             return False
@@ -1422,7 +1457,7 @@ class MixinNodeIntrospection:
                 final_correlation_id = correlation_id or uuid4()
                 publish_event = event.model_copy(
                     update={
-                        "reason": reason,
+                        "reason": reason_enum,
                         "correlation_id": final_correlation_id,
                     }
                 )
@@ -1453,7 +1488,7 @@ class MixinNodeIntrospection:
                     f"Published introspection event for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
-                        "reason": reason,
+                        "reason": reason_enum.value,
                         "correlation_id": str(final_correlation_id),
                     },
                 )
@@ -1462,11 +1497,11 @@ class MixinNodeIntrospection:
             except Exception as e:
                 # Use error() with exc_info=True instead of exception() to include
                 # structured error_type and error_message fields for log aggregation
-                logger.error(  # noqa: G201
+                logger.error(
                     f"Failed to publish introspection for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
-                        "reason": reason,
+                        "reason": reason_enum.value,
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                     },
@@ -1576,7 +1611,7 @@ class MixinNodeIntrospection:
         except Exception as e:
             # Use error() with exc_info=True instead of exception() to include
             # structured error_type and error_message fields for log aggregation
-            logger.error(  # noqa: G201
+            logger.error(
                 f"Failed to publish heartbeat for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
@@ -1620,7 +1655,7 @@ class MixinNodeIntrospection:
             except Exception as e:
                 # Use error() with exc_info=True instead of exception() to include
                 # structured error_type and error_message fields for log aggregation
-                logger.error(  # noqa: G201
+                logger.error(
                     f"Error in heartbeat loop for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,

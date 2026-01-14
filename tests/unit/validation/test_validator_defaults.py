@@ -426,10 +426,6 @@ class TestCLICommandDefaults:
 
     def test_architecture_cli_defaults(self) -> None:
         """Verify architecture CLI command has correct defaults."""
-        from click.testing import CliRunner
-
-        runner = CliRunner()
-
         # Check default max_violations in option
         from omnibase_infra.cli.commands import validate_architecture_cmd
 

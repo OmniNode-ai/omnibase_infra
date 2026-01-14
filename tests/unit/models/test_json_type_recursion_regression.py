@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from pydantic import ValidationError
 
 # Import affected models that use JsonType or dict[str, object]
 from omnibase_infra.handlers.models.http.model_http_post_payload import (

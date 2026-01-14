@@ -22,7 +22,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import asyncpg
@@ -288,9 +288,7 @@ class TestModelCapabilityFields:
     def test_capability_fields_is_frozen(self) -> None:
         """Test that ModelCapabilityFields is immutable."""
         fields = ModelCapabilityFields(contract_type="effect")
-        with pytest.raises(
-            Exception
-        ):  # Pydantic raises ValidationError for frozen models
+        with pytest.raises(ValidationError):
             fields.contract_type = "compute"  # type: ignore[misc]
 
     def test_capability_fields_serializes_correctly(self) -> None:

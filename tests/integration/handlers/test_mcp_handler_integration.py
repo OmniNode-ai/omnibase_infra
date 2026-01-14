@@ -45,19 +45,16 @@ if TYPE_CHECKING:
         ONEXToMCPAdapter,
         TransportMCPStreamableHttp,
     )
-    from omnibase_infra.handlers.mcp.adapter_onex_to_mcp import MCPToolParameter
     from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
 # Check if MCP SDK is available for tests that require it
-try:
-    import mcp
+# Using importlib.util.find_spec avoids importing the module just to check availability
+import importlib.util
 
-    MCP_AVAILABLE = True
-except ImportError:
-    MCP_AVAILABLE = False
+MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
 
 requires_mcp = pytest.mark.skipif(
     not MCP_AVAILABLE,

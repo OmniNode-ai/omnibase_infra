@@ -31,7 +31,7 @@
 #
 # Environment variables:
 #   RUNTIME_PROFILE   - Runtime profile selection (default: all)
-#   CONTRACTS_DIR     - Contract configuration directory (default: /app/contracts)
+#   ONEX_CONTRACTS_DIR - Contract configuration directory (default: /app/contracts)
 #   ONEX_LOG_LEVEL    - Logging level (default: INFO)
 #   ONEX_ENVIRONMENT  - Environment name (default: local)
 #   ONEX_INPUT_TOPIC  - Input topic for event bus (default: requests)
@@ -188,7 +188,7 @@ ENV PYTHONUNBUFFERED=1 \
     # Runtime profile selection (all | minimal | kafka | consul | vault)
     RUNTIME_PROFILE=all \
     # Contract configuration directory
-    CONTRACTS_DIR=/app/contracts \
+    ONEX_CONTRACTS_DIR=/app/contracts \
     # Logging configuration
     ONEX_LOG_LEVEL=INFO \
     # Event bus configuration
@@ -261,5 +261,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command runs the ONEX kernel via Poetry-installed script
-# The kernel loads configuration from CONTRACTS_DIR and starts the runtime
+# The kernel loads configuration from ONEX_CONTRACTS_DIR and starts the runtime
 CMD ["onex-runtime"]

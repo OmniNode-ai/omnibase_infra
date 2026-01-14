@@ -81,7 +81,16 @@ raise PaymentError(f"Card declined: {cc_number}")  # NEVER
 
 # IP addresses of users (in some contexts)
 user_ip = "192.168.1.100"
-raise SecurityError(f"Blocked request from {user_ip}")  # Context-dependent
+# NOTE: Including IPs is context-dependent - avoid in user-facing errors
+raise InfraAuthenticationError(
+    f"Blocked request from {user_ip}",  # May be acceptable for security logs
+    context=ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.HTTP,
+        operation="authenticate",
+        target_name="api-gateway",
+        correlation_id=correlation_id,
+    ),
+)
 ```
 
 #### Internal System Details

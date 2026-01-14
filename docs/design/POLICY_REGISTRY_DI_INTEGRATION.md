@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document designs the integration of `PolicyRegistry` with ONEX's dependency injection system using `ModelOnexContainer` from `omnibase_core`. The goal is to remove the singleton pattern and use proper container-managed dependency injection while maintaining thread-safety and backwards compatibility.
+This document designs the integration of `PolicyRegistry` with ONEX's dependency injection system using `ModelOnexContainer` from `omnibase_core`. The goal is to remove the singleton pattern and use proper container-managed dependency injection while maintaining thread-safety.
 
 ## Current Architecture
 
@@ -114,47 +114,19 @@ class PolicyRegistry:
     # ... rest of implementation unchanged (register, get, list_keys, etc.)
 ```
 
-**Deprecate but maintain singleton accessor for backwards compatibility:**
+**Remove singleton accessor (per no-backwards-compatibility policy):**
+
+Per CLAUDE.md, all changes are breaking changes and no backwards compatibility is maintained.
+The singleton accessor should be removed entirely, not deprecated:
 
 ```python
 # src/omnibase_infra/runtime/policy_registry.py
 
-# =============================================================================
-# DEPRECATED: Module-Level Singleton Registry (For Backwards Compatibility)
-# =============================================================================
+# The singleton pattern has been REMOVED (not deprecated).
+# Use container-based DI exclusively:
 
-_policy_registry: Optional[PolicyRegistry] = None
-_singleton_lock: threading.Lock = threading.Lock()
-
-
-def get_policy_registry() -> PolicyRegistry:
-    """Get the module-level singleton policy registry instance.
-
-    .. deprecated:: 0.2.0
-        Use container-based DI instead:
-
-        ```python
-        # OLD (deprecated):
-        registry = get_policy_registry()
-
-        # NEW (preferred):
-        def __init__(self, container: ModelOnexContainer):
-            self.policy_registry = container.resolve("policy_registry")
-        ```
-
-    This function maintains backwards compatibility for code that hasn't
-    migrated to container-based DI. New code should use the container
-    to resolve PolicyRegistry.
-
-    Returns:
-        PolicyRegistry: The singleton policy registry instance.
-    """
-    global _policy_registry  # noqa: PLW0603
-    if _policy_registry is None:
-        with _singleton_lock:
-            if _policy_registry is None:
-                _policy_registry = PolicyRegistry()
-    return _policy_registry
+def __init__(self, container: ModelOnexContainer):
+    self.policy_registry = container.resolve("policy_registry")
 ```
 
 #### 1.2 Container Registration
@@ -261,7 +233,7 @@ def wire_infrastructure_services(container: ModelOnexContainer) -> dict[str, lis
 def get_or_create_policy_registry(container: ModelOnexContainer) -> PolicyRegistry:
     """Get PolicyRegistry from container, creating if not registered.
 
-    Helper function for backwards compatibility during migration.
+    Helper function for lazy initialization.
     Checks if PolicyRegistry is registered in container, and if not,
     creates and registers a new instance.
 
@@ -322,16 +294,18 @@ class NodeInfrastructureOrchestratorEffect:
         ...
 ```
 
-**Pattern for consumers without container (backwards compatibility):**
+**All consumers must use container-based DI:**
+
+Per CLAUDE.md, no backwards compatibility is maintained. The singleton pattern has been removed.
+All code must use container-based DI:
 
 ```python
-# Legacy code or standalone utilities
-from omnibase_infra.runtime.policy_registry import get_policy_registry
+# Standalone utilities must accept container parameter
+from omnibase_infra.runtime.container_wiring import get_or_create_policy_registry
 
-def register_default_policies() -> None:
-    """Register default policies (backwards compatible)."""
-    # Uses deprecated singleton accessor
-    registry = get_policy_registry()
+def register_default_policies(container: ModelOnexContainer) -> None:
+    """Register default policies using container DI."""
+    registry = get_or_create_policy_registry(container)
 
     registry.register_policy(
         policy_id="exponential_backoff",
@@ -676,11 +650,9 @@ registry.register_policy(
     version="1.0.0",
 )
 
-# Singleton-based (deprecated, backwards compatibility)
-from omnibase_infra.runtime.policy_registry import get_policy_registry
-registry = get_policy_registry()
-registry.register_policy(...)
-```
+# NOTE: Singleton pattern has been REMOVED (not deprecated).
+# Per CLAUDE.md, no backwards compatibility is maintained.
+# All code must use container-based DI.
 ```
 
 ## Benefits of Container-Based Approach
@@ -709,38 +681,24 @@ registry.register_policy(...)
 - **Service overrides**: Easy to replace services for testing
 - **Lazy initialization**: Services created only when resolved
 
-## Migration Timeline
+## Implementation Checklist
 
-### Immediate (PR for ONM-812)
+### Required Changes (PR for ONM-812)
 
 1. ✅ Add `container_wiring.py` with `wire_infrastructure_services()`
 2. ✅ Add container-aware convenience functions
 3. ✅ Document container-based pattern in docstrings
-4. ✅ Keep singleton pattern for backwards compatibility
+4. ✅ Remove singleton pattern entirely (per no-backwards-compatibility policy)
 
-### Short-term (Next Sprint)
+### Follow-up Tasks
 
 1. Update test fixtures to use container
 2. Update examples and documentation
 3. Add integration tests with real ModelOnexContainer
-
-### Medium-term (Future Sprints)
-
-1. Migrate all consumers to container-based DI
-2. Add deprecation warnings to singleton accessors
-3. Update `ProtocolBindingRegistry` and `EventBusBindingRegistry` to use container
-
-### Long-term (Future Release)
-
-1. Remove singleton pattern entirely (breaking change)
-2. Make container parameter required for all services
-3. Remove deprecated convenience functions
+4. Update all consumers to container-based DI
+5. Update `ProtocolBindingRegistry` and `EventBusBindingRegistry` to use container
 
 ## Risks and Mitigations
-
-### Risk: Breaking Changes
-
-**Mitigation**: Keep singleton pattern for backwards compatibility. Only deprecate, don't remove.
 
 ### Risk: Container Not Available
 
@@ -763,6 +721,6 @@ registry.register_policy(...)
 
 ## Conclusion
 
-This design provides a clear path to migrate PolicyRegistry from singleton pattern to container-based DI while maintaining backwards compatibility. The phased approach allows incremental migration without breaking existing code.
+This design provides a clear path to migrate PolicyRegistry from singleton pattern to container-based DI. Per CLAUDE.md policy, all changes are breaking changes and no backwards compatibility is maintained. The singleton pattern should be removed entirely.
 
-**Recommendation**: Implement Phase 1 (container wiring) in ONM-812. This provides the foundation for future migration while preserving backwards compatibility.
+**Recommendation**: Implement container wiring in ONM-812 and remove the singleton pattern immediately.

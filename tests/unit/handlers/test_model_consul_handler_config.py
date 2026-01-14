@@ -777,7 +777,7 @@ class TestModelConsulConfigEquality:
         assert config != "not a config"
         assert config != 42
         assert config != {"host": "localhost", "port": 8500}
-        assert config != None
+        assert config is not None
 
     def test_retry_config_not_equal_to_other_types(self) -> None:
         """Test retry config is not equal to non-config types."""
@@ -785,7 +785,7 @@ class TestModelConsulConfigEquality:
         assert config != "not a config"
         assert config != 42
         assert config != {"max_attempts": 3}
-        assert config != None
+        assert config is not None
 
     def test_handler_config_hash_with_token(self) -> None:
         """Test handler config hash consistency with SecretStr token."""

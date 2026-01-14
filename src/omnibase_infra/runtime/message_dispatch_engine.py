@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: TRY400
+# TRY400 disabled: logger.error is intentional to avoid leaking sensitive data in stack traces
 """
 Message Dispatch Engine.
 
@@ -1171,7 +1173,7 @@ class MessageDispatchEngine:
                 # logger.exception() to avoid leaking sensitive data in stack traces.
                 # The sanitized_error variable already contains safe error details.
                 # TRY400: Intentionally using error() instead of exception() for security
-                self._logger.error(  # noqa: TRY400
+                self._logger.error(
                     "Dispatcher '%s' failed: %s",
                     dispatcher_entry.dispatcher_id,
                     sanitized_error,
@@ -1273,7 +1275,7 @@ class MessageDispatchEngine:
                 # TRY400: Intentionally using error() instead of exception() for security
                 # - exception() would log stack trace which may expose internal paths
                 # - sanitized_validation_error already contains safe error details
-                self._logger.error(  # noqa: TRY400
+                self._logger.error(
                     "Failed to validate dispatch outputs (%d topics): %s",
                     len(outputs),
                     sanitized_validation_error,
@@ -1326,7 +1328,7 @@ class MessageDispatchEngine:
             # This is a critical internal error - log and return a minimal error result
             sanitized_result_error = sanitize_error_message(result_validation_error)
             # TRY400: Intentionally using error() instead of exception() for security
-            self._logger.error(  # noqa: TRY400
+            self._logger.error(
                 "Failed to construct ModelDispatchResult: %s",
                 sanitized_result_error,
                 extra=self._build_log_context(

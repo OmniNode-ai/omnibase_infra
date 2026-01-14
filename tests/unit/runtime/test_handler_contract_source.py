@@ -47,16 +47,13 @@ from omnibase_infra.runtime.protocol_contract_descriptor import (
 # This enables the graceful_mode=True pattern where discovery continues despite
 # errors and returns both valid descriptors and collected validation errors.
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
-from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
+from tests.helpers.mock_helpers import create_mock_stat_result
 
 # Alias for test readability - HandlerContractSource implements ProtocolContractSource
 ProtocolHandlerSource = ProtocolContractSource
 ProtocolHandlerDescriptor = ProtocolContractDescriptor
 
 # Import the actual model returned by HandlerContractSource
-from omnibase_infra.models.handlers.model_handler_descriptor import (
-    ModelHandlerDescriptor,
-)
 
 # =============================================================================
 # Constants for Test Contracts
@@ -778,7 +775,6 @@ output_model: "omnibase_infra.models.test.ModelTestOutput"
         """
         # Import will fail in RED phase - this is expected
         from omnibase_infra.enums import EnumHandlerErrorType
-        from omnibase_infra.models.errors import ModelHandlerValidationError
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )

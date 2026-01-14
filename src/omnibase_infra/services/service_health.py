@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S104
+# S104 disabled: Binding to 0.0.0.0 is intentional for Docker/K8s health checks
 """HTTP Health Service for ONEX Runtime.
 
 This module provides a minimal HTTP service for exposing health check endpoints.
@@ -80,7 +82,7 @@ logger = logging.getLogger(__name__)
 # Default configuration - hardcoded to avoid import-time crashes from invalid env vars
 # Environment variable override is handled safely in ServiceHealth.__init__
 DEFAULT_HTTP_PORT: int = 8085
-DEFAULT_HTTP_HOST = "0.0.0.0"  # noqa: S104 - Required for container networking
+DEFAULT_HTTP_HOST = "0.0.0.0"
 
 
 def _get_port_from_env(default: int) -> int:

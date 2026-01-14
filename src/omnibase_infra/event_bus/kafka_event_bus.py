@@ -176,7 +176,6 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -1074,7 +1073,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 try:
                     # Find and remove the subscription
                     subs = self._subscribers.get(topic, [])
-                    for i, (gid, sid, _) in enumerate(subs):
+                    for i, (_gid, sid, _) in enumerate(subs):
                         if sid == subscription_id:
                             subs.pop(i)
                             break

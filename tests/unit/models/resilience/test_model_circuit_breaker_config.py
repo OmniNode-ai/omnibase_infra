@@ -33,6 +33,7 @@ from unittest.mock import patch
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ProtocolConfigurationError
@@ -70,22 +71,22 @@ class TestModelCircuitBreakerConfigBasics:
         """Test model is immutable (frozen)."""
         config = ModelCircuitBreakerConfig()
 
-        with pytest.raises(Exception):  # Pydantic ValidationError for frozen
+        with pytest.raises(ValidationError):
             config.threshold = 10  # type: ignore[misc]
 
     def test_threshold_minimum_validation(self) -> None:
         """Test threshold must be >= 1."""
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError):
             ModelCircuitBreakerConfig(threshold=0)
 
     def test_reset_timeout_minimum_validation(self) -> None:
         """Test reset_timeout_seconds must be >= 0."""
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError):
             ModelCircuitBreakerConfig(reset_timeout_seconds=-1.0)
 
     def test_service_name_minimum_length(self) -> None:
         """Test service_name must have minimum length."""
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError):
             ModelCircuitBreakerConfig(service_name="")
 
 

@@ -16,7 +16,6 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.models.registration import (
@@ -869,7 +868,7 @@ class TestModelNodeRegistrationEquality:
         )
         assert registration != "not a model"
         assert registration != 42
-        assert registration != None
+        assert registration is not None
 
 
 class TestModelNodeRegistrationStringRepresentation:

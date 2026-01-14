@@ -15,11 +15,9 @@ import logging
 import re
 from pathlib import Path
 from unittest.mock import patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
-
-from .conftest import INVALID_YAML_SYNTAX, MINIMAL_HANDLER_CONTRACT_YAML
 
 
 class TestHandlerPluginLoaderObservabilityLogging:
@@ -392,7 +390,6 @@ class TestLogLoadSummaryMethod:
         self, valid_contract_directory: Path
     ) -> None:
         """Test that _log_load_summary returns a ModelPluginLoadSummary."""
-        from omnibase_infra.models.runtime import ModelPluginLoadSummary
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 
         loader = HandlerPluginLoader()

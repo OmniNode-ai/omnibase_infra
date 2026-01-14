@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S104
+# S104 disabled: Binding to 0.0.0.0 is intentional for container networking
 """MCP handler configuration model."""
 
 from pydantic import BaseModel, Field
@@ -18,7 +20,7 @@ class ModelMcpHandlerConfig(BaseModel):
         max_tools: Maximum number of tools to expose.
     """
 
-    host: str = Field(default="0.0.0.0", description="Host to bind MCP server to")  # noqa: S104
+    host: str = Field(default="0.0.0.0", description="Host to bind MCP server to")
     port: int = Field(default=8090, description="Port for MCP streamable HTTP endpoint")
     path: str = Field(default="/mcp", description="URL path for MCP endpoint")
     stateless: bool = Field(

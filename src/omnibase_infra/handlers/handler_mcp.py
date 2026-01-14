@@ -43,7 +43,6 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.models.mcp import (
     EnumMcpOperationType,
     ModelMcpHandlerConfig,
-    ModelMcpToolCall,
     ModelMcpToolResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction

@@ -618,7 +618,7 @@ class TestMemoryUsagePerformance:
 
         start_time = time.perf_counter()
 
-        for batch_num, batch_start in enumerate(range(0, total_events, batch_size)):
+        for batch_num, _batch_start in enumerate(range(0, total_events, batch_size)):
             batch_events = generate_events(
                 count=batch_size,
                 id_generator=id_generator,

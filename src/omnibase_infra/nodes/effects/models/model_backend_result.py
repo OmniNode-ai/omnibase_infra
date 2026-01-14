@@ -91,6 +91,7 @@ class ModelBackendResult(BaseModel):
         >>> result = ModelBackendResult(
         ...     success=True,
         ...     duration_ms=45.2,
+        ...     backend_id="consul",
         ... )
         >>> result.success
         True
@@ -101,6 +102,7 @@ class ModelBackendResult(BaseModel):
         ...     error="Connection refused to database host",
         ...     error_code="DATABASE_CONNECTION_ERROR",
         ...     duration_ms=5000.0,
+        ...     backend_id="postgres",
         ... )
         >>> result.success
         False

@@ -53,7 +53,6 @@ A PR review suggested exploring Python `Protocol` from `typing` to define dispat
 
 - **Type safety at registration time**: Catch signature mismatches early
 - **Runtime performance**: Minimize overhead during message dispatch
-- **Backwards compatibility**: Existing dispatchers must continue to work
 - **Code simplicity**: Solution should not add significant complexity
 - **Static analysis**: Enable mypy/pyright to catch type errors
 
@@ -160,7 +159,6 @@ def register_context_aware_dispatcher(
 
 **Cons**:
 - **API surface doubles**: Two methods instead of one
-- **Backwards compatibility**: Existing code uses unified `register_dispatcher()`
 - **User burden**: Caller must choose the correct method
 - **Potential for misuse**: User could call wrong method (though static type checker would catch it)
 
@@ -399,16 +397,15 @@ This provides:
 
 ### Phase 2: Future Enhancement (Optional)
 
-Consider **Option 2** - separate registration methods - for new code:
+Consider **Option 2** - separate registration methods:
 
 1. Add `register_context_aware_dispatcher()` method
 2. Document it as the preferred API when using `node_kind`
-3. Keep `register_dispatcher()` with introspection fallback for backwards compatibility
+3. Remove `register_dispatcher()` introspection fallback (per no-backwards-compatibility policy)
 4. Use `@overload` (Option 4) to improve static type checking on existing API
 
 This provides:
-- **Opt-in type safety**: New code gets static verification
-- **Gradual migration**: Existing code continues to work
+- **Type safety**: Static verification for all dispatchers
 - **Clear documentation**: API names describe expected usage
 
 ## Implementation Notes
@@ -476,12 +473,15 @@ async def _execute_dispatcher(
 ```python
 def _dispatcher_accepts_context(self, dispatcher: DispatcherFunc) -> bool:
     """
-    .. deprecated:: 0.6.0
-        This method is deprecated. Signature checking is now performed
+    .. removed:: 0.6.0
+        This method has been removed. Signature checking is now performed
         at registration time and cached in DispatchEntryInternal.
+        Per CLAUDE.md policy, no backwards compatibility is maintained.
     """
-    # Keep for backwards compatibility if called externally
-    ...
+    raise NotImplementedError(
+        "_check_dispatcher_accepts_context has been removed. "
+        "Signature is now cached at registration time."
+    )
 ```
 
 ### Test Coverage

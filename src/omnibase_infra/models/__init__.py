@@ -52,6 +52,10 @@ from omnibase_infra.models.registration import (
     ModelNodeRegistration,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.models.routing import (
+    ModelRoutingEntry,
+    ModelRoutingSubcontract,
+)
 from omnibase_infra.models.runtime import ModelLoadedHandler
 from omnibase_infra.models.security import (
     ModelEnvironmentPolicy,
@@ -85,6 +89,9 @@ __all__: list[str] = [
     "ModelHandlerValidationError",
     # Handler models
     "ModelHandlerIdentifier",
+    # Routing models
+    "ModelRoutingEntry",
+    "ModelRoutingSubcontract",
     # Health models
     "ModelHealthCheckResult",
     # Registration models

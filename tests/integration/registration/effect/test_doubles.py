@@ -196,7 +196,9 @@ class StubConsulClient:
 
         # Simulate failure
         if self.should_fail:
-            return ModelBackendResult(success=False, error=self.failure_error)
+            return ModelBackendResult(
+                success=False, error=self.failure_error, backend_id="consul"
+            )
 
         # Record successful registration
         registration = ConsulRegistration(
@@ -207,7 +209,7 @@ class StubConsulClient:
         )
         self.registrations.append(registration)
 
-        return ModelBackendResult(success=True)
+        return ModelBackendResult(success=True, backend_id="consul")
 
     async def deregister_service(
         self,
@@ -239,12 +241,14 @@ class StubConsulClient:
 
         # Simulate failure
         if self.should_fail:
-            return ModelBackendResult(success=False, error=self.failure_error)
+            return ModelBackendResult(
+                success=False, error=self.failure_error, backend_id="consul"
+            )
 
         # Record successful deregistration
         self.deregistrations.append(service_id)
 
-        return ModelBackendResult(success=True)
+        return ModelBackendResult(success=True, backend_id="consul")
 
 
 class StubPostgresAdapter:
@@ -361,7 +365,9 @@ class StubPostgresAdapter:
 
         # Simulate failure
         if self.should_fail:
-            return ModelBackendResult(success=False, error=self.failure_error)
+            return ModelBackendResult(
+                success=False, error=self.failure_error, backend_id="postgres"
+            )
 
         # Record successful upsert
         registration = PostgresRegistration(
@@ -373,7 +379,7 @@ class StubPostgresAdapter:
         )
         self.registrations.append(registration)
 
-        return ModelBackendResult(success=True)
+        return ModelBackendResult(success=True, backend_id="postgres")
 
     async def deactivate(
         self,
@@ -405,12 +411,14 @@ class StubPostgresAdapter:
 
         # Simulate failure
         if self.should_fail:
-            return ModelBackendResult(success=False, error=self.failure_error)
+            return ModelBackendResult(
+                success=False, error=self.failure_error, backend_id="postgres"
+            )
 
         # Record successful deactivation
         self.deactivations.append(node_id)
 
-        return ModelBackendResult(success=True)
+        return ModelBackendResult(success=True, backend_id="postgres")
 
 
 __all__ = [

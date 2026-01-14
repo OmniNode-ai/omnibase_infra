@@ -2,8 +2,8 @@
 # ONEX Infrastructure E2E Testing Stack
 #
 # This compose file provides infrastructure services for E2E integration testing.
-# It includes PostgreSQL, Redpanda (Kafka), Consul, and Vault - the core infrastructure
-# needed to run the ONEX runtime in a realistic environment.
+# It includes PostgreSQL, Redpanda (Kafka), Consul, Vault, and Valkey - the core
+# infrastructure needed to run the ONEX runtime in a realistic environment.
 #
 # Usage:
 #   # Start infrastructure services only
@@ -28,6 +28,7 @@
 #   - Redpanda Admin: 9644
 #   - Consul: 8500
 #   - Vault: 8200
+#   - Valkey: 6379
 #   - Runtime Health: 8085 (when runtime profile enabled)
 name: omnibase-infra
 # ==========================================================================
@@ -187,6 +188,27 @@ services:
       - "com.omninode.service=consul"
       - "com.omninode.role=infrastructure"
   # ==========================================================================
+  # Valkey (Redis-compatible Key-Value Store)
+  # Check for updates: https://hub.docker.com/r/valkey/valkey/tags
+  # ==========================================================================
+  valkey:
+    image: valkey/valkey:9.0.1
+    container_name: omnibase-infra-valkey
+    ports:
+      - "${VALKEY_PORT:-6379}:6379"
+    networks:
+      - omnibase-infra-network
+    volumes:
+      - valkey_data:/data
+    # Disable persistence for faster E2E testing
+    command: valkey-server --save "" --appendonly no
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "valkey-cli", "ping"]
+    labels:
+      - "com.omninode.service=valkey"
+      - "com.omninode.role=infrastructure"
+  # ==========================================================================
   # Vault (Secrets Management)
   # ==========================================================================
   vault:
@@ -229,6 +251,8 @@ services:
         condition: service_healthy
       vault:
         condition: service_healthy
+      valkey:
+        condition: service_healthy
       redpanda-topic-manager:
         condition: service_completed_successfully
     environment:
@@ -247,13 +271,16 @@ services:
       # Vault (internal address)
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:-test-token}
+      # Valkey (internal address)
+      REDIS_HOST: valkey
+      REDIS_PORT: 6379
       # Runtime configuration
       ONEX_ENVIRONMENT: test
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}
       ONEX_INPUT_TOPIC: dev.onex.evt.node-introspection.v1
       ONEX_OUTPUT_TOPIC: dev.onex.evt.registration-completed.v1
       ONEX_GROUP_ID: onex-runtime-e2e
-      CONTRACTS_DIR: /app/contracts
+      ONEX_CONTRACTS_DIR: /app/contracts
     ports:
       - "${RUNTIME_PORT:-8085}:8085"
     networks:
@@ -285,5 +312,7 @@ volumes:
     name: omnibase-infra-redpanda-data
   consul_data:
     name: omnibase-infra-consul-data
+  valkey_data:
+    name: omnibase-infra-valkey-data
   runtime_logs:
     name: omnibase-infra-runtime-logs

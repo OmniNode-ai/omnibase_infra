@@ -859,7 +859,6 @@ class TestIdempotencyDuplicateEventRejection:
         )
 
         output1 = reducer.reduce(initial_state, event1)
-        pending_state = output1.result
 
         assert len(output1.intents) == 2
 

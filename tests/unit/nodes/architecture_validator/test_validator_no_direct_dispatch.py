@@ -29,8 +29,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from omnibase_infra.nodes.architecture_validator.validators import (
     validate_no_direct_dispatch,
 )

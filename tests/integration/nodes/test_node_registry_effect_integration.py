@@ -36,9 +36,8 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, call
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
@@ -418,7 +417,9 @@ class TestPartialFailureHandling:
 
         mock_postgres = AsyncMock()
         mock_postgres.upsert = AsyncMock(
-            return_value=ModelBackendResult(success=True, duration_ms=10.0)
+            return_value=ModelBackendResult(
+                success=True, duration_ms=10.0, backend_id="postgres"
+            )
         )
 
         node = NodeRegistryEffect(mock_consul, mock_postgres)
@@ -704,7 +705,9 @@ class TestExceptionHandling:
 
         mock_postgres = AsyncMock()
         mock_postgres.upsert = AsyncMock(
-            return_value=ModelBackendResult(success=True, duration_ms=10.0)
+            return_value=ModelBackendResult(
+                success=True, duration_ms=10.0, backend_id="postgres"
+            )
         )
 
         node = NodeRegistryEffect(mock_consul, mock_postgres)

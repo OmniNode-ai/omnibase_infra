@@ -17,6 +17,7 @@ This document provides comprehensive security patterns for ONEX infrastructure d
 - [Input Validation](#input-validation)
 - [Authentication and Authorization](#authentication-and-authorization)
 - [Secret Management](#secret-management)
+  - [YAML Contract Security](#yaml-contract-security-no-secrets-in-contracts)
 - [Network Security](#network-security)
 - [Policy Security](#policy-security)
 - [Introspection Security](#introspection-security)
@@ -559,12 +560,17 @@ ROLE_PERMISSIONS: Final[dict[EnumRole, frozenset[EnumPermission]]] = {
 
 
 class AuthorizationContext(BaseModel):
-    """Context for authorization decisions."""
+    """Context for authorization decisions.
+
+    All authorization decisions include a correlation_id for traceability
+    and integration with ONEX observability patterns.
+    """
 
     user_id: UUID
     roles: frozenset[EnumRole]
     resource_id: str
     action: EnumPermission
+    correlation_id: UUID  # Required for traceability per ONEX error patterns
 
     def is_authorized(self) -> bool:
         """Check if action is authorized for user's roles."""
@@ -585,8 +591,18 @@ def require_permission(permission: EnumPermission):
     def decorator(func):
         async def wrapper(ctx: AuthorizationContext, *args, **kwargs):
             if permission not in get_user_permissions(ctx.roles):
-                raise PermissionError(
-                    f"Permission {permission.value} required"
+                from omnibase_infra.errors import InfraAuthenticationError, ModelInfraErrorContext
+                from omnibase_infra.enums import EnumInfraTransportType
+
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="authorization_check",
+                    target_name="permission_guard",
+                    correlation_id=ctx.correlation_id,  # Required field, always present
+                )
+                raise InfraAuthenticationError(
+                    f"Authorization denied: permission {permission.value} required",
+                    context=context,
                 )
             return await func(ctx, *args, **kwargs)
         return wrapper
@@ -785,6 +801,41 @@ class DatabaseCredentialRotator:
 
         return username, password
 ```
+
+### YAML Contract Security: No Secrets in Contracts
+
+**CRITICAL**: ONEX handler contracts (YAML files) must NEVER contain secrets.
+
+Handler contracts are:
+- Version-controlled in Git (secrets would be in repository history forever)
+- Potentially logged during deployment or debugging
+- Shared across environments (dev/staging/prod)
+- Readable by anyone with repository access
+
+#### Prohibited Content in Contracts
+
+```yaml
+# NEVER include these in handler_contract.yaml or contract.yaml:
+config:
+  password: "secret123"           # VIOLATION
+  api_key: "sk-abc123"            # VIOLATION
+  connection_string: "...pass..." # VIOLATION
+  private_key: "-----BEGIN..."    # VIOLATION
+  token: "eyJhbGc..."             # VIOLATION
+```
+
+#### Where to Store Secrets Instead
+
+| Secret Type | Recommended Storage | Access Pattern |
+|-------------|-------------------|----------------|
+| Database credentials | Vault dynamic secrets | `await vault.get_database_credentials()` |
+| API keys | Vault KV store | `await vault.get_secret("secret/api-keys")` |
+| Service tokens | Vault AppRole | `await vault.auth.approle.login()` |
+| Static secrets | Kubernetes secrets | Environment variable injection |
+
+**See Also**: [Handler Plugin Loader - Contract Content Security](./handler_plugin_loader.md#contract-content-security-no-secrets-in-contracts) for detailed contract security guidelines.
+
+---
 
 ### Environment Variable Security
 
@@ -1050,6 +1101,10 @@ Policy registration and execution require careful security considerations as pol
 
 ```python
 from typing import Final
+from uuid import uuid4
+
+from omnibase_infra.errors import ProtocolConfigurationError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
 
 
 # Allowlisted policy packages
@@ -1060,17 +1115,54 @@ TRUSTED_POLICY_SOURCES: Final[frozenset[str]] = frozenset({
 })
 
 
-def validate_policy_source(policy_class: type) -> bool:
+class PolicySecurityError(ProtocolConfigurationError):
+    """Raised when a policy fails security validation.
+
+    Extends ProtocolConfigurationError to integrate with ONEX error handling.
+
+    Error Codes:
+        POLICY_SECURITY_001: Policy from untrusted source/namespace
+        POLICY_SECURITY_002: Policy code hash not in approved list
+        POLICY_SECURITY_003: Policy failed static analysis
+    """
+
+    def __init__(
+        self,
+        message: str,
+        error_code: str,
+        policy_class_name: str | None = None,
+        context: ModelInfraErrorContext | None = None,
+        **kwargs: object,
+    ) -> None:
+        """Initialize PolicySecurityError with required error code.
+
+        Args:
+            message: Human-readable error message
+            error_code: Error code for categorization (e.g., "POLICY_SECURITY_001")
+            policy_class_name: Name of the policy class that failed validation
+            context: Optional infrastructure error context
+            **kwargs: Additional context fields
+        """
+        super().__init__(message, context=context, **kwargs)
+        self.error_code = error_code
+        self.policy_class_name = policy_class_name
+
+
+def validate_policy_source(
+    policy_class: type,
+    correlation_id: UUID | None = None,
+) -> bool:
     """Validate policy comes from trusted source.
 
     Args:
         policy_class: Policy class to validate
+        correlation_id: Optional correlation ID for tracing
 
     Returns:
         True if from trusted source
 
     Raises:
-        SecurityError: If from untrusted source
+        PolicySecurityError: If from untrusted source (POLICY_SECURITY_001)
     """
     module = policy_class.__module__
 
@@ -1078,8 +1170,16 @@ def validate_policy_source(policy_class: type) -> bool:
         if module.startswith(trusted):
             return True
 
-    raise SecurityError(
-        f"Policy {policy_class.__name__} is from untrusted source: {module}"
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="validate_policy_source",
+        correlation_id=correlation_id or uuid4(),
+    )
+    raise PolicySecurityError(
+        f"Policy from untrusted source namespace: {module}",
+        error_code="POLICY_SECURITY_001",
+        policy_class_name=policy_class.__name__,
+        context=context,
     )
 ```
 
@@ -1651,6 +1751,8 @@ Use this checklist before deploying to production:
 ### Pre-Deployment
 
 - [ ] All secrets stored in Vault, not in code or environment files
+- [ ] **Handler contracts contain NO secrets** (passwords, API keys, tokens)
+- [ ] CI pipeline includes secret scanning for contracts (gitleaks, detect-secrets)
 - [ ] TLS 1.3 configured for all network connections
 - [ ] Certificate verification enabled (`verify_mode=CERT_REQUIRED`)
 - [ ] Database connections use SSL with certificate verification

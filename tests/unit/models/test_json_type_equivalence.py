@@ -326,9 +326,6 @@ class TestJsonTypeReExport:
         This validates JsonType accepts the same primitives as old JsonValue:
         str, int, float, bool, None
         """
-        from omnibase_infra.models.types import (
-            JsonType,
-        )
 
         # String
         s: JsonType = "hello"
@@ -356,9 +353,6 @@ class TestJsonTypeReExport:
         This validates JsonType accepts the same containers as old JsonValue:
         list[JsonType], dict[str, JsonType]
         """
-        from omnibase_infra.models.types import (
-            JsonType,
-        )
 
         # List
         lst: JsonType = [1, "two", 3.0, True, None]
@@ -373,9 +367,6 @@ class TestJsonTypeReExport:
 
         This validates JsonType accepts the same nested structures as old JsonValue.
         """
-        from omnibase_infra.models.types import (
-            JsonType,
-        )
 
         nested: JsonType = {
             "level1": {

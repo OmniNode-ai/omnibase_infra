@@ -8,6 +8,10 @@ consolidating shared mocks to avoid code duplication.
 Fixtures:
     mock_wire_infrastructure: Mocks wire_infrastructure_services and
         ModelONEXContainer to avoid wiring errors in tests.
+    mock_runtime_handler: Re-exported from tests.conftest for handler seeding.
+
+Functions:
+    seed_mock_handlers: Re-exported from tests.conftest for fail-fast bypass.
 """
 
 from __future__ import annotations
@@ -16,6 +20,15 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from omnibase_infra.runtime.registry import ProtocolBindingRegistry
+
+# Re-export handler seeding utilities from root conftest
+# These are available here for convenience but defined in tests/conftest.py
+# to make them available to both unit and integration tests.
+from tests.conftest import mock_runtime_handler, seed_mock_handlers
+
+__all__ = ["mock_runtime_handler", "seed_mock_handlers"]
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -28,14 +41,26 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
     This fixture mocks both:
     1. wire_infrastructure_services - to be a no-op async function
     2. ModelONEXContainer - to have a mock service_registry with resolve_service
+
+    Note: Returns a real ProtocolBindingRegistry for handler registration to work.
     """
+    # Create a shared registry instance that will be used throughout the test
+    shared_registry = ProtocolBindingRegistry()
 
     async def noop_wire(container: object) -> dict[str, list[str]]:
         """Async no-op for wire_infrastructure_services."""
         return {"services": []}
 
-    async def mock_resolve_service(service_class: type) -> MagicMock:
-        """Mock resolve_service to return a MagicMock for any service."""
+    async def mock_resolve_service(
+        service_class: type,
+    ) -> MagicMock | ProtocolBindingRegistry:
+        """Mock resolve_service to return appropriate instances.
+
+        Returns a real ProtocolBindingRegistry for handler registration,
+        and MagicMock for other service types.
+        """
+        if service_class == ProtocolBindingRegistry:
+            return shared_registry
         return MagicMock()
 
     with patch(

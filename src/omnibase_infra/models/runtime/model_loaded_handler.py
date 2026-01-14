@@ -85,6 +85,14 @@ class ModelLoadedHandler(BaseModel):
         min_length=1,
         description="Unique identifier for the handler",
     )
+    protocol_type: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Protocol type identifier for registry lookup (e.g., 'db', 'http'). "
+            "Used as the key for handler registry registration."
+        ),
+    )
     handler_type: EnumHandlerTypeCategory = Field(
         ...,
         description="Behavioral classification (COMPUTE, EFFECT, NONDETERMINISTIC_COMPUTE)",

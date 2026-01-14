@@ -31,8 +31,6 @@ Protocol Compliance Requirements (from handler_plugin_loader.py docstring):
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader

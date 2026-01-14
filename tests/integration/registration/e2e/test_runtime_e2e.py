@@ -55,8 +55,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-logger = logging.getLogger(__name__)
-
 import httpx
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
@@ -66,16 +64,17 @@ from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+from tests.integration.registration.e2e.conftest import (
+    wait_for_consumer_ready,
+    wrap_event_in_envelope,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
-# Import shared envelope helper from conftest
-# Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
-from tests.integration.registration.e2e.conftest import (
-    wrap_event_in_envelope,
-)
+# Module-level logger
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Topic Configuration
@@ -171,6 +170,38 @@ SKIP_PROCESSING_REASON = (
     "2) Runtime is writing projections to PostgreSQL, "
     "3) Full E2E pipeline is operational. "
     "Without this, tests would wait 60-120s before timing out."
+)
+
+# =============================================================================
+# Output Event and Consul Registration Feature Flags
+# =============================================================================
+# These optional features may not be configured in all runtime deployments.
+# Tests for these features require explicit opt-in to avoid soft failures.
+
+RUNTIME_OUTPUT_EVENTS_ENABLED = os.getenv(
+    "RUNTIME_E2E_OUTPUT_EVENTS_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+
+SKIP_OUTPUT_EVENTS_REASON = (
+    "Runtime output event tests require explicit opt-in. "
+    "Set RUNTIME_E2E_OUTPUT_EVENTS_ENABLED=true to enable these tests after verifying: "
+    "1) Runtime is configured to publish completion events to ONEX_OUTPUT_TOPIC, "
+    "2) The output topic exists and is accessible. "
+    "Without this flag, tests would wait and timeout."
+)
+
+RUNTIME_CONSUL_ENABLED = os.getenv("RUNTIME_E2E_CONSUL_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
+SKIP_CONSUL_REASON = (
+    "Runtime Consul registration tests require explicit opt-in. "
+    "Set RUNTIME_E2E_CONSUL_ENABLED=true to enable these tests after verifying: "
+    "1) Runtime is configured for dual registration (Consul + PostgreSQL), "
+    "2) Consul is accessible at CONSUL_HOST:CONSUL_PORT. "
+    "Without this flag, tests would wait and timeout."
 )
 
 
@@ -296,6 +327,7 @@ class TestRuntimeE2EFlow:
             if projection is not None:
                 break
 
+            # Polling interval - wait before checking database again
             await asyncio.sleep(poll_interval)
 
         # Verify projection was created
@@ -367,6 +399,7 @@ class TestRuntimeE2EFlow:
             if all_found:
                 break
 
+            # Polling interval - wait before checking all projections again
             await asyncio.sleep(0.5)
 
         # Verify all projections exist
@@ -383,13 +416,21 @@ class TestRuntimeE2EFlow:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        not RUNTIME_OUTPUT_EVENTS_ENABLED,
+        reason=SKIP_OUTPUT_EVENTS_REASON,
+    )
     async def test_runtime_publishes_completion_event(
         self,
         real_kafka_event_bus: KafkaEventBus,
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,
     ) -> None:
-        """Test that runtime publishes registration-completed event."""
+        """Test that runtime publishes registration-completed event.
+
+        This test requires RUNTIME_E2E_OUTPUT_EVENTS_ENABLED=true because output
+        event publishing may not be configured in all runtime deployments.
+        """
         # Track completion events
         completion_received = asyncio.Event()
         received_completions: list[dict] = []
@@ -425,8 +466,11 @@ class TestRuntimeE2EFlow:
         )
 
         try:
-            # Allow subscription to establish
-            await asyncio.sleep(2.0)
+            # Wait for Kafka consumer to be ready before publishing.
+            # See wait_for_consumer_ready docstring for known limitations.
+            await wait_for_consumer_ready(
+                real_kafka_event_bus, output_topic, max_wait=2.0
+            )
 
             # Publish introspection event wrapped in envelope
             envelope = wrap_event_in_envelope(introspection_event)
@@ -434,34 +478,36 @@ class TestRuntimeE2EFlow:
                 envelope, topic=RUNTIME_INPUT_TOPIC
             )
 
-            # Wait for completion event
-            try:
-                await asyncio.wait_for(completion_received.wait(), timeout=30.0)
-                assert len(received_completions) > 0, (
-                    "Expected completion event from runtime"
-                )
+            # Wait for completion event - hard failure on timeout
+            await asyncio.wait_for(completion_received.wait(), timeout=30.0)
 
-                # Verify completion event structure
-                completion = received_completions[0]
-                assert completion.get("node_id") == str(unique_node_id)
+            assert len(received_completions) > 0, (
+                "Expected completion event from runtime"
+            )
 
-            except TimeoutError:
-                logger.warning(
-                    "Runtime did not publish completion event within timeout. "
-                    "This may indicate the output topic is not configured."
-                )
+            # Verify completion event structure
+            completion = received_completions[0]
+            assert completion.get("node_id") == str(unique_node_id)
 
         finally:
             await unsub()
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        not RUNTIME_CONSUL_ENABLED,
+        reason=SKIP_CONSUL_REASON,
+    )
     async def test_runtime_dual_registration_creates_consul_entry(
         self,
         real_kafka_event_bus: KafkaEventBus,
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,
     ) -> None:
-        """Test that runtime performs dual registration including Consul."""
+        """Test that runtime performs dual registration including Consul.
+
+        This test requires RUNTIME_E2E_CONSUL_ENABLED=true because Consul
+        dual registration may not be configured in all runtime deployments.
+        """
         # Publish introspection event wrapped in envelope
         envelope = wrap_event_in_envelope(introspection_event)
         await real_kafka_event_bus.publish_envelope(envelope, topic=RUNTIME_INPUT_TOPIC)
@@ -488,21 +534,25 @@ class TestRuntimeE2EFlow:
                         if services:
                             consul_entry = services[0]
                             break
-                except Exception:
+                except (
+                    httpx.ConnectError,
+                    httpx.TimeoutException,
+                    json.JSONDecodeError,
+                ):
+                    # Connection/timeout errors and JSON decode errors are expected
+                    # during polling - Consul may not have the service yet or be
+                    # temporarily unavailable
                     pass
 
+                # Polling interval - wait before checking Consul catalog again
                 await asyncio.sleep(0.5)
 
-        if consul_entry is None:
-            logger.warning(
-                "Service %s not found in Consul within %ss. "
-                "Dual registration may not be configured in runtime.",
-                service_name,
-                max_wait_seconds,
-            )
-            return  # Exit test early but don't fail
-
-        assert consul_entry is not None
+        # Hard failure - if Consul is enabled, registration must succeed
+        assert consul_entry is not None, (
+            f"Service '{service_name}' not found in Consul within {max_wait_seconds}s. "
+            f"Consul: http://{consul_host}:{consul_port}. "
+            f"Verify runtime has dual registration enabled and Consul is accessible."
+        )
 
 
 class TestRuntimeErrorHandling:
@@ -521,15 +571,48 @@ class TestRuntimeErrorHandling:
             value=b"not valid json {{{",
         )
 
-        # Wait a moment
-        await asyncio.sleep(2.0)
+        # RATIONALE: This sleep cannot be replaced with deterministic polling.
+        # This is a "negative" test verifying the runtime stays healthy after
+        # receiving invalid input. There's no observable state change to poll for -
+        # the runtime should simply log an error and continue. The 2.0s wait gives
+        # enough time for the message to be consumed and (mis)processed.
+        # Alternative: Poll health endpoint repeatedly over 2s to catch transient
+        # failures, implemented below.
+        max_wait = 2.0
+        poll_interval = 0.2
+        start_time = asyncio.get_running_loop().time()
+        health_ok = True
 
-        # Verify runtime is still healthy
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(RUNTIME_HEALTH_URL)
-            assert response.status_code == 200, (
-                "Runtime became unhealthy after malformed message"
-            )
+            while asyncio.get_running_loop().time() - start_time < max_wait:
+                try:
+                    response = await client.get(RUNTIME_HEALTH_URL)
+                    if response.status_code != 200:
+                        health_ok = False
+                        break
+                except httpx.ConnectError:
+                    # Connection refused - runtime crashed or became unavailable
+                    health_ok = False
+                    break
+                except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout):
+                    # Specific timeout types - runtime may be overloaded but not crashed.
+                    # Continue polling as timeout alone doesn't indicate crash.
+                    # Note: httpx.WriteTimeout excluded as health GET has no request body.
+                    logger.debug(
+                        "Health check timed out during polling (expected during load)"
+                    )
+                except (httpx.ReadError, httpx.ProtocolError) as e:
+                    # Network read errors or protocol violations indicate runtime issues
+                    logger.warning(
+                        "Health check failed with network/protocol error: %s",
+                        type(e).__name__,
+                    )
+                    health_ok = False
+                    break
+                await asyncio.sleep(poll_interval)
+
+        # Verify runtime remained healthy throughout the wait period
+        assert health_ok, "Runtime became unhealthy after malformed message"
 
     @pytest.mark.asyncio
     async def test_runtime_handles_missing_fields(
@@ -549,15 +632,48 @@ class TestRuntimeErrorHandling:
             value=json.dumps(incomplete_event).encode("utf-8"),
         )
 
-        # Wait a moment
-        await asyncio.sleep(2.0)
+        # RATIONALE: This sleep cannot be replaced with deterministic polling.
+        # This is a "negative" test verifying the runtime stays healthy after
+        # receiving incomplete events. There's no observable state change to poll for -
+        # the runtime should validate and reject gracefully. The 2.0s wait gives
+        # enough time for the message to be consumed and rejected.
+        # Alternative: Poll health endpoint repeatedly over 2s to catch transient
+        # failures, implemented below.
+        max_wait = 2.0
+        poll_interval = 0.2
+        start_time = asyncio.get_running_loop().time()
+        health_ok = True
 
-        # Verify runtime is still healthy
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(RUNTIME_HEALTH_URL)
-            assert response.status_code == 200, (
-                "Runtime became unhealthy after incomplete event"
-            )
+            while asyncio.get_running_loop().time() - start_time < max_wait:
+                try:
+                    response = await client.get(RUNTIME_HEALTH_URL)
+                    if response.status_code != 200:
+                        health_ok = False
+                        break
+                except httpx.ConnectError:
+                    # Connection refused - runtime crashed or became unavailable
+                    health_ok = False
+                    break
+                except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout):
+                    # Specific timeout types - runtime may be overloaded but not crashed.
+                    # Continue polling as timeout alone doesn't indicate crash.
+                    # Note: httpx.WriteTimeout excluded as health GET has no request body.
+                    logger.debug(
+                        "Health check timed out during polling (expected during load)"
+                    )
+                except (httpx.ReadError, httpx.ProtocolError) as e:
+                    # Network read errors or protocol violations indicate runtime issues
+                    logger.warning(
+                        "Health check failed with network/protocol error: %s",
+                        type(e).__name__,
+                    )
+                    health_ok = False
+                    break
+                await asyncio.sleep(poll_interval)
+
+        # Verify runtime remained healthy throughout the wait period
+        assert health_ok, "Runtime became unhealthy after incomplete event"
 
 
 class TestRuntimePerformance:
@@ -625,6 +741,7 @@ class TestRuntimePerformance:
                 processing_time = elapsed
                 break
 
+            # Tight polling interval (0.1s) for accurate SLA measurement
             await asyncio.sleep(0.1)
 
         # Check soft SLA and warn if exceeded (but don't fail)

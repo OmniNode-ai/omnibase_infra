@@ -84,7 +84,7 @@ class ModelTracingContext(BaseModel):
         - Nil UUID (00000000-0000-0000-0000-000000000000) means "not set"
         - Use ``has_correlation_id``, ``has_trace_id``, ``has_span_id`` to check
 
-    Backwards Compatibility:
+    Null Coercion:
         Constructors accept ``None`` for any field and convert to the sentinel value.
 
     Attributes:
@@ -130,7 +130,7 @@ class ModelTracingContext(BaseModel):
     @field_validator("correlation_id", "trace_id", "span_id", mode="before")
     @classmethod
     def _convert_none_to_uuid_sentinel(cls, v: object) -> UUID:
-        """Convert None to nil UUID sentinel for backwards compatibility."""
+        """Convert None to nil UUID sentinel for null coercion."""
         if v is None:
             return _SENTINEL_UUID
         if isinstance(v, UUID):

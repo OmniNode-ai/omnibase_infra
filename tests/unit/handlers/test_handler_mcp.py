@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S104
+# S104 disabled: Binding to 0.0.0.0 is tested for container networking patterns
 # mypy: disable-error-code="index, operator, arg-type"
 """Unit tests for HandlerMCP.
 
@@ -12,11 +14,11 @@ execute) rather than directly accessing internal state where possible.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -33,9 +35,6 @@ from omnibase_infra.handlers.models.mcp import (
     EnumMcpOperationType,
     ModelMcpHandlerConfig,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
 
 class TestHandlerMCPInitialization:
@@ -103,7 +102,7 @@ class TestHandlerMCPInitialization:
 
         assert handler._initialized is True
         assert handler._config is not None
-        assert handler._config.host == "0.0.0.0"  # noqa: S104
+        assert handler._config.host == "0.0.0.0"
         assert handler._config.port == 8090
         assert handler._config.path == "/mcp"
         assert handler._config.stateless is True
@@ -360,7 +359,7 @@ class TestMcpHandlerConfig:
         """Test config has correct defaults."""
         config = ModelMcpHandlerConfig()
 
-        assert config.host == "0.0.0.0"  # noqa: S104
+        assert config.host == "0.0.0.0"
         assert config.port == 8090
         assert config.path == "/mcp"
         assert config.stateless is True
@@ -392,7 +391,7 @@ class TestMcpHandlerConfig:
         """Test config is immutable (frozen)."""
         config = ModelMcpHandlerConfig()
 
-        with pytest.raises(Exception):  # Pydantic raises ValidationError on frozen
+        with pytest.raises(ValidationError):
             config.host = "changed"
 
 

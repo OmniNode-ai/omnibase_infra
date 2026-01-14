@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: RUF001, PLR0133, B023
+# RUF001/PLR0133 disabled: Greek letters are intentional for Unicode homograph testing
+# B023 disabled: Loop variable capture is intentional for dynamic plugin factory tests
 """Unit tests for RegistryCompute.
 
 Tests cover:
@@ -1526,7 +1529,7 @@ class TestUnicodePluginId:
         Current behavior: ALLOWED
         Uses Greek letters alpha and beta.
         """
-        plugin_id = "transformer_α_β"  # noqa: RUF001
+        plugin_id = "transformer_α_β"
 
         registry.register_plugin(
             plugin_id=plugin_id,
@@ -1755,7 +1758,7 @@ class TestUnicodePluginId:
 
         # Verify they are different strings
         assert plugin_id_ascii != plugin_id_greek
-        assert "o" != "\u03bf"  # noqa: PLR0133 - Intentional: ASCII 'o' vs Greek omicron
+        assert "o" != "\u03bf"
 
         registry.register_plugin(
             plugin_id=plugin_id_ascii,
@@ -1915,7 +1918,7 @@ class TestStressAndPerformance:
                 """Dynamically created plugin for stress testing."""
 
                 def execute(self, data: dict[str, object]) -> dict[str, object]:
-                    return {"plugin_id": i}  # noqa: B023
+                    return {"plugin_id": i}
 
             registry.register_plugin(
                 plugin_id=f"plugin_{i:04d}",
@@ -1939,7 +1942,7 @@ class TestStressAndPerformance:
                 """Plugin with specific version for testing."""
 
                 def execute(self, data: dict[str, object]) -> dict[str, object]:
-                    return {"version": i}  # noqa: B023
+                    return {"version": i}
 
             registry.register_plugin(
                 plugin_id="versioned_plugin",
@@ -1965,7 +1968,7 @@ class TestStressAndPerformance:
 
             class DynamicPlugin:
                 def execute(self, data: dict[str, object]) -> dict[str, object]:
-                    return {"id": i}  # noqa: B023
+                    return {"id": i}
 
             registry.register_plugin(
                 plugin_id=f"stress_plugin_{i:04d}",
@@ -2000,7 +2003,7 @@ class TestStressAndPerformance:
 
             class VersionPlugin:
                 def execute(self, data: dict[str, object]) -> dict[str, object]:
-                    return {"v": i}  # noqa: B023
+                    return {"v": i}
 
             registry.register_plugin(
                 plugin_id="multi_version_plugin",
@@ -2221,7 +2224,7 @@ class TestStressAndPerformance:
 
         # Registry dict
         memory_bytes += sys.getsizeof(registry._registry)
-        for key, value in registry._registry.items():
+        for key, _value in registry._registry.items():
             memory_bytes += sys.getsizeof(key)
             # Key internals (strings)
             memory_bytes += sys.getsizeof(key.plugin_id)
@@ -2267,7 +2270,7 @@ class TestStressAndPerformance:
 
                 class CyclePlugin:
                     def execute(self, data: dict[str, object]) -> dict[str, object]:
-                        return {"cycle": cycle}  # noqa: B023
+                        return {"cycle": cycle}
 
                 registry.register_plugin(f"cycle_plugin_{i:04d}", CyclePlugin, "1.0.0")
 

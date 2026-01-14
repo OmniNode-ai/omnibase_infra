@@ -457,8 +457,20 @@ omnibase_infra:
 
 ---
 
+## Related Documentation
+
+- **[Migration Guide: wire_default_handlers()](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md)** - Step-by-step migration from legacy wiring
+- **[Handler Plugin Loader Pattern](../patterns/handler_plugin_loader.md)** - Contract-driven handler discovery pattern
+
+---
+
 ## Changelog
 
+- **2026-01-13**: Contract-based handler discovery implemented (PR #143)
+  - `HandlerPluginLoader` and `ContractHandlerDiscovery` implemented
+  - `RuntimeHostProcess` accepts `contract_paths` parameter
+  - Migration guide created at `docs/migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md`
+  - Legacy `wire_default_handlers()` available as fallback (to be removed)
 - **2025-12-28**: ADAPTER redesigned as policy tag
   - ADAPTER removed from EnumHandlerTypeCategory
   - ADAPTER now a boolean tag (`is_adapter: bool`) on descriptor

@@ -767,7 +767,7 @@ class TestPolicyRegistryPerformanceRegression:
 
         # Registry dict
         memory_bytes += sys.getsizeof(registry._registry)
-        for key, value in registry._registry.items():
+        for key, _value in registry._registry.items():
             memory_bytes += sys.getsizeof(key)
             # Key internals (strings)
             memory_bytes += sys.getsizeof(key.policy_id)

@@ -28,7 +28,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, NamedTuple, TypeVar
+from typing import NamedTuple, TypeVar
 from uuid import UUID, uuid4
 
 import consul

@@ -547,7 +547,7 @@ class TestModelFailedComponentEquality:
         )
         assert failed != "Component: Error"
         assert failed != {"component_name": "Component", "error_message": "Error"}
-        assert failed != None
+        assert failed is not None
 
 
 class TestModelFailedComponentEdgeCases:

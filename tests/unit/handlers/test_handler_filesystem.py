@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S108
+# S108 disabled: /tmp paths are intentional for test fixtures
 # mypy: disable-error-code="index, operator, arg-type"
 """Unit tests for HandlerFileSystem.
 
@@ -22,7 +24,6 @@ Test Classes:
 from __future__ import annotations
 
 import base64
-import os
 import tempfile
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -143,7 +144,7 @@ class TestHandlerFileSystemInitialization:
     ) -> None:
         """Test handler initializes with allowed_paths configuration."""
         config: dict[str, object] = {
-            "allowed_paths": [str(temp_dir), "/tmp/other"],  # noqa: S108
+            "allowed_paths": [str(temp_dir), "/tmp/other"],
         }
         await handler.initialize(config)
 
@@ -496,7 +497,7 @@ class TestHandlerFileSystemWriteFile:
         # Create a symlink pointing to a directory outside allowed paths
         symlink_dir = temp_dir / "escape_dir"
         try:
-            symlink_dir.symlink_to("/tmp")  # noqa: S108
+            symlink_dir.symlink_to("/tmp")
         except OSError:
             pytest.skip("Cannot create symlinks on this system")
 
@@ -1166,7 +1167,7 @@ class TestHandlerFileSystemLifecycle:
         """Test execute before initialize raises RuntimeHostError."""
         envelope: dict[str, object] = {
             "operation": "filesystem.read_file",
-            "payload": {"path": "/tmp/test.txt"},  # noqa: S108
+            "payload": {"path": "/tmp/test.txt"},
             "correlation_id": str(uuid4()),
         }
 
@@ -1285,7 +1286,7 @@ class TestHandlerFileSystemOperationValidation:
         """Test unsupported operation raises ProtocolConfigurationError."""
         envelope: dict[str, object] = {
             "operation": "filesystem.unsupported_operation",
-            "payload": {"path": "/tmp/test"},  # noqa: S108
+            "payload": {"path": "/tmp/test"},
             "correlation_id": str(uuid4()),
         }
 
@@ -1301,7 +1302,7 @@ class TestHandlerFileSystemOperationValidation:
     async def test_missing_operation_raises_error(self, initialized_handler) -> None:
         """Test missing operation field raises ProtocolConfigurationError."""
         envelope: dict[str, object] = {
-            "payload": {"path": "/tmp/test"},  # noqa: S108
+            "payload": {"path": "/tmp/test"},
             "correlation_id": str(uuid4()),
         }
 

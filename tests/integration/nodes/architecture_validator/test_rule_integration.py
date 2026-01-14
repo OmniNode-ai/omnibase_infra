@@ -25,9 +25,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-import pytest
 
 from omnibase_infra.nodes.architecture_validator.models.model_validation_request import (
     ModelArchitectureValidationRequest,
@@ -38,13 +35,6 @@ from omnibase_infra.nodes.architecture_validator.validators import (
     RuleNoHandlerPublishing,
     RuleNoOrchestratorFSM,
 )
-
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
-    from omnibase_infra.nodes.architecture_validator.models.model_validation_result import (
-        ModelFileValidationResult,
-    )
-
 
 # =============================================================================
 # Test Class: Multi-Rule Integration

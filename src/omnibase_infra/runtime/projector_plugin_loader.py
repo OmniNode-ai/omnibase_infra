@@ -1056,7 +1056,7 @@ class ProjectorPluginLoader:
                         "Absolute pattern path resolution failed - "
                         "possible symlink security issue",
                         error_code=EnumCoreErrorCode.VALIDATION_FAILED,
-                    )
+                    ) from None
 
                 matched_files = list(allowed_base.glob(relative_pattern))
 

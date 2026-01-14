@@ -34,6 +34,7 @@ Related:
 from __future__ import annotations
 
 import json
+from dataclasses import FrozenInstanceError
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -524,5 +525,5 @@ class TestEventSequenceIntegrity:
         entry = event_sequence_log.entries[0]
 
         # Frozen dataclass should prevent modification
-        with pytest.raises(Exception):  # FrozenInstanceError or similar
+        with pytest.raises(FrozenInstanceError):
             entry.expected_status = "complete"  # type: ignore[misc]

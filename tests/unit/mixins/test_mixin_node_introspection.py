@@ -251,7 +251,7 @@ class TestMixinNodeIntrospectionInit:
 
     async def test_initialize_introspection_sets_attributes(self) -> None:
         """Test that initialize_introspection properly sets all attributes."""
-        test_node_id = uuid4()
+        uuid4()
         node = MockNode()
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
@@ -1336,7 +1336,7 @@ class TestMixinNodeIntrospectionEdgeCases:
         class MinimalNode(MixinNodeIntrospection):
             pass
 
-        test_node_id = uuid4()
+        uuid4()
         node = MinimalNode()
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
@@ -1408,7 +1408,7 @@ class TestMixinNodeIntrospectionEdgeCases:
 
     async def test_concurrent_introspection_calls(self) -> None:
         """Test concurrent introspection data requests."""
-        test_node_id = uuid4()
+        uuid4()
         node = MockNode()
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
@@ -1601,7 +1601,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         # First call (cold cache) - populates cache
         start1 = time.perf_counter()
         await node.get_capabilities()
-        first_call_ms = (time.perf_counter() - start1) * 1000
+        (time.perf_counter() - start1) * 1000
 
         # Subsequent calls (warm cache) - uses cached signatures
         times_warm = []

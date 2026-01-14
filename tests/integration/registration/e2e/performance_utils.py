@@ -43,7 +43,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar, cast
 
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
@@ -562,7 +562,7 @@ class PerformanceCollector:
         print(f"Passed: {summary['passed_count']}, Failed: {summary['failed_count']}")
         print(f"Total time: {summary['total_time_ms']:.2f}ms")
 
-        if summary["total_operations"] > 1:
+        if cast(int, summary["total_operations"]) > 1:
             print(
                 f"Range: {summary['min_time_ms']:.2f}ms - {summary['max_time_ms']:.2f}ms"
             )

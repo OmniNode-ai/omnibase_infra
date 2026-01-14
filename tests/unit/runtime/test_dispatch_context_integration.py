@@ -371,16 +371,16 @@ class TestRuntimeHostDispatcherReceivesTime:
 
 
 # =============================================================================
-# Backwards Compatibility Tests (no node_kind)
+# Dispatchers Without node_kind Tests
 # =============================================================================
 
 
-class TestBackwardsCompatibility:
-    """Tests verifying dispatchers without node_kind still work."""
+class TestDispatchersWithoutNodeKind:
+    """Tests verifying dispatchers without node_kind parameter still work."""
 
     @pytest.mark.asyncio
     async def test_dispatcher_without_node_kind_works(self) -> None:
-        """Verify dispatchers without node_kind still work (backwards compatible)."""
+        """Verify dispatchers without node_kind still work."""
         was_called = False
 
         async def simple_dispatcher(
@@ -394,7 +394,7 @@ class TestBackwardsCompatibility:
             dispatcher_id="test-simple",
             dispatcher=simple_dispatcher,
             category=EnumMessageCategory.EVENT,
-            # No node_kind parameter - backwards compatibility
+            # No node_kind parameter - optional for simple dispatchers
         )
 
         envelope = create_test_envelope()

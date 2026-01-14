@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: TRY400
+# TRY400 disabled: logger.error is intentional to avoid leaking sensitive data in stack traces
 """Dispatcher adapter for HandlerNodeRegistrationAcked.
 
 This module provides a ProtocolMessageDispatcher adapter that wraps
@@ -339,7 +341,7 @@ class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
 
             # Use logger.error instead of logger.exception to avoid leaking
             # potentially sensitive data in stack traces (credentials, PII, etc.)
-            logger.error(  # noqa: TRY400
+            logger.error(
                 "DispatcherNodeRegistrationAcked failed: %s",
                 sanitized_error,
                 extra={

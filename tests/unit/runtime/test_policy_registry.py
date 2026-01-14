@@ -1513,8 +1513,8 @@ class TestPolicyRegistrySemverCaching:
 
         # Parse prerelease versions
         result1 = PolicyRegistry._parse_semver("1.0.0-alpha")
-        result2 = PolicyRegistry._parse_semver("1.0.0-beta")
-        result3 = PolicyRegistry._parse_semver("1.0.0")
+        PolicyRegistry._parse_semver("1.0.0-beta")
+        PolicyRegistry._parse_semver("1.0.0")
 
         # Note: omnibase_core's ModelSemVer ignores prerelease for comparison
         # All three versions have same major.minor.patch, so they compare equal

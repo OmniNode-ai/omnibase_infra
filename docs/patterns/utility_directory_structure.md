@@ -7,13 +7,13 @@ This document clarifies the distinction between `utils/` and `shared/utils/` dir
 | Directory | Status | Import Path |
 |-----------|--------|-------------|
 | `utils/` | **CANONICAL** | `from omnibase_infra.utils import ...` |
-| `shared/utils/` | **DEPRECATED** | ~~`from omnibase_infra.shared.utils import ...`~~ |
+| `shared/utils/` | **REMOVED** | ~~`from omnibase_infra.shared.utils import ...`~~ (will raise ImportError) |
 
-**Migration**: Update all imports from `shared.utils` to `utils`. See [Migration Guide](#migration-guide) below.
+**Migration**: Update all imports from `shared.utils` to `utils`. The deprecated location has been removed per no-backwards-compatibility policy.
 
 ## Overview
 
-The infrastructure package has a single canonical utility location (`utils/`), with `shared/utils/` retained only for backwards compatibility during migration:
+The infrastructure package has a single canonical utility location (`utils/`). The legacy `shared/utils/` location has been removed:
 
 ```
 src/omnibase_infra/
@@ -63,22 +63,14 @@ from omnibase_infra.utils import (
 )
 ```
 
-### `shared/utils/` - Legacy/Transitional (Deprecated)
+### `shared/utils/` - REMOVED
 
-**Location**: `src/omnibase_infra/shared/utils/`
+**Location**: Previously `src/omnibase_infra/shared/utils/` (now removed)
 
-**Purpose**: Historical location for shared utilities, now deprecated.
+**Status**: **REMOVED** - Per CLAUDE.md, no backwards compatibility is maintained.
 
-**Status**: **DEPRECATED** - Do not add new utilities here.
-
-> **Warning**: Importing from `shared/utils/` emits a `DeprecationWarning` at runtime:
-> ```
-> DeprecationWarning: Importing from 'omnibase_infra.shared.utils' is deprecated.
-> Use 'omnibase_infra.utils' instead.
-> This module will be removed in a future version.
-> ```
-
-This directory exists for backwards compatibility during migration. It contains only a re-export module that emits deprecation warnings and directs users to the canonical `utils/` location.
+> **Note**: This directory has been removed entirely. All code must use the canonical `utils/` location.
+> Attempting to import from `omnibase_infra.shared.utils` will raise an `ImportError`.
 
 **Migration**: Update imports from `omnibase_infra.shared.utils` to `omnibase_infra.utils`.
 

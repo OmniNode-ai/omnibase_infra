@@ -32,8 +32,6 @@ See Also:
 
 from __future__ import annotations
 
-from omnibase_core.enums import EnumDataClassification
-
 from omnibase_infra.enums import EnumHandlerTypeCategory, EnumSecurityRuleId
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier

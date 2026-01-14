@@ -128,6 +128,7 @@ async def verify_consul_registration(
                 },
             )
 
+        # Polling interval - retry Consul KV lookup every 0.2s until timeout
         await asyncio.sleep(0.2)
 
     return None
@@ -196,6 +197,7 @@ async def wait_for_consul_registration(
                 },
             )
 
+        # Polling interval - check Consul registration status periodically
         await asyncio.sleep(poll_interval)
 
     error_msg = (
@@ -210,6 +212,76 @@ async def wait_for_consul_registration(
 # =============================================================================
 # PostgreSQL Verification Helpers (via ProjectionReader)
 # =============================================================================
+
+
+async def wait_for_postgres_write(
+    projection_reader: ProjectionReaderRegistration,
+    entity_id: UUID,
+    timeout_seconds: float = 2.0,
+    poll_interval: float = 0.05,
+    *,
+    correlation_id: UUID | None = None,
+) -> ModelRegistrationProjection | None:
+    """Wait for a PostgreSQL write to complete with deterministic polling.
+
+    Replaces fixed sleeps after persist() operations with a deterministic
+    polling approach. This ensures tests don't rely on arbitrary delays
+    and fail fast when writes complete quickly.
+
+    Use Case:
+        After calling projector.persist(), use this helper instead of
+        a fixed asyncio.sleep() to wait for the write to propagate.
+
+    Args:
+        projection_reader: Initialized ProjectionReaderRegistration instance.
+        entity_id: UUID of the entity to verify.
+        timeout_seconds: Maximum time to wait (default: 2.0s).
+        poll_interval: Time between poll attempts (default: 0.05s = 50ms).
+        correlation_id: Optional correlation ID for tracing.
+
+    Returns:
+        ModelRegistrationProjection if found within timeout, None otherwise.
+
+    Example:
+        >>> await projector.persist(projection, entity_id=node_id, ...)
+        >>> result = await wait_for_postgres_write(
+        ...     projection_reader, node_id, timeout_seconds=1.0
+        ... )
+        >>> assert result is not None, "Write did not complete in time"
+
+    Note:
+        This is a lighter-weight alternative to wait_for_postgres_registration
+        intended for use immediately after persist() calls where we just need
+        to confirm the write completed. The shorter default timeout and poll
+        interval are optimized for this use case.
+    """
+    start_time = asyncio.get_running_loop().time()
+
+    while asyncio.get_running_loop().time() - start_time < timeout_seconds:
+        try:
+            result = await projection_reader.get_entity_state(
+                entity_id, "registration", correlation_id=correlation_id
+            )
+            if result is not None:
+                return result
+        except (TimeoutError, ConnectionError, OSError):
+            # Expected transient errors during polling
+            pass
+        except KeyError:
+            # Entity not found yet - expected case
+            pass
+        except Exception as e:
+            # Unexpected errors - log but continue polling
+            logger.debug(
+                "Unexpected error during postgres write poll: %s: %s",
+                type(e).__name__,
+                str(e),
+            )
+
+        # Tight polling interval for fast write verification
+        await asyncio.sleep(poll_interval)
+
+    return None
 
 
 async def verify_postgres_registration(
@@ -309,6 +381,7 @@ async def wait_for_postgres_registration(
             if expected_state is None or projection.current_state == expected_state:
                 return projection
 
+        # Polling interval - check PostgreSQL projection status periodically
         await asyncio.sleep(poll_interval)
 
     if last_projection is not None and expected_state is not None:
@@ -529,6 +602,8 @@ async def collect_registration_events(
                 node_id,
             )
 
+    # Collection window - wait for timeout_seconds to collect events from Kafka.
+    # Events published after subscription started will be captured by the handler.
     await asyncio.sleep(timeout_seconds)
 
     # Cleanup subscriptions
@@ -606,6 +681,7 @@ async def verify_dual_registration(
         if consul_result is not None and postgres_result is not None:
             return consul_result, postgres_result
 
+        # Polling interval - check both Consul and PostgreSQL every 0.5s
         await asyncio.sleep(0.5)
 
     missing = []
@@ -672,6 +748,7 @@ async def verify_state_transition(
                 # Already transitioned - that's fine
                 return projection
 
+        # Polling interval - check projection state every 0.2s until from_state reached
         await asyncio.sleep(0.2)
 
     if initial_projection is not None and initial_projection.current_state == to_state:
@@ -790,6 +867,7 @@ async def wait_for_heartbeat_update(
         ):
             return projection
 
+        # Polling interval - check heartbeat every 1.0s (longer interval for 30s heartbeat cycle)
         await asyncio.sleep(1.0)
 
     projection = await verify_postgres_registration(
@@ -887,7 +965,7 @@ def assert_node_became_active(event: ModelNodeBecameActive) -> None:
     assert event.correlation_id is not None, "correlation_id is required"
     assert event.causation_id is not None, "causation_id is required"
     assert event.emitted_at is not None, "emitted_at is required"
-    assert event.declared_capabilities is not None, "declared_capabilities is required"
+    assert event.capabilities is not None, "capabilities is required"
 
 
 def assert_registration_accepted(event: ModelNodeRegistrationAccepted) -> None:
@@ -1009,6 +1087,7 @@ __all__: list[str] = [
     # PostgreSQL verification
     "verify_postgres_registration",
     "wait_for_postgres_registration",
+    "wait_for_postgres_write",
     # Kafka verification
     "wait_for_kafka_event",
     "collect_registration_events",

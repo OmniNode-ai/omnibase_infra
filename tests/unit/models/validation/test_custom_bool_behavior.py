@@ -30,7 +30,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.enums import EnumNodeKind
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -359,7 +359,7 @@ class TestModelCategoryMatchResultFactoryMethods:
         ]
 
         for result in results:
-            with pytest.raises(Exception):  # ValidationError for frozen models
+            with pytest.raises(ValidationError):
                 result.matched = not result.matched  # type: ignore[misc]
 
     @pytest.mark.parametrize(

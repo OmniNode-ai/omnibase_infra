@@ -74,7 +74,7 @@ class ModelDispatchMetadata(BaseModel):
         - Empty string ("") means "not set" for all string fields
         - Use ``has_source_node``, ``has_target_node``, etc. to check
 
-    Backwards Compatibility:
+    Null Coercion:
         Constructors accept ``None`` for any field and convert to sentinel.
 
     Attributes:
@@ -144,7 +144,7 @@ class ModelDispatchMetadata(BaseModel):
     )
     @classmethod
     def _convert_none_to_str_sentinel(cls, v: object) -> str:
-        """Convert None to empty string sentinel for backwards compatibility."""
+        """Convert None to empty string sentinel for null coercion."""
         if v is None:
             return _SENTINEL_STR
         if isinstance(v, str):

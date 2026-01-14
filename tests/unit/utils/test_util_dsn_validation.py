@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: S106
+# S106 disabled: Test password fixtures are intentional for DSN validation testing
 """Tests for PostgreSQL DSN validation utility.
 
 This test suite validates DSN parsing and validation for:
@@ -359,7 +361,7 @@ class TestModelParsedDSNValidation:
         dsn = ModelParsedDSN(
             scheme="postgresql",
             username="user",
-            password="pass",  # noqa: S106 - test value
+            password="pass",
             hostname="localhost",
             port=5432,
             database="mydb",
@@ -595,7 +597,7 @@ class TestModelParsedDSNValidation:
         dsn = ModelParsedDSN(
             scheme="postgresql",
             username="admin",
-            password="super_secret",  # noqa: S106 - test value
+            password="super_secret",
             hostname="localhost",
             port=5432,
             database="mydb",
@@ -618,7 +620,7 @@ class TestModelParsedDSNValidation:
 
         dsn = ModelParsedDSN(
             scheme="postgresql",
-            password="another_secret",  # noqa: S106 - test value
+            password="another_secret",
             hostname="localhost",
             database="mydb",
         )
@@ -634,7 +636,7 @@ class TestModelParsedDSNValidation:
 
         dsn = ModelParsedDSN(
             scheme="postgresql",
-            password="real_password",  # noqa: S106 - test value
+            password="real_password",
             hostname="localhost",
             database="mydb",
         )
@@ -652,7 +654,7 @@ class TestModelParsedDSNValidation:
         dsn = ModelParsedDSN(
             scheme="postgresql",
             username="admin",
-            password="super_secret",  # noqa: S106 - test value
+            password="super_secret",
             hostname="localhost",
             port=5432,
             database="mydb",
@@ -721,7 +723,7 @@ class TestModelParsedDSNValidation:
 
         dsn = ModelParsedDSN(
             scheme="postgresql",
-            password="secret",  # noqa: S106 - test value
+            password="secret",
             hostname="localhost",
             database="mydb",
         )

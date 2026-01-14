@@ -12,8 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 from tests.ci.test_architecture_compliance import _scan_file_for_imports
 
 if TYPE_CHECKING:

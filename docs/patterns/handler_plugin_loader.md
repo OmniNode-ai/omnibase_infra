@@ -268,6 +268,26 @@ ONEX uses duck typing for protocol validation to:
 
 This section provides comprehensive security documentation for the handler plugin loader's dynamic import mechanism. Understanding these security implications is essential for safe production deployment.
 
+### Quick Security Reference
+
+| Threat | Risk | Status | Control |
+|--------|------|--------|---------|
+| **YAML deserialization attacks** | CRITICAL | **MITIGATED** | `yaml.safe_load()` blocks `!!python/object` tags |
+| **Memory exhaustion (DoS)** | HIGH | **MITIGATED** | 10MB file size limit (`MAX_CONTRACT_SIZE`) |
+| **Arbitrary class loading** | HIGH | **MITIGATED** | Protocol validation requires 5 `ProtocolHandler` methods |
+| **Path information disclosure** | MEDIUM | **MITIGATED** | `_sanitize_exception_message()` strips paths from errors |
+| **Non-class object loading** | MEDIUM | **MITIGATED** | `isinstance(handler_class, type)` check |
+| **Malicious contract injection** | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` parameter |
+| **Module path traversal** | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` with package boundary validation |
+| **Import-time code execution** | CRITICAL | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict to trusted modules |
+| **Handler instantiation exploits** | HIGH | **OPTIONALLY MITIGATED** | Enable `allowed_namespaces` to restrict to trusted modules |
+
+**Legend**:
+- **MITIGATED**: Built-in protection, always active
+- **OPTIONALLY MITIGATED**: Requires enabling `allowed_namespaces` parameter (recommended for production)
+
+**For production deployments**: Enable `allowed_namespaces` to convert "optionally mitigated" threats to "mitigated".
+
 ---
 
 ### Dynamic Import Security Model
@@ -404,6 +424,129 @@ handler = loader.load_from_contract(Path("malicious_contract.yaml"))
 | `allowed_namespaces=["omnibase_.", "myapp."]` | Only specified prefixes allowed | Production deployments |
 | `allowed_namespaces=[]` | ALL namespaces blocked | Effectively disables loader |
 
+#### Path Traversal Protection
+
+The `allowed_namespaces` parameter provides **package boundary validation** that prevents path traversal attacks:
+
+**Attack Example**:
+```yaml
+# Malicious contract attempting path traversal
+handler_class: "os.system"  # Attempt to load system module
+# OR
+handler_class: "sys.modules"  # Attempt to access runtime internals
+```
+
+**How Namespace Allowlisting Protects**:
+1. **Prefix matching with boundary validation**: The namespace `"foo."` only matches packages starting with `foo.`, not `foobar.`
+2. **Explicit trailing dot requirement**: Namespaces should end with `.` to enforce package boundaries
+3. **No dynamic path construction**: Module paths cannot escape the allowed namespace prefixes
+
+**Implementation Detail** (from `_validate_namespace()`):
+```python
+# Package boundary validation prevents "foo" from matching "foobar.module"
+for namespace in self._allowed_namespaces:
+    if class_path.startswith(namespace):
+        if namespace.endswith("."):
+            return  # Matched with proper package boundary
+        remaining = class_path[len(namespace):]
+        if remaining == "" or remaining.startswith("."):
+            return  # Exact match or proper boundary
+```
+
+**Recommendation**: Always use trailing dots in namespace prefixes for clarity and consistency:
+```python
+# RECOMMENDED: Trailing dots make package boundaries explicit
+loader = HandlerPluginLoader(
+    allowed_namespaces=["omnibase_infra.", "myapp.handlers."]
+)
+
+# WORKS BUT LESS EXPLICIT: Without trailing dot, relies on boundary validation
+# The implementation validates that remaining path is empty or starts with "."
+# So "omnibase" matches "omnibase" and "omnibase.core" but NOT "omnibase_malicious"
+loader = HandlerPluginLoader(
+    allowed_namespaces=["omnibase", "myapp"]  # Prefer trailing dots for clarity
+)
+```
+
+### Contract Content Security: No Secrets in Contracts
+
+**CRITICAL**: Handler contracts must NEVER contain secrets, credentials, or sensitive configuration values.
+
+#### What Must NOT Be in Contracts
+
+| Category | Examples | Why Prohibited |
+|----------|----------|----------------|
+| **Credentials** | Passwords, API keys, tokens, secrets | Git history exposure, log leakage |
+| **Connection strings with auth** | `postgresql://user:pass@host` | Full credential disclosure |
+| **Private keys** | SSL certificates, encryption keys | Cryptographic compromise |
+| **Environment-specific secrets** | Production passwords, staging tokens | Cross-environment leakage |
+| **PII** | User data, emails in examples | Privacy/compliance violation |
+
+#### What IS Safe in Contracts
+
+| Category | Examples | Rationale |
+|----------|----------|-----------|
+| **Handler class paths** | `myapp.handlers.AuthHandler` | Code reference, not secret |
+| **Handler names** | `auth.validate`, `db.query` | Identifiers only |
+| **Handler types** | `effect`, `compute`, `reducer` | Static categorization |
+| **Capability tags** | `["database", "async"]` | Feature flags, non-sensitive |
+| **Non-secret configuration** | Timeouts, retry counts, feature flags | Operational metadata |
+
+#### Example: Correct vs Incorrect Contract
+
+```yaml
+# INCORRECT - Contains secrets (NEVER DO THIS)
+handler_name: "db.query"
+handler_class: "myapp.handlers.DatabaseHandler"
+handler_type: "effect"
+config:
+  connection_string: "postgresql://admin:secret123@db.prod:5432/app"  # VIOLATION
+  api_key: "sk-abc123xyz"  # VIOLATION
+  aws_secret_key: "AKIAIOSFODNN7EXAMPLE"  # VIOLATION
+```
+
+```yaml
+# CORRECT - No secrets, references environment/Vault
+handler_name: "db.query"
+handler_class: "myapp.handlers.DatabaseHandler"
+handler_type: "effect"
+capability_tags:
+  - database
+  - pooled
+  - async
+# Secrets loaded at runtime from:
+# - Environment variables (POSTGRES_PASSWORD)
+# - HashiCorp Vault (secret/data/db/credentials)
+# - Kubernetes secrets (mounted as env vars)
+```
+
+#### Where Secrets Should Live
+
+| Source | When to Use | Example |
+|--------|-------------|---------|
+| **Environment variables** | Container/pod configuration | `POSTGRES_PASSWORD`, `API_KEY` |
+| **HashiCorp Vault** | Dynamic secrets, rotation | `vault kv get secret/data/db/creds` |
+| **Kubernetes secrets** | Static secrets in K8s | `secretKeyRef` in pod spec |
+| **AWS Secrets Manager** | AWS deployments | `secretsmanager:GetSecretValue` |
+
+#### CI Validation
+
+Contracts should be validated in CI to detect accidental secret inclusion:
+
+```bash
+# Example: Scan contracts for potential secrets
+grep -rE "(password|secret|key|token|credential).*:" contracts/ && echo "FAIL: Potential secrets in contracts" && exit 1
+```
+
+Consider using tools like:
+- **gitleaks** - Scan for hardcoded secrets in contracts
+- **trufflehog** - Detect high-entropy strings
+- **detect-secrets** - Pre-commit hook for secret detection
+
+**See Also**: [Secret Management](./security_patterns.md#secret-management) for comprehensive secret handling guidance.
+
+---
+
 ### What the Loader Does NOT Protect Against
 
 **CRITICAL**: The following protections require deployment-level mitigation:
@@ -480,13 +623,13 @@ loader = HandlerPluginLoader(
 )
 ```
 
-##### Legacy Wrapper Pattern (for custom validation)
+##### External Policy Service Integration (Advanced)
 
-For environments requiring additional validation beyond namespace prefixes, you can wrap the loader:
+For environments requiring external policy service validation (e.g., OPA, custom approval service), you can wrap the loader. Note that for simple namespace validation, use the built-in `allowed_namespaces` parameter instead (see above).
 
 ```python
 from pathlib import Path
-from typing import Final
+from typing import Protocol
 from uuid import UUID
 
 import yaml
@@ -494,57 +637,147 @@ import yaml
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 from omnibase_infra.models.runtime import ModelLoadedHandler
 
-# Define trusted namespace prefixes
-ALLOWED_MODULE_PREFIXES: Final[tuple[str, ...]] = (
-    "omnibase_infra.handlers.",     # First-party handlers
-    "myapp.handlers.",              # Application handlers
-    "approved_plugins.",            # Vetted third-party
-)
+
+class PolicyServiceClient(Protocol):
+    """Protocol for external policy service integration."""
+
+    async def check_handler_approval(
+        self,
+        handler_class: str,
+        contract_path: str,
+        correlation_id: UUID,
+    ) -> "ApprovalResult":
+        """Check if handler is approved for loading."""
+        ...
 
 
-class SecurityError(Exception):
-    """Raised when security validation fails."""
-    pass
+class ApprovalResult(Protocol):
+    """Result from policy service approval check."""
+
+    approved: bool
+    reason: str
 
 
-def secure_load_from_contract(
+from omnibase_infra.errors import ProtocolConfigurationError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+
+class PolicyServiceValidationError(ProtocolConfigurationError):
+    """Raised when external policy service rejects handler loading.
+
+    Extends ProtocolConfigurationError to integrate with ONEX error handling.
+    Use this for custom validation that goes beyond namespace prefix matching.
+
+    IMPORTANT - Error Code Domain Separation:
+        This error uses POLICY_SERVICE_xxx codes which are DISTINCT from
+        EnumHandlerLoaderError (HANDLER_LOADER_xxx) codes. This separation
+        reflects different validation domains:
+
+        - HANDLER_LOADER_xxx: Built-in loader validation (file not found,
+          invalid YAML, protocol not implemented, namespace not allowed, etc.)
+        - POLICY_SERVICE_xxx: External policy service validation (approval
+          service rejection, hash verification, etc.)
+
+    NOTE: For namespace validation, prefer the built-in `allowed_namespaces`
+    parameter which uses EnumHandlerLoaderError.NAMESPACE_NOT_ALLOWED
+    (HANDLER_LOADER_013). This custom error is for additional validation
+    scenarios like external policy service integration.
+
+    Error Codes (POLICY_SERVICE domain - not EnumHandlerLoaderError):
+        POLICY_SERVICE_001: External policy service rejected handler
+        POLICY_SERVICE_002: Policy service unavailable
+        POLICY_SERVICE_003: Handler hash not in approved list
+    """
+
+    def __init__(
+        self,
+        message: str,
+        error_code: str,
+        context: ModelInfraErrorContext | None = None,
+        **kwargs: object,
+    ) -> None:
+        """Initialize PolicyServiceValidationError with required error code.
+
+        Args:
+            message: Human-readable error message
+            error_code: Error code for categorization (e.g., "POLICY_SERVICE_001").
+                        Uses POLICY_SERVICE_xxx codes, NOT EnumHandlerLoaderError.
+            context: Optional infrastructure error context with correlation_id
+            **kwargs: Additional context fields
+        """
+        super().__init__(message, context=context, **kwargs)
+        self.error_code = error_code
+
+
+async def load_with_policy_service_validation(
     loader: HandlerPluginLoader,
     path: Path,
+    policy_service: PolicyServiceClient,
     correlation_id: UUID | None = None,
 ) -> ModelLoadedHandler:
-    """Load handler with additional custom validation.
+    """Load handler with external policy service validation.
 
-    Note: The built-in `allowed_namespaces` parameter is preferred
-    as it validates BEFORE any import occurs.
+    This wrapper pattern is for advanced scenarios requiring external
+    policy service integration. For simple namespace validation, use
+    the built-in `allowed_namespaces` parameter instead.
+
+    Use this wrapper when you need:
+    - External policy service approval (e.g., OPA, custom approval service)
+    - Handler code hash verification against approved list
+    - Audit logging to external compliance system
+
+    NOTE: For namespace-based validation, prefer:
+        loader = HandlerPluginLoader(
+            allowed_namespaces=["omnibase_infra.", "myapp.handlers."]
+        )
+    This uses the built-in HANDLER_LOADER_013 (NAMESPACE_NOT_ALLOWED) error.
 
     Args:
-        loader: The handler plugin loader
+        loader: The handler plugin loader (should have allowed_namespaces set)
         path: Path to contract file
+        policy_service: External policy service client
         correlation_id: Optional correlation ID for tracing
 
     Returns:
-        Loaded handler if path passes validation
+        Loaded handler if policy service approves
 
     Raises:
-        SecurityError: If module path is not in allowlist
+        PolicyServiceValidationError: If policy service rejects handler
     """
-    # Pre-validate module path before loader processes it
+    from uuid import uuid4
+    import hashlib
+
+    corr_id = correlation_id or uuid4()
+
+    # Read contract to get handler class path
     with open(path) as f:
         contract_data = yaml.safe_load(f)
 
     handler_class = contract_data.get("handler_class", "")
 
-    # Check against allowlist
-    if not any(handler_class.startswith(prefix) for prefix in ALLOWED_MODULE_PREFIXES):
-        raise SecurityError(
-            f"Handler module path '{handler_class}' not in allowlist. "
-            f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}"
+    # Consult external policy service for approval
+    approval_result = await policy_service.check_handler_approval(
+        handler_class=handler_class,
+        contract_path=str(path),
+        correlation_id=corr_id,
+    )
+
+    if not approval_result.approved:
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="policy_service_validation",
+            correlation_id=corr_id,
+        )
+        raise PolicyServiceValidationError(
+            f"Policy service rejected handler: {approval_result.reason}",
+            error_code="POLICY_SERVICE_001",
+            context=context,
+            handler_class=handler_class,
         )
 
-    # Additional custom validation can go here
-
-    # Path validated, proceed with loading
-    return loader.load_from_contract(path, correlation_id)
+    # Policy service approved, proceed with loading
+    # The loader's built-in allowed_namespaces will also validate
+    return loader.load_from_contract(path, corr_id)
 ```
 
 ##### Import Hook Monitoring
@@ -835,3 +1068,4 @@ capability_tags:
 - `src/omnibase_infra/models/runtime/model_loaded_handler.py` - Result model
 - `src/omnibase_infra/models/runtime/model_handler_contract.py` - Contract model
 - [ADR: Handler Plugin Loader Security Model](../decisions/adr-handler-plugin-loader-security.md) - Security decisions
+- [Migration Guide: wire_default_handlers()](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md) - Migration from legacy wiring

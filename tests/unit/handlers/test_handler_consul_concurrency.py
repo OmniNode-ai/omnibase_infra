@@ -155,7 +155,6 @@ class TestHandlerConsulConcurrentRetry:
             # Track results for verification
             success_count = 0
             failure_count = 0
-            retry_attempt_counts: list[int] = []
             lock = asyncio.Lock()
 
             async def execute_request(index: int) -> HandlerResponse | None:

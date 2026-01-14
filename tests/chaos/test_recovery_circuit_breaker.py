@@ -44,7 +44,7 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.enums import EnumCircuitState, EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     MixinAsyncCircuitBreaker,
@@ -229,7 +229,7 @@ class TestCircuitBreakerOpens:
             3. Verify next request is blocked immediately
         """
         # Cause threshold failures
-        for i in range(3):
+        for _ in range(3):
             try:
                 await low_threshold_service.perform_operation(should_fail=True)
             except ValueError:

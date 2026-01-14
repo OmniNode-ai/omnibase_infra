@@ -30,6 +30,9 @@ This directory contains detailed implementation guides and best practices for ON
 - **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
 - **[Handler Plugin Loader](./handler_plugin_loader.md)** - Contract-driven handler discovery with comprehensive security documentation for dynamic imports, threat model, and deployment checklist
 
+### Migration
+- **[wire_default_handlers() Migration](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md)** - Migration from legacy hardcoded handler wiring to contract-driven discovery
+
 ### Testing
 - **[Testing Patterns](./testing_patterns.md)** - Assertion patterns, "HOW TO FIX" error messages, and test best practices
 
@@ -81,6 +84,7 @@ This directory contains detailed implementation guides and best practices for ON
 | Secure handler loading | [Handler Plugin Loader](./handler_plugin_loader.md) | Security Considerations |
 | Dynamic import security | [Handler Plugin Loader](./handler_plugin_loader.md) | Threat Model |
 | Handler deployment security | [Handler Plugin Loader](./handler_plugin_loader.md) | Secure Deployment Checklist |
+| Migrate from wire_default_handlers() | [Migration Guide](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md) | Migration Steps |
 | Write actionable assertions | [Testing Patterns](./testing_patterns.md) | The "HOW TO FIX" Pattern |
 | Improve test error messages | [Testing Patterns](./testing_patterns.md) | Writing Effective Messages |
 | Add registry clear() method | [Registry clear() Policy](./registry_clear_policy.md) | Implementation Patterns |
@@ -173,6 +177,12 @@ Handler Plugin Loader
     ├── Security: Threat model, trust boundaries, deployment checklist
     ├── Depends on: Security Patterns, Correlation ID Tracking
     └── References: importlib, yaml.safe_load, ProtocolHandler
+
+wire_default_handlers() Migration (../migration/)
+    ├── Migration from legacy hardcoded wiring to contract-driven discovery
+    ├── Depends on: Handler Plugin Loader
+    ├── Replaces: wire_default_handlers(), wire_handlers_from_contract()
+    └── References: RuntimeHostProcess, ContractHandlerDiscovery
 
 Testing Patterns
     ├── Assertion patterns and "HOW TO FIX" error messages

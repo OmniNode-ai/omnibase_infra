@@ -13,6 +13,7 @@ Fixtures:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncGenerator, Callable, Coroutine
@@ -42,6 +43,16 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:2
 
 
 # =============================================================================
+# Consumer Readiness Helper (shared implementation)
+# =============================================================================
+# Re-exported from tests.helpers.kafka_utils for convenience.
+# See tests/helpers/kafka_utils.py for the canonical implementation.
+from tests.helpers.kafka_utils import wait_for_consumer_ready
+
+__all__ = ["wait_for_consumer_ready"]
+
+
+# =============================================================================
 # Topic Management Fixtures
 # =============================================================================
 
@@ -68,9 +79,9 @@ async def ensure_test_topic() -> AsyncGenerator[
             topic = await ensure_test_topic(f"test.integration.{uuid4().hex[:12]}")
             # Topic now exists and can be used for produce/consume
     """
-    import asyncio
 
     from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+    from aiokafka.errors import TopicAlreadyExistsError
 
     admin: AIOKafkaAdminClient | None = None
     created_topics: list[str] = []
@@ -137,8 +148,8 @@ async def ensure_test_topic() -> AsyncGenerator[
 
             # Wait for topic metadata to propagate
             await _wait_for_topic_metadata(admin, topic_name)
-        except Exception:
-            # Topic may already exist - this is acceptable
+        except TopicAlreadyExistsError:
+            # Topic already exists - this is acceptable in test environments
             # Still wait for metadata in case topic was just created by another process
             if admin is not None:
                 await _wait_for_topic_metadata(admin, topic_name, timeout=5.0)
@@ -241,6 +252,7 @@ async def topic_factory() -> AsyncGenerator[
             topic = await topic_factory("my.topic", partitions=3, replication=1)
     """
     from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+    from aiokafka.errors import TopicAlreadyExistsError
 
     admin: AIOKafkaAdminClient | None = None
     created_topics: list[str] = []
@@ -277,8 +289,8 @@ async def topic_factory() -> AsyncGenerator[
                 ]
             )
             created_topics.append(topic_name)
-        except Exception:
-            pass  # Topic may already exist
+        except TopicAlreadyExistsError:
+            pass  # Topic already exists - acceptable in test environments
 
         return topic_name
 

@@ -51,7 +51,9 @@ def create_mock_consul_client() -> AsyncMock:
     """Create a mock ProtocolConsulClient."""
     mock = AsyncMock()
     mock.register_service = AsyncMock(
-        return_value=ModelBackendResult(success=True, duration_ms=10.0)
+        return_value=ModelBackendResult(
+            success=True, duration_ms=10.0, backend_id="consul"
+        )
     )
     return mock
 
@@ -60,7 +62,9 @@ def create_mock_postgres_adapter() -> AsyncMock:
     """Create a mock ProtocolPostgresAdapter."""
     mock = AsyncMock()
     mock.upsert = AsyncMock(
-        return_value=ModelBackendResult(success=True, duration_ms=10.0)
+        return_value=ModelBackendResult(
+            success=True, duration_ms=10.0, backend_id="postgres"
+        )
     )
     return mock
 

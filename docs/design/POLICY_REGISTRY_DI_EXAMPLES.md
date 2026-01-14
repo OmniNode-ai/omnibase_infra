@@ -392,27 +392,28 @@ def test_full_container_lifecycle():
     assert not registry3.is_registered("test_policy")
 ```
 
-## Example 6: Backwards Compatibility (Deprecated Pattern)
+## Example 6: Standalone Utilities with Container DI
 
 ```python
-# legacy_code.py - Old code using singleton pattern
-"""Legacy code using deprecated singleton accessor."""
+# utility_module.py - Utilities accepting container parameter
+"""Standalone utilities using container-based DI.
 
-from omnibase_infra.runtime.policy_registry import (
-    get_policy_registry,  # Deprecated but still works
-    register_policy,  # Deprecated but still works
-)
+Per CLAUDE.md policy, no backwards compatibility is maintained.
+The singleton pattern has been removed entirely.
+All code must use container-based DI.
+"""
+
+from omnibase_infra.runtime.container_wiring import get_or_create_policy_registry
 from omnibase_infra.enums import EnumPolicyType
 
 
-def register_default_policies():
-    """Register default policies (old pattern).
+def register_default_policies(container: ModelOnexContainer) -> None:
+    """Register default policies using container DI.
 
-    This code still works but is deprecated.
-    Prefer container-based DI for new code.
+    Args:
+        container: ONEX container instance.
     """
-    # OLD PATTERN (deprecated): Uses module singleton
-    registry = get_policy_registry()
+    registry = get_or_create_policy_registry(container)
 
     registry.register_policy(
         policy_id="exponential_backoff",
@@ -421,8 +422,7 @@ def register_default_policies():
         version="1.0.0",
     )
 
-    # Or use convenience function
-    register_policy(
+    registry.register_policy(
         policy_id="linear_backoff",
         policy_class=LinearBackoffPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -497,22 +497,23 @@ class HybridRetryService:
 
         Args:
             container: Optional container for DI (preferred).
-            registry: Optional registry for backwards compatibility.
+            registry: Optional registry for direct injection (testing).
 
-        Note:
-            If neither provided, falls back to singleton (deprecated).
+        Raises:
+            ValueError: If neither container nor registry provided.
         """
         if container is not None:
-            # NEW: Container-based DI (preferred)
+            # Container-based DI (preferred)
             self.policy_registry = container.resolve("policy_registry")
         elif registry is not None:
-            # MIGRATION: Direct injection (for testing)
+            # Direct injection (for testing)
             self.policy_registry = registry
         else:
-            # OLD: Fallback to singleton (deprecated)
-            from omnibase_infra.runtime.policy_registry import get_policy_registry
-
-            self.policy_registry = get_policy_registry()
+            # Per CLAUDE.md: no backwards compatibility - container required
+            raise ValueError(
+                "Either container or registry must be provided. "
+                "Singleton pattern has been removed."
+            )
 
     def retry_operation(self, policy_id):
         policy_cls = self.policy_registry.get(policy_id)
@@ -596,14 +597,13 @@ These examples demonstrate:
 2. **Node integration** - Using PolicyRegistry in ONEX nodes
 3. **Service classes** - Using PolicyRegistry in service classes
 4. **Testing** - Unit and integration tests with container
-5. **Backwards compatibility** - Supporting old singleton pattern during migration
-6. **Migration path** - Hybrid approach for gradual migration
-7. **Configuration** - Environment-specific container setup
+5. **Standalone utilities** - Container DI for utility functions
+6. **Configuration** - Environment-specific container setup
 
 **Key Takeaways**:
 
-- ✅ **Always use container injection** for new code
+- ✅ **Always use container injection** for all code
 - ✅ **Resolve PolicyRegistry from container** via `container.resolve("policy_registry")`
 - ✅ **Test with mock containers** for isolated unit tests
-- ✅ **Support backwards compatibility** during migration period
+- ✅ **No backwards compatibility** - Singleton pattern has been removed (per CLAUDE.md)
 - ✅ **Wire services at startup** via `wire_infrastructure_services(container)`

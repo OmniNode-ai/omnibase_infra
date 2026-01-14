@@ -59,7 +59,9 @@ def mock_consul_client() -> AsyncMock:
         AsyncMock implementing ProtocolConsulClient interface.
     """
     mock = AsyncMock()
-    mock.register_service = AsyncMock(return_value=ModelBackendResult(success=True))
+    mock.register_service = AsyncMock(
+        return_value=ModelBackendResult(success=True, backend_id="consul")
+    )
     return mock
 
 
@@ -72,7 +74,9 @@ def mock_postgres_handler() -> AsyncMock:
         (adapter protocol for database operations).
     """
     mock = AsyncMock()
-    mock.upsert = AsyncMock(return_value=ModelBackendResult(success=True))
+    mock.upsert = AsyncMock(
+        return_value=ModelBackendResult(success=True, backend_id="postgres")
+    )
     return mock
 
 
@@ -159,7 +163,7 @@ class TestEffectPartialFailure:
         """
         # Arrange
         mock_consul_client.register_service.return_value = ModelBackendResult(
-            success=True
+            success=True, backend_id="consul"
         )
         mock_postgres_handler.upsert.side_effect = Exception("DB connection failed")
 
@@ -215,7 +219,9 @@ class TestEffectPartialFailure:
         mock_consul_client.register_service.side_effect = InfraConnectionError(
             "Consul service unavailable", context=error_context
         )
-        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(
+            success=True, backend_id="postgres"
+        )
 
         # Act
         response = await registry_effect.register_node(sample_registry_request)
@@ -327,7 +333,7 @@ class TestEffectPartialFailure:
 
         # Arrange - First attempt: Consul succeeds, PostgreSQL fails
         mock_consul_client.register_service.return_value = ModelBackendResult(
-            success=True
+            success=True, backend_id="consul"
         )
         mock_postgres_handler.upsert.side_effect = Exception("DB connection failed")
 
@@ -347,7 +353,9 @@ class TestEffectPartialFailure:
 
         # Arrange - Second attempt: PostgreSQL now succeeds
         mock_postgres_handler.upsert.side_effect = None
-        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(
+            success=True, backend_id="postgres"
+        )
 
         # Act - Second attempt (retry)
         response2 = await registry_effect.register_node(request)
@@ -454,7 +462,7 @@ class TestEffectPartialFailure:
             *args: object, **kwargs: object
         ) -> ModelBackendResult:
             await asyncio.sleep(0.01)  # 10ms
-            return ModelBackendResult(success=True)
+            return ModelBackendResult(success=True, backend_id="consul")
 
         # Arrange - PostgreSQL times out (simulated with slower operation + failure)
         async def slow_postgres_timeout(
@@ -511,9 +519,11 @@ class TestPartialFailureEdgeCases:
         """
         # Arrange
         mock_consul_client.register_service.return_value = ModelBackendResult(
-            success=True
+            success=True, backend_id="consul"
         )
-        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(
+            success=True, backend_id="postgres"
+        )
 
         # Act
         response = await registry_effect.register_node(sample_registry_request)
@@ -546,9 +556,11 @@ class TestPartialFailureEdgeCases:
 
         # First registration - both succeed
         mock_consul_client.register_service.return_value = ModelBackendResult(
-            success=True
+            success=True, backend_id="consul"
         )
-        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(
+            success=True, backend_id="postgres"
+        )
 
         response1 = await registry_effect.register_node(request)
         assert response1.status == "success"
@@ -573,7 +585,7 @@ class TestPartialFailureEdgeCases:
         """Test ModelRegistryResponse helper methods work correctly."""
         # Arrange - Partial failure
         mock_consul_client.register_service.return_value = ModelBackendResult(
-            success=True
+            success=True, backend_id="consul"
         )
         mock_postgres_handler.upsert.side_effect = Exception("DB error")
 
@@ -598,9 +610,11 @@ class TestPartialFailureEdgeCases:
         """Test that skip_consul and skip_postgres flags work correctly."""
         # Arrange
         mock_consul_client.register_service.return_value = ModelBackendResult(
-            success=True
+            success=True, backend_id="consul"
         )
-        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(
+            success=True, backend_id="postgres"
+        )
 
         # Act - Skip Consul
         response = await registry_effect.register_node(
@@ -683,8 +697,10 @@ class TestModelRegistryResponseFactory:
         """Test factory creates success status when both backends succeed."""
         node_id = uuid4()
         correlation_id = uuid4()
-        consul = ModelBackendResult(success=True, duration_ms=10.0)
-        postgres = ModelBackendResult(success=True, duration_ms=20.0)
+        consul = ModelBackendResult(success=True, duration_ms=10.0, backend_id="consul")
+        postgres = ModelBackendResult(
+            success=True, duration_ms=20.0, backend_id="postgres"
+        )
 
         response = ModelRegistryResponse.from_backend_results(
             node_id=node_id,
@@ -703,11 +719,12 @@ class TestModelRegistryResponseFactory:
         """Test factory creates partial status when one backend fails."""
         node_id = uuid4()
         correlation_id = uuid4()
-        consul = ModelBackendResult(success=True, duration_ms=10.0)
+        consul = ModelBackendResult(success=True, duration_ms=10.0, backend_id="consul")
         postgres = ModelBackendResult(
             success=False,
             error="Connection failed",
             duration_ms=5000.0,
+            backend_id="postgres",
         )
 
         response = ModelRegistryResponse.from_backend_results(
@@ -729,11 +746,13 @@ class TestModelRegistryResponseFactory:
             success=False,
             error="Consul error",
             duration_ms=1000.0,
+            backend_id="consul",
         )
         postgres = ModelBackendResult(
             success=False,
             error="Postgres error",
             duration_ms=2000.0,
+            backend_id="postgres",
         )
 
         response = ModelRegistryResponse.from_backend_results(

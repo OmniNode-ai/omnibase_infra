@@ -68,7 +68,7 @@ class HandlerConsulRegister:
         >>> from unittest.mock import AsyncMock
         >>> consul_client = AsyncMock()
         >>> consul_client.register_service.return_value = ModelBackendResult(
-        ...     success=True, duration_ms=0.0
+        ...     success=True, duration_ms=0.0, backend_id="consul"
         ... )
         >>> handler = HandlerConsulRegister(consul_client)
         >>> # Call handler.handle(request, correlation_id) in async context

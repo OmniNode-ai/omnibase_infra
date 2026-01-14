@@ -25,7 +25,6 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 

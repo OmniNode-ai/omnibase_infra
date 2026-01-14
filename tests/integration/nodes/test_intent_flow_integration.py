@@ -48,7 +48,6 @@ Related:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -72,14 +71,6 @@ from omnibase_infra.nodes.reducers.models.model_registration_state import (
     ModelRegistrationState,
 )
 from omnibase_infra.nodes.reducers.registration_reducer import RegistrationReducer
-
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.effects.models.model_backend_result import (
-        ModelBackendResult,
-    )
-    from omnibase_infra.nodes.effects.models.model_registry_response import (
-        ModelRegistryResponse,
-    )
 
 # Test timestamp constant for reproducible tests
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)

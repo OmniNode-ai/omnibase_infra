@@ -36,7 +36,9 @@ def create_mock_postgres_adapter() -> AsyncMock:
     """Create a mock ProtocolPostgresAdapter."""
     mock = AsyncMock()
     mock.deactivate = AsyncMock(
-        return_value=ModelBackendResult(success=True, duration_ms=10.0)
+        return_value=ModelBackendResult(
+            success=True, duration_ms=10.0, backend_id="postgres"
+        )
     )
     return mock
 
@@ -64,7 +66,7 @@ class TestHandlerPostgresDeactivateSuccess:
         # Arrange
         mock_adapter = create_mock_postgres_adapter()
         mock_adapter.deactivate.return_value = ModelBackendResult(
-            success=True, duration_ms=15.5
+            success=True, duration_ms=15.5, backend_id="postgres"
         )
 
         handler = HandlerPostgresDeactivate(mock_adapter)

@@ -6,9 +6,9 @@ This mixin provides `get`, `__getitem__`, and `__contains__` methods
 that enable dict-like access patterns for Pydantic BaseModel subclasses.
 
 Use Cases:
-    - Backwards compatibility with code that used TypedDict or plain dicts
     - Flexible access patterns where field names are computed or unknown
-    - Migration from JsonType to strongly-typed Pydantic models
+    - Interoperability with dict-based interfaces and APIs
+    - Generic processing where field names are dynamic
 
 Design Notes:
     - Works with any Pydantic BaseModel subclass
@@ -70,8 +70,8 @@ class MixinDictLikeAccessors:
     def get(self, key: str, default: object = None) -> object:
         """Get field value by key with optional default.
 
-        Provides dict-like access for backwards compatibility with
-        code that previously used TypedDict or plain dictionaries.
+        Provides dict-like access for interoperability with dict-based
+        interfaces and APIs.
 
         Args:
             key: Field name to retrieve.

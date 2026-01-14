@@ -855,7 +855,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                         f"Invalid port '{port_str}' in '{server}'. "
                         "Port must be a valid integer.",
                         context=ctx,
-                    )
+                    ) from None
 
             # Use the stripped and validated version
             bootstrap_servers = stripped_servers
@@ -897,7 +897,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                     if not messages:
                         break  # No more messages within timeout
 
-                    for tp, msgs in messages.items():
+                    for _tp, msgs in messages.items():
                         for message in msgs:
                             key = message.key.decode("utf-8") if message.key else None
 

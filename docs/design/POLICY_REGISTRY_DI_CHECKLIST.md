@@ -119,10 +119,10 @@
   ruff check src/omnibase_infra/runtime/policy_registry.py
   ```
 
-- [ ] **Verify backwards compatibility**:
-  - [ ] All existing tests pass unchanged
-  - [ ] Old singleton pattern still works
-  - [ ] No breaking changes to public API
+- [ ] **Verify container-based DI**:
+  - [ ] All tests updated to use container DI
+  - [ ] Singleton pattern removed (per no-backwards-compatibility policy)
+  - [ ] All consumers updated to use container
 
 ## Phase 2: Integration Tests (Next Sprint)
 
@@ -159,23 +159,11 @@
 - [ ] Identify all utilities that use `get_policy_registry()`
 - [ ] Refactor to accept container or registry as parameter
 - [ ] Update tests to inject registry
-- [ ] Add deprecation notices to old functions
+- [ ] Remove old singleton-based functions (no deprecation notices - per policy)
 
-## Phase 4: Deprecation Warnings (Future Sprint)
+## Phase 4: Singleton Removal (Immediate - Per No-Backwards-Compatibility Policy)
 
-- [ ] **File**: `src/omnibase_infra/runtime/policy_registry.py`
-  - [ ] Add `warnings.warn()` to `get_policy_registry()`
-  - [ ] Add `warnings.warn()` to `get_policy_class()`
-  - [ ] Add `warnings.warn()` to `register_policy()`
-  - [ ] Configure warnings to show once per call site
-  - [ ] Document deprecation in release notes
-
-- [ ] **Update tests**:
-  - [ ] Add tests for deprecation warnings
-  - [ ] Use `pytest.warns()` to verify warnings
-  - [ ] Verify warning messages are clear
-
-## Phase 5: Removal (Breaking Change - Future Release)
+Per CLAUDE.md: "ALL changes are breaking changes. NO backwards compatibility is maintained."
 
 - [ ] **File**: `src/omnibase_infra/runtime/policy_registry.py`
   - [ ] Remove `_policy_registry` module variable
@@ -192,10 +180,9 @@
   - [ ] Update all documentation
   - [ ] Update all examples
 
-- [ ] **Breaking change documentation**:
-  - [ ] Add to CHANGELOG.md
-  - [ ] Add migration guide
-  - [ ] Update semantic version (major bump)
+- [ ] **CHANGELOG update**:
+  - [ ] Add to CHANGELOG.md (no migration guide needed per policy)
+  - [ ] Note: No deprecation warnings - old APIs are simply removed
 
 ## Integration Checkpoints
 
@@ -204,7 +191,6 @@
 - [ ] PR review completed
 - [ ] All tests passing
 - [ ] Documentation updated
-- [ ] Zero breaking changes confirmed
 - [ ] Container wiring working
 - [ ] Examples tested
 
@@ -224,25 +210,17 @@
 
 ### After Phase 4
 
-- [ ] Deprecation warnings in place
-- [ ] Users notified of deprecation
-- [ ] Migration guide published
-- [ ] Timeline communicated
-
-### After Phase 5
-
-- [ ] Breaking changes merged
-- [ ] Major version released
-- [ ] Singleton pattern removed
-- [ ] All tests updated
+- [ ] Singleton pattern removed (per no-backwards-compatibility policy)
+- [ ] All tests updated for container DI
+- [ ] CHANGELOG updated
 - [ ] Documentation current
 
 ## Risk Mitigation Checklist
 
-- [ ] **Backwards compatibility verified**:
-  - [ ] Existing tests pass without changes
-  - [ ] Old singleton pattern still works
-  - [ ] No changes to public API signatures
+- [ ] **Migration complete**:
+  - [ ] All tests updated for container DI
+  - [ ] Singleton pattern removed entirely
+  - [ ] All consumers use container DI
 
 - [ ] **Container API verified**:
   - [ ] ModelOnexContainer imports successfully
@@ -257,7 +235,7 @@
 - [ ] **Documentation complete**:
   - [ ] All patterns documented
   - [ ] Examples tested and working
-  - [ ] Migration path clear
+  - [ ] Container DI pattern documented (no migration guide - per policy)
 
 ## Success Metrics
 
@@ -279,7 +257,7 @@
 ## Notes
 
 - Keep each phase small and independently deliverable
-- Maintain backwards compatibility until Phase 5
+- No backwards compatibility maintained (per CLAUDE.md policy)
 - Test thoroughly at each phase
 - Document as you go
 - Get feedback early and often

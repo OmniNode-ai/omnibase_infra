@@ -56,6 +56,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
     UnknownHandlerTypeError,
 )
@@ -714,6 +715,83 @@ class RuntimeHostProcess:
         # - Store the handler instance in self._handlers for routing
         await self._populate_handlers_from_registry()
 
+        # Step 4.1: FAIL-FAST validation - runtime MUST have at least one handler
+        # A runtime with no handlers cannot process any events and is misconfigured.
+        # This catches configuration issues early rather than silently starting a
+        # runtime that cannot do anything useful.
+        if not self._handlers:
+            correlation_id = uuid4()
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_handlers",
+                target_name="runtime_host_process",
+                correlation_id=correlation_id,
+            )
+
+            # Build informative error message with context about what was attempted
+            contract_paths_info = (
+                f"  * contract_paths provided: {[str(p) for p in self._contract_paths]}\n"
+                if self._contract_paths
+                else "  * contract_paths: NOT PROVIDED (using ONEX_CONTRACTS_DIR env var)\n"
+            )
+
+            # Get registry count for additional context
+            handler_registry = await self._get_handler_registry()
+            registry_protocol_count = len(handler_registry.list_protocols())
+
+            # Build additional diagnostic info
+            failed_handlers_detail = ""
+            if self._failed_handlers:
+                failed_handlers_detail = "FAILED HANDLERS (check these first):\n"
+                for handler_type, error_msg in self._failed_handlers.items():
+                    failed_handlers_detail += f"  * {handler_type}: {error_msg}\n"
+                failed_handlers_detail += "\n"
+
+            raise ProtocolConfigurationError(
+                "No handlers registered. The runtime cannot start without at least one handler.\n\n"
+                "CURRENT CONFIGURATION:\n"
+                f"{contract_paths_info}"
+                f"  * Registry protocol count: {registry_protocol_count}\n"
+                f"  * Failed handlers: {len(self._failed_handlers)}\n"
+                f"  * Correlation ID: {correlation_id}\n\n"
+                f"{failed_handlers_detail}"
+                "TROUBLESHOOTING STEPS:\n"
+                "  1. Verify ONEX_CONTRACTS_DIR points to a valid contracts directory:\n"
+                "     - Run: echo $ONEX_CONTRACTS_DIR && ls -la $ONEX_CONTRACTS_DIR\n"
+                "     - Expected: Directory containing handler_contract.yaml or contract.yaml files\n\n"
+                "  2. Check for handler contract files:\n"
+                "     - Run: find $ONEX_CONTRACTS_DIR -name 'handler_contract.yaml' -o -name 'contract.yaml'\n"
+                "     - If empty: No contracts found - create handler contracts or set correct path\n\n"
+                "  3. Verify handler contracts have required fields:\n"
+                "     - Required: handler_name, handler_class, handler_type\n"
+                "     - Example:\n"
+                "         handler_name: my_handler\n"
+                "         handler_class: mymodule.handlers.MyHandler\n"
+                "         handler_type: http\n\n"
+                "  4. Verify handler modules are importable:\n"
+                "     - Run: python -c 'from mymodule.handlers import MyHandler; print(MyHandler)'\n"
+                "     - Check PYTHONPATH includes your handler module paths\n\n"
+                "  5. Check application logs for loader errors:\n"
+                "     - Look for: MODULE_NOT_FOUND (HANDLER_LOADER_010)\n"
+                "     - Look for: CLASS_NOT_FOUND (HANDLER_LOADER_011)\n"
+                "     - Look for: IMPORT_ERROR (HANDLER_LOADER_012)\n"
+                "     - Look for: AMBIGUOUS_CONTRACT (HANDLER_LOADER_040)\n\n"
+                "  6. If using wire_handlers() manually:\n"
+                "     - Ensure wire_handlers() is called before RuntimeHostProcess.start()\n"
+                "     - Check that handlers implement ProtocolHandler interface\n\n"
+                "  7. Docker/container environment:\n"
+                "     - Verify volume mounts include handler contract directories\n"
+                "     - Check ONEX_CONTRACTS_DIR is set in docker-compose.yml/Dockerfile\n"
+                "     - Run: docker exec <container> ls $ONEX_CONTRACTS_DIR\n\n"
+                "For verbose handler discovery logging, set LOG_LEVEL=DEBUG.",
+                context=context,
+                registered_handler_count=0,
+                failed_handler_count=len(self._failed_handlers),
+                failed_handlers=list(self._failed_handlers.keys()),
+                contract_paths=[str(p) for p in self._contract_paths],
+                registry_protocol_count=registry_protocol_count,
+            )
+
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
 
@@ -944,7 +1022,6 @@ class RuntimeHostProcess:
             ContractHandlerDiscovery,
         )
         from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
-        from omnibase_infra.runtime.handler_registry import get_handler_registry
 
         logger.info(
             "Starting contract-based handler discovery",
@@ -1479,7 +1556,8 @@ class RuntimeHostProcess:
             Dictionary with health status information:
                 - healthy: Overall health status (True only if running,
                   event bus healthy, no handlers failed to instantiate,
-                  and all registered handlers are healthy)
+                  all registered handlers are healthy, AND at least one
+                  handler is registered - a runtime without handlers is useless)
                 - degraded: True when process is running but some handlers
                   failed to instantiate. Indicates partial functionality -
                   the system is operational but not at full capacity.
@@ -1498,11 +1576,17 @@ class RuntimeHostProcess:
                 - registered_handlers: List of successfully registered handler types
                 - handlers: Dict of handler_type -> health status for each
                   registered handler
+                - no_handlers_registered: True if no handlers are registered.
+                  This indicates a critical configuration issue - the runtime
+                  cannot process any events without handlers (OMN-1317).
 
         Health State Matrix:
             - healthy=True, degraded=False: Fully operational
             - healthy=False, degraded=True: Running with reduced functionality
-            - healthy=False, degraded=False: Not running or event bus unhealthy
+            - healthy=False, degraded=False: Not running, event bus unhealthy,
+              or no handlers registered (critical configuration issue)
+            - healthy=False, no_handlers_registered=True: Configuration error,
+              runtime cannot process events
 
         Drain State:
             When is_draining=True, the service is shutting down gracefully:
@@ -1581,17 +1665,23 @@ class RuntimeHostProcess:
         # Check for failed handlers - any failures indicate degraded state
         has_failed_handlers = len(self._failed_handlers) > 0
 
+        # Check for no handlers registered - critical configuration issue
+        # A runtime with no handlers cannot process any events and should be unhealthy
+        no_handlers_registered = len(self._handlers) == 0
+
         # Degraded state: process is running but some handlers failed to instantiate
         # This means the system is operational but with reduced functionality
         degraded = self._is_running and has_failed_handlers
 
         # Overall health is True only if running, event bus is healthy,
-        # no handlers failed to instantiate, and all registered handlers are healthy
+        # no handlers failed to instantiate, all registered handlers are healthy,
+        # AND at least one handler is registered (runtime without handlers is useless)
         healthy = (
             self._is_running
             and event_bus_healthy
             and not has_failed_handlers
             and handlers_all_healthy
+            and not no_handlers_registered
         )
 
         return {
@@ -1605,6 +1695,7 @@ class RuntimeHostProcess:
             "failed_handlers": self._failed_handlers,
             "registered_handlers": list(self._handlers.keys()),
             "handlers": handler_health_results,
+            "no_handlers_registered": no_handlers_registered,
         }
 
     def register_handler(self, handler_type: str, handler: ProtocolHandler) -> None:

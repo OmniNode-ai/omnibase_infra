@@ -172,7 +172,7 @@ The codebase has migrated from "handler" to "dispatcher" terminology for message
 - **Class Naming**: Handler implementations renamed to Dispatcher (e.g., `UserEventHandler` → `UserEventDispatcher`)
 - **ID Convention**: `dispatcher_id` values now use `-dispatcher` suffix instead of `-handler`
 - **Enum Rename**: `EnumDispatchStatus.NO_HANDLER` renamed to `NO_DISPATCHER` with new value `no_dispatcher` for consistency with dispatcher terminology
-- **Enum Stability**: `EnumDispatchStatus.HANDLER_ERROR` value remains **unchanged** for backwards compatibility with existing metrics, logs, and monitoring systems
+- **Enum Value**: `EnumDispatchStatus.HANDLER_ERROR` retains its current value `handler_error` (rename deferred; see ADR for rationale)
 - **Full Migration Guide**: See `docs/migrations/HANDLER_TO_DISPATCHER_MIGRATION.md` for complete migration details and code examples
 
 #### CI/CD

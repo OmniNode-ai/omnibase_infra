@@ -48,7 +48,42 @@ This means:
 - **Malicious contracts can execute arbitrary code** if an attacker can write to contract directories
 - **Import-time vulnerabilities** in handler modules are triggered by contract discovery
 
-### 2. Built-in Security Controls
+### 2. Contract Content Security: No Secrets
+
+**Handler contracts must NEVER contain secrets, credentials, or sensitive configuration values.**
+
+This is a fundamental security principle separate from dynamic import security:
+
+| Prohibited Content | Why | Risk |
+|--------------------|-----|------|
+| Passwords, API keys, tokens | Git history exposure | Credential theft |
+| Connection strings with credentials | Log leakage | Full system access |
+| Private keys, certificates | Repository access | Cryptographic compromise |
+| Environment-specific secrets | Cross-environment sharing | Lateral movement |
+
+#### Correct Pattern
+
+```yaml
+# handler_contract.yaml - NO secrets, only handler metadata
+handler_name: "db.query"
+handler_class: "myapp.handlers.DatabaseHandler"
+handler_type: "effect"
+capability_tags:
+  - database
+  - pooled
+# Credentials loaded at runtime from Vault/env vars
+```
+
+#### Why This Matters
+
+1. **Git history is permanent**: Secrets committed once remain in history forever
+2. **Contracts are shared**: Same contracts used across dev/staging/prod
+3. **Logging exposure**: Contracts may be logged during deployment
+4. **Access control mismatch**: Repository access != secret access authorization
+
+**See Also**: [Handler Plugin Loader Pattern - Contract Content Security](../patterns/handler_plugin_loader.md#contract-content-security-no-secrets-in-contracts)
+
+### 3. Built-in Security Controls
 
 The loader implements several protections:
 
@@ -90,7 +125,7 @@ The `_sanitize_exception_message()` function strips filesystem paths from except
 
 This prevents information disclosure about internal directory structures.
 
-### 3. Optional Security Controls
+### 4. Optional Security Controls
 
 The loader provides the following **optional** security controls that must be explicitly enabled:
 
@@ -117,7 +152,15 @@ loader.load_from_contract(Path("bad.yaml"))  # handler_class: malicious_pkg.Evil
 - **Explicit allowlist**: Only modules starting with specified prefixes can be loaded. Recommended for production deployments.
 - **Empty list**: Blocks ALL namespaces - effectively disables the loader.
 
-### 4. What the Loader Does NOT Protect Against
+**Path Traversal Protection:**
+
+The `allowed_namespaces` parameter includes **package boundary validation** that prevents path traversal attacks:
+
+- Prefix `"foo."` only matches `foo.bar`, NOT `foobar.module`
+- Implementation validates that namespace boundaries are respected
+- Recommendation: Always use trailing dots (e.g., `"omnibase_infra."`) for maximum security
+
+### 5. What the Loader Does NOT Protect Against
 
 **CRITICAL**: The following protections require deployment-level mitigation:
 
@@ -220,6 +263,8 @@ All production deployments MUST complete these items:
   - Contracts come from version-controlled repositories with code review
   - Container images are signed
   - Artifact registries verify provenance
+  - **Contracts contain NO secrets** (passwords, API keys, tokens)
+  - CI pipeline includes secret scanning (gitleaks, detect-secrets)
 
 - [ ] **4. Handler Loading Logging Enabled**
   ```python
@@ -317,8 +362,15 @@ ALLOWED_MODULE_PREFIXES: Final[tuple[str, ...]] = (
 )
 
 
-class SecurityError(Exception):
-    """Raised when security validation fails."""
+from omnibase_infra.errors import ProtocolConfigurationError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+
+class SecurityValidationError(ProtocolConfigurationError):
+    """Raised when security validation fails.
+
+    Extends ProtocolConfigurationError to integrate with ONEX error handling.
+    """
     pass
 
 
@@ -333,7 +385,7 @@ def secure_load_from_contract(
 
     handler_class = contract_data.get("handler_class", "")
     if not any(handler_class.startswith(prefix) for prefix in ALLOWED_MODULE_PREFIXES):
-        raise SecurityError(
+        raise SecurityValidationError(
             f"Handler module path '{handler_class}' not in allowlist. "
             f"Allowed prefixes: {ALLOWED_MODULE_PREFIXES}"
         )

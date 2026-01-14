@@ -24,6 +24,7 @@ import pytest
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.services.service_health import ServiceHealth
+from tests.conftest import seed_mock_handlers
 
 
 class TestShutdownHealthIntegration:
@@ -48,6 +49,8 @@ class TestShutdownHealthIntegration:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
 
             # Verify running state first
@@ -84,6 +87,8 @@ class TestShutdownHealthIntegration:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
 
             # Act - start shutdown (but don't await immediately)
@@ -128,6 +133,8 @@ class TestShutdownHealthIntegration:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
             await health_server.start()
 
@@ -187,6 +194,8 @@ class TestShutdownHealthIntegration:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
             await health_server.start()
 
@@ -245,6 +254,8 @@ class TestShutdownHealthIntegration:
             with patch.object(
                 runtime, "_populate_handlers_from_registry", noop_populate
             ):
+                # Set handlers to avoid fail-fast validation
+                seed_mock_handlers(runtime)
                 # Start both
                 await runtime.start()
                 await health_server.start()
@@ -294,6 +305,8 @@ class TestShutdownHealthIntegration:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
             await runtime.stop()
 
@@ -324,6 +337,8 @@ class TestShutdownHealthIntegration:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
 
             # Verify event bus is started
@@ -354,6 +369,8 @@ class TestShutdownHealthIntegration:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
 
             # Simulate a degraded state while running
@@ -393,6 +410,8 @@ class TestServiceHealthShutdownBehavior:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
             await health_server.start()
 
@@ -461,6 +480,8 @@ class TestServiceHealthShutdownBehavior:
             pass
 
         with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
+            # Set handlers to avoid fail-fast validation
+            seed_mock_handlers(runtime)
             await runtime.start()
             await health_server.start()
 

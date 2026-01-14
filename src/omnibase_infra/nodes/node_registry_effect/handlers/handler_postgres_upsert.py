@@ -64,7 +64,7 @@ class HandlerPostgresUpsert:
     Example:
         >>> from unittest.mock import AsyncMock
         >>> adapter = AsyncMock()
-        >>> adapter.upsert.return_value = ModelBackendResult(success=True)
+        >>> adapter.upsert.return_value = ModelBackendResult(success=True, backend_id="postgres")
         >>> handler = HandlerPostgresUpsert(adapter)
         >>> result = await handler.handle(request, correlation_id)
         >>> result.success

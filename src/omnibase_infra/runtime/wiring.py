@@ -114,7 +114,6 @@ Example Usage:
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -126,7 +125,6 @@ from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_http import HttpRestHandler
 from omnibase_infra.handlers.handler_vault import HandlerVault
-from omnibase_infra.models.types import JsonDict
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_CONSUL,

@@ -33,6 +33,7 @@ import copy
 import inspect
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
@@ -431,7 +432,7 @@ class TestStateIsolation:
         """
         results: list[tuple] = []
 
-        for i in range(5):
+        for _ in range(5):
             node_id = id_generator.next_uuid()
             correlation_id = id_generator.next_uuid()
             clock.advance(60)
@@ -598,10 +599,8 @@ class TestStateIsolation:
             "ModelRegistrationState must have frozen=True in model_config"
         )
 
-        # Attempt to mutate should raise TypeError
-        with pytest.raises(
-            Exception
-        ):  # ValidationError or TypeError depending on Pydantic version
+        # Attempt to mutate should raise ValidationError (Pydantic V2 frozen model)
+        with pytest.raises(ValidationError):
             state.status = "pending"  # type: ignore[misc]
 
     def test_with_methods_return_new_instances(

@@ -132,7 +132,6 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import yaml
@@ -312,6 +311,23 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         """
         self._allowed_namespaces: list[str] | None = allowed_namespaces
 
+        # Security best practice: warn if no namespace restriction is configured
+        if allowed_namespaces is None:
+            logger.info(
+                "HandlerPluginLoader initialized without namespace restrictions. "
+                "For production environments, consider setting allowed_namespaces to "
+                "restrict handler imports to trusted packages (e.g., "
+                "allowed_namespaces=['omnibase_infra.', 'omnibase_core.', 'mycompany.']).",
+            )
+        # Warn if empty list is provided - this blocks ALL handler imports
+        elif len(allowed_namespaces) == 0:
+            logger.warning(
+                "HandlerPluginLoader initialized with empty allowed_namespaces list. "
+                "This will block ALL handler imports. If this is intentional, ignore "
+                "this warning. Otherwise, set allowed_namespaces=None to allow all "
+                "namespaces or provide a list of allowed namespace prefixes.",
+            )
+
     def _validate_correlation_id(
         self,
         correlation_id: UUID | None,
@@ -408,6 +424,9 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
 
         # Convert UUID to string for logging and error context
         correlation_id_str = str(correlation_id)
+
+        # Start timing for performance observability
+        start_time = time.perf_counter()
 
         logger.debug(
             "Loading handler from contract: %s",
@@ -564,6 +583,14 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         handler_class_path = contract.handler_class
         handler_type = contract.handler_type
         capability_tags = contract.capability_tags
+        # protocol_type is the registry key (e.g., "db", "http")
+        # The model_validator in ModelHandlerContract sets this from handler_name
+        # if not explicitly provided (strips "handler-" prefix)
+        protocol_type = contract.protocol_type
+        # Should never be None after model_validator, but assert for type safety
+        assert protocol_type is not None, (
+            "protocol_type should be set by model_validator"
+        )
 
         # Import and validate handler class
         handler_class = self._import_handler_class(
@@ -613,21 +640,28 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 contract_path=str(contract_path),
             ) from e
 
+        # Calculate load duration for performance observability
+        load_duration_ms = (time.perf_counter() - start_time) * 1000
+
         logger.info(
-            "Successfully loaded handler from contract: %s -> %s",
+            "Successfully loaded handler from contract: %s -> %s (%.2fms)",
             handler_name,
             handler_class_path,
+            load_duration_ms,
             extra={
                 "handler_name": handler_name,
                 "handler_class": handler_class_path,
                 "handler_type": handler_type.value,
+                "protocol_type": protocol_type,
                 "contract_path": str(resolved_contract_path),
                 "correlation_id": correlation_id_str,
+                "load_duration_ms": load_duration_ms,
             },
         )
 
         return ModelLoadedHandler(
             handler_name=handler_name,
+            protocol_type=protocol_type,
             handler_type=handler_type,
             handler_class=handler_class_path,
             contract_path=resolved_contract_path,
@@ -1935,19 +1969,22 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
         # Fail fast if any directory has both contract types (ambiguous configuration)
         for parent_dir, filenames in dir_to_contract_types.items():
             if len(filenames) > 1:
-                context = ModelInfraErrorContext(
+                # Use with_correlation() to ensure correlation_id is always present
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="find_contract_files",
-                    correlation_id=correlation_id,
                 )
                 raise ProtocolConfigurationError(
                     f"Ambiguous contract configuration in '{parent_dir.name}': "
                     f"Found both '{HANDLER_CONTRACT_FILENAME}' and '{CONTRACT_YAML_FILENAME}'. "
-                    f"Use only ONE contract file per handler directory to avoid conflicts.",
+                    f"Use only ONE contract file per handler directory to avoid conflicts. "
+                    f"Total contracts discovered so far: {len(contract_files)}.",
                     context=context,
                     loader_error=EnumHandlerLoaderError.AMBIGUOUS_CONTRACT_CONFIGURATION.value,
                     directory=str(parent_dir),
                     contract_files=sorted(filenames),
+                    total_discovered=len(contract_files),
                 )
 
         # Deduplicate by resolved path

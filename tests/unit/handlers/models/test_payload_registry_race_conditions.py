@@ -17,10 +17,9 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 import pytest
-from pydantic import BaseModel
 
 from omnibase_infra.handlers.models.consul.model_payload_consul import (
     ModelPayloadConsul,

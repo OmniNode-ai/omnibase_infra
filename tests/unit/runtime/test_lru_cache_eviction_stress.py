@@ -531,7 +531,7 @@ class TestConcurrentCacheAccess:
         assert len(errors) == 0, f"Thread errors: {errors}"
 
         # Verify all size readings were within limit
-        for hits, misses, size in read_results:
+        for _hits, _misses, size in read_results:
             assert size <= cache_size, f"Size {size} exceeded limit {cache_size}"
 
     def test_concurrent_eviction_correctness(self) -> None:
@@ -1002,7 +1002,6 @@ class TestCachePerformanceUnderStress:
 
         # Calculate statistics
         latencies.sort()
-        p50 = latencies[len(latencies) // 2]
         p99 = latencies[int(len(latencies) * 0.99)]
 
         # Latency should be reasonable even under continuous eviction
@@ -1043,9 +1042,6 @@ class TestCachePerformanceUnderStress:
         """
         cache_size = 32
         PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
-
-        # Record initial state
-        initial_info = PolicyRegistry._get_semver_cache_info()
 
         # Perform many operations
         for i in range(50_000):

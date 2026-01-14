@@ -35,6 +35,8 @@ Fixture Dependency Graph:
     real_kafka_event_bus
         -> registration_orchestrator
         -> introspectable_test_node
+    ensure_test_topic
+        -> ensure_test_topic_exists (UUID-suffixed topic with cleanup)
     real_consul_handler
         -> cleanup_consul_services
 
@@ -45,24 +47,30 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID, uuid4
 
 import pytest
-
-# Module-level logger for test cleanup diagnostics
-logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_infra.enums import EnumIntrospectionReason
+from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
+from tests.conftest import check_service_registry_available
+from tests.infrastructure_config import (
+    DEFAULT_CONSUL_PORT,
+    DEFAULT_POSTGRES_PORT,
+)
 
 # Load environment configuration with priority:
 # 1. .env.docker in this directory (for Docker compose infrastructure)
@@ -81,26 +89,6 @@ if _docker_env_file.exists():
 elif _project_env_file.exists():
     # Remote infrastructure mode - use project .env
     load_dotenv(_project_env_file)
-
-# =============================================================================
-# Cross-Module Imports
-# =============================================================================
-# From tests/infrastructure_config.py:
-#   - DEFAULT_CONSUL_PORT: Standard Consul port on infrastructure server (28500)
-#   - DEFAULT_POSTGRES_PORT: Standard PostgreSQL port on infrastructure server (5436)
-#
-# This configuration module centralizes infrastructure endpoints to:
-#   - Enable environment variable overrides for different deployments
-#   - Provide graceful skip behavior when infrastructure is unavailable
-#   - Document the ONEX development infrastructure server (192.168.86.200)
-# =============================================================================
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
-from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from tests.infrastructure_config import (
-    DEFAULT_CONSUL_PORT,
-    DEFAULT_POSTGRES_PORT,
-)
 
 if TYPE_CHECKING:
     import asyncpg
@@ -126,6 +114,16 @@ if TYPE_CHECKING:
     from omnibase_infra.services import TimeoutEmitter, TimeoutScanner
     from tests.helpers.deterministic import DeterministicClock
 
+# Module-level logger for test cleanup diagnostics
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Consumer Readiness Helper (shared implementation)
+# =============================================================================
+# Imported from tests.helpers.kafka_utils for shared use across test modules.
+# See tests/helpers/kafka_utils.py for the canonical implementation.
+from tests.helpers.kafka_utils import wait_for_consumer_ready
 
 # =============================================================================
 # Envelope Helper
@@ -198,20 +196,6 @@ def _check_consul_reachable() -> bool:
 
 
 CONSUL_AVAILABLE = _check_consul_reachable()
-
-
-# =============================================================================
-# Cross-Module Import: Service Registry Availability
-# =============================================================================
-# From tests/conftest.py:
-#   - check_service_registry_available: Function that checks if ServiceRegistry
-#     is available in ModelONEXContainer. Returns False when omnibase_core 0.6.x
-#     has a circular import issue causing service_registry to be None.
-#
-# This check enables graceful test skipping when ServiceRegistry is unavailable,
-# which is a known issue in omnibase_core 0.6.2 due to circular imports.
-# =============================================================================
-from tests.conftest import check_service_registry_available
 
 SERVICE_REGISTRY_AVAILABLE = check_service_registry_available()
 
@@ -439,6 +423,15 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
     if not KAFKA_AVAILABLE:
         pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
 
+    # NOTE: enable_auto_commit=False is intentional for test isolation.
+    # With auto_commit=True (default), offsets are committed periodically,
+    # which can cause:
+    # 1. Messages committed before processing completes (test failure = lost message)
+    # 2. Flaky tests due to rebalance timing during auto-commit intervals
+    # 3. Cross-test pollution if consumer groups share committed offsets
+    #
+    # With enable_auto_commit=False, offsets are committed after successful
+    # processing, ensuring each test starts from a deterministic position.
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         environment="e2e-test",
@@ -447,6 +440,7 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         max_retry_attempts=3,
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=60.0,
+        enable_auto_commit=False,
     )
     bus = KafkaEventBus(config=config)
 
@@ -455,6 +449,163 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
     yield bus
 
     await bus.close()
+
+
+# =============================================================================
+# Topic Management Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+async def ensure_test_topic() -> AsyncGenerator[
+    Callable[[str, int], Coroutine[object, object, str]], None
+]:
+    """Create test topics via Kafka admin API before tests and cleanup after.
+
+    This fixture handles explicit topic creation for Redpanda/Kafka brokers
+    that have topic auto-creation disabled. Topics are created before test
+    execution and deleted during cleanup.
+
+    Topic names are automatically suffixed with a UUID to ensure parallel test
+    isolation, preventing cross-test pollution when multiple test processes
+    run concurrently.
+
+    Yields:
+        Async function that creates a topic with the given name and partition count.
+        Returns the topic name (with UUID suffix) for convenience.
+
+    Example:
+        async def test_publish_subscribe(ensure_test_topic):
+            topic = await ensure_test_topic("test.e2e.introspection")
+            # Topic now exists as "test.e2e.introspection-<uuid>" and can be used
+    """
+    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+    from aiokafka.errors import TopicAlreadyExistsError
+
+    admin: AIOKafkaAdminClient | None = None
+    created_topics: list[str] = []
+
+    async def _wait_for_topic_metadata(
+        admin_client: AIOKafkaAdminClient,
+        topic_name: str,
+        timeout: float = 10.0,
+    ) -> bool:
+        """Wait for topic metadata to be available in the broker.
+
+        Args:
+            admin_client: Kafka admin client for topic operations.
+            topic_name: Name of the topic to wait for.
+            timeout: Maximum time to wait in seconds.
+
+        Returns:
+            True if topic metadata is available, False on timeout.
+
+        Note:
+            aiokafka.describe_topics() returns dict[str, TopicDescription]
+            keyed by topic name. This function validates the dict response
+            and checks for error codes to ensure the topic is truly available.
+        """
+        start_time = asyncio.get_running_loop().time()
+        while (asyncio.get_running_loop().time() - start_time) < timeout:
+            try:
+                description = await admin_client.describe_topics([topic_name])
+                # describe_topics returns dict[str, TopicDescription] keyed by topic name
+                if isinstance(description, dict) and topic_name in description:
+                    topic_metadata = description[topic_name]
+                    # Verify no error code (0 means success, None means field not present)
+                    error_code = getattr(topic_metadata, "error_code", None)
+                    if error_code is None or error_code == 0:
+                        return True
+                elif description:
+                    # Non-dict format (legacy compatibility) - accept if truthy
+                    return True
+            except Exception:
+                pass  # Topic not yet available
+            await asyncio.sleep(0.5)
+        return False
+
+    async def _create_topic(topic_name: str, partitions: int = 1) -> str:
+        """Create a topic with the given name and partition count.
+
+        Args:
+            topic_name: Base name of the topic to create (UUID will be appended).
+            partitions: Number of partitions (default: 1).
+
+        Returns:
+            The full topic name with UUID suffix.
+        """
+        nonlocal admin, created_topics
+
+        # Append UUID for parallel test isolation
+        unique_topic_name = f"{topic_name}-{uuid4().hex[:12]}"
+
+        # Lazy initialization of admin client
+        if admin is None:
+            admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+            await admin.start()
+
+        try:
+            await admin.create_topics(
+                [
+                    NewTopic(
+                        name=unique_topic_name,
+                        num_partitions=partitions,
+                        replication_factor=1,
+                    )
+                ]
+            )
+            created_topics.append(unique_topic_name)
+
+            # Wait for topic metadata to propagate
+            await _wait_for_topic_metadata(admin, unique_topic_name)
+        except TopicAlreadyExistsError:
+            # Topic already exists - still wait for metadata in case just created
+            if admin is not None:
+                await _wait_for_topic_metadata(admin, unique_topic_name, timeout=5.0)
+
+        return unique_topic_name
+
+    yield _create_topic
+
+    # Cleanup: delete created topics
+    if admin is not None:
+        if created_topics:
+            try:
+                await admin.delete_topics(created_topics)
+                logger.debug("Cleaned up test topics: %s", created_topics)
+            except Exception as e:
+                logger.warning(
+                    "Cleanup failed for Kafka topics %s: %s",
+                    created_topics,
+                    sanitize_error_message(e),
+                )
+        try:
+            await admin.close()
+        except Exception as e:
+            logger.warning(
+                "Failed to close Kafka admin client: %s",
+                sanitize_error_message(e),
+            )
+
+
+@pytest.fixture
+async def ensure_test_topic_exists(
+    ensure_test_topic: Callable[[str, int], Coroutine[object, object, str]],
+) -> str:
+    """Pre-create a unique topic for E2E tests with automatic cleanup.
+
+    This fixture creates a topic with UUID suffix for parallel test isolation.
+    The topic is automatically deleted after the test completes.
+
+    Returns:
+        The created topic name (with UUID suffix).
+
+    Example:
+        async def test_introspection_flow(ensure_test_topic_exists):
+            # Topic already exists, use it directly
+            await publish_to_topic(ensure_test_topic_exists, event)
+    """
+    return await ensure_test_topic("test.e2e.introspection", partitions=3)
 
 
 # =============================================================================
@@ -799,6 +950,7 @@ class ProtocolIntrospectableTestNode(Protocol):
     - Node identity (node_id, node_type, version)
     - Sample operations for capability discovery
     - Introspection event publishing via Kafka
+    - Introspection lifecycle methods (from MixinNodeIntrospection)
     """
 
     @property
@@ -822,6 +974,36 @@ class ProtocolIntrospectableTestNode(Protocol):
 
     async def handle_request(self, request: object) -> object:
         """Handle a sample request."""
+        ...
+
+    # Methods from MixinNodeIntrospection
+    async def publish_introspection(
+        self,
+        reason: EnumIntrospectionReason | str = EnumIntrospectionReason.STARTUP,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Publish introspection event to the event bus."""
+        ...
+
+    async def get_introspection_data(self) -> ModelNodeIntrospectionEvent:
+        """Get introspection data with caching support."""
+        ...
+
+    async def start_introspection_tasks(
+        self,
+        enable_heartbeat: bool = True,
+        heartbeat_interval_seconds: float = 30.0,
+        enable_registry_listener: bool = True,
+    ) -> None:
+        """Start background introspection tasks."""
+        ...
+
+    async def stop_introspection_tasks(self) -> None:
+        """Stop all background introspection tasks."""
+        ...
+
+    async def _publish_heartbeat(self) -> bool:
+        """Publish heartbeat event to the event bus."""
         ...
 
 
@@ -1041,6 +1223,48 @@ async def cleanup_node_ids(
 
 
 # =============================================================================
+# Logging Configuration for E2E Observability
+# =============================================================================
+
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_e2e_logging() -> None:
+    """Configure logging for E2E test observability.
+
+    This session-scoped fixture ensures that:
+    - All E2E pipeline logs are visible during test runs (with -v flag)
+    - Log output uses a clear, structured format
+
+    Log Levels Configured:
+        - tests.integration.registration.e2e: DEBUG (verbose test output)
+        - omnibase_infra: INFO (reduces infrastructure noise)
+
+    Usage:
+        Run tests with pytest -v to see pipeline stage logs
+        Run tests with pytest -v --log-cli-level=DEBUG for verbose output
+    """
+    # Configure E2E test logger: DEBUG level for verbose test diagnostics
+    e2e_logger = logging.getLogger("tests.integration.registration.e2e")
+    e2e_logger.setLevel(logging.DEBUG)
+
+    # Configure omnibase_infra logger: INFO level to reduce verbosity
+    # (DEBUG would emit too much internal infrastructure noise)
+    infra_logger = logging.getLogger("omnibase_infra")
+    infra_logger.setLevel(logging.INFO)
+
+    # Add console handler if not already present
+    if not any(isinstance(h, logging.StreamHandler) for h in e2e_logger.handlers):
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        handler.setFormatter(formatter)
+        e2e_logger.addHandler(handler)
+
+
+# =============================================================================
 # Export Fixtures
 # =============================================================================
 
@@ -1051,6 +1275,8 @@ __all__ = [
     "KAFKA_AVAILABLE",
     "POSTGRES_AVAILABLE",
     "SERVICE_REGISTRY_AVAILABLE",
+    # Helper functions
+    "wait_for_consumer_ready",
     # Database fixtures
     "postgres_pool",
     # Container fixtures
@@ -1059,6 +1285,9 @@ __all__ = [
     "handler_node_introspected",
     # Kafka fixtures
     "real_kafka_event_bus",
+    # Topic fixtures
+    "ensure_test_topic",
+    "ensure_test_topic_exists",
     # Consul fixtures
     "real_consul_handler",
     "cleanup_consul_services",
@@ -1082,4 +1311,6 @@ __all__ = [
     # Cleanup fixtures
     "cleanup_projections",
     "cleanup_node_ids",
+    # Logging fixtures
+    "configure_e2e_logging",
 ]

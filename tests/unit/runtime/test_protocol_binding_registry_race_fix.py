@@ -14,15 +14,11 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import TYPE_CHECKING
 
 import pytest
 
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.registry.registry_protocol_binding import RegistryError
-
-if TYPE_CHECKING:
-    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 
 class MockHandler:

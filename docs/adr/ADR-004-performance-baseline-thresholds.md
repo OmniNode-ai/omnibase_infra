@@ -6,7 +6,7 @@ Accepted
 
 ## Date
 
-2024-12-27
+2025-12-27
 
 ## Context
 
@@ -34,7 +34,7 @@ All thresholds are calibrated for remote services at 192.168.86.200:
 
 ### 2. Network Characteristics (Measured)
 
-Baseline measurements taken December 2024:
+Baseline measurements taken December 2025:
 - Network RTT to remote host: 10-25ms typical, 50ms worst-case
 - Kafka produce acknowledgment: 15-40ms (includes replication)
 - PostgreSQL query execution: 5-20ms (simple queries)

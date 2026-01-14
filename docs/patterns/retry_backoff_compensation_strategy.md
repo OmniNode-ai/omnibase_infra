@@ -77,17 +77,17 @@ error_handling:
 Orchestrator (owns retry logic)
     │
     ├─[Attempt 1]─> Effect.execute() -> FAILURE (timeout)
-    │               └─> Returns ModelBackendResult(success=False, error="timeout")
+    │               └─> Returns ModelBackendResult(success=False, error="timeout", backend_id="consul")
     │
     ├─[Backoff 1s]
     │
     ├─[Attempt 2]─> Effect.execute() -> FAILURE (connection refused)
-    │               └─> Returns ModelBackendResult(success=False, error="connection refused")
+    │               └─> Returns ModelBackendResult(success=False, error="connection refused", backend_id="consul")
     │
     ├─[Backoff 2s]
     │
     └─[Attempt 3]─> Effect.execute() -> SUCCESS
-                    └─> Returns ModelBackendResult(success=True, duration_ms=45.2)
+                    └─> Returns ModelBackendResult(success=True, duration_ms=45.2, backend_id="consul")
 ```
 
 ---
@@ -426,6 +426,10 @@ from dataclasses import dataclass
 from typing import Callable, Awaitable
 from uuid import UUID
 
+from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.errors import ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
 
 @dataclass
 class SagaStep:
@@ -435,9 +439,10 @@ class SagaStep:
     compensate: Callable[[], Awaitable[None]]
 
 
-class CompensationFailedError(Exception):
+class CompensationFailedError(RuntimeHostError):
     """Raised when one or more saga compensations fail.
 
+    Extends RuntimeHostError to integrate with ONEX error handling patterns.
     This error aggregates all compensation failures that occurred during
     saga rollback, providing visibility into which steps failed to compensate
     and why. This is critical for operational awareness when the system is
@@ -449,14 +454,63 @@ class CompensationFailedError(Exception):
         message: str,
         failed_steps: list[str],
         errors: list[Exception],
+        context: ModelInfraErrorContext | None = None,
     ):
-        super().__init__(message)
+        super().__init__(message, context=context)
         self.failed_steps = failed_steps
         self.errors = errors
 
 
 class SagaExecutor:
-    """Execute saga with automatic compensation on failure."""
+    """Execute saga with automatic compensation on failure.
+
+    Transport Type Selection:
+        The transport_type parameter is CONFIGURABLE via constructor (not hardcoded)
+        and is used in CompensationFailedError context for observability and
+        categorization. Choose based on your use case:
+
+        **Recommended for Compensation Errors**:
+        - RUNTIME: For saga orchestration errors (compensation is a runtime concern)
+          This is the default since saga compensation is an internal orchestration
+          concern, not tied to a specific external transport.
+
+        **Alternative: Entry Point Transport**:
+        - HTTP: REST API-triggered sagas (when correlation with trigger matters)
+        - KAFKA: Event-driven sagas (async message processing)
+        - DATABASE: Database-centric workflows (batch operations)
+
+        **Guidance**: For saga compensation failures, `RUNTIME` is often more
+        accurate since compensation is an internal orchestration concern. Use
+        the trigger transport (HTTP, KAFKA) when you need to correlate
+        compensation failures with the original request source.
+
+        **Configuration Example**:
+            # Default: RUNTIME (recommended for most saga orchestration)
+            saga = SagaExecutor()
+
+            # Override for API-triggered sagas
+            saga = SagaExecutor(transport_type=EnumInfraTransportType.HTTP)
+
+        Note: Individual saga steps may interact with multiple transports.
+        The executor's transport_type represents the error categorization,
+        not individual step operations.
+    """
+
+    def __init__(
+        self,
+        transport_type: EnumInfraTransportType = EnumInfraTransportType.RUNTIME,
+    ) -> None:
+        """Initialize saga executor.
+
+        Args:
+            transport_type: Transport type for CompensationFailedError context.
+                Defaults to RUNTIME since compensation is an orchestration
+                concern. Override to correlate with trigger source:
+                - HTTP: When correlating with REST API triggers
+                - KAFKA: When correlating with event-driven triggers
+                - DATABASE: When correlating with batch job triggers
+        """
+        self._transport_type = transport_type
 
     async def execute(
         self,
@@ -501,10 +555,16 @@ class SagaExecutor:
 
             # If any compensations failed, raise aggregate error
             if compensation_errors:
+                context = ModelInfraErrorContext(
+                    transport_type=self._transport_type,
+                    operation="saga_compensation",
+                    correlation_id=correlation_id,
+                )
                 raise CompensationFailedError(
                     f"Saga failed and {len(compensation_errors)} compensation(s) also failed",
                     failed_steps=[name for name, _ in compensation_errors],
                     errors=[err for _, err in compensation_errors],
+                    context=context,
                 ) from e
 
             raise
@@ -516,9 +576,27 @@ async def transfer_funds(
     to_account: str,
     amount: float,
     correlation_id: UUID,
+    trigger_transport: EnumInfraTransportType | None = None,
 ) -> None:
-    """Transfer funds between accounts with saga compensation."""
-    saga = SagaExecutor()
+    """Transfer funds between accounts with saga compensation.
+
+    Args:
+        from_account: Source account ID
+        to_account: Destination account ID
+        amount: Transfer amount
+        correlation_id: Request correlation ID for tracing
+        trigger_transport: Transport that triggered this saga (HTTP, KAFKA, etc.).
+            If None, defaults to RUNTIME (recommended for internal orchestration).
+            Set explicitly when you need to correlate compensation failures
+            with the original request source in observability tools.
+    """
+    # Configure transport type based on trigger source
+    # RUNTIME (default): Generic orchestration context
+    # HTTP: REST API-triggered sagas - correlate with API errors
+    # KAFKA: Event-driven sagas - correlate with message processing
+    saga = SagaExecutor(
+        transport_type=trigger_transport or EnumInfraTransportType.RUNTIME
+    )
 
     debit_result = None
 

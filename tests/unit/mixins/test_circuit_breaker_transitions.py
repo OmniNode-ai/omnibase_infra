@@ -698,7 +698,7 @@ class TestOpenStateStability:
         for _ in range(fast_service.circuit_breaker_threshold):
             await fast_service.record_failure()
 
-        original_open_until = fast_service.get_open_until()
+        fast_service.get_open_until()
 
         # Record more failures (simulating if somehow failures were recorded)
         await fast_service.record_failure()

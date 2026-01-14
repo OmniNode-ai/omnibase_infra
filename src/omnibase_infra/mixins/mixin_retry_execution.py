@@ -51,7 +51,6 @@ from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
-    InfraUnavailableError,
     ModelInfraErrorContext,
 )
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (

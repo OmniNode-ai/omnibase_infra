@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# ruff: noqa: PLW0603
+# PLW0603 disabled: Global statement is intentional for singleton pattern with thread-safe initialization
 """Handler Registry - Constants and singleton accessors for handler registration.
 
 This module provides constants and singleton accessor functions for the
@@ -151,7 +153,7 @@ def get_handler_registry() -> ProtocolBindingRegistry:
         >>> same_registry is registry
         True
     """
-    global _handler_registry  # noqa: PLW0603
+    global _handler_registry
     if _handler_registry is None:
         with _singleton_lock:
             # Double-check locking pattern
@@ -176,7 +178,7 @@ def get_event_bus_registry() -> EventBusBindingRegistry:
         >>> same_registry is registry
         True
     """
-    global _event_bus_registry  # noqa: PLW0603
+    global _event_bus_registry
     if _event_bus_registry is None:
         with _singleton_lock:
             # Double-check locking pattern

@@ -132,12 +132,97 @@ class ImpurePolicy:
 
 ## Security Mitigations for High-Security Environments
 
+### Policy Registry Error Class
+
+Following ONEX error conventions, `PolicyRegistryError` extends `RuntimeHostError` to integrate with the standard error handling infrastructure:
+
+```python
+from omnibase_infra.errors import RuntimeHostError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumPolicyType, EnumInfraTransportType
+
+
+class PolicyRegistryError(RuntimeHostError):
+    """Raised when policy registration or execution fails.
+
+    Extends RuntimeHostError to integrate with ONEX error handling.
+    Provides policy-specific context for debugging and monitoring.
+
+    Error Codes (POLICY_REG domain):
+        POLICY_REG_001: Policy not registered (lookup failure)
+            - Use when: get() called for unregistered policy_id
+            - Context: Include policy_id in error
+        POLICY_REG_002: Policy has async methods (sync enforcement violation)
+            - Use when: policy class has async methods but allow_async=False
+            - Context: Include policy_id and method names
+        POLICY_REG_003: Invalid policy type identifier
+            - Use when: policy_type not in EnumPolicyType
+            - Context: Include provided policy_type value
+        POLICY_REG_004: Policy protocol not implemented
+            - Use when: policy class missing required ProtocolPolicy methods
+            - Context: Include policy class name and missing methods
+        POLICY_REG_005: Policy registration limit exceeded
+            - Use when: registry capacity exceeded (if limits configured)
+            - Context: Include current count and limit
+        POLICY_REG_006: Code review not approved
+            - Use when: ReviewedPolicyRegistry rejects unreviewed policy
+            - Context: Include policy_id and code_hash
+        POLICY_REG_007: Static analysis failed
+            - Use when: SecureRegistryWrapper security scan fails
+            - Context: Include policy_id and scan issues
+        POLICY_REG_008: Not in allowlist
+            - Use when: AllowlistEnforcedRegistry rejects non-allowlisted policy
+            - Context: Include policy_id
+        POLICY_REG_009: Timeout exceeded
+            - Use when: execute_policy_safely() times out
+            - Context: Include policy_id and timeout_seconds
+        POLICY_REG_010: Memory exceeded
+            - Use when: execute_policy_safely() exceeds memory limit
+            - Context: Include policy_id and max_memory_mb
+
+    All errors should include:
+        - correlation_id: For request tracing (required in ModelInfraErrorContext)
+        - policy_id: The policy that caused the error (when available)
+        - error_code: The POLICY_REG_xxx code for categorization
+    """
+
+    def __init__(
+        self,
+        message: str,
+        policy_id: str | None = None,
+        policy_type: str | EnumPolicyType | None = None,
+        context: ModelInfraErrorContext | None = None,
+        error_code: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        """Initialize PolicyRegistryError with policy-specific context.
+
+        Args:
+            message: Human-readable error message
+            policy_id: The policy ID that caused the error
+            policy_type: The policy type (EnumPolicyType or string)
+            context: Infrastructure error context with correlation ID
+            error_code: Error code for categorization (e.g., "POLICY_REG_001")
+            **kwargs: Additional context fields
+        """
+        super().__init__(message, context=context, **kwargs)
+        self.policy_id = policy_id
+        self.policy_type = (
+            policy_type.value if isinstance(policy_type, EnumPolicyType) else policy_type
+        )
+        self.error_code = error_code
+```
+
 ### 1. Code Review Gate
 
 Require mandatory code review for all policy implementations:
 
 ```python
 from typing import Protocol
+from uuid import uuid4
+
+from omnibase_infra.errors import PolicyRegistryError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
 
 class PolicyReviewGate(Protocol):
     """Protocol for policy review integration."""
@@ -165,10 +250,16 @@ class ReviewedPolicyRegistry:
         code_hash = hashlib.sha256(source.encode()).hexdigest()
 
         if not self._review_gate.is_approved(registration.policy_id, code_hash):
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_code_review",
+                correlation_id=uuid4(),
+            )
             raise PolicyRegistryError(
-                f"Policy '{registration.policy_id}' has not been reviewed. "
-                f"Code hash: {code_hash}",
+                f"Policy has not been reviewed. Code hash: {code_hash}",
                 policy_id=registration.policy_id,
+                context=context,
+                error_code="POLICY_REG_006",  # Code review not approved
             )
 
         self._registry.register(registration)
@@ -183,6 +274,10 @@ import subprocess
 import tempfile
 import inspect
 from pathlib import Path
+
+from omnibase_infra.errors import PolicyRegistryError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
 
 def run_security_scan(policy_class: type) -> tuple[bool, list[str]]:
     """Run bandit and semgrep on policy source code.
@@ -237,12 +332,21 @@ class SecureRegistryWrapper:
         self._registry = registry
 
     def register(self, registration: ModelPolicyRegistration) -> None:
+        from uuid import uuid4
+
         passed, issues = run_security_scan(registration.policy_class)
 
         if not passed:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_static_analysis",
+                correlation_id=uuid4(),
+            )
             raise PolicyRegistryError(
-                f"Policy '{registration.policy_id}' failed security scan: {issues}",
+                f"Policy failed security scan: {issues}",
                 policy_id=registration.policy_id,
+                context=context,
+                error_code="POLICY_REG_007",  # Static analysis failed
             )
 
         self._registry.register(registration)
@@ -255,6 +359,11 @@ Maintain explicit allowlist of approved policies:
 ```python
 from dataclasses import dataclass
 from typing import FrozenSet
+from uuid import uuid4
+
+from omnibase_infra.errors import PolicyRegistryError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
 
 @dataclass(frozen=True)
 class PolicyAllowlist:
@@ -291,10 +400,17 @@ class AllowlistEnforcedRegistry:
 
     def register(self, registration: ModelPolicyRegistration) -> None:
         if not self._allowlist.is_allowed(registration.policy_id):
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_allowlist",
+                correlation_id=uuid4(),
+            )
             raise PolicyRegistryError(
-                f"Policy '{registration.policy_id}' is not in the approved allowlist. "
-                f"Contact security team to request approval.",
+                "Policy is not in the approved allowlist. "
+                "Contact security team to request approval.",
                 policy_id=registration.policy_id,
+                context=context,
+                error_code="POLICY_REG_008",  # Not in allowlist
             )
 
         self._registry.register(registration)
@@ -309,8 +425,13 @@ import asyncio
 import resource
 from contextlib import contextmanager
 from typing import TypeVar, Callable
+from uuid import UUID, uuid4
+
+from omnibase_infra.errors import PolicyRegistryError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
 
 T = TypeVar("T")
+
 
 @contextmanager
 def resource_limits(
@@ -343,6 +464,7 @@ async def execute_policy_safely(
     context: dict,
     timeout_seconds: float = 1.0,
     max_memory_mb: int = 100,
+    correlation_id: UUID | None = None,
 ) -> PolicyResult:
     """Execute policy with timeout and resource limits.
 
@@ -351,13 +473,17 @@ async def execute_policy_safely(
         context: Evaluation context
         timeout_seconds: Maximum execution time
         max_memory_mb: Maximum memory allocation
+        correlation_id: Optional correlation ID for tracing
 
     Returns:
         Policy evaluation result
 
     Raises:
-        PolicyRegistryError: If policy exceeds limits
+        PolicyRegistryError: If policy exceeds limits (POLICY_REG_009, POLICY_REG_010)
     """
+    corr_id = correlation_id or uuid4()
+    policy_id = getattr(policy, "policy_id", "unknown")
+
     try:
         with resource_limits(max_memory_mb=max_memory_mb):
             result = await asyncio.wait_for(
@@ -366,14 +492,28 @@ async def execute_policy_safely(
             )
         return result
     except asyncio.TimeoutError:
+        error_context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="execute_policy",
+            correlation_id=corr_id,
+        )
         raise PolicyRegistryError(
-            f"Policy '{policy.__class__.__name__}' exceeded timeout of {timeout_seconds}s",
-            policy_id=getattr(policy, "policy_id", "unknown"),
+            f"Policy exceeded timeout of {timeout_seconds}s",
+            policy_id=policy_id,
+            context=error_context,
+            error_code="POLICY_REG_009",  # Timeout exceeded
         )
     except MemoryError:
+        error_context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="execute_policy",
+            correlation_id=corr_id,
+        )
         raise PolicyRegistryError(
-            f"Policy '{policy.__class__.__name__}' exceeded memory limit of {max_memory_mb}MB",
-            policy_id=getattr(policy, "policy_id", "unknown"),
+            f"Policy exceeded memory limit of {max_memory_mb}MB",
+            policy_id=policy_id,
+            context=error_context,
+            error_code="POLICY_REG_010",  # Memory exceeded
         )
 ```
 
