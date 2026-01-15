@@ -68,7 +68,7 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul
-    from omnibase_infra.projectors import ProjectorRegistration
+    from omnibase_infra.runtime.projector_shell import ProjectorShell
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
     ModelNodeRegistrationInitiated,
 )
@@ -179,7 +179,7 @@ class HandlerNodeIntrospected:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration | None = None,
+        projector: ProjectorShell | None = None,
         ack_timeout_seconds: float | None = None,
         consul_handler: HandlerConsul | None = None,
     ) -> None:
@@ -187,8 +187,9 @@ class HandlerNodeIntrospected:
 
         Args:
             projection_reader: Reader for querying registration projection state.
-            projector: Optional projector for persisting state transitions.
+            projector: Optional ProjectorShell for persisting state transitions.
                 If None, the handler operates in read-only mode (useful for testing).
+                The projector should be loaded from the registration projector contract.
             ack_timeout_seconds: Timeout in seconds for node acknowledgment.
                 Default: 30 seconds. Used to calculate ack_deadline when persisting.
             consul_handler: Optional HandlerConsul for Consul service registration.
@@ -370,21 +371,38 @@ class HandlerNodeIntrospected:
             node_type = event.node_type
             node_version = event.node_version
 
-            # Use declared_capabilities directly from the introspection event
-            # ModelNodeIntrospectionEvent.declared_capabilities is already ModelNodeCapabilities
+            # Serialize capabilities to JSON string
             capabilities = event.declared_capabilities
+            capabilities_json = capabilities.model_dump_json() if capabilities else "{}"
 
-            await self._projector.persist_state_transition(
-                entity_id=node_id,
-                domain="registration",
-                new_state=EnumRegistrationState.PENDING_REGISTRATION,
-                node_type=node_type.value,
-                node_version=node_version,
-                capabilities=capabilities,
-                event_id=registration_attempt_id,
-                now=now,
-                ack_deadline=ack_deadline,
+            # Build values dict for upsert_partial
+            # Uses composite conflict key (entity_id, domain) for registration projections
+            projection_values: dict[str, object] = {
+                "entity_id": node_id,
+                "domain": "registration",
+                "current_state": EnumRegistrationState.PENDING_REGISTRATION.value,
+                "node_type": node_type.value,
+                "node_version": str(node_version) if node_version else None,
+                "capabilities": capabilities_json,
+                # Capability fields (defaults for new registration)
+                "contract_type": "unknown",
+                "intent_types": [],
+                "protocols": [],
+                "capability_tags": [],
+                "contract_version": None,
+                # Timestamps and tracking
+                "ack_deadline": ack_deadline,
+                "last_applied_event_id": registration_attempt_id,
+                "registered_at": now,
+                "updated_at": now,
+                "correlation_id": correlation_id,
+            }
+
+            await self._projector.upsert_partial(
+                aggregate_id=node_id,
+                values=projection_values,
                 correlation_id=correlation_id,
+                conflict_columns=["entity_id", "domain"],
             )
 
             logger.info(

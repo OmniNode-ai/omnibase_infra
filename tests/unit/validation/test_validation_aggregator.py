@@ -27,6 +27,7 @@ import pytest
 from omnibase_infra.enums import (
     EnumHandlerErrorType,
     EnumHandlerSourceType,
+    EnumValidationSeverity,
 )
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.errors import ModelHandlerValidationError
@@ -63,7 +64,7 @@ def contract_error(
         line_number=5,
         remediation_hint="Check YAML indentation and syntax",
         handler_identity=handler_identity,
-        severity="error",
+        severity=EnumValidationSeverity.ERROR,
     )
 
 
@@ -79,7 +80,7 @@ def security_warning(
         handler_identity=handler_identity,
         file_path="nodes/auth/handlers/handler_authenticate.py",
         line_number=42,
-        severity="warning",
+        severity=EnumValidationSeverity.WARNING,
     )
 
 
@@ -95,7 +96,7 @@ def architecture_error(
         handler_identity=handler_identity,
         file_path="nodes/compute/node.py",
         line_number=85,
-        severity="error",
+        severity=EnumValidationSeverity.ERROR,
     )
 
 
@@ -109,7 +110,7 @@ def descriptor_warning(
         message="Handler method signature could be improved",
         remediation_hint="Consider using type hints for better IDE support",
         handler_identity=handler_identity,
-        severity="warning",
+        severity=EnumValidationSeverity.WARNING,
     )
 
 
@@ -628,7 +629,7 @@ def test_error_without_file_path(handler_identity: ModelHandlerIdentifier) -> No
         source_type=EnumHandlerSourceType.REGISTRATION,
         message="Registration failed",
         remediation_hint="Check handler configuration",
-        severity="error",
+        severity=EnumValidationSeverity.ERROR,
     )
 
     aggregator = ValidationAggregator()

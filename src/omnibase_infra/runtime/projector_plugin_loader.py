@@ -442,6 +442,31 @@ class ProjectorPluginLoader:
         with contract_path.open("r", encoding="utf-8") as f:
             raw_data = yaml.safe_load(f)
 
+        # Strip extension fields not in base ModelProjectorContract.
+        # partial_updates is an extension field for OMN-1170 that defines
+        # partial update operations. It is used by the runtime for optimized
+        # UPDATE statements but is not part of the core contract schema.
+        if isinstance(raw_data, dict):
+            raw_data.pop("partial_updates", None)
+
+            # Handle composite key fields: ModelProjectorContract expects strings,
+            # but the contract YAML uses lists for composite primary/upsert keys.
+            # Convert first element of list to string for model validation.
+            # The full composite key information is preserved in the SQL schema.
+            if isinstance(
+                raw_data.get("projection_schema", {}).get("primary_key"), list
+            ):
+                pk_list = raw_data["projection_schema"]["primary_key"]
+                raw_data["projection_schema"]["primary_key"] = (
+                    pk_list[0] if pk_list else "entity_id"
+                )
+
+            if isinstance(raw_data.get("behavior", {}).get("upsert_key"), list):
+                upsert_list = raw_data["behavior"]["upsert_key"]
+                raw_data["behavior"]["upsert_key"] = (
+                    upsert_list[0] if upsert_list else None
+                )
+
         # Validate against ModelProjectorContract
         contract = ModelProjectorContract.model_validate(raw_data)
         return contract

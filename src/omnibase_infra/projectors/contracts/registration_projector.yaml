@@ -1,0 +1,370 @@
+# SPDX-FileCopyrightText: 2025 OmniNode Team <info@omninode.ai>
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Registration Projector Contract
+#
+# Declarative contract for the registration domain projector, matching the
+# legacy ProjectorRegistration implementation behavior exactly.
+#
+# This contract defines:
+#   - 23 columns matching schema_registration_projection.sql
+#   - Full column mappings with source paths
+#   - All GIN and B-tree indexes for query optimization
+#   - Idempotency configuration (offset-based ordering)
+#   - Partial update definitions for specialized operations
+#
+# Related Tickets:
+#   - OMN-1170: Create registration_projector.yaml contract
+#   - OMN-944: Implement Registration Projection Schema
+#   - OMN-1134: Capability fields for fast discovery queries
+#
+# Legacy Implementation: projector_registration.py
+# SQL Schema: schema_registration_projection.sql
+projector_kind: materialized_view
+projector_id: registration-projector
+name: Registration Projector
+version: "1.0.0"
+aggregate_type: registration
+# Events consumed by this projector
+# Each event triggers specific column updates (see partial_updates below)
+consumed_events:
+  - node.introspected.v1
+  - node.registration_accepted.v1
+  - node.registration_rejected.v1
+  - node.ack_received.v1
+  - node.ack_timeout.v1
+  - node.heartbeat_received.v1
+  - node.liveness_expired.v1
+projection_schema:
+  table: registration_projections
+  # Composite primary key for multi-domain support.
+  # The SQL schema defines: PRIMARY KEY (entity_id, domain)
+  # See: schema_registration_projection.sql
+  primary_key:
+    - entity_id
+    - domain
+  columns:
+    # ==========================================================================
+    # IDENTITY COLUMNS (Composite Primary Key)
+    # ==========================================================================
+    - name: entity_id
+      type: UUID
+      source: event.payload.entity_id
+      # Node UUID - partition key for per-entity ordering
+    - name: domain
+      type: VARCHAR(128)
+      source: context.domain
+      default: "registration"
+      # Domain namespace for multi-domain support
+    # ==========================================================================
+    # FSM STATE
+    # ==========================================================================
+    - name: current_state
+      type: registration_state
+      source: event.payload.state
+      # Current FSM state. Values: pending_registration, accepted, awaiting_ack,
+      # rejected, ack_timed_out, ack_received, active, liveness_expired
+    # ==========================================================================
+    # NODE INFORMATION (Snapshot at Registration Time)
+    # ==========================================================================
+    - name: node_type
+      type: VARCHAR(64)
+      source: event.payload.node_type
+      # ONEX node type: effect, compute, reducer, orchestrator
+    - name: node_version
+      type: VARCHAR(32)
+      source: event.payload.node_version
+      default: "1.0.0"
+      # Semantic version of the node
+    - name: capabilities
+      type: JSONB
+      source: event.payload.capabilities
+      default: "{}"
+      # Full capabilities snapshot as JSONB
+    # ==========================================================================
+    # CAPABILITY FIELDS (OMN-1134 - GIN-Indexed Discovery Queries)
+    # Denormalized from capabilities for fast array queries
+    #
+    # NOTE ON ARRAY DEFAULTS: The "ARRAY[]::TEXT[]" defaults below are SQL
+    # expressions used by the database schema. For ProjectorShell.project(),
+    # these defaults are NOT applied - the SQL schema's DEFAULT clause handles
+    # empty arrays. For explicit upsert_partial() calls, pass [] (empty Python
+    # list) to insert empty arrays, as asyncpg serializes lists to PostgreSQL
+    # arrays correctly.
+    # ==========================================================================
+    - name: contract_type
+      type: TEXT
+      source: event.payload.contract_type
+      # Nullable. Values: effect, compute, reducer, orchestrator, or NULL
+      # NULL = never processed, 'unknown' = processed but undeterminable (backfill only)
+    - name: intent_types
+      type: TEXT[]
+      source: event.payload.intent_types
+      default: "ARRAY[]::TEXT[]"
+      # Array of intent types this node handles (e.g., postgres.upsert, consul.register)
+    - name: protocols
+      type: TEXT[]
+      source: event.payload.protocols
+      default: "ARRAY[]::TEXT[]"
+      # Array of protocols this node implements (e.g., ProtocolDatabaseAdapter)
+    - name: capability_tags
+      type: TEXT[]
+      source: event.payload.capability_tags
+      default: "ARRAY[]::TEXT[]"
+      # Array of capability tags for discovery queries
+    - name: contract_version
+      type: TEXT
+      source: event.payload.contract_version
+      # Contract version string (e.g., "1.0.0")
+    # ==========================================================================
+    # TIMEOUT DEADLINES (Durable Timeout Handling per OMN-932/C2)
+    # ==========================================================================
+    - name: ack_deadline
+      type: TIMESTAMPTZ
+      source: event.payload.ack_deadline
+      # Deadline for node acknowledgment. Orchestrator emits timeout event when passed.
+    - name: liveness_deadline
+      type: TIMESTAMPTZ
+      source: event.payload.liveness_deadline
+      # Deadline for next heartbeat. Orchestrator emits liveness expired event when passed.
+    - name: last_heartbeat_at
+      type: TIMESTAMPTZ
+      source: event.payload.last_heartbeat_at
+      on_event: node.heartbeat_received.v1
+      # Timestamp of last received heartbeat. Updated on HeartbeatReceived events.
+    # ==========================================================================
+    # TIMEOUT EMISSION MARKERS (Deduplication per OMN-932/C2)
+    # Prevent duplicate timeout event emission during replay
+    # ==========================================================================
+    - name: ack_timeout_emitted_at
+      type: TIMESTAMPTZ
+      source: event.payload.emitted_at
+      on_event: node.ack_timeout.v1
+      # Marker: ack timeout event was already emitted. Prevents duplicates.
+    - name: liveness_timeout_emitted_at
+      type: TIMESTAMPTZ
+      source: event.payload.emitted_at
+      on_event: node.liveness_expired.v1
+      # Marker: liveness expiration event was already emitted. Prevents duplicates.
+    # ==========================================================================
+    # IDEMPOTENCY AND ORDERING (Per OMN-944/F1)
+    # Enable replay correctness and stale update rejection
+    # ==========================================================================
+    - name: last_applied_event_id
+      type: UUID
+      source: envelope.metadata.message_id
+      # message_id of last applied event - used for idempotency checks
+    - name: last_applied_offset
+      type: BIGINT
+      source: envelope.offset
+      default: "0"
+      # Kafka offset of last applied event - canonical ordering for replay
+    - name: last_applied_sequence
+      type: BIGINT
+      source: envelope.sequence_number
+      # Sequence number for non-Kafka transports (optional)
+    - name: last_applied_partition
+      type: VARCHAR(128)
+      source: envelope.partition
+      # Kafka partition of last applied event. Used with offset for global ordering.
+    # ==========================================================================
+    # TIMESTAMPS
+    # ==========================================================================
+    - name: registered_at
+      type: TIMESTAMPTZ
+      source: event.payload.registered_at
+      # Timestamp when entity was first registered
+    - name: updated_at
+      type: TIMESTAMPTZ
+      source: context.now
+      # Timestamp of last update (set by projector at persist time)
+    # ==========================================================================
+    # TRACING
+    # ==========================================================================
+    - name: correlation_id
+      type: UUID
+      source: envelope.metadata.correlation_id
+      # Correlation ID for distributed tracing
+  # ============================================================================
+  # INDEXES
+  # Optimized for orchestrator query patterns per OMN-944
+  # ============================================================================
+  indexes:
+    # Ack deadline scanning (C2: orchestrator queries for overdue ack)
+    # Partial index: only rows with non-null ack_deadline
+    - name: idx_registration_ack_deadline
+      columns:
+        - ack_deadline
+      type: btree
+    # Liveness deadline scanning (C2: orchestrator queries for overdue liveness)
+    # Partial index: only active nodes with non-null liveness_deadline
+    - name: idx_registration_liveness_deadline
+      columns:
+        - liveness_deadline
+      type: btree
+    # State filtering (common orchestrator query pattern)
+    - name: idx_registration_current_state
+      columns:
+        - current_state
+      type: btree
+    # State + domain filtering (multi-domain queries)
+    - name: idx_registration_domain_state
+      columns:
+        - domain
+        - current_state
+      type: btree
+    # Idempotency checks (fast lookup by event_id)
+    - name: idx_registration_last_event_id
+      columns:
+        - last_applied_event_id
+      type: btree
+    # Capability queries (GIN index on JSONB)
+    - name: idx_registration_capabilities
+      columns:
+        - capabilities
+      type: gin
+    # GIN index for capability_tags array queries
+    # Query: WHERE capability_tags @> ARRAY['postgres.storage']
+    - name: idx_registration_capability_tags
+      columns:
+        - capability_tags
+      type: gin
+    # GIN index for intent_types array queries
+    # Query: WHERE intent_types @> ARRAY['postgres.upsert']
+    - name: idx_registration_intent_types
+      columns:
+        - intent_types
+      type: gin
+    # GIN index for protocols array queries
+    # Query: WHERE protocols @> ARRAY['ProtocolDatabaseAdapter']
+    - name: idx_registration_protocols
+      columns:
+        - protocols
+      type: gin
+    # B-tree index for contract_type + state queries
+    # Query: WHERE contract_type = 'effect' AND current_state = 'active'
+    - name: idx_registration_contract_type_state
+      columns:
+        - contract_type
+        - current_state
+      type: btree
+    # Composite index for deadline + emission marker scans
+    # Optimizes the most common timeout check queries
+    - name: idx_registration_ack_timeout_scan
+      columns:
+        - ack_deadline
+        - ack_timeout_emitted_at
+      type: btree
+    - name: idx_registration_liveness_timeout_scan
+      columns:
+        - current_state
+        - liveness_deadline
+        - liveness_timeout_emitted_at
+      type: btree
+# ==============================================================================
+# BEHAVIOR CONFIGURATION
+# ==============================================================================
+behavior:
+  mode: upsert
+  # Composite upsert key matching the database primary key.
+  # ON CONFLICT (entity_id, domain) DO UPDATE will be used for upserts.
+  # See: projection_schema.primary_key for the composite key definition.
+  upsert_key:
+    - entity_id
+    - domain
+  idempotency:
+    enabled: true
+    # Uses offset-based ordering for Kafka, sequence-based for other transports
+    # See persist() WHERE clause in projector_registration.py for full logic
+    key: sequence_number
+# ==============================================================================
+# PARTIAL UPDATE DEFINITIONS (Extension to Base Contract)
+#
+# These define specialized update operations that modify only a subset of columns.
+# The legacy ProjectorRegistration has explicit methods for these operations.
+#
+# Runtime implementations should handle these as optimized UPDATE statements
+# rather than full upserts, bypassing the idempotency WHERE clause.
+# ==============================================================================
+partial_updates:
+  # ============================================================================
+  # HEARTBEAT UPDATE
+  # Method: update_heartbeat()
+  # Triggered by: node.heartbeat_received.v1
+  # ============================================================================
+  heartbeat:
+    description: Update heartbeat tracking fields when heartbeat is received
+    trigger_event: node.heartbeat_received.v1
+    columns:
+      - last_heartbeat_at
+      - liveness_deadline
+      - updated_at
+    where:
+      - entity_id
+      - domain
+  # ============================================================================
+  # ACK TIMEOUT MARKER UPDATE
+  # Method: update_ack_timeout_marker()
+  # Triggered by: Orchestrator after emitting ack timeout event
+  # ============================================================================
+  ack_timeout_marker:
+    description: Mark that ack timeout event was emitted (prevents duplicate emission)
+    trigger_event: node.ack_timeout.v1
+    columns:
+      - ack_timeout_emitted_at
+      - updated_at
+    where:
+      - entity_id
+      - domain
+  # ============================================================================
+  # LIVENESS TIMEOUT MARKER UPDATE
+  # Method: update_liveness_timeout_marker()
+  # Triggered by: Orchestrator after emitting liveness expired event
+  # ============================================================================
+  liveness_timeout_marker:
+    description: Mark that liveness timeout event was emitted (prevents duplicate emission)
+    trigger_event: node.liveness_expired.v1
+    columns:
+      - liveness_timeout_emitted_at
+      - updated_at
+    where:
+      - entity_id
+      - domain
+  # ============================================================================
+  # STATE TRANSITION UPDATE
+  # Method: persist_state_transition()
+  # Triggered by: Various state-changing events
+  #
+  # Note: This is a simplified upsert WITHOUT sequence ordering checks.
+  # Used for handler-initiated state transitions where ordering is
+  # guaranteed by the event processing pipeline.
+  # ============================================================================
+  state_transition:
+    description: Persist FSM state transition without sequence ordering checks
+    trigger_events:
+      - node.introspected.v1
+      - node.registration_accepted.v1
+      - node.registration_rejected.v1
+      - node.ack_received.v1
+    columns:
+      - current_state
+      - node_type
+      - node_version
+      - capabilities
+      - contract_type
+      - intent_types
+      - protocols
+      - capability_tags
+      - contract_version
+      - ack_deadline
+      - liveness_deadline
+      - last_applied_event_id
+      - last_applied_offset
+      - registered_at
+      - updated_at
+      - correlation_id
+    where:
+      - entity_id
+      - domain
+    skip_ordering_check: true

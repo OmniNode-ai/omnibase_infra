@@ -73,10 +73,8 @@ from .verification_helpers import (
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.nodes.effects import NodeRegistryEffect
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import ProjectorShell
 
 
 logger = logging.getLogger(__name__)
@@ -198,7 +196,7 @@ class OrchestratorPipeline:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         registry_effect: NodeRegistryEffect,
         reducer: RegistrationReducer,
     ) -> None:
@@ -552,32 +550,26 @@ class OrchestratorPipeline:
             now: Current time for timestamps.
             correlation_id: Correlation ID for tracing.
         """
-        from omnibase_infra.models.projection import ModelRegistrationProjection
-        from omnibase_infra.models.projection.model_sequence_info import (
-            ModelSequenceInfo,
-        )
+        # Convert event data to values dict for upsert_partial
+        node_type = coerce_to_node_kind(event.node_type)
+        values: dict[str, object] = {
+            "entity_id": event.node_id,
+            "domain": "registration",
+            "current_state": EnumRegistrationState.PENDING_REGISTRATION.value,
+            "node_type": node_type.value,
+            "node_version": str(event.node_version),
+            "capabilities": "{}",
+            "registered_at": now,
+            "updated_at": now,
+            "last_applied_event_id": correlation_id,
+            "last_applied_offset": self._next_sequence(),
+        }
 
-        # Use incrementing sequence for proper ordering across multiple events
-        sequence_info = ModelSequenceInfo.from_sequence(self._next_sequence())
-
-        projection = ModelRegistrationProjection(
-            entity_id=event.node_id,
-            current_state=EnumRegistrationState.PENDING_REGISTRATION,
-            node_type=coerce_to_node_kind(event.node_type),
-            node_version=str(event.node_version),
-            registered_at=now,
-            updated_at=now,
-            last_applied_event_id=correlation_id,  # Use correlation_id as event_id for test
+        await self._projector.upsert_partial(
+            aggregate_id=event.node_id,
+            values=values,
             correlation_id=correlation_id,
-            domain="registration",
-        )
-
-        await self._projector.persist(
-            projection=projection,
-            entity_id=event.node_id,
-            domain="registration",
-            sequence_info=sequence_info,
-            correlation_id=correlation_id,
+            conflict_columns=["entity_id", "domain"],
         )
 
 
@@ -656,7 +648,7 @@ async def registry_effect_node(
 @pytest.fixture
 async def orchestrator_pipeline(
     projection_reader: ProjectionReaderRegistration,
-    real_projector: ProjectorRegistration,
+    real_projector: ProjectorShell,
     registry_effect_node: NodeRegistryEffect,
     mock_consul_client: AsyncMock,
     mock_postgres_adapter: AsyncMock,
@@ -1338,7 +1330,7 @@ class TestFullPipelineWithRealInfrastructure:
         self,
         real_kafka_event_bus: EventBusKafka,
         projection_reader: ProjectionReaderRegistration,
-        real_projector: ProjectorRegistration,
+        real_projector: ProjectorShell,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
         cleanup_projections: None,
@@ -1378,31 +1370,25 @@ class TestFullPipelineWithRealInfrastructure:
 
         # If handler says we should register, create the projection
         if handler_output.events:
-            from omnibase_infra.models.projection import ModelRegistrationProjection
-            from omnibase_infra.models.projection.model_sequence_info import (
-                ModelSequenceInfo,
-            )
+            node_type = coerce_to_node_kind(event.node_type)
+            values: dict[str, object] = {
+                "entity_id": unique_node_id,
+                "domain": "registration",
+                "current_state": EnumRegistrationState.PENDING_REGISTRATION.value,
+                "node_type": node_type.value,
+                "node_version": str(event.node_version),
+                "capabilities": "{}",
+                "registered_at": now,
+                "updated_at": now,
+                "last_applied_event_id": unique_correlation_id,
+                "last_applied_offset": 1,
+            }
 
-            sequence_info = ModelSequenceInfo.from_sequence(1)
-
-            projection = ModelRegistrationProjection(
-                entity_id=unique_node_id,
-                current_state=EnumRegistrationState.PENDING_REGISTRATION,
-                node_type=coerce_to_node_kind(event.node_type),
-                node_version=str(event.node_version),
-                registered_at=now,
-                updated_at=now,
-                last_applied_event_id=unique_correlation_id,
+            await real_projector.upsert_partial(
+                aggregate_id=unique_node_id,
+                values=values,
                 correlation_id=unique_correlation_id,
-                domain="registration",
-            )
-
-            await real_projector.persist(
-                projection=projection,
-                entity_id=unique_node_id,
-                domain="registration",
-                sequence_info=sequence_info,
-                correlation_id=unique_correlation_id,
+                conflict_columns=["entity_id", "domain"],
             )
 
         # Verify projection exists in PostgreSQL

@@ -95,6 +95,11 @@ CREATE TABLE IF NOT EXISTS registration_projections (
 
     -- Constraints
     PRIMARY KEY (entity_id, domain),
+    -- UNIQUE constraint on entity_id enables ON CONFLICT (entity_id) upserts.
+    -- Required because omnibase-core's ModelProjectorContract only supports single-column
+    -- upsert_key, but we need composite PK for multi-domain support.
+    -- See: registration_projector.yaml behavior.upsert_key comment for details.
+    UNIQUE (entity_id),
     CONSTRAINT valid_offset CHECK (last_applied_offset >= 0),
     CONSTRAINT valid_sequence CHECK (last_applied_sequence IS NULL OR last_applied_sequence >= 0),
     -- Node types MUST match omnibase_core.enums.EnumNodeKind values (lowercase serialized form)

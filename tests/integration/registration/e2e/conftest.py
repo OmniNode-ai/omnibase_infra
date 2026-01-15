@@ -106,10 +106,8 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator.timeout_coordinator import (
         TimeoutCoordinator,
     )
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import ProjectorShell
     from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
     from omnibase_infra.services import TimeoutEmitter, TimeoutScanner
     from tests.helpers.deterministic import DeterministicClock
@@ -691,18 +689,35 @@ async def cleanup_consul_services(
 @pytest.fixture
 async def real_projector(
     postgres_pool: asyncpg.Pool,
-) -> ProjectorRegistration:
-    """Create ProjectorRegistration for persisting handler outputs.
+) -> ProjectorShell:
+    """Create ProjectorShell for persisting handler outputs.
+
+    Uses ProjectorPluginLoader to load the registration projector from
+    its YAML contract definition. This ensures the test uses the same
+    contract-driven configuration as production.
 
     Args:
         postgres_pool: Database connection pool.
 
     Returns:
-        ProjectorRegistration for persisting projections.
-    """
-    from omnibase_infra.projectors import ProjectorRegistration
+        ProjectorShell for persisting projections (contract-driven).
 
-    return ProjectorRegistration(postgres_pool)
+    Related:
+        - OMN-1169: ProjectorShell for contract-driven projections
+        - OMN-1168: ProjectorPluginLoader contract discovery
+    """
+    from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
+    from omnibase_infra.runtime import ProjectorPluginLoader, ProjectorShell
+
+    loader = ProjectorPluginLoader(pool=postgres_pool)
+    contract_path = REGISTRATION_PROJECTOR_CONTRACT
+    projector = await loader.load_from_contract(contract_path)
+
+    # Type narrowing - loader with pool returns ProjectorShell, not placeholder
+    assert isinstance(projector, ProjectorShell), (
+        "Expected ProjectorShell instance when pool is provided"
+    )
+    return projector
 
 
 # =============================================================================
@@ -731,14 +746,14 @@ async def timeout_scanner(
 async def timeout_emitter(
     timeout_scanner: TimeoutScanner,
     real_kafka_event_bus: EventBusKafka,
-    real_projector: ProjectorRegistration,
+    real_projector: ProjectorShell,
 ) -> TimeoutEmitter:
     """Create TimeoutEmitter for emitting timeout events.
 
     Args:
         timeout_scanner: Scanner for finding overdue entities.
         real_kafka_event_bus: Event bus for publishing events.
-        real_projector: Projector for updating markers.
+        real_projector: ProjectorShell for updating markers (contract-driven).
 
     Returns:
         TimeoutEmitter for processing timeouts.
@@ -760,7 +775,7 @@ async def timeout_emitter(
 @pytest.fixture
 async def heartbeat_handler(
     projection_reader: ProjectionReaderRegistration,
-    real_projector: ProjectorRegistration,
+    real_projector: ProjectorShell,
 ) -> HandlerNodeHeartbeat:
     """HandlerNodeHeartbeat for E2E heartbeat tests.
 
@@ -770,7 +785,7 @@ async def heartbeat_handler(
 
     Args:
         projection_reader: Reader for projection queries.
-        real_projector: Projector for persisting state.
+        real_projector: ProjectorShell for persisting state (contract-driven).
 
     Returns:
         HandlerNodeHeartbeat: Configured handler for heartbeat processing.

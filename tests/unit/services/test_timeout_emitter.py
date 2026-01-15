@@ -153,12 +153,9 @@ def mock_event_bus() -> AsyncMock:
 
 @pytest.fixture
 def mock_projector() -> AsyncMock:
-    """Create a mock projector."""
+    """Create a mock ProjectorShell."""
     projector = AsyncMock()
-    projector.persist = AsyncMock(return_value=True)
-    # Keep these for backwards compatibility with some tests
-    projector.update_ack_timeout_marker = AsyncMock(return_value=True)
-    projector.update_liveness_timeout_marker = AsyncMock(return_value=True)
+    projector.partial_update = AsyncMock(return_value=True)
     return projector
 
 
@@ -275,8 +272,7 @@ class TestServiceTimeoutEmitterProcessTimeouts:
 
         # Verify no publishes occurred
         mock_event_bus.publish_envelope.assert_not_called()
-        mock_projector.update_ack_timeout_marker.assert_not_called()
-        mock_projector.update_liveness_timeout_marker.assert_not_called()
+        mock_projector.partial_update.assert_not_called()
 
     async def test_process_timeouts_with_ack_timeouts(
         self,
@@ -316,9 +312,12 @@ class TestServiceTimeoutEmitterProcessTimeouts:
         assert result.markers_updated == 1
         assert result.errors == ()
 
-        # Verify publish and marker update via atomic update
+        # Verify publish and marker update via partial_update
         mock_event_bus.publish_envelope.assert_called_once()
-        mock_projector.update_ack_timeout_marker.assert_called_once()
+        mock_projector.partial_update.assert_called_once()
+        # Verify ack_timeout_emitted_at was updated
+        call_args = mock_projector.partial_update.call_args
+        assert "ack_timeout_emitted_at" in call_args.kwargs["updates"]
 
     async def test_process_timeouts_with_liveness_expirations(
         self,
@@ -358,9 +357,12 @@ class TestServiceTimeoutEmitterProcessTimeouts:
         assert result.markers_updated == 1
         assert result.errors == ()
 
-        # Verify publish and marker update via atomic update
+        # Verify publish and marker update via partial_update
         mock_event_bus.publish_envelope.assert_called_once()
-        mock_projector.update_liveness_timeout_marker.assert_called_once()
+        mock_projector.partial_update.assert_called_once()
+        # Verify liveness_timeout_emitted_at was updated
+        call_args = mock_projector.partial_update.call_args
+        assert "liveness_timeout_emitted_at" in call_args.kwargs["updates"]
 
     async def test_process_timeouts_with_both_types(
         self,
@@ -411,10 +413,9 @@ class TestServiceTimeoutEmitterProcessTimeouts:
         assert result.total_emitted == 3
         assert result.errors == ()
 
-        # 3 publishes, 1 ack marker update, 2 liveness marker updates
+        # 3 publishes, 3 partial_update calls (1 ack + 2 liveness)
         assert mock_event_bus.publish_envelope.call_count == 3
-        assert mock_projector.update_ack_timeout_marker.call_count == 1
-        assert mock_projector.update_liveness_timeout_marker.call_count == 2
+        assert mock_projector.partial_update.call_count == 3
 
 
 @pytest.mark.unit
@@ -470,7 +471,7 @@ class TestServiceTimeoutEmitterAckTimeout:
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
-        """Test _emit_ack_timeout updates marker via atomic update after publish."""
+        """Test _emit_ack_timeout updates marker via partial_update after publish."""
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
@@ -490,15 +491,15 @@ class TestServiceTimeoutEmitterAckTimeout:
             correlation_id=correlation_id,
         )
 
-        # Verify atomic marker update was called
-        mock_projector.update_ack_timeout_marker.assert_called_once()
-        call_args = mock_projector.update_ack_timeout_marker.call_args
+        # Verify partial_update was called for marker update
+        mock_projector.partial_update.assert_called_once()
+        call_args = mock_projector.partial_update.call_args
 
         # Verify the correct parameters were passed
-        assert call_args.kwargs["entity_id"] == node_id
-        assert call_args.kwargs["domain"] == projection.domain
-        assert call_args.kwargs["emitted_at"] == now
+        assert call_args.kwargs["aggregate_id"] == node_id
         assert call_args.kwargs["correlation_id"] == correlation_id
+        assert "ack_timeout_emitted_at" in call_args.kwargs["updates"]
+        assert call_args.kwargs["updates"]["ack_timeout_emitted_at"] == now
 
     async def test_emit_ack_timeout_raises_on_missing_deadline(
         self,
@@ -572,7 +573,7 @@ class TestServiceTimeoutEmitterLivenessExpiration:
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
-        """Test _emit_liveness_expiration updates marker via atomic update after publish."""
+        """Test _emit_liveness_expiration updates marker via partial_update after publish."""
         now = datetime.now(UTC)
         tick_id = uuid4()
         correlation_id = uuid4()
@@ -592,15 +593,15 @@ class TestServiceTimeoutEmitterLivenessExpiration:
             correlation_id=correlation_id,
         )
 
-        # Verify atomic marker update was called
-        mock_projector.update_liveness_timeout_marker.assert_called_once()
-        call_args = mock_projector.update_liveness_timeout_marker.call_args
+        # Verify partial_update was called for marker update
+        mock_projector.partial_update.assert_called_once()
+        call_args = mock_projector.partial_update.call_args
 
         # Verify the correct parameters were passed
-        assert call_args.kwargs["entity_id"] == node_id
-        assert call_args.kwargs["domain"] == projection.domain
-        assert call_args.kwargs["emitted_at"] == now
+        assert call_args.kwargs["aggregate_id"] == node_id
         assert call_args.kwargs["correlation_id"] == correlation_id
+        assert "liveness_timeout_emitted_at" in call_args.kwargs["updates"]
+        assert call_args.kwargs["updates"]["liveness_timeout_emitted_at"] == now
 
     async def test_emit_liveness_expiration_raises_on_missing_deadline(
         self,
@@ -816,9 +817,9 @@ class TestServiceTimeoutEmitterErrorHandling:
             query_duration_ms=1.0,
         )
 
-        # Publish succeeds but atomic marker update fails
+        # Publish succeeds but partial_update (marker update) fails
         mock_event_bus.publish_envelope.return_value = None
-        mock_projector.update_ack_timeout_marker.side_effect = InfraConnectionError(
+        mock_projector.partial_update.side_effect = InfraConnectionError(
             "Marker update failed"
         )
 
@@ -881,8 +882,8 @@ class TestServiceTimeoutEmitterExactlyOnce:
         mock_event_bus.publish_envelope.side_effect = (
             lambda **kwargs: call_order.append("publish")
         )
-        mock_projector.update_ack_timeout_marker.side_effect = (
-            lambda **kwargs: call_order.append("marker_update")
+        mock_projector.partial_update.side_effect = lambda **kwargs: call_order.append(
+            "marker_update"
         )
 
         await processor._emit_ack_timeout(
@@ -892,7 +893,7 @@ class TestServiceTimeoutEmitterExactlyOnce:
             correlation_id=uuid4(),
         )
 
-        # Verify order: publish THEN atomic marker update
+        # Verify order: publish THEN partial_update marker update
         assert call_order == ["publish", "marker_update"]
 
     async def test_marker_not_updated_on_publish_failure(
@@ -922,8 +923,8 @@ class TestServiceTimeoutEmitterExactlyOnce:
                 correlation_id=uuid4(),
             )
 
-        # Marker should NOT have been updated (atomic update not called)
-        mock_projector.update_ack_timeout_marker.assert_not_called()
+        # Marker should NOT have been updated (partial_update not called)
+        mock_projector.partial_update.assert_not_called()
 
     async def test_restart_safe_only_unmarked_processed(
         self,

@@ -351,6 +351,7 @@ from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from omnibase_infra.enums import EnumConfirmationEventType
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
@@ -1042,9 +1043,9 @@ class RegistrationReducer:
     #
     #     # Handle error confirmation
     #     if not confirmation.success:
-    #         if confirmation.event_type == "consul.registered":
+    #         if confirmation.event_type == EnumConfirmationEventType.CONSUL_REGISTERED:
     #             new_state = state.with_failure("consul_failed", event_id)
-    #         elif confirmation.event_type == "postgres.registration_upserted":
+    #         elif confirmation.event_type == EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED:
     #             new_state = state.with_failure("postgres_failed", event_id)
     #         else:
     #             new_state = state.with_failure("both_failed", event_id)
@@ -1053,9 +1054,9 @@ class RegistrationReducer:
     #         )
     #
     #     # Handle success confirmation - transition state
-    #     if confirmation.event_type == "consul.registered":
+    #     if confirmation.event_type == EnumConfirmationEventType.CONSUL_REGISTERED:
     #         new_state = state.with_consul_confirmed(event_id)
-    #     elif confirmation.event_type == "postgres.registration_upserted":
+    #     elif confirmation.event_type == EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED:
     #         new_state = state.with_postgres_confirmed(event_id)
     #     else:
     #         # Unknown confirmation type - ignore

@@ -9,12 +9,11 @@ full context for debugging and observability.
 
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumChainViolationType
+from omnibase_infra.enums import EnumChainViolationType, EnumValidationSeverity
 
 
 class ModelChainViolation(BaseModel):
@@ -52,7 +51,7 @@ class ModelChainViolation(BaseModel):
         ...     message_id=uuid4(),
         ...     parent_message_id=uuid4(),
         ...     violation_message="Child message has different correlation_id than parent",
-        ...     severity="error",
+        ...     severity=EnumValidationSeverity.ERROR,
         ... )
         >>> violation.is_blocking()
         True
@@ -93,8 +92,8 @@ class ModelChainViolation(BaseModel):
         min_length=1,
         description="Human-readable description of the violation",
     )
-    severity: Literal["error", "warning"] = Field(
-        default="error",
+    severity: EnumValidationSeverity = Field(
+        default=EnumValidationSeverity.ERROR,
         description=(
             "Severity classification: 'error' indicates a critical chain break "
             "that should block processing, 'warning' is advisory for potential issues"
@@ -117,7 +116,7 @@ class ModelChainViolation(BaseModel):
             >>> violation.is_blocking()
             True
         """
-        return self.severity == "error"
+        return self.severity == EnumValidationSeverity.ERROR
 
     def format_for_logging(self) -> str:
         """Format violation for structured logging output.

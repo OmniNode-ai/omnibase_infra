@@ -18,13 +18,13 @@ Related Tickets:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
+from omnibase_infra.enums import EnumBackendType
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 from omnibase_infra.nodes.node_registry_effect.handlers.handler_partial_retry import (
     HandlerPartialRetry,
@@ -38,7 +38,7 @@ class MockPartialRetryRequest:
     node_id: UUID
     node_type: EnumNodeKind
     node_version: str
-    target_backend: Literal["consul", "postgres"]
+    target_backend: EnumBackendType
     idempotency_key: str | None = None
     service_name: str | None = None
     tags: list[str] = field(default_factory=list)
@@ -70,7 +70,7 @@ def create_mock_postgres_adapter() -> AsyncMock:
 
 
 def create_retry_request(
-    target_backend: Literal["consul", "postgres"] = "consul",
+    target_backend: EnumBackendType = EnumBackendType.CONSUL,
     node_id: UUID | None = None,
     node_type: EnumNodeKind = EnumNodeKind.EFFECT,
     idempotency_key: str | None = None,
@@ -105,7 +105,7 @@ class TestHandlerPartialRetryConsulSuccess:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -130,7 +130,7 @@ class TestHandlerPartialRetryConsulSuccess:
         node_id = uuid4()
         node_type = EnumNodeKind.EFFECT
         request = create_retry_request(
-            target_backend="consul", node_id=node_id, node_type=node_type
+            target_backend=EnumBackendType.CONSUL, node_id=node_id, node_type=node_type
         )
         correlation_id = uuid4()
 
@@ -154,7 +154,7 @@ class TestHandlerPartialRetryPostgresSuccess:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="postgres")
+        request = create_retry_request(target_backend=EnumBackendType.POSTGRES)
         correlation_id = uuid4()
 
         # Act
@@ -182,7 +182,7 @@ class TestHandlerPartialRetryPostgresSuccess:
         endpoints = {"grpc": "grpc://localhost:9090"}
         metadata = {"region": "us-west"}
         request = create_retry_request(
-            target_backend="postgres",
+            target_backend=EnumBackendType.POSTGRES,
             node_id=node_id,
             node_type=node_type,
             endpoints=endpoints,
@@ -216,7 +216,7 @@ class TestHandlerPartialRetryInvalidBackend:
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
         # Create request with invalid backend (type: ignore needed for test)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         request.target_backend = "invalid_backend"  # type: ignore[assignment]
         correlation_id = uuid4()
 
@@ -249,7 +249,7 @@ class TestHandlerPartialRetryConsulFailure:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -270,7 +270,7 @@ class TestHandlerPartialRetryConsulFailure:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -299,7 +299,7 @@ class TestHandlerPartialRetryPostgresFailure:
         )
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="postgres")
+        request = create_retry_request(target_backend=EnumBackendType.POSTGRES)
         correlation_id = uuid4()
 
         # Act
@@ -320,7 +320,7 @@ class TestHandlerPartialRetryPostgresFailure:
         mock_postgres.upsert.side_effect = TimeoutError("Query timed out")
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="postgres")
+        request = create_retry_request(target_backend=EnumBackendType.POSTGRES)
         correlation_id = uuid4()
 
         # Act
@@ -345,7 +345,7 @@ class TestHandlerPartialRetryExceptionHandling:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -365,7 +365,7 @@ class TestHandlerPartialRetryExceptionHandling:
         mock_postgres.upsert.side_effect = RuntimeError("Unexpected error")
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="postgres")
+        request = create_retry_request(target_backend=EnumBackendType.POSTGRES)
         correlation_id = uuid4()
 
         # Act
@@ -388,7 +388,7 @@ class TestHandlerPartialRetryCorrelationId:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -405,7 +405,7 @@ class TestHandlerPartialRetryCorrelationId:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="postgres")
+        request = create_retry_request(target_backend=EnumBackendType.POSTGRES)
         correlation_id = uuid4()
 
         # Act
@@ -425,7 +425,7 @@ class TestHandlerPartialRetryCorrelationId:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -443,7 +443,7 @@ class TestHandlerPartialRetryCorrelationId:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -464,7 +464,7 @@ class TestHandlerPartialRetryTiming:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -481,7 +481,7 @@ class TestHandlerPartialRetryTiming:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="postgres")
+        request = create_retry_request(target_backend=EnumBackendType.POSTGRES)
         correlation_id = uuid4()
 
         # Act
@@ -499,7 +499,7 @@ class TestHandlerPartialRetryTiming:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul")
+        request = create_retry_request(target_backend=EnumBackendType.CONSUL)
         correlation_id = uuid4()
 
         # Act
@@ -533,7 +533,7 @@ class TestHandlerPartialRetryNodeTypes:
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
         node_id = uuid4()
         request = create_retry_request(
-            target_backend="consul", node_id=node_id, node_type=node_type
+            target_backend=EnumBackendType.CONSUL, node_id=node_id, node_type=node_type
         )
         correlation_id = uuid4()
 
@@ -567,7 +567,9 @@ class TestHandlerPartialRetryNodeTypes:
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
         node_id = uuid4()
         request = create_retry_request(
-            target_backend="postgres", node_id=node_id, node_type=node_type
+            target_backend=EnumBackendType.POSTGRES,
+            node_id=node_id,
+            node_type=node_type,
         )
         correlation_id = uuid4()
 
@@ -593,7 +595,7 @@ class TestHandlerPartialRetryIdempotencyKey:
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
         idempotency_key = f"retry-{uuid4()}"
         request = create_retry_request(
-            target_backend="consul", idempotency_key=idempotency_key
+            target_backend=EnumBackendType.CONSUL, idempotency_key=idempotency_key
         )
         correlation_id = uuid4()
 
@@ -612,7 +614,9 @@ class TestHandlerPartialRetryIdempotencyKey:
         mock_postgres = create_mock_postgres_adapter()
 
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
-        request = create_retry_request(target_backend="consul", idempotency_key=None)
+        request = create_retry_request(
+            target_backend=EnumBackendType.CONSUL, idempotency_key=None
+        )
         correlation_id = uuid4()
 
         # Act

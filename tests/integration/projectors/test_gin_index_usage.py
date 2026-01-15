@@ -58,7 +58,11 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 if TYPE_CHECKING:
     import asyncpg
 
-    from omnibase_infra.projectors import ProjectorRegistration
+    from omnibase_infra.runtime import ProjectorShell
+
+    # Legacy type alias - ProjectorRegistration has been superseded by ProjectorShell
+    # Tests using this type require the legacy_projector fixture
+    ProjectorRegistration = object  # type: ignore[misc]
 
 
 # Test markers
@@ -235,7 +239,7 @@ async def gin_index_exists(
 
 @pytest.fixture
 async def populated_db(
-    projector: ProjectorRegistration,
+    legacy_projector: ProjectorRegistration,
     pg_pool: asyncpg.Pool,
 ) -> asyncpg.Pool:
     """Populate database with test data for index and query tests.
@@ -285,7 +289,7 @@ async def populated_db(
             protocols=protocol_options[i % len(protocol_options)],
             offset=1000 + i,
         )
-        await projector.persist(
+        await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,
@@ -600,7 +604,7 @@ class TestQueryPerformanceBaseline:
 
     async def test_capability_tags_query_completes(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
         """Verify capability_tags query completes in reasonable time."""
@@ -610,7 +614,7 @@ class TestQueryPerformanceBaseline:
                 capability_tags=["test.tag", f"unique.tag.{i}"],
                 offset=2000 + i,
             )
-            await projector.persist(
+            await legacy_projector.persist(
                 projection=projection,
                 entity_id=projection.entity_id,
                 domain=projection.domain,
@@ -631,7 +635,7 @@ class TestQueryPerformanceBaseline:
 
     async def test_empty_array_query_completes(
         self,
-        projector: ProjectorRegistration,
+        legacy_projector: ProjectorRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
         """Verify queries for empty arrays complete correctly."""
@@ -642,7 +646,7 @@ class TestQueryPerformanceBaseline:
             protocols=[],
             offset=3000,
         )
-        await projector.persist(
+        await legacy_projector.persist(
             projection=projection,
             entity_id=projection.entity_id,
             domain=projection.domain,

@@ -38,9 +38,10 @@ Related Tickets:
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
+from omnibase_infra.enums import EnumBackendType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -69,7 +70,7 @@ class ProtocolPartialRetryRequest(Protocol):
         node_id: Unique identifier for the node being registered.
         node_type: Type of ONEX node (effect, compute, reducer, orchestrator).
         node_version: Semantic version of the node.
-        target_backend: Backend to retry ("consul" or "postgres").
+        target_backend: Backend to retry (EnumBackendType.CONSUL or EnumBackendType.POSTGRES).
         idempotency_key: Optional key for idempotent retry semantics.
         service_name: Optional service name for Consul registration.
         tags: Tags for Consul service discovery.
@@ -81,7 +82,7 @@ class ProtocolPartialRetryRequest(Protocol):
     node_id: UUID
     node_type: EnumNodeKind
     node_version: str
-    target_backend: Literal["consul", "postgres"]
+    target_backend: EnumBackendType
     idempotency_key: str | None
     service_name: str | None
     tags: list[str]
@@ -99,8 +100,8 @@ class HandlerPartialRetry:
     but another failed.
 
     Backend Routing:
-        - target_backend="consul": Routes to Consul registration
-        - target_backend="postgres": Routes to PostgreSQL upsert
+        - target_backend=EnumBackendType.CONSUL: Routes to Consul registration
+        - target_backend=EnumBackendType.POSTGRES: Routes to PostgreSQL upsert
         - Unknown values: Returns error result
 
     Error Handling:
@@ -154,7 +155,7 @@ class HandlerPartialRetry:
             request: Retry request with target backend specification including:
                 - node_id: UUID of the node to register
                 - node_type: ONEX node type (effect, compute, reducer, orchestrator)
-                - target_backend: "consul" or "postgres"
+                - target_backend: EnumBackendType.CONSUL or EnumBackendType.POSTGRES
                 - idempotency_key: Optional key for safe retry semantics
                 - service_name: Optional custom service name (for Consul)
                 - tags: List of service discovery tags (for Consul)
@@ -179,14 +180,18 @@ class HandlerPartialRetry:
             handling in dual-backend registration scenarios.
         """
         start_time = time.perf_counter()
-        target_backend = request.target_backend.lower()
+        target_backend = request.target_backend
 
-        if target_backend == "consul":
+        if target_backend == EnumBackendType.CONSUL:
             return await self._retry_consul(request, correlation_id, start_time)
-        elif target_backend == "postgres":
+        elif target_backend == EnumBackendType.POSTGRES:
             return await self._retry_postgres(request, correlation_id, start_time)
         else:
-            # Unknown backend - return error result
+            # Defensive: This branch handles unexpected enum values that may arise from
+            # duck-typed Protocol usage, where callers could pass objects with a
+            # target_backend attribute that isn't a valid EnumBackendType member.
+            # While static typing prevents this in normal usage, the Protocol pattern
+            # allows runtime duck typing that bypasses compile-time checks.
             duration_ms = (time.perf_counter() - start_time) * 1000
             error_msg = (
                 f"Unknown target backend: {target_backend}. "
@@ -197,7 +202,9 @@ class HandlerPartialRetry:
                 error=error_msg,
                 error_code="INVALID_TARGET_BACKEND",
                 duration_ms=duration_ms,
-                backend_id=target_backend,
+                backend_id=target_backend.value
+                if isinstance(target_backend, EnumBackendType)
+                else str(target_backend),
                 correlation_id=correlation_id,
             )
 

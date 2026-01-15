@@ -58,6 +58,7 @@ from collections.abc import Awaitable, Callable
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 
 import asyncpg
 import yaml
@@ -74,13 +75,17 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.projectors import ProjectorRegistration
 from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 from omnibase_infra.runtime.models import ModelRuntimeConfig
+from omnibase_infra.runtime.projector_plugin_loader import (
+    ProjectorPluginLoader,
+    ProjectorShell,
+    ProtocolEventProjector,
+)
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
@@ -174,7 +179,10 @@ def _get_contracts_dir() -> Path:
     return Path(DEFAULT_CONTRACTS_DIR)
 
 
-def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
+def load_runtime_config(
+    contracts_dir: Path,
+    correlation_id: UUID | None = None,
+) -> ModelRuntimeConfig:
     """Load runtime configuration from contract file or return defaults.
 
     Attempts to load runtime_config.yaml from the contracts directory.
@@ -195,6 +203,10 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
     Args:
         contracts_dir: Path to the contracts directory containing runtime_config.yaml.
             Example: Path("./contracts") or Path("/app/contracts")
+        correlation_id: Optional correlation ID for distributed tracing. If not
+            provided, a new one will be generated. Passing a correlation_id from
+            the caller (e.g., bootstrap) ensures consistent tracing across the
+            initialization sequence.
 
     Returns:
         ModelRuntimeConfig: Fully validated configuration model with runtime settings.
@@ -221,19 +233,20 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
         (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
     """
     config_path = contracts_dir / DEFAULT_RUNTIME_CONFIG
-    correlation_id = generate_correlation_id()
+    # Use passed correlation_id for consistent tracing, or generate new one
+    effective_correlation_id = correlation_id or generate_correlation_id()
     context = ModelInfraErrorContext(
         transport_type=EnumInfraTransportType.RUNTIME,
         operation="load_config",
         target_name=str(config_path),
-        correlation_id=correlation_id,
+        correlation_id=effective_correlation_id,
     )
 
     if config_path.exists():
         logger.info(
             "Loading runtime config from %s (correlation_id=%s)",
             config_path,
-            correlation_id,
+            effective_correlation_id,
         )
         try:
             with config_path.open(encoding="utf-8") as f:
@@ -259,13 +272,13 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
                 )
             logger.debug(
                 "Contract validation passed (correlation_id=%s)",
-                correlation_id,
+                effective_correlation_id,
             )
 
             config = ModelRuntimeConfig.model_validate(raw_config)
             logger.debug(
                 "Runtime config loaded successfully (correlation_id=%s)",
-                correlation_id,
+                effective_correlation_id,
                 extra={
                     "input_topic": config.input_topic,
                     "output_topic": config.output_topic,
@@ -318,7 +331,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
     logger.info(
         "No runtime config found at %s, using environment/defaults (correlation_id=%s)",
         config_path,
-        correlation_id,
+        effective_correlation_id,
     )
     config = ModelRuntimeConfig(
         input_topic=os.getenv("ONEX_INPUT_TOPIC", DEFAULT_INPUT_TOPIC),
@@ -327,7 +340,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
     )
     logger.debug(
         "Runtime config constructed from environment/defaults (correlation_id=%s)",
-        correlation_id,
+        effective_correlation_id,
         extra={
             "input_topic": config.input_topic,
             "output_topic": config.output_topic,
@@ -426,8 +439,9 @@ async def bootstrap() -> int:
         )
 
         # 2. Load runtime configuration (may raise ProtocolConfigurationError)
+        # Pass correlation_id for consistent tracing across initialization sequence
         config_start_time = time.time()
-        config = load_runtime_config(contracts_dir)
+        config = load_runtime_config(contracts_dir, correlation_id=correlation_id)
         config_duration = time.time() - config_start_time
         logger.debug(
             "Runtime config loaded in %.3fs (correlation_id=%s)",
@@ -582,7 +596,7 @@ async def bootstrap() -> int:
 
         # 4.5. Create PostgreSQL pool for projections
         # Only create if POSTGRES_HOST is set (indicates registration should be enabled)
-        projector: ProjectorRegistration | None = None
+        projector: ProjectorShell | None = None
         introspection_dispatcher: DispatcherNodeIntrospected | None = None
         consul_handler = None  # Will be initialized if Consul is configured
 
@@ -614,13 +628,152 @@ async def bootstrap() -> int:
                     },
                 )
 
-                # 4.6. Create ProjectorRegistration and initialize schema
-                projector = ProjectorRegistration(postgres_pool)
-                await projector.initialize_schema(correlation_id=correlation_id)
-                logger.info(
-                    "ProjectorRegistration schema initialized (correlation_id=%s)",
-                    correlation_id,
+                # 4.6. Load projectors from contracts via ProjectorPluginLoader (OMN-1170/1169)
+                #
+                # This section implements fully contract-driven projector management. The
+                # loader discovers projector contracts from the package's projectors/contracts
+                # directory and creates ProjectorShell instances for runtime use.
+                #
+                # Contract-driven approach:
+                # - Projector behavior defined in YAML contracts (registration_projector.yaml)
+                # - ProjectorPluginLoader discovers and loads projectors from contracts
+                # - ProjectorShell provides generic projection operations (project, partial_update)
+                # - Schema initialization is decoupled - SQL executed directly from schema file
+                #
+                # The registration projector is identified by projector_id="registration-projector"
+                # and is passed to wire_registration_handlers() for handler injection.
+                #
+                projector_contracts_dir = (
+                    Path(__file__).parent.parent / "projectors" / "contracts"
                 )
+
+                # Try to discover projectors from contracts
+                projector_loader = ProjectorPluginLoader(
+                    container=container,
+                    pool=postgres_pool,
+                    graceful_mode=True,  # Continue on errors during discovery
+                )
+
+                discovered_projectors: list[ProtocolEventProjector] = []
+                if projector_contracts_dir.exists():
+                    try:
+                        discovered_projectors = (
+                            await projector_loader.load_from_directory(
+                                projector_contracts_dir
+                            )
+                        )
+                        if discovered_projectors:
+                            logger.info(
+                                "Discovered %d projector(s) from contracts (correlation_id=%s)",
+                                len(discovered_projectors),
+                                correlation_id,
+                                extra={
+                                    "discovered_count": len(discovered_projectors),
+                                    "contracts_dir": str(projector_contracts_dir),
+                                    "projector_ids": [
+                                        getattr(p, "projector_id", "unknown")
+                                        for p in discovered_projectors
+                                    ],
+                                },
+                            )
+                        else:
+                            logger.warning(
+                                "No projector contracts found in %s (correlation_id=%s)",
+                                projector_contracts_dir,
+                                correlation_id,
+                                extra={
+                                    "contracts_dir": str(projector_contracts_dir),
+                                },
+                            )
+                    except Exception as discovery_error:
+                        # Log warning but continue - projector discovery is best-effort
+                        # Registration features will be unavailable if discovery fails
+                        logger.warning(
+                            "Projector contract discovery failed: %s (correlation_id=%s)",
+                            sanitize_error_message(discovery_error),
+                            correlation_id,
+                            extra={
+                                "error_type": type(discovery_error).__name__,
+                                "contracts_dir": str(projector_contracts_dir),
+                            },
+                        )
+                else:
+                    logger.debug(
+                        "Projector contracts directory not found, skipping discovery "
+                        "(correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "contracts_dir": str(projector_contracts_dir),
+                        },
+                    )
+
+                # Extract registration projector from discovered projectors (OMN-1169)
+                # This replaces the legacy ProjectorRegistration with contract-loaded ProjectorShell
+                registration_projector_id = "registration-projector"
+                for discovered in discovered_projectors:
+                    if (
+                        getattr(discovered, "projector_id", None)
+                        == registration_projector_id
+                    ):
+                        # Cast to ProjectorShell (loader creates ProjectorShell when pool provided)
+                        if isinstance(discovered, ProjectorShell):
+                            projector = discovered
+                            logger.info(
+                                "Using contract-loaded ProjectorShell for registration "
+                                "(correlation_id=%s)",
+                                correlation_id,
+                                extra={
+                                    "projector_id": registration_projector_id,
+                                    "aggregate_type": projector.aggregate_type,
+                                },
+                            )
+                        break
+
+                if projector is None:
+                    # Fallback: No registration projector discovered from contracts
+                    logger.warning(
+                        "Registration projector not found in contracts, "
+                        "registration features will be unavailable (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "expected_projector_id": registration_projector_id,
+                            "discovered_count": len(discovered_projectors),
+                        },
+                    )
+
+                # Initialize schema by executing SQL file directly
+                # Schema initialization is decoupled from the projector - it just ensures
+                # the table and indexes exist. The ProjectorShell uses the schema at runtime.
+                schema_file = (
+                    Path(__file__).parent.parent
+                    / "schemas"
+                    / "schema_registration_projection.sql"
+                )
+                if schema_file.exists():
+                    try:
+                        schema_sql = schema_file.read_text()
+                        async with postgres_pool.acquire() as conn:
+                            await conn.execute(schema_sql)
+                        logger.info(
+                            "Registration projection schema initialized (correlation_id=%s)",
+                            correlation_id,
+                        )
+                    except Exception as schema_error:
+                        # Log warning but continue - schema may already exist
+                        logger.warning(
+                            "Schema initialization encountered error: %s (correlation_id=%s)",
+                            sanitize_error_message(schema_error),
+                            correlation_id,
+                            extra={
+                                "error_type": type(schema_error).__name__,
+                            },
+                        )
+                else:
+                    logger.warning(
+                        "Schema file not found: %s (correlation_id=%s)",
+                        schema_file,
+                        correlation_id,
+                    )
 
                 # 4.6.5. Initialize HandlerConsul if Consul is configured
                 # CONSUL_HOST determines whether to enable Consul registration
