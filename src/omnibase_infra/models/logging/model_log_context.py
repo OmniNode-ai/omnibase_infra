@@ -84,7 +84,12 @@ See Also:
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 # Sentinel constants for "not set" values
 _SENTINEL_STR: str = ""
@@ -331,7 +336,7 @@ class ModelLogContext(BaseModel):
             A new ModelLogContext with duration_ms set.
 
         Raises:
-            ValueError: If duration_ms is negative.
+            ProtocolConfigurationError: If duration_ms is negative.
 
         Example:
             >>> ctx = (
@@ -342,7 +347,14 @@ class ModelLogContext(BaseModel):
         .. versionadded:: 0.6.0
         """
         if duration_ms < 0:
-            raise ValueError("duration_ms must be >= 0")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="with_duration_ms",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                "duration_ms must be >= 0", context=context
+            )
         return self.model_copy(update={"duration_ms": duration_ms})
 
     def with_retry_count(self, retry_count: int) -> ModelLogContext:
@@ -356,7 +368,7 @@ class ModelLogContext(BaseModel):
             A new ModelLogContext with retry_count set.
 
         Raises:
-            ValueError: If retry_count is negative.
+            ProtocolConfigurationError: If retry_count is negative.
 
         Example:
             >>> ctx = (
@@ -367,7 +379,14 @@ class ModelLogContext(BaseModel):
         .. versionadded:: 0.6.0
         """
         if retry_count < 0:
-            raise ValueError("retry_count must be >= 0")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="with_retry_count",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                "retry_count must be >= 0", context=context
+            )
         return self.model_copy(update={"retry_count": retry_count})
 
     def with_service_name(self, service_name: str) -> ModelLogContext:
@@ -572,7 +591,7 @@ class ModelLogContext(BaseModel):
             A ModelLogContext configured for dispatch operations.
 
         Raises:
-            ValueError: If duration_ms is negative (except sentinel -1.0).
+            ProtocolConfigurationError: If duration_ms is negative (except sentinel -1.0).
 
         Example:
             >>> ctx = ModelLogContext.for_dispatch(
@@ -586,7 +605,14 @@ class ModelLogContext(BaseModel):
         """
         # Validate duration_ms: allow sentinel (-1.0) or non-negative values
         if duration_ms != _SENTINEL_FLOAT and duration_ms < 0:
-            raise ValueError("duration_ms must be >= 0 when set")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="for_dispatch",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                "duration_ms must be >= 0 when set", context=context
+            )
 
         extra: dict[str, str] = {}
         if dispatcher_id != _SENTINEL_STR:
@@ -630,7 +656,7 @@ class ModelLogContext(BaseModel):
             A ModelLogContext configured for connection operations.
 
         Raises:
-            ValueError: If retry_count is negative (except sentinel -1).
+            ProtocolConfigurationError: If retry_count is negative (except sentinel -1).
 
         Example:
             >>> ctx = ModelLogContext.for_connection(
@@ -645,7 +671,14 @@ class ModelLogContext(BaseModel):
         """
         # Validate retry_count: allow sentinel (-1) or non-negative values
         if retry_count != _SENTINEL_INT and retry_count < 0:
-            raise ValueError("retry_count must be >= 0 when set")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="for_connection",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                "retry_count must be >= 0 when set", context=context
+            )
 
         extra: dict[str, str] = {}
         if host != _SENTINEL_STR:
@@ -687,7 +720,7 @@ class ModelLogContext(BaseModel):
             A ModelLogContext configured for error logging.
 
         Raises:
-            ValueError: If retry_count is negative (except sentinel -1).
+            ProtocolConfigurationError: If retry_count is negative (except sentinel -1).
 
         Example:
             >>> ctx = ModelLogContext.for_error(
@@ -701,7 +734,14 @@ class ModelLogContext(BaseModel):
         """
         # Validate retry_count: allow sentinel (-1) or non-negative values
         if retry_count != _SENTINEL_INT and retry_count < 0:
-            raise ValueError("retry_count must be >= 0 when set")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="for_error",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                "retry_count must be >= 0 when set", context=context
+            )
 
         return cls(
             operation=operation,

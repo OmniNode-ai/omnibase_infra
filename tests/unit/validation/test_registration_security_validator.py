@@ -438,8 +438,8 @@ class TestAdapterSecurityConstraints:
             if e.rule_id == EnumSecurityRuleId.ADAPTER_NON_EFFECT_CATEGORY
         ]
         assert len(category_errors) == 1
-        # Verify error message mentions the missing category
-        assert "no handler_type_category" in category_errors[0].message.lower()
+        # Verify error message mentions the missing category (standardized format)
+        assert "got none" in category_errors[0].message.lower()
 
     def test_adapter_with_non_effect_category_raises_error(self) -> None:
         """Adapter with non-EFFECT handler category should fail registration.

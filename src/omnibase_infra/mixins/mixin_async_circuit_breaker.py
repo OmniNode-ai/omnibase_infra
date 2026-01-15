@@ -102,7 +102,11 @@ import time
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumCircuitState, EnumInfraTransportType
-from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.errors import (
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
@@ -215,10 +219,28 @@ class MixinAsyncCircuitBreaker:
         """
         # Validate parameters
         if threshold < 1:
-            raise ValueError(f"Circuit breaker threshold must be >= 1, got {threshold}")
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=transport_type,
+                operation="init_circuit_breaker",
+                target_name=service_name,
+            )
+            raise ProtocolConfigurationError(
+                f"Circuit breaker threshold must be >= 1, got {threshold}",
+                context=context,
+                parameter="threshold",
+                value=threshold,
+            )
         if reset_timeout < 0:
-            raise ValueError(
-                f"Circuit breaker reset_timeout must be >= 0, got {reset_timeout}"
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=transport_type,
+                operation="init_circuit_breaker",
+                target_name=service_name,
+            )
+            raise ProtocolConfigurationError(
+                f"Circuit breaker reset_timeout must be >= 0, got {reset_timeout}",
+                context=context,
+                parameter="reset_timeout",
+                value=reset_timeout,
             )
 
         # State variables

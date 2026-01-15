@@ -151,7 +151,7 @@ def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
         with contract_path.open("r", encoding="utf-8") as f:
             contract = yaml.safe_load(f)
     except FileNotFoundError as e:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="load_handler_routing_contract",
             target_name=str(contract_path),
@@ -165,7 +165,7 @@ def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
             context=ctx,
         ) from e
     except yaml.YAMLError as e:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="parse_handler_routing_contract",
             target_name=str(contract_path),
@@ -183,7 +183,7 @@ def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
         ) from e
 
     if contract is None:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="validate_handler_routing_contract",
             target_name=str(contract_path),
@@ -194,7 +194,7 @@ def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
 
     handler_routing = contract.get("handler_routing")
     if handler_routing is None:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="validate_handler_routing_contract",
             target_name=str(contract_path),

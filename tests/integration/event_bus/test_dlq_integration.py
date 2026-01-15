@@ -34,6 +34,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
+
 from .conftest import wait_for_consumer_ready
 
 if TYPE_CHECKING:
@@ -183,17 +185,21 @@ class TestDlqTopicConstants:
         """Verify build_dlq_topic rejects invalid categories."""
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
-        with pytest.raises(ValueError, match="Invalid category"):
+        with pytest.raises(ProtocolConfigurationError, match="Invalid category"):
             build_dlq_topic("dev", "invalid")
 
     def test_build_dlq_topic_empty_environment(self) -> None:
         """Verify build_dlq_topic rejects empty environment."""
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
-        with pytest.raises(ValueError, match="environment cannot be empty"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="environment cannot be empty"
+        ):
             build_dlq_topic("", "intents")
 
-        with pytest.raises(ValueError, match="environment cannot be empty"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="environment cannot be empty"
+        ):
             build_dlq_topic("   ", "intents")
 
     def test_parse_dlq_topic_valid(self) -> None:
