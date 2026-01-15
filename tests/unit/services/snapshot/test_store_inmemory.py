@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
 from omnibase_infra.services.snapshot import StoreSnapshotInMemory
 
@@ -565,11 +566,15 @@ class TestStoreSnapshotInMemoryCleanupExpired:
     async def test_cleanup_expired_invalid_keep_latest_n(
         self, store: StoreSnapshotInMemory
     ) -> None:
-        """cleanup_expired() raises ValueError for keep_latest_n < 1."""
-        with pytest.raises(ValueError, match="keep_latest_n must be >= 1"):
+        """cleanup_expired() raises ProtocolConfigurationError for keep_latest_n < 1."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="keep_latest_n must be >= 1"
+        ):
             await store.cleanup_expired(keep_latest_n=0)
 
-        with pytest.raises(ValueError, match="keep_latest_n must be >= 1"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="keep_latest_n must be >= 1"
+        ):
             await store.cleanup_expired(keep_latest_n=-1)
 
     @pytest.mark.asyncio

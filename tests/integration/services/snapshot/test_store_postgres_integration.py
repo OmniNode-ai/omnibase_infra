@@ -370,7 +370,15 @@ class TestBasicCrud:
 
         latest = await store.load_latest()
         assert latest is not None
+        # Verify exact snapshot ID (strongest assertion)
+        assert latest.id == snap2.id
+        # Verify sequence_number is truly the highest
         assert latest.sequence_number == 100
+        assert latest.sequence_number > snap1.sequence_number
+        # Verify data integrity
+        assert latest.data["v"] == 100
+        # Verify it's from the expected subject
+        assert latest.subject.subject_type == "type_b"
 
     async def test_query_returns_ordered_results(
         self,
@@ -923,14 +931,442 @@ class TestParentLineage:
 
 
 # =============================================================================
+# Cleanup/Retention Policy Tests
+# =============================================================================
+
+
+class TestCleanupExpired:
+    """Tests for cleanup_expired retention policy enforcement."""
+
+    async def test_cleanup_by_age_removes_old_snapshots(
+        self,
+        store: StoreSnapshotPostgres,
+        subject: ModelSubjectRef,
+        db_pool: asyncpg.Pool,
+    ) -> None:
+        """Verify cleanup_expired removes snapshots older than max_age_seconds.
+
+        Given: Snapshots with manually backdated created_at timestamps
+        When: cleanup_expired(max_age_seconds=3600)
+        Then: Old snapshots are deleted, recent ones retained
+        """
+        # Create snapshots with different ages by manually updating timestamps
+        snap1 = ModelSnapshot(subject=subject, data={"age": "old"}, sequence_number=1)
+        snap2 = ModelSnapshot(
+            subject=subject, data={"age": "recent"}, sequence_number=2
+        )
+
+        await store.save(snap1)
+        await store.save(snap2)
+
+        # Backdate snap1 to be 2 hours old
+        async with db_pool.acquire() as conn:
+            old_time = datetime.now(UTC) - timedelta(hours=2)
+            await conn.execute(
+                "UPDATE snapshots SET created_at = $1 WHERE id = $2",
+                old_time,
+                snap1.id,
+            )
+
+        # Cleanup with 1 hour max age (snap1 should be deleted)
+        deleted = await store.cleanup_expired(max_age_seconds=3600)
+        assert deleted == 1
+
+        # Verify snap1 is gone, snap2 remains
+        assert await store.load(snap1.id) is None
+        assert await store.load(snap2.id) is not None
+
+    async def test_cleanup_by_count_keeps_latest_n(
+        self,
+        store: StoreSnapshotPostgres,
+        subject: ModelSubjectRef,
+    ) -> None:
+        """Verify cleanup_expired keeps only the N most recent per subject.
+
+        Given: Multiple snapshots for a subject
+        When: cleanup_expired(keep_latest_n=3)
+        Then: Only the 3 highest sequence_number snapshots remain
+        """
+        # Create 5 snapshots
+        snapshot_ids = []
+        for i in range(1, 6):
+            snap = ModelSnapshot(subject=subject, data={"n": i}, sequence_number=i)
+            await store.save(snap)
+            snapshot_ids.append(snap.id)
+
+        # Keep only latest 3
+        deleted = await store.cleanup_expired(keep_latest_n=3)
+        assert deleted == 2  # seq 1 and 2 should be deleted
+
+        # Verify seq 1 and 2 are gone, seq 3, 4, 5 remain
+        assert await store.load(snapshot_ids[0]) is None  # seq 1
+        assert await store.load(snapshot_ids[1]) is None  # seq 2
+        assert await store.load(snapshot_ids[2]) is not None  # seq 3
+        assert await store.load(snapshot_ids[3]) is not None  # seq 4
+        assert await store.load(snapshot_ids[4]) is not None  # seq 5
+
+    async def test_cleanup_combined_strategy(
+        self,
+        store: StoreSnapshotPostgres,
+        subject: ModelSubjectRef,
+        db_pool: asyncpg.Pool,
+    ) -> None:
+        """Verify combined cleanup requires BOTH conditions for deletion.
+
+        Given: Snapshots with varying ages and sequences
+        When: cleanup_expired(max_age_seconds=3600, keep_latest_n=3)
+        Then: Only snapshots older than 1 hour AND outside top 3 are deleted
+        """
+        # Create 5 snapshots
+        snapshot_ids = []
+        for i in range(1, 6):
+            snap = ModelSnapshot(subject=subject, data={"n": i}, sequence_number=i)
+            await store.save(snap)
+            snapshot_ids.append(snap.id)
+
+        # Backdate all but the latest 2 to be 2 hours old
+        async with db_pool.acquire() as conn:
+            old_time = datetime.now(UTC) - timedelta(hours=2)
+            for snap_id in snapshot_ids[:3]:  # seq 1, 2, 3
+                await conn.execute(
+                    "UPDATE snapshots SET created_at = $1 WHERE id = $2",
+                    old_time,
+                    snap_id,
+                )
+
+        # Combined strategy: delete if older than 1 hour AND not in top 3
+        # Seq 3 is old but in top 3, so should NOT be deleted
+        # Seq 1, 2 are old and NOT in top 3, so should be deleted
+        deleted = await store.cleanup_expired(max_age_seconds=3600, keep_latest_n=3)
+        assert deleted == 2
+
+        # Verify seq 1, 2 gone; seq 3, 4, 5 remain
+        assert await store.load(snapshot_ids[0]) is None  # seq 1
+        assert await store.load(snapshot_ids[1]) is None  # seq 2
+        assert await store.load(snapshot_ids[2]) is not None  # seq 3 (in top 3)
+        assert await store.load(snapshot_ids[3]) is not None  # seq 4
+        assert await store.load(snapshot_ids[4]) is not None  # seq 5
+
+    async def test_cleanup_scoped_to_subject(
+        self,
+        store: StoreSnapshotPostgres,
+        unique_subject_factory: type,
+    ) -> None:
+        """Verify cleanup_expired can be scoped to a specific subject.
+
+        Given: Snapshots across multiple subjects
+        When: cleanup_expired(keep_latest_n=1, subject=subject1)
+        Then: Only subject1's old snapshots are deleted
+        """
+        subject1 = unique_subject_factory.create("type_a")
+        subject2 = unique_subject_factory.create("type_b")
+
+        # Create 3 snapshots for each subject with UNIQUE data to avoid
+        # content_hash deduplication (which would return existing IDs)
+        s1_ids = []
+        s2_ids = []
+        for i in range(1, 4):
+            # Use subject-specific data to ensure unique content_hash
+            snap1 = ModelSnapshot(
+                subject=subject1,
+                data={"subject": "s1", "n": i, "unique": str(uuid4())},
+                sequence_number=i,
+            )
+            snap2 = ModelSnapshot(
+                subject=subject2,
+                data={"subject": "s2", "n": i, "unique": str(uuid4())},
+                sequence_number=i,
+            )
+            await store.save(snap1)
+            await store.save(snap2)
+            s1_ids.append(snap1.id)
+            s2_ids.append(snap2.id)
+
+        # Cleanup only subject1, keep latest 1
+        deleted = await store.cleanup_expired(keep_latest_n=1, subject=subject1)
+        assert deleted == 2  # seq 1 and 2 from subject1
+
+        # Verify subject1: seq 1, 2 gone; seq 3 remains
+        assert await store.load(s1_ids[0]) is None
+        assert await store.load(s1_ids[1]) is None
+        assert await store.load(s1_ids[2]) is not None
+
+        # Verify subject2: all 3 still exist
+        assert await store.load(s2_ids[0]) is not None
+        assert await store.load(s2_ids[1]) is not None
+        assert await store.load(s2_ids[2]) is not None
+
+    async def test_cleanup_no_policy_returns_zero(
+        self,
+        store: StoreSnapshotPostgres,
+        subject: ModelSubjectRef,
+    ) -> None:
+        """Verify cleanup_expired returns 0 when no policy specified.
+
+        Given: Existing snapshots
+        When: cleanup_expired() with no parameters
+        Then: Returns 0, no snapshots deleted
+        """
+        snap = ModelSnapshot(subject=subject, data={"test": True}, sequence_number=1)
+        await store.save(snap)
+
+        deleted = await store.cleanup_expired()
+        assert deleted == 0
+
+        # Snapshot still exists
+        assert await store.load(snap.id) is not None
+
+    async def test_cleanup_invalid_keep_latest_raises(
+        self,
+        store: StoreSnapshotPostgres,
+    ) -> None:
+        """Verify cleanup_expired raises ProtocolConfigurationError for keep_latest_n < 1.
+
+        Given: Any state
+        When: cleanup_expired(keep_latest_n=0)
+        Then: Raises ProtocolConfigurationError
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(
+            ProtocolConfigurationError, match="keep_latest_n must be >= 1"
+        ):
+            await store.cleanup_expired(keep_latest_n=0)
+
+    async def test_cleanup_concurrent_deletes(
+        self,
+        store: StoreSnapshotPostgres,
+        unique_subject_factory: type,
+        db_pool: asyncpg.Pool,
+    ) -> None:
+        """Verify concurrent cleanup operations don't cause deadlocks.
+
+        Given: Multiple subjects with snapshots
+        When: Multiple cleanup_expired calls run concurrently
+        Then: All complete without deadlocks
+        """
+        subjects = [unique_subject_factory.create(f"type_{i}") for i in range(5)]
+
+        # Create 5 snapshots per subject with UNIQUE data to avoid content_hash dedup
+        for idx, subj in enumerate(subjects):
+            for seq in range(1, 6):
+                snap = ModelSnapshot(
+                    subject=subj,
+                    data={"subject_idx": idx, "seq": seq, "unique": str(uuid4())},
+                    sequence_number=seq,
+                )
+                await store.save(snap)
+
+        # Backdate all to be old
+        async with db_pool.acquire() as conn:
+            old_time = datetime.now(UTC) - timedelta(hours=2)
+            await conn.execute(
+                "UPDATE snapshots SET created_at = $1",
+                old_time,
+            )
+
+        # Run concurrent cleanup per subject
+        async def cleanup_subject(subj: ModelSubjectRef) -> int:
+            return await store.cleanup_expired(
+                max_age_seconds=3600, keep_latest_n=2, subject=subj
+            )
+
+        tasks = [cleanup_subject(subj) for subj in subjects]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # No exceptions should occur (primary goal: no deadlocks)
+        exceptions = [r for r in results if isinstance(r, Exception)]
+        assert len(exceptions) == 0, f"Cleanup raised exceptions: {exceptions}"
+
+        # Each subject should have 3 deleted (5 - 2 = 3)
+        # With combined strategy: delete if old AND outside top 2
+        successful_deletes = [r for r in results if isinstance(r, int)]
+        assert len(successful_deletes) == 5, "All cleanups should complete"
+        assert all(r == 3 for r in successful_deletes), (
+            f"Expected 3 deletions per subject, got: {successful_deletes}"
+        )
+
+
+# =============================================================================
+# Transaction Rollback Tests
+# =============================================================================
+
+
+class TestTransactionRollback:
+    """Tests for transaction rollback behavior on errors."""
+
+    async def test_failed_save_does_not_persist(
+        self,
+        store: StoreSnapshotPostgres,
+        subject: ModelSubjectRef,
+    ) -> None:
+        """Verify failed save operations don't partially persist data.
+
+        Given: Existing snapshot with sequence 1
+        When: Attempting to save different content with same sequence
+        Then: Original data unchanged, new data not persisted
+        """
+        from omnibase_infra.errors import InfraConnectionError
+
+        original = ModelSnapshot(
+            subject=subject, data={"original": True}, sequence_number=1
+        )
+        await store.save(original)
+
+        duplicate_seq = ModelSnapshot(
+            subject=subject, data={"duplicate": True}, sequence_number=1
+        )
+
+        # Should fail due to sequence conflict
+        with pytest.raises(InfraConnectionError):
+            await store.save(duplicate_seq)
+
+        # Verify original is unchanged
+        loaded = await store.load(original.id)
+        assert loaded is not None
+        assert loaded.data == {"original": True}
+
+        # Verify duplicate was not persisted
+        all_snaps = await store.query(subject=subject)
+        assert len(all_snaps) == 1
+        assert all_snaps[0].id == original.id
+
+    async def test_concurrent_conflict_rollback(
+        self,
+        store: StoreSnapshotPostgres,
+        subject: ModelSubjectRef,
+    ) -> None:
+        """Verify conflicting concurrent saves rollback correctly.
+
+        Given: Multiple concurrent saves with same sequence but different content
+        When: All execute simultaneously
+        Then: Exactly one succeeds, others rollback cleanly
+        """
+        # Create snapshots with different data but same sequence
+        snapshots = [
+            ModelSnapshot(
+                subject=subject,
+                data={"worker": i, "unique": str(uuid4())},
+                sequence_number=1,  # Same sequence for all
+            )
+            for i in range(10)
+        ]
+
+        # Save all concurrently
+        tasks = [store.save(snap) for snap in snapshots]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Count successes and failures
+        successes = [r for r in results if isinstance(r, UUID)]
+        failures = [r for r in results if isinstance(r, Exception)]
+
+        # Most should fail (sequence conflict with different content)
+        # Some may succeed due to content_hash deduplication if randomly same
+        assert len(successes) >= 1, "At least one save should succeed"
+        assert len(failures) >= 1, "Expect some failures due to sequence conflict"
+
+        # Verify database consistency - only one sequence 1 exists
+        all_snaps = await store.query(subject=subject)
+        assert len(all_snaps) == len(successes)
+
+    async def test_schema_sequential_idempotent(
+        self,
+        db_pool: asyncpg.Pool,
+    ) -> None:
+        """Verify ensure_schema is idempotent when called sequentially.
+
+        Given: Schema already exists
+        When: ensure_schema called multiple times sequentially
+        Then: All calls succeed, schema remains complete
+
+        Note: Concurrent ensure_schema calls may race on index creation,
+        so this test uses sequential calls to verify idempotency.
+        """
+        store = StoreSnapshotPostgres(pool=db_pool)
+
+        # Run ensure_schema sequentially multiple times
+        for _ in range(3):
+            await store.ensure_schema()
+
+        # Verify schema is complete
+        async with db_pool.acquire() as conn:
+            # Table exists
+            table_exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = 'snapshots'
+                )
+                """
+            )
+            assert table_exists is True
+
+            # Unique index exists
+            index_info = await conn.fetchrow(
+                """
+                SELECT indexdef FROM pg_indexes
+                WHERE indexname = 'idx_snapshots_content_hash'
+                """
+            )
+            assert index_info is not None
+            assert "UNIQUE" in index_info["indexdef"].upper()
+
+
+# =============================================================================
+# Pool Exhaustion and Connection Error Tests
+# =============================================================================
+
+
+class TestConnectionResilience:
+    """Tests for connection pool behavior under stress."""
+
+    async def test_high_concurrent_load(
+        self,
+        store: StoreSnapshotPostgres,
+        unique_subject_factory: type,
+    ) -> None:
+        """Verify store handles high concurrent load without pool exhaustion.
+
+        Given: Connection pool with limited connections
+        When: Many concurrent operations exceed pool size
+        Then: All operations complete (some may wait for connections)
+        """
+        num_operations = 100
+        subjects = [
+            unique_subject_factory.create(f"load_test_{i}")
+            for i in range(num_operations)
+        ]
+
+        async def create_and_load(subj: ModelSubjectRef) -> bool:
+            """Create a snapshot and immediately load it."""
+            snap = ModelSnapshot(subject=subj, data={"test": True}, sequence_number=1)
+            snap_id = await store.save(snap)
+            loaded = await store.load(snap_id)
+            return loaded is not None and loaded.id == snap_id
+
+        tasks = [create_and_load(subj) for subj in subjects]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Check for failures
+        failures = [r for r in results if isinstance(r, Exception)]
+        assert len(failures) == 0, f"Operations failed: {failures[:5]}..."
+
+        # All should succeed
+        assert all(r is True for r in results if isinstance(r, bool))
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
 __all__ = [
     "TestBasicCrud",
+    "TestCleanupExpired",
     "TestConcurrentSequenceGeneration",
+    "TestConnectionResilience",
     "TestContentHashDeduplication",
     "TestErrorHandling",
     "TestParentLineage",
     "TestSchemaManagement",
+    "TestTransactionRollback",
 ]

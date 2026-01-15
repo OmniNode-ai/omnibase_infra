@@ -45,6 +45,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
 
 
@@ -176,6 +177,41 @@ class StoreSnapshotInMemory:
         """
         return self._snapshots.get(snapshot_id)
 
+    async def load_many(self, snapshot_ids: list[UUID]) -> dict[UUID, ModelSnapshot]:
+        """Load multiple snapshots by ID.
+
+        Uses batch lookup for efficient multi-row fetch.
+
+        Args:
+            snapshot_ids: List of snapshot UUIDs to load.
+
+        Returns:
+            Dictionary mapping snapshot ID to ModelSnapshot for found
+            snapshots. Missing IDs are not included in the result.
+
+        Example:
+            >>> import asyncio
+            >>> from uuid import uuid4
+            >>> from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
+            >>>
+            >>> async def test_load_many():
+            ...     store = StoreSnapshotInMemory()
+            ...     subject = ModelSubjectRef(subject_type="test", subject_id=uuid4())
+            ...     snap1 = ModelSnapshot(subject=subject, data={"v": 1}, sequence_number=1)
+            ...     snap2 = ModelSnapshot(subject=subject, data={"v": 2}, sequence_number=2)
+            ...     await store.save(snap1)
+            ...     await store.save(snap2)
+            ...
+            ...     results = await store.load_many([snap1.id, snap2.id])
+            ...     assert len(results) == 2
+            ...     assert results[snap1.id].data["v"] == 1
+            >>>
+            >>> asyncio.run(test_load_many())
+        """
+        return {
+            sid: self._snapshots[sid] for sid in snapshot_ids if sid in self._snapshots
+        }
+
     async def load_latest(
         self,
         subject: ModelSubjectRef | None = None,
@@ -240,6 +276,64 @@ class StoreSnapshotInMemory:
             return None
 
         return max(candidates, key=lambda s: s.sequence_number)
+
+    async def load_latest_many(
+        self,
+        subjects: list[ModelSubjectRef],
+    ) -> dict[tuple[str, UUID], ModelSnapshot]:
+        """Load the latest snapshot for multiple subjects.
+
+        Uses batch lookup for efficient multi-subject query.
+
+        Args:
+            subjects: List of subject references to load latest snapshots for.
+
+        Returns:
+            Dictionary mapping (subject_type, subject_id) tuple to the latest
+            ModelSnapshot for that subject. Subjects with no snapshots are
+            not included in the result.
+
+        Example:
+            >>> import asyncio
+            >>> from uuid import uuid4
+            >>> from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
+            >>>
+            >>> async def test_load_latest_many():
+            ...     store = StoreSnapshotInMemory()
+            ...     s1 = ModelSubjectRef(subject_type="agent", subject_id=uuid4())
+            ...     s2 = ModelSubjectRef(subject_type="workflow", subject_id=uuid4())
+            ...
+            ...     snap1 = ModelSnapshot(subject=s1, data={"v": 1}, sequence_number=1)
+            ...     snap2 = ModelSnapshot(subject=s2, data={"v": 2}, sequence_number=1)
+            ...     await store.save(snap1)
+            ...     await store.save(snap2)
+            ...
+            ...     results = await store.load_latest_many([s1, s2])
+            ...     assert len(results) == 2
+            >>>
+            >>> asyncio.run(test_load_latest_many())
+        """
+        if not subjects:
+            return {}
+
+        # Group snapshots by subject key
+        snapshots_by_subject: dict[str, list[ModelSnapshot]] = {}
+        for snapshot in self._snapshots.values():
+            key = snapshot.subject.to_key()
+            if key not in snapshots_by_subject:
+                snapshots_by_subject[key] = []
+            snapshots_by_subject[key].append(snapshot)
+
+        # Get latest for each requested subject
+        result: dict[tuple[str, UUID], ModelSnapshot] = {}
+        for subject in subjects:
+            key = subject.to_key()
+            candidates = snapshots_by_subject.get(key, [])
+            if candidates:
+                latest = max(candidates, key=lambda s: s.sequence_number)
+                result[(subject.subject_type, subject.subject_id)] = latest
+
+        return result
 
     async def query(
         self,
@@ -399,7 +493,7 @@ class StoreSnapshotInMemory:
             Number of snapshots deleted.
 
         Raises:
-            ValueError: If keep_latest_n is provided but < 1.
+            ProtocolConfigurationError: If keep_latest_n is provided but < 1.
 
         Example:
             >>> import asyncio
@@ -424,8 +518,10 @@ class StoreSnapshotInMemory:
             >>> asyncio.run(test_cleanup())
         """
         if keep_latest_n is not None and keep_latest_n < 1:
-            msg = "keep_latest_n must be >= 1"
-            raise ValueError(msg)
+            raise ProtocolConfigurationError(
+                "keep_latest_n must be >= 1",
+                keep_latest_n=keep_latest_n,
+            )
 
         # If neither policy is specified, no-op
         if max_age_seconds is None and keep_latest_n is None:

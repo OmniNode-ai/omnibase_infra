@@ -171,11 +171,17 @@ class ProtocolSnapshotStore(Protocol):
 
         Example:
             ```python
+            from uuid import uuid4, UUID
+
+            # subject_id must be a UUID (not str)
+            node_id: UUID = uuid4()
+            state_dict: dict = {"status": "active", "version": "1.0.0"}
+
             snapshot = ModelSnapshot(
                 id=uuid4(),
                 subject=ModelSubjectRef(
                     subject_type="node_registration",
-                    subject_id=node_id,  # UUID type
+                    subject_id=node_id,  # Must be UUID, not str
                 ),
                 data=state_dict,
                 sequence_number=42,
@@ -215,6 +221,37 @@ class ProtocolSnapshotStore(Protocol):
         """
         ...
 
+    async def load_many(self, snapshot_ids: list[UUID]) -> dict[UUID, ModelSnapshot]:
+        """Load multiple snapshots by ID in a single query.
+
+        Uses batch loading for efficient multi-row fetch, avoiding N+1
+        query patterns when loading multiple snapshots.
+
+        Args:
+            snapshot_ids: List of snapshot UUIDs to load.
+
+        Returns:
+            Dictionary mapping snapshot ID to ModelSnapshot for found
+            snapshots. Missing IDs are not included in the result.
+
+        Raises:
+            InfraConnectionError: If storage is unavailable
+            InfraTimeoutError: If operation times out
+
+        Example:
+            ```python
+            snapshots = await store.load_many([id1, id2, id3])
+            for sid, snap in snapshots.items():
+                print(f"{sid}: seq={snap.sequence_number}")
+            ```
+
+        Implementation Notes:
+            - Use batch query (e.g., WHERE id = ANY($1))
+            - Avoid N separate queries
+            - Return dict for O(1) lookup by ID
+        """
+        ...
+
     async def load_latest(
         self,
         subject: ModelSubjectRef | None = None,
@@ -248,12 +285,31 @@ class ProtocolSnapshotStore(Protocol):
             time. Use ``query(after=timestamp)`` if you need time-based
             ordering across subjects.
 
+        Warning:
+            The ``subject=None`` behavior returns a snapshot based on
+            sequence_number comparison across different subjects. This is
+            useful for "get any recent snapshot" scenarios but NOT for
+            "get the most recently saved snapshot" which requires time-based
+            queries. Example of potentially surprising behavior:
+
+            - Subject A has snapshots with sequence_number 1, 2, 3
+            - Subject B has a single snapshot with sequence_number 1
+            - Subject B's snapshot was saved 1 minute ago
+            - Subject A's latest (seq=3) was saved 1 hour ago
+            - ``load_latest(subject=None)`` returns Subject A's snapshot (seq=3)
+            - To get Subject B's snapshot (most recent by time), use:
+              ``query(after=one_minute_ago, limit=1)``
+
         Examples:
             ```python
+            from uuid import uuid4, UUID
+            from datetime import datetime, timedelta, UTC
+
             # Get latest snapshot for a specific node
+            node_id: UUID = uuid4()  # subject_id must be UUID, not str
             subject = ModelSubjectRef(
                 subject_type="node_registration",
-                subject_id=node_id,  # UUID type
+                subject_id=node_id,  # Must be UUID, not str
             )
             latest = await store.load_latest(subject=subject)
             # Returns snapshot with highest sequence_number for this subject
@@ -262,9 +318,9 @@ class ProtocolSnapshotStore(Protocol):
             global_latest = await store.load_latest(subject=None)
             # Returns snapshot with highest sequence_number in entire store
             # Note: This is NOT necessarily the most recent by created_at
+            # because sequence_number is per-subject (each subject starts at 1)
 
             # Alternative: Get most recent by wall-clock time
-            from datetime import datetime, timedelta, UTC
             one_second_ago = datetime.now(UTC) - timedelta(seconds=1)
             recent = await store.query(after=one_second_ago, limit=1)
             time_based_latest = recent[0] if recent else None
@@ -274,6 +330,45 @@ class ProtocolSnapshotStore(Protocol):
             - Order by sequence_number DESC, not created_at
             - Use index on (subject_type, subject_id, sequence_number)
             - LIMIT 1 for efficiency
+        """
+        ...
+
+    async def load_latest_many(
+        self,
+        subjects: list[ModelSubjectRef],
+    ) -> dict[tuple[str, UUID], ModelSnapshot]:
+        """Load the latest snapshot for multiple subjects in a single query.
+
+        Uses batch loading to efficiently fetch the latest snapshot per
+        subject in one database round-trip, avoiding N+1 query patterns.
+
+        Args:
+            subjects: List of subject references to load latest snapshots for.
+
+        Returns:
+            Dictionary mapping (subject_type, subject_id) tuple to the latest
+            ModelSnapshot for that subject. Subjects with no snapshots are
+            not included in the result.
+
+        Raises:
+            InfraConnectionError: If storage is unavailable
+            InfraTimeoutError: If operation times out
+
+        Example:
+            ```python
+            subjects = [
+                ModelSubjectRef(subject_type="agent", subject_id=agent_id),
+                ModelSubjectRef(subject_type="workflow", subject_id=wf_id),
+            ]
+            latest = await store.load_latest_many(subjects)
+            for (stype, sid), snap in latest.items():
+                print(f"{stype}/{sid}: seq={snap.sequence_number}")
+            ```
+
+        Implementation Notes:
+            - Use window function to get latest per subject in one query
+            - Avoid N separate queries
+            - Return dict keyed by (subject_type, subject_id) tuple
         """
         ...
 
@@ -303,10 +398,14 @@ class ProtocolSnapshotStore(Protocol):
 
         Example:
             ```python
+            from uuid import uuid4, UUID
+            from datetime import datetime, timedelta, UTC
+
             # Get last 10 snapshots for a subject
+            node_id: UUID = uuid4()  # subject_id must be UUID, not str
             subject = ModelSubjectRef(
                 subject_type="node_registration",
-                subject_id=node_id,  # UUID type
+                subject_id=node_id,  # Must be UUID, not str
             )
             snapshots = await store.query(subject=subject, limit=10)
 
@@ -373,9 +472,12 @@ class ProtocolSnapshotStore(Protocol):
 
         Example:
             ```python
+            from uuid import uuid4, UUID
+
+            node_id: UUID = uuid4()  # subject_id must be UUID, not str
             subject = ModelSubjectRef(
                 subject_type="node_registration",
-                subject_id=node_id,  # UUID type
+                subject_id=node_id,  # Must be UUID, not str
             )
             seq = await store.get_next_sequence_number(subject)
             # seq is guaranteed to be greater than any existing
@@ -443,9 +545,11 @@ class ProtocolSnapshotStore(Protocol):
             )
 
             # Cleanup only for a specific subject
+            from uuid import uuid4, UUID
+            agent_id: UUID = uuid4()  # subject_id must be UUID, not str
             subject = ModelSubjectRef(
                 subject_type="agent",
-                subject_id=agent_id,
+                subject_id=agent_id,  # Must be UUID, not str
             )
             deleted = await store.cleanup_expired(
                 max_age_seconds=60 * 60,  # 1 hour

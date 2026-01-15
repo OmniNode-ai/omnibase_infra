@@ -36,7 +36,7 @@ from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.types import JsonType
 
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.models.snapshot import (
     ModelSnapshot,
     ModelSnapshotDiff,
@@ -309,10 +309,10 @@ class ServiceSnapshot:
         *,
         skip_missing: bool = False,
     ) -> builtins.list[ModelSnapshot]:
-        """Load multiple snapshots in parallel.
+        """Load multiple snapshots in a single batch query.
 
-        Fetches multiple snapshots concurrently using asyncio.gather() for
-        improved performance when loading batches of snapshots.
+        Uses batch loading for efficient multi-row fetch, avoiding N+1
+        query patterns when loading multiple snapshots.
 
         Args:
             snapshot_ids: List of snapshot UUIDs to load.
@@ -346,17 +346,13 @@ class ServiceSnapshot:
         if not snapshot_ids:
             return []
 
-        # Execute all loads in parallel
-        tasks = [self._store.load(sid) for sid in snapshot_ids]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Use batch load for single database round-trip
+        results_dict = await self._store.load_many(snapshot_ids)
 
         snapshots: builtins.list[ModelSnapshot] = []
-        for snapshot_id, result in zip(snapshot_ids, results, strict=True):  # type: ignore[arg-type]
-            if isinstance(result, Exception):
-                # Re-raise infrastructure errors
-                raise result
-
-            if result is None:
+        for snapshot_id in snapshot_ids:
+            snapshot = results_dict.get(snapshot_id)
+            if snapshot is None:
                 if not skip_missing:
                     raise SnapshotNotFoundError(
                         f"Snapshot not found: {snapshot_id}",
@@ -365,7 +361,7 @@ class ServiceSnapshot:
                 # skip_missing=True: silently skip
                 continue
 
-            snapshots.append(result)  # type: ignore[arg-type]
+            snapshots.append(snapshot)
 
         return snapshots
 
@@ -373,11 +369,10 @@ class ServiceSnapshot:
         self,
         subjects: builtins.list[ModelSubjectRef],
     ) -> builtins.list[ModelSnapshot | None]:
-        """Load the latest snapshot for multiple subjects in parallel.
+        """Load the latest snapshot for multiple subjects in a single batch query.
 
-        Fetches the latest snapshot for each subject concurrently using
-        asyncio.gather() for improved performance when querying multiple
-        subjects.
+        Uses batch loading for efficient multi-row fetch, avoiding N+1
+        query patterns when querying multiple subjects.
 
         Args:
             subjects: List of subject references to load latest snapshots for.
@@ -404,16 +399,14 @@ class ServiceSnapshot:
         if not subjects:
             return []
 
-        # Execute all loads in parallel
-        tasks = [self._store.load_latest(subject) for subject in subjects]  # type: ignore[arg-type]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Use batch load for single database round-trip
+        results_dict = await self._store.load_latest_many(subjects)
 
+        # Build result list maintaining input order
         snapshots: builtins.list[ModelSnapshot | None] = []
-        for result in results:
-            if isinstance(result, Exception):
-                # Re-raise infrastructure errors
-                raise result
-            snapshots.append(result)  # type: ignore[arg-type]
+        for subject in subjects:
+            key = (subject.subject_type, subject.subject_id)
+            snapshots.append(results_dict.get(key))
 
         return snapshots
 
@@ -593,7 +586,7 @@ class ServiceSnapshot:
             Number of snapshots deleted.
 
         Raises:
-            ValueError: If keep_latest_n is provided but < 1.
+            ProtocolConfigurationError: If keep_latest_n is provided but < 1.
             InfraConnectionError: If the store is unavailable.
             InfraTimeoutError: If the operation times out.
 

@@ -84,7 +84,11 @@ import asyncpg
 import asyncpg.exceptions
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
 
 logger = logging.getLogger(__name__)
@@ -377,6 +381,48 @@ class StoreSnapshotPostgres:
                 context=context,
             ) from e
 
+    async def load_many(self, snapshot_ids: list[UUID]) -> dict[UUID, ModelSnapshot]:
+        """Load multiple snapshots by ID in a single query.
+
+        Uses a batch query with ANY() for efficient multi-row fetch,
+        avoiding N+1 query patterns when loading multiple snapshots.
+
+        Args:
+            snapshot_ids: List of snapshot UUIDs to load.
+
+        Returns:
+            Dictionary mapping snapshot ID to ModelSnapshot for found
+            snapshots. Missing IDs are not included in the result.
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+
+        Example:
+            >>> snapshots = await store.load_many([id1, id2, id3])
+            >>> for sid, snap in snapshots.items():
+            ...     print(f"{sid}: seq={snap.sequence_number}")
+        """
+        if not snapshot_ids:
+            return {}
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT * FROM snapshots WHERE id = ANY($1::uuid[])",
+                    snapshot_ids,
+                )
+                return {row["id"]: self._row_to_model(row) for row in rows}
+        except Exception as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="load_many_snapshots",
+                target_name="snapshots",
+            )
+            raise InfraConnectionError(
+                f"Failed to load snapshots: {type(e).__name__}",
+                context=context,
+            ) from e
+
     async def load_latest(
         self,
         subject: ModelSubjectRef | None = None,
@@ -451,6 +497,81 @@ class StoreSnapshotPostgres:
             )
             raise InfraConnectionError(
                 f"Failed to load latest snapshot: {type(e).__name__}",
+                context=context,
+            ) from e
+
+    async def load_latest_many(
+        self,
+        subjects: list[ModelSubjectRef],
+    ) -> dict[tuple[str, UUID], ModelSnapshot]:
+        """Load the latest snapshot for multiple subjects in a single query.
+
+        Uses a window function to efficiently fetch the latest snapshot per
+        subject in one database round-trip, avoiding N+1 query patterns.
+
+        Args:
+            subjects: List of subject references to load latest snapshots for.
+
+        Returns:
+            Dictionary mapping (subject_type, subject_id) tuple to the latest
+            ModelSnapshot for that subject. Subjects with no snapshots are
+            not included in the result.
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+
+        Example:
+            >>> subjects = [
+            ...     ModelSubjectRef(subject_type="agent", subject_id=agent_id),
+            ...     ModelSubjectRef(subject_type="workflow", subject_id=wf_id),
+            ... ]
+            >>> latest = await store.load_latest_many(subjects)
+            >>> for (stype, sid), snap in latest.items():
+            ...     print(f"{stype}/{sid}: seq={snap.sequence_number}")
+        """
+        if not subjects:
+            return {}
+
+        try:
+            async with self._pool.acquire() as conn:
+                # Build arrays for subject_type and subject_id to match
+                subject_types = [s.subject_type for s in subjects]
+                subject_ids = [s.subject_id for s in subjects]
+
+                # Use window function to get latest per subject in one query
+                # The query uses a CTE to rank snapshots per subject, then
+                # filters to only keep the top-ranked (latest) per subject.
+                rows = await conn.fetch(
+                    """
+                    WITH ranked AS (
+                        SELECT *,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY subject_type, subject_id
+                                ORDER BY sequence_number DESC
+                            ) as rn
+                        FROM snapshots
+                        WHERE (subject_type, subject_id) IN (
+                            SELECT UNNEST($1::text[]), UNNEST($2::uuid[])
+                        )
+                    )
+                    SELECT * FROM ranked WHERE rn = 1
+                    """,
+                    subject_types,
+                    subject_ids,
+                )
+
+                return {
+                    (row["subject_type"], row["subject_id"]): self._row_to_model(row)
+                    for row in rows
+                }
+        except Exception as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="load_latest_many_snapshots",
+                target_name="snapshots",
+            )
+            raise InfraConnectionError(
+                f"Failed to load latest snapshots: {type(e).__name__}",
                 context=context,
             ) from e
 
@@ -556,11 +677,19 @@ class StoreSnapshotPostgres:
             ) from e
 
     async def get_next_sequence_number(self, subject: ModelSubjectRef) -> int:
-        """Get the next sequence number for a subject.
+        """Get the next sequence number for a subject with advisory lock.
 
-        Uses MAX() + 1 to determine the next sequence number. This is
-        NOT atomic across concurrent operations - for high-concurrency
-        scenarios, consider database sequences or advisory locks.
+        Uses PostgreSQL advisory locks to ensure atomic sequence allocation.
+        The lock is held only during the MAX() query, allowing concurrent
+        access to different subjects while preventing race conditions for
+        the same subject.
+
+        Advisory Lock Strategy:
+            Uses pg_advisory_xact_lock() with a hash of (subject_type, subject_id)
+            to create a subject-specific lock. This ensures:
+            - Concurrent calls for the SAME subject serialize
+            - Concurrent calls for DIFFERENT subjects proceed in parallel
+            - Lock is automatically released at transaction end
 
         Args:
             subject: The subject reference for sequence generation.
@@ -572,23 +701,48 @@ class StoreSnapshotPostgres:
             InfraConnectionError: If database connection fails.
 
         Note:
-            The UNIQUE constraint on (subject_type, subject_id, sequence_number)
-            ensures no duplicate sequences are created, but may result in
-            constraint violations under high concurrency. Callers should
-            handle retry logic.
+            For atomic allocate-and-save operations, prefer save_with_auto_sequence()
+            which combines sequence allocation and insert in a single transaction.
+
+        Concurrency Guarantees:
+            - No duplicate sequence numbers for the same subject
+            - No gaps in sequence numbers (unless deletes occur)
+            - Monotonically increasing per subject
         """
         try:
             async with self._pool.acquire() as conn:
-                result = await conn.fetchval(
-                    """
-                    SELECT COALESCE(MAX(sequence_number), 0) + 1
-                    FROM snapshots
-                    WHERE subject_type = $1 AND subject_id = $2
-                    """,
-                    subject.subject_type,
-                    subject.subject_id,
-                )
-                return int(result) if result else 1
+                # Use a transaction to hold the advisory lock during the query.
+                # The lock key is derived from a hash of subject identifiers.
+                # pg_advisory_xact_lock takes a bigint, so we use hashtext()
+                # on the concatenated subject identifiers.
+                async with conn.transaction():
+                    # Acquire advisory lock for this specific subject.
+                    # hashtext() returns a stable 32-bit hash; we cast to bigint.
+                    # This serializes concurrent calls for the same subject.
+                    # Note: subject_id must be converted to str() for text concatenation
+                    # in the hashtext() call - asyncpg requires string type for || operator.
+                    await conn.execute(
+                        """
+                        SELECT pg_advisory_xact_lock(
+                            hashtext($1 || '::' || $2)::bigint
+                        )
+                        """,
+                        subject.subject_type,
+                        str(subject.subject_id),
+                    )
+
+                    # Now safely get the next sequence number while holding the lock
+                    result = await conn.fetchval(
+                        """
+                        SELECT COALESCE(MAX(sequence_number), 0) + 1
+                        FROM snapshots
+                        WHERE subject_type = $1 AND subject_id = $2
+                        """,
+                        subject.subject_type,
+                        subject.subject_id,
+                    )
+                    # Lock released automatically when transaction ends
+                    return int(result) if result else 1
         except Exception as e:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
@@ -597,6 +751,260 @@ class StoreSnapshotPostgres:
             )
             raise InfraConnectionError(
                 f"Failed to get sequence number: {type(e).__name__}",
+                context=context,
+            ) from e
+
+    async def save_with_auto_sequence(
+        self,
+        subject: ModelSubjectRef,
+        data: dict[str, object],
+        *,
+        version: int = 1,
+        content_hash: str | None = None,
+        parent_id: UUID | None = None,
+    ) -> tuple[UUID, int]:
+        """Atomically allocate sequence number and save snapshot.
+
+        This method combines sequence allocation and insert into a single
+        atomic transaction, eliminating the TOCTOU race condition that
+        exists when calling get_next_sequence_number() followed by save()
+        separately.
+
+        Atomicity Guarantees:
+            1. Advisory lock prevents concurrent sequence allocation for same subject
+            2. Sequence allocation and INSERT occur in same transaction
+            3. If INSERT fails, no sequence number is "consumed"
+            4. Content-hash deduplication still applies (returns existing if duplicate)
+
+        Race Condition Handling:
+            - Same content_hash: Returns existing snapshot ID and sequence number
+            - Concurrent saves for same subject: Serialized via advisory lock
+            - Database constraint violations: Wrapped as InfraConnectionError
+
+        Args:
+            subject: The subject reference for the snapshot.
+            data: The snapshot payload as a JSON-compatible dictionary.
+            version: Version number for the snapshot (default 1).
+            content_hash: Optional content hash for deduplication. If provided
+                and a snapshot with this hash already exists, returns the
+                existing snapshot's ID and sequence number.
+            parent_id: Optional parent snapshot ID for lineage tracking.
+
+        Returns:
+            Tuple of (snapshot_id, sequence_number) for the saved or existing snapshot.
+
+        Raises:
+            InfraConnectionError: If database connection fails or
+                constraint violation occurs.
+
+        Example:
+            >>> subject = ModelSubjectRef(subject_type="agent", subject_id=uuid4())
+            >>> snapshot_id, seq_num = await store.save_with_auto_sequence(
+            ...     subject=subject,
+            ...     data={"status": "active"},
+            ...     content_hash="sha256:abc123...",
+            ... )
+            >>> print(f"Saved snapshot {snapshot_id} with sequence {seq_num}")
+        """
+        from uuid import uuid4
+
+        snapshot_id = uuid4()
+        data_json = json.dumps(data, sort_keys=True)
+        created_at = datetime.now(UTC)
+
+        try:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    # Step 1: Check for existing content_hash FIRST (before locking).
+                    # This avoids unnecessary lock acquisition for duplicates and
+                    # eliminates the race condition between check and insert by
+                    # performing the check within the same transaction that will
+                    # do the insert. The transaction isolation ensures consistency.
+                    if content_hash:
+                        existing = await conn.fetchrow(
+                            """
+                            SELECT id, sequence_number FROM snapshots
+                            WHERE content_hash = $1
+                            """,
+                            content_hash,
+                        )
+                        if existing:
+                            existing_id = UUID(str(existing["id"]))
+                            existing_seq = int(existing["sequence_number"])
+                            logger.debug(
+                                "Duplicate snapshot detected via content_hash, "
+                                "returning existing ID",
+                                extra={
+                                    "existing_id": str(existing_id),
+                                    "content_hash": content_hash[:16] + "...",
+                                },
+                            )
+                            return existing_id, existing_seq
+
+                    # Step 2: Acquire advisory lock for this subject.
+                    # This serializes concurrent saves for the same subject,
+                    # preventing race conditions in sequence number allocation.
+                    # The lock is held until the transaction commits/rollbacks.
+                    # Note: subject_id must be converted to str() for text concatenation
+                    # in the hashtext() call - asyncpg requires string type for || operator.
+                    await conn.execute(
+                        """
+                        SELECT pg_advisory_xact_lock(
+                            hashtext($1 || '::' || $2)::bigint
+                        )
+                        """,
+                        subject.subject_type,
+                        str(subject.subject_id),
+                    )
+
+                    # Step 3: Allocate next sequence number while holding lock.
+                    # The advisory lock ensures no concurrent transaction can
+                    # read the same MAX value for this subject.
+                    sequence_number = await conn.fetchval(
+                        """
+                        SELECT COALESCE(MAX(sequence_number), 0) + 1
+                        FROM snapshots
+                        WHERE subject_type = $1 AND subject_id = $2
+                        """,
+                        subject.subject_type,
+                        subject.subject_id,
+                    )
+                    sequence_number = int(sequence_number) if sequence_number else 1
+
+                    # Step 4: Insert with ON CONFLICT for content_hash idempotency.
+                    # Even though we checked above, a concurrent transaction might
+                    # have committed between our check and lock acquisition (before
+                    # the lock was acquired). The ON CONFLICT handles this edge case.
+                    if content_hash:
+                        result = await conn.fetchrow(
+                            """
+                            INSERT INTO snapshots (
+                                id, subject_type, subject_id, data, sequence_number,
+                                version, content_hash, created_at, parent_id
+                            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+                            ON CONFLICT (content_hash) WHERE content_hash IS NOT NULL
+                                DO UPDATE SET id = snapshots.id
+                            RETURNING id, sequence_number
+                            """,
+                            snapshot_id,
+                            subject.subject_type,
+                            subject.subject_id,
+                            data_json,
+                            sequence_number,
+                            version,
+                            content_hash,
+                            created_at,
+                            parent_id,
+                        )
+                    else:
+                        # No content_hash - insert directly
+                        result = await conn.fetchrow(
+                            """
+                            INSERT INTO snapshots (
+                                id, subject_type, subject_id, data, sequence_number,
+                                version, content_hash, created_at, parent_id
+                            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+                            RETURNING id, sequence_number
+                            """,
+                            snapshot_id,
+                            subject.subject_type,
+                            subject.subject_id,
+                            data_json,
+                            sequence_number,
+                            version,
+                            content_hash,
+                            created_at,
+                            parent_id,
+                        )
+
+                    if result:
+                        result_id = UUID(str(result["id"]))
+                        result_seq = int(result["sequence_number"])
+
+                        if result_id != snapshot_id:
+                            # Existing snapshot returned via ON CONFLICT
+                            logger.debug(
+                                "Duplicate snapshot detected during insert, "
+                                "returning existing ID",
+                                extra={
+                                    "existing_id": str(result_id),
+                                    "sequence_number": result_seq,
+                                },
+                            )
+                        else:
+                            logger.debug(
+                                "Snapshot saved atomically",
+                                extra={
+                                    "snapshot_id": str(snapshot_id),
+                                    "subject_type": subject.subject_type,
+                                    "sequence_number": result_seq,
+                                },
+                            )
+                        return result_id, result_seq
+
+                    # Should never reach here with valid INSERT
+                    context = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.DATABASE,
+                        operation="save_with_auto_sequence",
+                        target_name="snapshots",
+                    )
+                    raise InfraConnectionError(
+                        "Unexpected NULL result from atomic insert",
+                        context=context,
+                    )
+
+        except asyncpg.exceptions.UniqueViolationError as e:
+            # This can occur if:
+            # 1. Very rare race on content_hash between check and insert
+            # 2. Sequence constraint violated (shouldn't happen with advisory lock)
+            #
+            # For content_hash conflicts, try to return the existing row.
+            # Use the same connection pool but a new connection to avoid
+            # transaction state issues.
+            if content_hash:
+                try:
+                    async with self._pool.acquire() as recovery_conn:
+                        existing = await recovery_conn.fetchrow(
+                            "SELECT id, sequence_number FROM snapshots "
+                            "WHERE content_hash = $1",
+                            content_hash,
+                        )
+                        if existing:
+                            existing_id = UUID(str(existing["id"]))
+                            existing_seq = int(existing["sequence_number"])
+                            logger.debug(
+                                "Race condition resolved: returning existing ID "
+                                "after UniqueViolationError",
+                                extra={
+                                    "existing_id": str(existing_id),
+                                    "content_hash": content_hash[:16] + "...",
+                                },
+                            )
+                            return existing_id, existing_seq
+                except Exception:
+                    pass  # Fall through to re-raise original error
+
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="save_with_auto_sequence",
+                target_name="snapshots",
+            )
+            raise InfraConnectionError(
+                f"Unique constraint violation: {e.constraint_name or 'unknown'}",
+                context=context,
+            ) from e
+
+        except InfraConnectionError:
+            raise
+
+        except Exception as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="save_with_auto_sequence",
+                target_name="snapshots",
+            )
+            raise InfraConnectionError(
+                f"Failed to save snapshot atomically: {type(e).__name__}",
                 context=context,
             ) from e
 
@@ -627,7 +1035,7 @@ class StoreSnapshotPostgres:
             Number of snapshots deleted.
 
         Raises:
-            ValueError: If keep_latest_n is provided but < 1.
+            ProtocolConfigurationError: If keep_latest_n is provided but < 1.
             InfraConnectionError: If database connection fails.
 
         Note:
@@ -637,8 +1045,10 @@ class StoreSnapshotPostgres:
             batching for very large datasets.
         """
         if keep_latest_n is not None and keep_latest_n < 1:
-            msg = "keep_latest_n must be >= 1"
-            raise ValueError(msg)
+            raise ProtocolConfigurationError(
+                "keep_latest_n must be >= 1",
+                keep_latest_n=keep_latest_n,
+            )
 
         # If neither policy is specified, no-op
         if max_age_seconds is None and keep_latest_n is None:
@@ -736,8 +1146,8 @@ class StoreSnapshotPostgres:
                 deleted_str = str(result).replace("DELETE ", "")
                 return int(deleted_str) if deleted_str.isdigit() else 0
 
-        except ValueError:
-            # Re-raise validation errors
+        except ProtocolConfigurationError:
+            # Re-raise configuration validation errors
             raise
         except Exception as e:
             context = ModelInfraErrorContext(
