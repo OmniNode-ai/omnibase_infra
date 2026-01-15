@@ -617,11 +617,10 @@ class MixinNodeIntrospection:
             self._introspection_node_type = EnumNodeKind(config.node_type.lower())
         else:
             # Should never happen with proper ModelIntrospectionConfig, but handle gracefully
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="initialize_introspection",
                 target_name=str(config.node_id),
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"node_type must be EnumNodeKind or str, got {type(config.node_type).__name__}",
@@ -1442,11 +1441,10 @@ class MixinNodeIntrospection:
                 )
                 reason_enum = EnumIntrospectionReason.HEARTBEAT
         else:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="publish_introspection",
                 target_name=str(self._introspection_node_id),
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"reason must be str or EnumIntrospectionReason, got {type(reason).__name__}",

@@ -651,10 +651,9 @@ class MessageDispatchEngine:
             from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
             if not isinstance(node_kind, EnumNodeKind):
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="register_dispatcher",
-                    correlation_id=uuid4(),
                 )
                 raise ProtocolConfigurationError(
                     f"node_kind must be EnumNodeKind or None, got {type(node_kind).__name__}",

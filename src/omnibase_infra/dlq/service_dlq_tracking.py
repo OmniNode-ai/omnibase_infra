@@ -201,11 +201,10 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
                 expected pattern (PATTERN_TABLE_NAME constant).
         """
         if not REGEX_TABLE_NAME.match(storage_table):
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="validate_storage_table",
                 target_name="dlq_tracking_service",
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"Invalid storage table: {storage_table}. "
@@ -295,11 +294,10 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
         if self._pool is None:
             raise RuntimeHostError(
                 "Pool not initialized - call initialize() first",
-                context=ModelInfraErrorContext(
+                context=ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.DATABASE,
                     operation="_ensure_table_exists",
                     target_name="dlq_tracking_service",
-                    correlation_id=uuid4(),
                 ),
             )
 

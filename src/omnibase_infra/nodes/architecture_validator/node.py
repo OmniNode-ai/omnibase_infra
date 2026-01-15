@@ -43,7 +43,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from omnibase_core.nodes.node_compute import NodeCompute
 
@@ -227,10 +226,9 @@ class NodeArchitectureValidator(NodeCompute):
         for path_str in paths:
             # Security: reject path traversal attempts
             if ".." in path_str:
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.FILESYSTEM,
                     operation="collect_files",
-                    correlation_id=uuid4(),
                 )
                 raise ProtocolConfigurationError(
                     f"Path traversal not allowed: {path_str}",
@@ -242,10 +240,9 @@ class NodeArchitectureValidator(NodeCompute):
             # Security: resolve and verify path is within cwd or is relative
             resolved = path.resolve() if path.exists() else (cwd / path).resolve()
             if path.is_absolute() and not str(resolved).startswith(str(cwd)):
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.FILESYSTEM,
                     operation="collect_files",
-                    correlation_id=uuid4(),
                 )
                 raise ProtocolConfigurationError(
                     f"Absolute path outside working directory not allowed: {path_str}",

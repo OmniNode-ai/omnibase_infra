@@ -219,11 +219,10 @@ class MixinAsyncCircuitBreaker:
         """
         # Validate parameters
         if threshold < 1:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=transport_type,
                 operation="init_circuit_breaker",
                 target_name=service_name,
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"Circuit breaker threshold must be >= 1, got {threshold}",
@@ -232,11 +231,10 @@ class MixinAsyncCircuitBreaker:
                 value=threshold,
             )
         if reset_timeout < 0:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=transport_type,
                 operation="init_circuit_breaker",
                 target_name=service_name,
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"Circuit breaker reset_timeout must be >= 0, got {reset_timeout}",

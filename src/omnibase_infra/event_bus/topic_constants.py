@@ -54,7 +54,6 @@ from __future__ import annotations
 
 import re
 from typing import Final
-from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -193,10 +192,9 @@ def build_dlq_topic(
     # Validate environment
     env = environment.strip()
     if not env:
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="build_dlq_topic",
-            correlation_id=uuid4(),
         )
         raise ProtocolConfigurationError(
             "environment cannot be empty",
@@ -205,10 +203,9 @@ def build_dlq_topic(
         )
 
     if not ENV_PATTERN.match(env):
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="build_dlq_topic",
-            correlation_id=uuid4(),
         )
         raise ProtocolConfigurationError(
             f"Invalid environment '{environment}'. "
@@ -222,10 +219,9 @@ def build_dlq_topic(
     cat_lower = category.lower().strip()
     if cat_lower not in DLQ_CATEGORY_SUFFIXES:
         valid_categories = ", ".join(sorted(set(DLQ_CATEGORY_SUFFIXES.keys())))
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="build_dlq_topic",
-            correlation_id=uuid4(),
         )
         raise ProtocolConfigurationError(
             f"Invalid category '{category}'. Valid categories: {valid_categories}",
