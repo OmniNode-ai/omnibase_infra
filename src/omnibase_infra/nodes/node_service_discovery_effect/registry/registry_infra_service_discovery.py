@@ -157,6 +157,15 @@ class RegistryInfraServiceDiscovery:
             ProtocolDiscoveryOperations,
         )
 
+        # NOTE: isinstance() is intentionally used here instead of duck typing for:
+        # 1. Fail-fast validation: Immediately reject invalid handlers at registration
+        #    time rather than discovering missing methods at runtime during operations
+        # 2. Type safety: The @runtime_checkable decorator enables structural subtyping
+        #    checks that verify all required Protocol methods exist
+        # 3. Clear error messages: TypeError with specific protocol name aids debugging
+        # Duck typing (hasattr checks) would defer validation to method call time,
+        # making it harder to diagnose misconfigured handlers.
+        # See: conftest.py "Protocol Compliance Strategy" for when to use each approach.
         if not isinstance(handler, ProtocolDiscoveryOperations):
             raise TypeError(
                 f"Handler must implement ProtocolDiscoveryOperations, "

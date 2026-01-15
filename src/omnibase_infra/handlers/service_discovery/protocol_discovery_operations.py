@@ -5,6 +5,20 @@
 This module defines the protocol that service discovery handlers must implement
 to be used with capability-oriented nodes.
 
+Protocol Duplication Note:
+    This protocol is intentionally separate from the node-level protocol
+    at ``nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py``:
+
+    - **This protocol (handlers/*/protocol_*.py)**: Handler implementation
+      contract used by tests for compliance verification. Uses
+      ``ModelServiceInfo`` with optional ``correlation_id``.
+
+    - **Node protocol (nodes/*/protocols/)**: Node-level contract used for
+      container-based dependency injection and registry binding.
+
+    The separation allows different parameter models and independent evolution
+    of handler contracts vs node-level DI contracts.
+
 Concurrency Safety:
     Implementations MUST be safe for concurrent async calls.
     Multiple coroutines may invoke methods simultaneously.
@@ -15,6 +29,7 @@ Related:
     - NodeServiceDiscoveryEffect: Effect node that uses this protocol
     - HandlerServiceDiscoveryConsul: Consul implementation
     - HandlerServiceDiscoveryMock: In-memory mock for testing
+    - nodes/node_service_discovery_effect/protocols/: Node-level protocol
 """
 
 from __future__ import annotations

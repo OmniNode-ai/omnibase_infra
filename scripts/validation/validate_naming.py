@@ -21,6 +21,13 @@ Usage:
 Exit Codes:
     0 - All naming conventions are compliant
     1 - Naming violations detected (errors, or warnings with --fail-on-warnings)
+
+Performance Optimizations:
+    - Single directory scan with file caching
+    - Pre-compiled regex patterns
+    - O(1) set lookups for allowed files and prefixes
+    - Batched file reading (each file parsed only once)
+    - Cached path component extraction
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ import argparse
 import ast
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
@@ -56,85 +63,115 @@ except ImportError:
 # =============================================================================
 # These rules complement the omnibase_core rules for infrastructure-specific directories.
 # NOTE: These are enforced as WARNINGS, not ERRORS, to allow incremental adoption.
-INFRA_DIRECTORY_PREFIX_RULES: dict[str, tuple[str, ...]] = {
+#
+# PERFORMANCE: Using frozensets for O(1) prefix lookups instead of tuple iteration.
+INFRA_DIRECTORY_PREFIX_RULES: dict[str, frozenset[str]] = {
     # Handler directories - primary pattern
-    "handlers": ("handler_", "protocol_", "model_", "enum_", "adapter_", "registry_"),
+    "handlers": frozenset(
+        {"handler_", "protocol_", "model_", "enum_", "adapter_", "registry_"}
+    ),
     # Dispatcher directories
-    "dispatchers": ("dispatcher_",),
+    "dispatchers": frozenset({"dispatcher_"}),
     # Store directories (idempotency, state storage)
-    "stores": ("store_",),
-    "idempotency": ("store_", "protocol_"),
+    "stores": frozenset({"store_"}),
+    "idempotency": frozenset({"store_", "protocol_"}),
     # Adapter directories
-    "adapters": ("adapter_",),
+    "adapters": frozenset({"adapter_"}),
     # Runtime directory - accepts many patterns due to diverse component types
-    "runtime": (
-        "service_",
-        "registry_",
-        "handler_",
-        "protocol_",
-        "chain_",
-        "dispatch_",
-        "container_",
-        "envelope_",
-        "introspection_",
-        "invocation_",
-        "kernel",  # kernel.py is allowed
-        "message_",
-        "policy_",
-        "projector_",
-        "runtime_",
-        "security_",
-        "util_",
-        "validation",  # validation.py is allowed
-        "wiring",  # wiring.py is allowed
-        "contract_",
+    "runtime": frozenset(
+        {
+            "service_",
+            "registry_",
+            "handler_",
+            "protocol_",
+            "chain_",
+            "dispatch_",
+            "container_",
+            "envelope_",
+            "introspection_",
+            "invocation_",
+            "kernel",  # kernel.py is allowed
+            "message_",
+            "policy_",
+            "projector_",
+            "runtime_",
+            "security_",
+            "util_",
+            "validation",  # validation.py is allowed
+            "wiring",  # wiring.py is allowed
+            "contract_",
+        }
     ),
     # DLQ directory
-    "dlq": ("service_", "dlq_", "protocol_", "constants_", "model_", "enum_"),
+    "dlq": frozenset(
+        {"service_", "dlq_", "protocol_", "constants_", "model_", "enum_"}
+    ),
     # Services directory
-    "services": ("service_",),
+    "services": frozenset({"service_"}),
     # Validation directory - accepts suffix patterns (e.g., *_validator.py)
-    "validation": ("validator_", "checker_", "infra_"),
+    "validation": frozenset({"validator_", "checker_", "infra_"}),
     # Models directory
-    "models": ("model_", "enum_", "protocol_", "registry_", "types_"),
+    "models": frozenset({"model_", "enum_", "protocol_", "registry_", "types_"}),
     # Enums directory
-    "enums": ("enum_",),
+    "enums": frozenset({"enum_"}),
     # Protocols directory
-    "protocols": ("protocol_",),
+    "protocols": frozenset({"protocol_"}),
     # Mixins directory
-    "mixins": ("mixin_", "protocol_"),
+    "mixins": frozenset({"mixin_", "protocol_"}),
     # Registry directory (within nodes)
-    "registry": ("registry_",),
+    "registry": frozenset({"registry_"}),
     # Nodes directory (node.py is the main file, also allow model_, handler_, etc.)
-    "nodes": (
-        "node_",
-        "node.py",
-        "model_",
-        "handler_",
-        "registry_",
-        "enum_",
-        "protocol_",
+    "nodes": frozenset(
+        {
+            "node_",
+            "node.py",
+            "model_",
+            "handler_",
+            "registry_",
+            "enum_",
+            "protocol_",
+        }
     ),
     # Effects directory
-    "effects": ("store_", "registry_", "effect_"),
+    "effects": frozenset({"store_", "registry_", "effect_"}),
     # Clients directory
-    "clients": ("client_",),
+    "clients": frozenset({"client_"}),
 }
 
 # Additional suffix patterns that are allowed (e.g., *_validator.py)
-INFRA_DIRECTORY_SUFFIX_RULES: dict[str, tuple[str, ...]] = {
-    "validation": ("_validator.py", "_linter.py", "_aggregator.py"),
+# PERFORMANCE: Using frozensets for O(1) suffix lookups
+INFRA_DIRECTORY_SUFFIX_RULES: dict[str, frozenset[str]] = {
+    "validation": frozenset({"_validator.py", "_linter.py", "_aggregator.py"}),
 }
 
 # Files that are always allowed regardless of directory
-INFRA_ALLOWED_FILES: set[str] = {
-    "__init__.py",
-    "conftest.py",
-    "py.typed",
-    "node.py",  # Node main files
-    "contract.yaml",
-    "README.md",
-}
+# PERFORMANCE: Using frozenset for immutable O(1) lookups
+INFRA_ALLOWED_FILES: frozenset[str] = frozenset(
+    {
+        "__init__.py",
+        "conftest.py",
+        "py.typed",
+        "node.py",  # Node main files
+        "contract.yaml",
+        "README.md",
+    }
+)
+
+# PERFORMANCE: Combined set of all allowed files for single O(1) lookup
+# Merges both omnibase_core's ALLOWED_FILES and INFRA_ALLOWED_FILES
+_ALL_ALLOWED_FILES: frozenset[str] = INFRA_ALLOWED_FILES | frozenset(ALLOWED_FILES)
+
+
+def _is_in_archived_directory(file_path: Path) -> bool:
+    """Check if file is in an archived directory using cross-platform path comparison.
+
+    Args:
+        file_path: Path to check.
+
+    Returns:
+        True if any parent directory is named "archived".
+    """
+    return "archived" in file_path.parts
 
 
 @dataclass
@@ -156,6 +193,28 @@ class NamingViolation:
     expected_pattern: str
     description: str
     severity: str = "error"
+
+
+@dataclass
+class ParsedFileInfo:
+    """Cached information about a parsed Python file.
+
+    PERFORMANCE: Stores parsed AST and extracted class definitions to avoid
+    re-reading and re-parsing the same file for multiple category validations.
+
+    Attributes:
+        file_path: Resolved absolute path to the file.
+        ast_tree: Parsed AST tree (None if parsing failed).
+        class_defs: List of (class_name, line_number) tuples.
+        parse_error: Error message if parsing failed, None otherwise.
+        relevant_dir: The omnibase_infra subdirectory (e.g., 'handlers', 'models').
+    """
+
+    file_path: Path
+    ast_tree: ast.Module | None
+    class_defs: list[tuple[str, int]] = field(default_factory=list)
+    parse_error: str | None = None
+    relevant_dir: str | None = None
 
 
 class InfraNamingConventionValidator:
@@ -230,6 +289,7 @@ class InfraNamingConventionValidator:
     }
 
     # Exception patterns - classes that don't need to follow strict naming
+    # PERFORMANCE: Raw patterns stored here; use _COMPILED_EXCEPTION_PATTERNS for matching
     EXCEPTION_PATTERNS: ClassVar[list[str]] = [
         r"^_.*",  # Private classes
         r".*Test$",  # Test classes
@@ -239,6 +299,33 @@ class InfraNamingConventionValidator:
         r".*Exception$",  # Exception classes (end with Exception)
         r"^Exception[A-Z].*",  # Exception classes (start with Exception)
     ]
+
+    # PERFORMANCE: Pre-compiled regex patterns (compiled once at class load time)
+    # This avoids re-compiling the same patterns on every _is_exception_class() call
+    _COMPILED_EXCEPTION_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
+        re.compile(r"^_.*"),
+        re.compile(r".*Test$"),
+        re.compile(r".*TestCase$"),
+        re.compile(r"^Test.*"),
+        re.compile(r".*Error$"),
+        re.compile(r".*Exception$"),
+        re.compile(r"^Exception[A-Z].*"),
+    ]
+
+    # PERFORMANCE: Pre-compiled naming patterns for fast class name validation
+    # Maps category -> compiled regex pattern
+    _COMPILED_NAMING_PATTERNS: ClassVar[dict[str, re.Pattern[str]]] = {
+        "handlers": re.compile(r"^Handler[A-Z][A-Za-z0-9]*$"),
+        "dispatchers": re.compile(r"^Dispatcher[A-Z][A-Za-z0-9]*$"),
+        "stores": re.compile(r"^Store[A-Z][A-Za-z0-9]*$"),
+        "adapters": re.compile(r"^Adapter[A-Z][A-Za-z0-9]*$"),
+        "registries": re.compile(r"^Registry[A-Z][A-Za-z0-9]*$"),
+        "services": re.compile(r"^Service[A-Z][A-Za-z0-9]*$"),
+        "models": re.compile(r"^Model[A-Z][A-Za-z0-9]*$"),
+        "enums": re.compile(r"^Enum[A-Z][A-Za-z0-9]*$"),
+        "protocols": re.compile(r"^Protocol[A-Z][A-Za-z0-9]*$"),
+        "mixins": re.compile(r"^Mixin[A-Z][A-Za-z0-9]*$"),
+    }
 
     # Architectural exemptions - documented design decisions
     ARCHITECTURAL_EXEMPTIONS: ClassVar[dict[str, list[str]]] = {
@@ -308,9 +395,18 @@ class InfraNamingConventionValidator:
 
         Args:
             repo_path: Path to the repository root directory to validate.
+
+        PERFORMANCE: Initializes file cache to avoid re-reading and re-parsing
+        files across multiple validation phases.
         """
         self.repo_path = repo_path
         self.violations: list[NamingViolation] = []
+        # PERFORMANCE: Cache parsed file info to avoid re-reading files
+        # Key: resolved absolute path, Value: ParsedFileInfo
+        self._file_cache: dict[Path, ParsedFileInfo] = {}
+        # PERFORMANCE: Cache all Python files found during directory scan
+        # Avoids multiple rglob calls for different categories
+        self._all_python_files: list[Path] | None = None
 
     def check_file_name(self, file_path: Path) -> tuple[str | None, str]:
         """Check if a file name conforms to omnibase_infra naming conventions.
@@ -321,22 +417,29 @@ class InfraNamingConventionValidator:
         Returns:
             Tuple of (error message or None, severity).
             Severity is 'error' for strict violations, 'warning' for style issues.
+
+        PERFORMANCE:
+            - Uses combined _ALL_ALLOWED_FILES for single O(1) lookup
+            - Pre-cached path.parts avoids repeated property access
+            - Early exits for common skip cases (non-.py, allowed files)
         """
         file_name = file_path.name
 
-        # Skip allowed files (both core and infra)
-        if file_name in ALLOWED_FILES or file_name in INFRA_ALLOWED_FILES:
-            return None, "info"
-
-        # Skip files with allowed prefixes (private modules)
-        if any(file_name.startswith(prefix) for prefix in ALLOWED_FILE_PREFIXES):
-            return None, "info"
-
-        # Skip non-Python files
+        # PERFORMANCE: Skip non-Python files early (most common skip case)
         if not file_name.endswith(".py"):
             return None, "info"
 
+        # PERFORMANCE: Single O(1) lookup using combined allowed files set
+        if file_name in _ALL_ALLOWED_FILES:
+            return None, "info"
+
+        # Skip files with allowed prefixes (private modules)
+        # PERFORMANCE: ALLOWED_FILE_PREFIXES is typically small (1-2 items)
+        if any(file_name.startswith(prefix) for prefix in ALLOWED_FILE_PREFIXES):
+            return None, "info"
+
         # Find the relevant directory for rule matching
+        # PERFORMANCE: Cache parts tuple to avoid repeated property access
         parts = file_path.parts
         try:
             # Find omnibase_infra in the path
@@ -345,28 +448,33 @@ class InfraNamingConventionValidator:
                 relevant_dir = parts[omnibase_idx + 1]
 
                 # Check suffix rules first (e.g., *_validator.py in validation/)
-                if relevant_dir in INFRA_DIRECTORY_SUFFIX_RULES:
-                    suffix_rules = INFRA_DIRECTORY_SUFFIX_RULES[relevant_dir]
-                    if any(file_name.endswith(suffix) for suffix in suffix_rules):
-                        return None, "info"  # Valid suffix pattern
+                # PERFORMANCE: O(1) dict lookup + small frozenset iteration
+                suffix_rules = INFRA_DIRECTORY_SUFFIX_RULES.get(relevant_dir)
+                if suffix_rules:
+                    for suffix in suffix_rules:
+                        if file_name.endswith(suffix):
+                            return None, "info"  # Valid suffix pattern
 
-                if relevant_dir in INFRA_DIRECTORY_PREFIX_RULES:
-                    required_prefixes = INFRA_DIRECTORY_PREFIX_RULES[relevant_dir]
-
+                # PERFORMANCE: O(1) dict lookup for prefix rules
+                required_prefixes = INFRA_DIRECTORY_PREFIX_RULES.get(relevant_dir)
+                if required_prefixes:
                     # Check if file name starts with or equals any required prefix
-                    matches_prefix = any(
-                        file_name.startswith(prefix) or file_name == prefix
-                        for prefix in required_prefixes
-                    )
+                    # PERFORMANCE: Iterate over frozenset (typically small, 1-20 items)
+                    matches_prefix = False
+                    for prefix in required_prefixes:
+                        if file_name.startswith(prefix) or file_name == prefix:
+                            matches_prefix = True
+                            break  # Early exit on first match
 
                     if not matches_prefix:
-                        prefix_str = (
-                            f"'{required_prefixes[0]}'"
-                            if len(required_prefixes) == 1
-                            else f"one of {required_prefixes[:3]}..."
-                            if len(required_prefixes) > 3
-                            else f"one of {required_prefixes}"
-                        )
+                        # PERFORMANCE: Only build prefix_str if violation found
+                        prefix_list = sorted(required_prefixes)[:3]
+                        if len(required_prefixes) == 1:
+                            prefix_str = f"'{prefix_list[0]}'"
+                        elif len(required_prefixes) > 3:
+                            prefix_str = f"one of {prefix_list}..."
+                        else:
+                            prefix_str = f"one of {sorted(required_prefixes)}"
                         # File naming is a WARNING for gradual adoption
                         return (
                             f"File '{file_name}' in '{relevant_dir}/' directory should start "
@@ -379,6 +487,81 @@ class InfraNamingConventionValidator:
 
         return None, "info"
 
+    def _get_all_python_files(self) -> list[Path]:
+        """Get all Python files in the repository, cached for reuse.
+
+        PERFORMANCE: Single directory scan that caches results. Subsequent calls
+        return the cached list instead of re-scanning the filesystem.
+
+        Returns:
+            List of resolved absolute paths to all Python files.
+        """
+        if self._all_python_files is None:
+            self._all_python_files = []
+            for file_path in self.repo_path.rglob("*.py"):
+                # Skip pycache and archived directories (cross-platform path check)
+                if "__pycache__" in file_path.parts or _is_in_archived_directory(
+                    file_path
+                ):
+                    continue
+                # Skip symbolic links
+                if file_path.is_symlink():
+                    continue
+                # Store resolved paths for proper deduplication
+                self._all_python_files.append(file_path.resolve())
+        return self._all_python_files
+
+    def _get_parsed_file_info(self, file_path: Path) -> ParsedFileInfo:
+        """Get cached parsed file info, parsing on first access.
+
+        PERFORMANCE: Each file is read and parsed only once. Subsequent calls
+        for the same file return the cached ParsedFileInfo.
+
+        Args:
+            file_path: Resolved absolute path to the Python file.
+
+        Returns:
+            ParsedFileInfo with AST tree and extracted class definitions.
+        """
+        if file_path not in self._file_cache:
+            # Parse the file and extract class definitions
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    content = f.read()
+
+                tree = ast.parse(content, filename=str(file_path))
+                class_defs: list[tuple[str, int]] = []
+
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef):
+                        class_defs.append((node.name, node.lineno))
+
+                # Extract relevant directory for rule matching
+                relevant_dir: str | None = None
+                parts = file_path.parts
+                try:
+                    omnibase_idx = parts.index("omnibase_infra")
+                    if omnibase_idx + 1 < len(parts) - 1:
+                        relevant_dir = parts[omnibase_idx + 1]
+                except ValueError:
+                    pass
+
+                self._file_cache[file_path] = ParsedFileInfo(
+                    file_path=file_path,
+                    ast_tree=tree,
+                    class_defs=class_defs,
+                    relevant_dir=relevant_dir,
+                )
+
+            except (SyntaxError, UnicodeDecodeError) as e:
+                self._file_cache[file_path] = ParsedFileInfo(
+                    file_path=file_path,
+                    ast_tree=None,
+                    parse_error=str(e),
+                )
+
+        return self._file_cache[file_path]
+
     def validate_directory(
         self, directory: Path, verbose: bool = False
     ) -> list[tuple[str, str, str]]:
@@ -390,17 +573,18 @@ class InfraNamingConventionValidator:
 
         Returns:
             List of tuples (file_path, message, severity).
+
+        PERFORMANCE: Uses cached file list from _get_all_python_files().
         """
         results: list[tuple[str, str, str]] = []
 
-        for file_path in directory.rglob("*.py"):
-            # Skip pycache and archived directories
-            if "__pycache__" in str(file_path) or "/archived/" in str(file_path):
-                continue
-
-            # Skip symbolic links
-            if file_path.is_symlink():
-                continue
+        # PERFORMANCE: Use cached file list instead of re-scanning
+        for file_path in self._get_all_python_files():
+            # Filter to files within the specified directory
+            try:
+                file_path.relative_to(directory)
+            except ValueError:
+                continue  # File not under this directory
 
             message, severity = self.check_file_name(file_path)
             if message:
@@ -448,30 +632,35 @@ class InfraNamingConventionValidator:
             category: The category to validate (e.g., 'handlers', 'dispatchers').
             rules: Dictionary containing validation rules.
             verbose: If True, show detailed output.
+
+        PERFORMANCE:
+            - Uses cached file list from _get_all_python_files() instead of
+              separate rglob calls for each category
+            - Files are filtered in-memory using cached path info
+            - Each file is validated only once per category
         """
         file_prefix = rules.get("file_prefix")
         expected_dir = rules.get("directory")
 
-        # Collect all candidate files into a set to avoid duplicate validations.
-        # A file like handlers/handler_consul.py could match both the prefix pattern
-        # (handler_*.py) and the directory pattern (*/handlers/*.py), so we
-        # deduplicate before validation.
+        # PERFORMANCE: Filter from cached file list instead of multiple rglob calls
+        # This is O(n) where n = total files, vs O(n * m) for m glob patterns
         files_to_validate: set[Path] = set()
 
-        # Scan for files matching the prefix pattern
-        if file_prefix:
-            for file_path in self.repo_path.rglob(f"{file_prefix}*.py"):
-                if "__pycache__" in str(file_path) or "/archived/" in str(file_path):
-                    continue
-                files_to_validate.add(file_path)
+        for file_path in self._get_all_python_files():
+            # Skip __init__.py for directory-based checks
+            if file_path.name == "__init__.py":
+                continue
 
-        # Also check files in expected directories
-        if expected_dir:
-            for file_path in self.repo_path.rglob(f"*/{expected_dir}/*.py"):
-                if file_path.name == "__init__.py":
-                    continue
-                if "__pycache__" in str(file_path) or "/archived/" in str(file_path):
-                    continue
+            # Check if file matches the prefix pattern
+            matches_prefix = file_prefix and file_path.name.startswith(file_prefix)
+
+            # Check if file is in expected directory (using cached info if available)
+            matches_dir = False
+            if expected_dir:
+                # PERFORMANCE: Use path.parts for O(n) directory check vs string search
+                matches_dir = expected_dir in file_path.parts
+
+            if matches_prefix or matches_dir:
                 files_to_validate.add(file_path)
 
         # Validate each unique file once
@@ -492,44 +681,54 @@ class InfraNamingConventionValidator:
             category: The category being validated.
             rules: Dictionary containing validation rules.
             verbose: If True, show detailed output.
+
+        PERFORMANCE:
+            - Uses cached parsed file info from _get_parsed_file_info()
+            - Each file is read and parsed only once across all categories
+            - Class definitions are pre-extracted during parsing
         """
-        try:
-            with open(file_path, encoding="utf-8") as f:
-                content = f.read()
+        # PERFORMANCE: Use cached parsed info instead of re-reading file
+        file_info = self._get_parsed_file_info(file_path)
 
-            tree = ast.parse(content, filename=str(file_path))
-
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    self._check_class_naming(file_path, node, category, rules)
-
-        except (SyntaxError, UnicodeDecodeError) as e:
+        if file_info.parse_error:
             if verbose:
-                print(f"Warning: Could not parse {file_path}: {e}")
+                print(f"Warning: Could not parse {file_path}: {file_info.parse_error}")
+            return
 
-    def _check_class_naming(
+        # PERFORMANCE: Use pre-extracted class definitions
+        for class_name, line_number in file_info.class_defs:
+            self._check_class_naming_cached(
+                file_path, class_name, line_number, category, rules
+            )
+
+    def _check_class_naming_cached(
         self,
         file_path: Path,
-        node: ast.ClassDef,
+        class_name: str,
+        line_number: int,
         category: str,
         rules: dict[str, str | None],
     ) -> None:
-        """Check if a class name follows conventions.
+        """Check if a class name follows conventions (optimized version).
+
+        PERFORMANCE: Works with pre-extracted class info instead of AST nodes.
+        Uses pre-compiled regex patterns for fast matching.
 
         Args:
             file_path: Path to the file containing the class.
-            node: AST class definition node.
+            class_name: Name of the class to check.
+            line_number: Line number of the class definition.
             category: The category being validated.
             rules: Dictionary containing validation rules.
         """
-        class_name = node.name
-        pattern = rules.get("pattern")
         description = rules.get("description")
 
-        if not pattern:
+        # PERFORMANCE: Use pre-compiled pattern from class variable
+        compiled_pattern = self._COMPILED_NAMING_PATTERNS.get(category)
+        if not compiled_pattern:
             return
 
-        # Skip exception patterns
+        # Skip exception patterns (uses pre-compiled patterns)
         if self._is_exception_class(class_name):
             return
 
@@ -547,30 +746,56 @@ class InfraNamingConventionValidator:
         expected_dir = rules.get("directory")
 
         # Only validate classes in files that should contain this category
+        # PERFORMANCE: Use path.parts for directory check
         in_relevant_file = file_prefix and file_path.name.startswith(file_prefix)
-        in_relevant_dir = expected_dir and expected_dir in str(file_path)
+        in_relevant_dir = expected_dir and expected_dir in file_path.parts
 
         if not in_relevant_file and not in_relevant_dir:
             return
 
-        # Check if class matches pattern
-        if not re.match(pattern, class_name):
+        # PERFORMANCE: Use pre-compiled pattern
+        if not compiled_pattern.match(class_name):
             # Check if it should match based on heuristics
             if self._should_match_pattern(class_name, category):
                 self.violations.append(
                     NamingViolation(
                         file_path=str(file_path),
-                        line_number=node.lineno,
+                        line_number=line_number,
                         class_name=class_name,
-                        expected_pattern=pattern,
+                        expected_pattern=compiled_pattern.pattern,
                         description=description
                         or f"Must follow {category} naming conventions",
                         severity="error",
                     )
                 )
 
+    def _check_class_naming(
+        self,
+        file_path: Path,
+        node: ast.ClassDef,
+        category: str,
+        rules: dict[str, str | None],
+    ) -> None:
+        """Check if a class name follows conventions (legacy version).
+
+        Note: Prefer _check_class_naming_cached for better performance.
+
+        Args:
+            file_path: Path to the file containing the class.
+            node: AST class definition node.
+            category: The category being validated.
+            rules: Dictionary containing validation rules.
+        """
+        # Delegate to cached version
+        self._check_class_naming_cached(
+            file_path, node.name, node.lineno, category, rules
+        )
+
     def _is_exception_class(self, class_name: str) -> bool:
         """Check if class name matches exception patterns.
+
+        PERFORMANCE: Uses pre-compiled regex patterns from _COMPILED_EXCEPTION_PATTERNS
+        instead of re-compiling patterns on each call.
 
         Args:
             class_name: Name of the class to check.
@@ -578,7 +803,10 @@ class InfraNamingConventionValidator:
         Returns:
             True if class matches an exception pattern.
         """
-        return any(re.match(pattern, class_name) for pattern in self.EXCEPTION_PATTERNS)
+        # PERFORMANCE: Use pre-compiled patterns for O(1) regex execution per pattern
+        return any(
+            pattern.match(class_name) for pattern in self._COMPILED_EXCEPTION_PATTERNS
+        )
 
     def _matches_architectural_exemption(
         self, class_name: str, file_path: Path
@@ -615,10 +843,27 @@ class InfraNamingConventionValidator:
 
         return False
 
+    # PERFORMANCE: Class variable for category indicators (created once, reused)
+    _CATEGORY_INDICATORS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "handlers": ("handler",),
+        "dispatchers": ("dispatcher", "dispatch"),
+        "stores": ("store", "storage"),
+        "adapters": ("adapter",),
+        "registries": ("registry",),
+        "services": ("service",),
+        "models": ("model", "data", "schema", "entity"),
+        "enums": ("enum", "choice", "status"),
+        "protocols": ("protocol", "interface"),
+        "mixins": ("mixin",),
+    }
+
     def _should_match_pattern(self, class_name: str, category: str) -> bool:
         """Determine if a class should match the pattern for a category.
 
         Uses heuristics based on keywords in the class name.
+
+        PERFORMANCE: Uses class-level _CATEGORY_INDICATORS instead of
+        recreating the dict on every call.
 
         Args:
             class_name: Name of the class to check.
@@ -627,20 +872,7 @@ class InfraNamingConventionValidator:
         Returns:
             True if the class name suggests it should follow the category's pattern.
         """
-        category_indicators = {
-            "handlers": ["handler"],
-            "dispatchers": ["dispatcher", "dispatch"],
-            "stores": ["store", "storage"],
-            "adapters": ["adapter"],
-            "registries": ["registry"],
-            "services": ["service"],
-            "models": ["model", "data", "schema", "entity"],
-            "enums": ["enum", "choice", "status"],
-            "protocols": ["protocol", "interface"],
-            "mixins": ["mixin"],
-        }
-
-        indicators = category_indicators.get(category, [])
+        indicators = self._CATEGORY_INDICATORS.get(category, ())
         class_lower = class_name.lower()
 
         return any(indicator in class_lower for indicator in indicators)
@@ -651,15 +883,18 @@ class InfraNamingConventionValidator:
         This prevents false positives when a class follows a different valid pattern
         than the category being checked (e.g., Model* classes in handler files).
 
+        PERFORMANCE: Uses pre-compiled patterns from _COMPILED_NAMING_PATTERNS
+        instead of re-compiling on each call.
+
         Args:
             class_name: Name of the class to check.
 
         Returns:
             True if the class matches any valid naming pattern.
         """
-        for category, rules in self.NAMING_PATTERNS.items():
-            pattern = rules.get("pattern")
-            if pattern and re.match(pattern, class_name):
+        # PERFORMANCE: Use pre-compiled patterns for faster matching
+        for compiled_pattern in self._COMPILED_NAMING_PATTERNS.values():
+            if compiled_pattern.match(class_name):
                 return True
         return False
 
@@ -735,7 +970,8 @@ def run_ast_validation(repo_path: Path, verbose: bool = False) -> list[str]:
     ast_issues: list[str] = []
 
     for file_path in repo_path.rglob("*.py"):
-        if "__pycache__" in str(file_path) or "/archived/" in str(file_path):
+        # Cross-platform path segment check
+        if "__pycache__" in file_path.parts or _is_in_archived_directory(file_path):
             continue
         if file_path.is_symlink():
             continue
@@ -869,6 +1105,11 @@ Class Naming Conventions:
                 for v in validator.violations
                 if not args.errors_only or v.severity == "error"
             ],
+            # IMPORTANT: 'passed' mirrors the script exit code logic exactly:
+            # - True (exit 0): No errors, no AST issues, and either no warnings
+            #   or --fail-on-warnings not set
+            # - False (exit 1): Any errors, AST issues, or warnings with
+            #   --fail-on-warnings set
             "passed": not has_failures,
         }
         print(json.dumps(output, indent=2))

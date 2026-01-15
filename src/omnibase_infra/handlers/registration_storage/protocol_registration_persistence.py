@@ -5,6 +5,19 @@
 This module defines the protocol that registration storage handlers must implement
 to be used with capability-oriented nodes.
 
+Protocol Duplication Note:
+    This protocol is intentionally separate from the node-level protocol
+    at ``nodes/node_registration_storage_effect/protocols/protocol_registration_persistence.py``:
+
+    - **This protocol (handlers/*/protocol_*.py)**: Handler implementation
+      contract used by tests for compliance verification.
+
+    - **Node protocol (nodes/*/protocols/)**: Node-level contract used for
+      container-based dependency injection and registry binding.
+
+    The separation allows different import paths and independent evolution
+    of handler contracts vs node-level DI contracts.
+
 Concurrency Safety:
     Implementations MUST be safe for concurrent async calls.
     Multiple coroutines may invoke methods simultaneously.
@@ -15,6 +28,7 @@ Related:
     - NodeRegistrationStorageEffect: Effect node that uses this protocol
     - HandlerRegistrationStoragePostgres: PostgreSQL implementation
     - HandlerRegistrationStorageMock: In-memory mock for testing
+    - nodes/node_registration_storage_effect/protocols/: Node-level protocol
 """
 
 from __future__ import annotations

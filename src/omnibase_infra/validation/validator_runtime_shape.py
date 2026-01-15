@@ -108,10 +108,17 @@ Security Design (Intentional Fail-Open Architecture):
 
     3. **Pre-Validation Check**::
 
+           from omnibase_infra.models.validation import ModelValidateAndRaiseParams
+
            category = detect_message_category(result)
            if category is None:
                raise ValueError("All outputs must have detectable categories")
-           validator.validate_and_raise(node_archetype, result, category)
+           params = ModelValidateAndRaiseParams(
+               node_archetype=node_archetype,
+               output=result,
+               output_category=category,
+           )
+           validator.validate_and_raise(params)
 
     **Security Responsibility Boundaries**:
     - This validator: Architectural pattern enforcement (developer guardrails)

@@ -18,6 +18,32 @@ Architecture:
 
     The handler_type property identifies the backend for routing.
 
+Protocol Duplication Note:
+    This protocol is intentionally separate from the handler-level protocol
+    at ``handlers/registration_storage/protocol_registration_persistence.py``:
+
+    - **This protocol (nodes/*/protocols/)**: Node-level contract used for
+      container-based dependency injection and registry binding.
+
+    - **Handler protocol (handlers/*/protocol_*.py)**: Handler implementation
+      contract used by tests for compliance verification.
+
+    The separation allows:
+    1. Node-level protocols to evolve independently of handler contracts
+    2. Clear ownership boundaries (nodes own their protocols)
+    3. Different import paths for different use cases (DI vs testing)
+
+    Both protocols share the same name for discoverability, but serve
+    different architectural layers.
+
+Protocol Verification:
+    Per ONEX conventions, protocol compliance is verified via duck typing
+    rather than isinstance checks. The @runtime_checkable decorator enables
+    structural subtyping checks.
+
+    However, registries use isinstance() for fail-fast validation at
+    registration time. See registry_infra_registration_storage.py for rationale.
+
 Thread Safety:
     Handler implementations may be invoked concurrently. Implementations
     should be stateless or use appropriate synchronization.
@@ -32,6 +58,7 @@ Related:
     - ModelStorageHealthCheckResult: Health check result for handlers
     - ModelStorageHealthCheckDetails: Backend-specific health check diagnostics
     - ModelUpsertResult: Insert/update result
+    - handlers/registration_storage/protocol_registration_persistence.py: Handler protocol
 """
 
 from __future__ import annotations

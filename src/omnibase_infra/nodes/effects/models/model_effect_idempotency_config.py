@@ -86,7 +86,7 @@ class ModelEffectIdempotencyConfig(BaseModel):
         description="Minimum interval between TTL cleanup passes.",
     )
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, from_attributes=True)
 
 
 __all__ = ["ModelEffectIdempotencyConfig"]

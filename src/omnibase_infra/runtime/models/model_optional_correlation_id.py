@@ -57,7 +57,7 @@ class ModelOptionalCorrelationId(BaseModel):
         True
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, from_attributes=True)
 
     value: UUID | None = Field(
         default=None, description="Optional correlation ID (UUID)"

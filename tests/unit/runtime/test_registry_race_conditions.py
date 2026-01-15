@@ -54,6 +54,16 @@ if TYPE_CHECKING:
 class MockSyncPolicy:
     """Mock synchronous policy for testing."""
 
+    @property
+    def policy_id(self) -> str:
+        """Return the policy identifier."""
+        return "mock-sync"
+
+    @property
+    def policy_type(self) -> str:
+        """Return the policy type."""
+        return "orchestrator"
+
     def evaluate(self, context: dict[str, object]) -> dict[str, object]:
         return {"result": "sync"}
 
@@ -63,6 +73,16 @@ class MockSyncPolicy:
 
 class MockSyncPolicyV2:
     """Second mock policy for version testing."""
+
+    @property
+    def policy_id(self) -> str:
+        """Return the policy identifier."""
+        return "mock-sync-v2"
+
+    @property
+    def policy_type(self) -> str:
+        """Return the policy type."""
+        return "orchestrator"
 
     def evaluate(self, context: dict[str, object]) -> dict[str, object]:
         return {"result": "v2"}

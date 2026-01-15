@@ -369,8 +369,9 @@ class MixinSemverCache:
         """
         if cls._semver_cache_inner is None:
             return None
-        # cache_info() is added by @lru_cache decorator
-        # The return type is functools._CacheInfo
+        # NOTE: cache_info() is dynamically added by @lru_cache decorator but not
+        # reflected in Callable type annotation. This is a known mypy limitation.
+        # The return type is functools._CacheInfo.
         result: functools._CacheInfo = cls._semver_cache_inner.cache_info()  # type: ignore[attr-defined]
         return result
 

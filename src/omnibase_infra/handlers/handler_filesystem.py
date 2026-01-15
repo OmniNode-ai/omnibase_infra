@@ -140,6 +140,14 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             container: Optional ONEX container for dependency injection.
                 When provided, enables full ONEX integration. When None,
                 handler operates in standalone mode for testing.
+
+        Note:
+            The container is stored for interface compliance with the standard ONEX
+            handler pattern and to enable future DI-based service resolution (e.g.,
+            metrics, logging, observability integration). Currently, the handler
+            operates independently for filesystem operations, but storing the container
+            ensures API consistency and enables future enhancements without breaking
+            changes.
         """
         self._container = container
         self._allowed_paths: tuple[Path, ...] = ()

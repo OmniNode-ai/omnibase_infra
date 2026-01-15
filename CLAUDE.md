@@ -552,6 +552,7 @@ class MyAdapter(MixinAsyncCircuitBreaker):
 **States**: CLOSED → OPEN (after failures) → HALF_OPEN → CLOSED (on success)
 
 **See**: `docs/patterns/circuit_breaker_implementation.md` for full implementation details
+**See**: `docs/patterns/mixin_dependencies.md` for mixin composition patterns and dependency requirements
 
 ### Transport Types
 | Type | Value |
@@ -573,6 +574,7 @@ Each dispatcher should:
 - Raise `InfraUnavailableError` when circuit opens
 
 **See**: `docs/patterns/dispatcher_resilience.md` for full pattern details
+**See**: `docs/patterns/mixin_dependencies.md` for mixin composition and inheritance order
 
 ### Handler No-Publish Constraint
 
@@ -613,6 +615,7 @@ The `MixinNodeIntrospection` mixin uses Python reflection for service discovery.
 - Configure Kafka topic ACLs for introspection topics
 
 **See**: `docs/patterns/security_patterns.md#introspection-security` for complete threat model and deployment checklist
+**See**: `docs/patterns/mixin_dependencies.md#mixinnodeintrospection` for initialization requirements
 
 ### Handler Plugin Loader Patterns
 

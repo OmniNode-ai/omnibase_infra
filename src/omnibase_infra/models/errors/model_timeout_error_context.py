@@ -24,7 +24,7 @@ Related:
 
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType
 
@@ -102,24 +102,9 @@ class ModelTimeoutErrorContext(BaseModel):
         description="The timeout value that was exceeded",
     )
 
-    @model_validator(mode="after")
-    def _ensure_correlation_id(self) -> "ModelTimeoutErrorContext":
-        """Validate correlation_id is present (always passes due to default_factory).
-
-        This validator exists for documentation purposes and future-proofing.
-        The default_factory=uuid4 on correlation_id ensures it's never None,
-        but this validator makes the intent explicit.
-
-        Returns:
-            Self (validation always passes).
-
-        Note:
-            In Pydantic v2, default_factory runs before validators, so
-            correlation_id will never be None when this validator runs.
-        """
-        # correlation_id is always set due to default_factory=uuid4
-        # This validator documents the invariant
-        return self
+    # NOTE: No model_validator needed - default_factory=uuid4 on correlation_id
+    # guarantees the field is always populated in Pydantic v2. The type annotation
+    # `UUID` (not `UUID | None`) documents the invariant at compile-time.
 
 
 __all__ = ["ModelTimeoutErrorContext"]

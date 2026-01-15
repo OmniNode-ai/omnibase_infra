@@ -55,7 +55,7 @@ class ModelPayloadVault(BaseModel):
         - EnumVaultOperationType: Enum defining valid operation types
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     operation_type: str
     """Operation type identifier used for type discrimination."""

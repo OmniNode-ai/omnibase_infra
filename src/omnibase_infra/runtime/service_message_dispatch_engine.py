@@ -1482,7 +1482,10 @@ class MessageDispatchEngine:
         # to pass context to the dispatcher.
         if inspect.iscoroutinefunction(dispatcher):
             if context is not None:
+                # NOTE: Dispatcher signature varies - context param may be optional.
+                # Return type depends on dispatcher implementation.
                 return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]
+            # NOTE: Return type depends on dispatcher implementation (dict or model).
             return await dispatcher(envelope)  # type: ignore[no-any-return]
         else:
             # Sync dispatcher execution via ThreadPoolExecutor
@@ -1502,6 +1505,8 @@ class MessageDispatchEngine:
                 return await loop.run_in_executor(
                     None,
                     sync_ctx_dispatcher,
+                    # NOTE: run_in_executor expects positional args as *args,
+                    # type checker cannot verify generic envelope type matches dispatcher.
                     envelope,  # type: ignore[arg-type]
                     context,
                 )
@@ -1512,6 +1517,8 @@ class MessageDispatchEngine:
                 return await loop.run_in_executor(
                     None,
                     sync_dispatcher,
+                    # NOTE: run_in_executor expects positional args as *args,
+                    # type checker cannot verify generic envelope type matches dispatcher.
                     envelope,  # type: ignore[arg-type]
                 )
 

@@ -906,7 +906,12 @@ class TestStructuredFieldsComprehensive:
                 "test", context=ModelInfraErrorContext(target_name="postgresql")
             ),
             InfraTimeoutError(
-                "test", context=ModelInfraErrorContext(target_name="kafka")
+                "test",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="test_operation",
+                    target_name="kafka",
+                ),
             ),
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(target_name="consul")
@@ -1025,11 +1030,12 @@ class TestErrorChaining:
     def test_chained_error_with_context_preserved(self) -> None:
         """Test that context is preserved when chaining errors."""
         correlation_id = uuid4()
-        context = ModelInfraErrorContext(
+        context = ModelTimeoutErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="execute_query",
             target_name="postgresql",
             correlation_id=correlation_id,
+            timeout_seconds=30.0,
         )
         original = TimeoutError("Query exceeded deadline")
         try:
@@ -1039,7 +1045,6 @@ class TestErrorChaining:
                 raise InfraTimeoutError(
                     "Database query timeout",
                     context=context,
-                    timeout_seconds=30,
                 ) from e
         except InfraTimeoutError as wrapped:
             # Verify chaining
@@ -1052,7 +1057,7 @@ class TestErrorChaining:
             )
             assert wrapped.model.context["operation"] == "execute_query"
             assert wrapped.model.context["target_name"] == "postgresql"
-            assert wrapped.model.context["timeout_seconds"] == 30
+            assert wrapped.model.context["timeout_seconds"] == 30.0
 
     def test_multi_level_chaining(self) -> None:
         """Test error chaining through multiple levels."""
@@ -1620,7 +1625,7 @@ class TestErrorContextSecretSanitization:
             (ProtocolConfigurationError, "Config error"),
             (SecretResolutionError, "Secret error"),
             (InfraConnectionError, "Connection error"),
-            (InfraTimeoutError, "Timeout error"),
+            # InfraTimeoutError tested separately (requires ModelTimeoutErrorContext)
             (InfraAuthenticationError, "Auth error"),
             (InfraUnavailableError, "Unavailable error"),
         ],
@@ -1632,6 +1637,9 @@ class TestErrorContextSecretSanitization:
 
         This test validates that the structured context for each error type
         only contains safe fields when properly constructed.
+
+        Note: InfraTimeoutError is tested separately as it requires
+        ModelTimeoutErrorContext instead of ModelInfraErrorContext.
         """
         correlation_id = uuid4()
         context = ModelInfraErrorContext(
@@ -1658,6 +1666,41 @@ class TestErrorContextSecretSanitization:
         # Verify no secret patterns in serialized context
         self._assert_no_secret_patterns_in_context(
             error, f"{error_class.__name__} with safe fields"
+        )
+
+    def test_infra_timeout_error_context_serialization_is_safe(self) -> None:
+        """Verify InfraTimeoutError serializes context without exposing secrets.
+
+        InfraTimeoutError requires ModelTimeoutErrorContext (with timeout_seconds),
+        tested separately from the parameterized test above.
+        """
+        correlation_id = uuid4()
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="test_operation",
+            target_name="test-service",
+            correlation_id=correlation_id,
+            timeout_seconds=30.0,
+        )
+
+        error = InfraTimeoutError(
+            "Timeout error",
+            context=context,
+            host="service.example.com",
+            port=8080,
+            retry_count=2,
+        )
+
+        # Verify safe fields are present
+        assert error.model.context["operation"] == "test_operation"
+        assert error.model.context["target_name"] == "test-service"
+        assert error.model.context["host"] == "service.example.com"
+        assert error.model.context["port"] == 8080
+        assert error.model.context["timeout_seconds"] == 30.0
+
+        # Verify no secret patterns in serialized context
+        self._assert_no_secret_patterns_in_context(
+            error, "InfraTimeoutError with safe fields"
         )
 
     # =========================================================================

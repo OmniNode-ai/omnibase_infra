@@ -555,7 +555,7 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
                 timeout_seconds=self._config.command_timeout,
             )
             raise InfraTimeoutError(
-                f"get_replay_history timed out after {self._config.command_timeout}s",
+                f"Get replay history timed out after {self._config.command_timeout}s",
                 context=timeout_ctx,
             ) from e
         except asyncpg.PostgresConnectionError as e:

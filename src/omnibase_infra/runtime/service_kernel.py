@@ -461,7 +461,30 @@ async def bootstrap() -> int:
         # Environment override takes precedence over config for environment field.
         environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
         kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-        use_kafka = kafka_bootstrap_servers or config.event_bus.type == "kafka"
+
+        # Explicit bool evaluation (not truthy string) for kafka usage.
+        # KAFKA_BOOTSTRAP_SERVERS env var takes precedence over config.event_bus.type.
+        # This prevents implicit "kafka but localhost" fallback scenarios.
+        use_kafka: bool = (
+            bool(kafka_bootstrap_servers) or config.event_bus.type == "kafka"
+        )
+
+        # Validate bootstrap_servers is provided when kafka is requested via config
+        # This prevents confusing implicit localhost:9092 fallback
+        if use_kafka and not kafka_bootstrap_servers:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="configure_event_bus",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                "Kafka event bus requested (config.event_bus.type='kafka') but "
+                "KAFKA_BOOTSTRAP_SERVERS environment variable is not set. "
+                "Set KAFKA_BOOTSTRAP_SERVERS to the broker address (e.g., 'kafka:9092') "
+                "or use event_bus.type='inmemory' for local development.",
+                context=context,
+                parameter="KAFKA_BOOTSTRAP_SERVERS",
+            )
 
         event_bus_start_time = time.time()
         event_bus: EventBusInmemory | EventBusKafka
@@ -469,8 +492,9 @@ async def bootstrap() -> int:
 
         if use_kafka:
             # Use EventBusKafka for production/integration testing
+            # bootstrap_servers is guaranteed non-empty at this point due to validation above
             kafka_config = ModelKafkaEventBusConfig(
-                bootstrap_servers=kafka_bootstrap_servers or "localhost:9092",
+                bootstrap_servers=kafka_bootstrap_servers,  # type: ignore[arg-type]
                 environment=environment,
                 group=config.consumer_group,
                 circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
@@ -491,7 +515,7 @@ async def bootstrap() -> int:
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="start_event_bus",
                     correlation_id=correlation_id,
-                    target_name=kafka_bootstrap_servers or "localhost:9092",
+                    target_name=kafka_bootstrap_servers,
                 )
                 raise RuntimeHostError(
                     f"Failed to start EventBusKafka: {sanitize_error_message(e)}",
@@ -502,7 +526,7 @@ async def bootstrap() -> int:
                 "Using EventBusKafka (correlation_id=%s)",
                 correlation_id,
                 extra={
-                    "bootstrap_servers": kafka_bootstrap_servers or "localhost:9092",
+                    "bootstrap_servers": kafka_bootstrap_servers,
                     "environment": environment,
                     "consumer_group": config.consumer_group,
                 },
@@ -1126,6 +1150,16 @@ async def bootstrap() -> int:
         #
         # The message handler is extracted to IntrospectionMessageHandler for
         # better testability and separation of concerns (PR #101 code quality).
+        #
+        # NOTE: Duck typing consideration (protocol compliance strategy):
+        # The isinstance(event_bus, EventBusKafka) check gates subscribe() capability.
+        # Both EventBusKafka and EventBusInmemory implement subscribe(), so this
+        # could use duck typing: hasattr(event_bus, 'subscribe') and callable(...).
+        # However, isinstance is retained here because:
+        # 1. Introspection in production requires Kafka's distributed consumer groups
+        # 2. EventBusInmemory's subscribe is for testing, not production introspection
+        # 3. Fail-fast: explicit Kafka check prevents unexpected behavior in prod
+        # Future: Consider ProtocolSubscribableEventBus if more buses need subscribe.
         if introspection_dispatcher is not None and isinstance(
             event_bus, EventBusKafka
         ):

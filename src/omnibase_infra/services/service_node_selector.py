@@ -128,10 +128,16 @@ class ServiceNodeSelector:
 
         Args:
             container: Optional ONEX container for dependency injection.
-                When provided, enables access to shared services and configuration.
+                Stored for interface compliance and future DI integration.
             max_round_robin_entries: Maximum number of round-robin state entries
                 before LRU eviction. Defaults to 1000. Set to 0 for unlimited
                 (not recommended in production).
+
+        Note:
+            The container is stored for interface compliance with the standard ONEX
+            service pattern and to enable future DI-based enhancements (e.g., metrics
+            reporting, configuration injection). Currently, the selector operates
+            with stateless selection logic that doesn't require container services.
         """
         self._container = container
         self._round_robin_state: dict[str, RoundRobinEntry] = {}

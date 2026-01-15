@@ -53,7 +53,7 @@ class ModelDispatchOutcome(BaseModel):
     .. versionadded:: 0.6.0
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     topics: list[str] = Field(
         default_factory=list,

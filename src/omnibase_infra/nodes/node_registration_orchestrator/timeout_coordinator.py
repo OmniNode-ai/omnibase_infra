@@ -154,6 +154,8 @@ class ModelTimeoutCoordinationResult(BaseModel):
         Raises:
             ValueError: If input is not a valid sequence type.
         """
+        # NOTE: isinstance checks validate runtime type, but mypy cannot narrow
+        # the generic Sequence type to tuple[str, ...] in this validator context.
         if isinstance(v, tuple):
             return v  # type: ignore[return-value]
         if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):

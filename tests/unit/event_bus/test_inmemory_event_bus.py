@@ -791,6 +791,33 @@ class TestInMemoryEventBusPublishEnvelope:
 
         await event_bus.close()
 
+    @pytest.mark.asyncio
+    async def test_publish_envelope_non_serializable_raises_explicit_error(
+        self, event_bus: EventBusInmemory
+    ) -> None:
+        """Test publish_envelope raises explicit error for non-serializable envelopes.
+
+        This test verifies that non-JSON-serializable objects produce a clear
+        ProtocolConfigurationError instead of a raw TypeError, providing better
+        diagnostics for debugging serialization issues.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        await event_bus.start()
+
+        # Create an object that cannot be JSON-serialized (lambda is not serializable)
+        non_serializable = {"callback": lambda x: x, "data": "test"}
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await event_bus.publish_envelope(non_serializable, "test-topic")
+
+        # Verify error message is helpful and contains diagnostic information
+        error_msg = str(exc_info.value)
+        assert "not JSON-serializable" in error_msg
+        assert "dict" in error_msg or "envelope" in error_msg.lower()
+
+        await event_bus.close()
+
 
 class TestInMemoryEventBusHealthCheck:
     """Test suite for health check operations."""

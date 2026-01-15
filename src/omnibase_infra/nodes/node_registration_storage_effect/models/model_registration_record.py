@@ -88,7 +88,7 @@ class ModelRegistrationRecord(BaseModel):
         <EnumNodeKind.EFFECT: 'effect'>
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     node_id: UUID = Field(
         ...,

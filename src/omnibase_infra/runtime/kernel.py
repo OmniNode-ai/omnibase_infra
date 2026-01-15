@@ -11,10 +11,11 @@ Functions:
     load_runtime_config: Load runtime configuration from contract and environment.
 
 Example:
+    from pathlib import Path
     from omnibase_infra.runtime.kernel import bootstrap, main, load_runtime_config
 
-    # Load configuration
-    config = load_runtime_config(contract_path="./contract.yaml")
+    # Load configuration from contracts directory
+    config = load_runtime_config(contracts_dir=Path("./contracts"))
 
     # Run the kernel
     main()

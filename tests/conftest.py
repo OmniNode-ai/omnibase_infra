@@ -378,8 +378,11 @@ def mock_container() -> MagicMock:
 
     Example:
         >>> async def test_with_container(mock_container):
-        ...     # Mock container is ready to use (async methods)
+        ...     # Configure the mock to return your service
         ...     mock_container.service_registry.resolve_service.return_value = some_service
+        ...     # Call with await (resolve_service is async in this test harness)
+        ...     result = await mock_container.service_registry.resolve_service(SomeType)
+        ...     assert result is some_service
     """
     container = MagicMock()
 

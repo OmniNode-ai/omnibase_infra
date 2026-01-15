@@ -113,6 +113,24 @@ class MixinPolicyValidation:
                 policy_class=policy_class.__name__,
             )
 
+        # Validate policy_id attribute exists on the class (individual check)
+        if not has_policy_id:
+            raise PolicyRegistryError(
+                f"Policy class {policy_class.__name__!r} is missing policy_id "
+                f"property from ProtocolPolicy protocol",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__,
+            )
+
+        # Validate policy_type attribute exists on the class (individual check)
+        if not has_policy_type:
+            raise PolicyRegistryError(
+                f"Policy class {policy_class.__name__!r} is missing policy_type "
+                f"property from ProtocolPolicy protocol",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__,
+            )
+
         # Check evaluate() method exists
         if not has_evaluate:
             raise PolicyRegistryError(

@@ -324,6 +324,8 @@ class ModelDispatchError(BaseModel):
         if self.has_message:
             result["error_message"] = self.error_message
         if self.has_code:
+            # NOTE: has_code guard ensures error_code is not None,
+            # but mypy cannot narrow the Optional[Enum] type in this context.
             result["error_code"] = self.error_code.name  # type: ignore[union-attr]
         if self.has_details:
             result["error_details"] = self.error_details

@@ -15,10 +15,33 @@ Architecture:
     This protocol enables the capability-oriented design principle:
     "I'm interested in what you do, not what you are"
 
+Protocol Duplication Note:
+    This protocol is intentionally separate from the handler-level protocol
+    at ``handlers/service_discovery/protocol_discovery_operations.py``:
+
+    - **This protocol (nodes/*/protocols/)**: Node-level contract used for
+      container-based dependency injection and registry binding. Uses
+      ``ModelServiceRegistration`` with required ``correlation_id``.
+
+    - **Handler protocol (handlers/*/protocol_*.py)**: Handler implementation
+      contract used by tests for compliance verification. Uses
+      ``ModelServiceInfo`` with optional ``correlation_id``.
+
+    The separation allows:
+    1. Node-level protocols to evolve independently of handler contracts
+    2. Different parameter models appropriate for each layer
+    3. Clear ownership boundaries (nodes own their protocols)
+
+    Both protocols share the same name for discoverability, but serve
+    different architectural layers.
+
 Protocol Verification:
     Per ONEX conventions, protocol compliance is verified via duck typing
     rather than isinstance checks. The @runtime_checkable decorator enables
     structural subtyping checks.
+
+    However, registries use isinstance() for fail-fast validation at
+    registration time. See registry_infra_service_discovery.py for rationale.
 
 Thread Safety:
     Handler implementations may be invoked concurrently.
@@ -30,6 +53,7 @@ Related:
     - ModelDiscoveryQuery: Input model for discovery queries
     - ModelDiscoveryResult: Output model for discovery results
     - ModelRegistrationResult: Output model for registration
+    - handlers/service_discovery/protocol_discovery_operations.py: Handler protocol
     - OMN-1131: Capability-oriented node architecture
 """
 

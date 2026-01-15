@@ -392,7 +392,8 @@ class EventBusInmemory:
 
         Raises:
             InfraUnavailableError: If the bus has not been started.
-            TypeError: If envelope cannot be JSON-serialized.
+            ProtocolConfigurationError: If envelope cannot be JSON-serialized (explicit
+                handling provides clearer error messages than raw TypeError).
         """
         # Serialize envelope to JSON bytes
         # Note: envelope is expected to have a model_dump() method (Pydantic)
@@ -409,11 +410,28 @@ class EventBusInmemory:
             envelope_dict = envelope
         else:
             # Fallback for non-Pydantic, non-dict types (e.g., primitive JSON-serializable
-            # types like str, int, list). json.dumps() will raise TypeError if the object
-            # is not JSON-serializable, providing a clear error at serialization time.
+            # types like str, int, list). Explicit handling below catches TypeError.
             envelope_dict = envelope
 
-        value = json.dumps(envelope_dict).encode("utf-8")
+        # Explicit error handling for non-serializable envelopes
+        # This provides clearer error messages than letting json.dumps raise raw TypeError
+        try:
+            value = json.dumps(envelope_dict).encode("utf-8")
+        except TypeError as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.INMEMORY,
+                operation="publish_envelope",
+                target_name=f"event_bus.{self._environment}",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"Envelope is not JSON-serializable: {e}. "
+                f"Ensure envelope is a Pydantic model (with model_dump), dict, or "
+                f"JSON-compatible primitive. Got type: {type(envelope).__name__}",
+                context=context,
+                parameter="envelope",
+                value=str(type(envelope)),
+            ) from e
 
         headers = ModelEventHeaders(
             source=f"{self._environment}.{self._group}",

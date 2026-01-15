@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
     ComputePluginClass = type[ProtocolPluginCompute]
 else:
+    # NOTE: At runtime we use generic type to avoid circular import.
+    # Type checkers see proper protocol type via TYPE_CHECKING block.
     ComputePluginClass = type  # type: ignore[assignment,misc]
 
 

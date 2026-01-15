@@ -556,7 +556,7 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
 
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
-                f"is_processed query timed out after {self._config.command_timeout}s",
+                f"Processed check query timed out after {self._config.command_timeout}s",
                 context=ModelTimeoutErrorContext(
                     transport_type=context.transport_type,
                     operation=context.operation,
@@ -567,7 +567,7 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
-                "Database connection lost during is_processed query",
+                "Database connection lost during processed check query",
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
@@ -661,7 +661,7 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
 
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
-                f"mark_processed timed out after {self._config.command_timeout}s",
+                f"Mark processed timed out after {self._config.command_timeout}s",
                 context=ModelTimeoutErrorContext(
                     transport_type=context.transport_type,
                     operation=context.operation,
@@ -672,7 +672,7 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
-                "Database connection lost during mark_processed",
+                "Database connection lost during mark processed",
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:

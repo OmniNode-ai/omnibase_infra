@@ -50,7 +50,7 @@ class ModelValidateAndRaiseParams(BaseModel):
         ...,
         description="The declared node archetype",
     )
-    # NOTE: Any required for Pydantic - output can be any handler return value
+    # NOTE: Using `object` per ONEX guidelines (not `Any`) - output can be any handler return value
     output: object = Field(
         ...,
         description="The actual output object",

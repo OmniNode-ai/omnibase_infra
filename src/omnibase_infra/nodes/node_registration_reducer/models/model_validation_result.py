@@ -53,7 +53,7 @@ class ModelValidationResult(BaseModel):
         Extracted to separate file (OMN-1104).
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, from_attributes=True)
 
     is_valid: bool
     error_code: ValidationErrorCode | None = None

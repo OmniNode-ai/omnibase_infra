@@ -21,7 +21,8 @@ if TYPE_CHECKING:
     # Type alias for policy class - uses TYPE_CHECKING to avoid circular import
     PolicyClass = type[ProtocolPolicy]
 else:
-    # At runtime, use generic type to avoid import
+    # NOTE: At runtime we use generic type to avoid circular import.
+    # Type checkers see proper protocol type via TYPE_CHECKING block.
     PolicyClass = type  # type: ignore[assignment,misc]
 
 

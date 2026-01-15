@@ -444,6 +444,54 @@ class TestBootstrap:
         assert config.bootstrap_servers == "kafka:9092"
         assert config.environment == "test-env"
 
+    async def test_bootstrap_fails_when_kafka_configured_without_bootstrap_servers(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that bootstrap returns error when kafka is configured but KAFKA_BOOTSTRAP_SERVERS is not set.
+
+        This prevents implicit localhost:9092 fallback which can cause confusing behavior
+        when someone configures event_bus.type='kafka' but forgets to set the env var.
+
+        Note: bootstrap() catches ProtocolConfigurationError and returns exit code 1,
+        so we verify via return value and logged error message.
+        """
+        # Clear KAFKA_BOOTSTRAP_SERVERS to ensure it's not set
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
+
+        # Create config that requests kafka event bus
+        runtime_config_dir = tmp_path / "runtime"
+        runtime_config_dir.mkdir()
+        config_file = runtime_config_dir / "runtime_config.yaml"
+        config_file.write_text(
+            """
+input_topic: requests
+output_topic: responses
+consumer_group: onex-runtime
+event_bus:
+  type: kafka
+  environment: test
+  circuit_breaker_threshold: 5
+shutdown:
+  grace_period_seconds: 30
+"""
+        )
+
+        # Bootstrap should return error exit code (1)
+        exit_code = await bootstrap()
+        assert exit_code == 1, "Expected exit code 1 for configuration error"
+
+        # Verify error message was logged with helpful information
+        assert "KAFKA_BOOTSTRAP_SERVERS" in caplog.text
+        assert "kafka" in caplog.text.lower()
+
     async def test_bootstrap_uses_contracts_dir_from_env(
         self,
         mock_wire_infrastructure: MagicMock,

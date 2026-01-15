@@ -307,6 +307,8 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
             await asyncio.wait_for(
                 loop.run_in_executor(
                     executor,
+                    # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
+                    # agent.service.register exists on Optional[Consul] union type.
                     lambda: client.agent.service.register(  # type: ignore[union-attr]
                         name=service_info.service_name,
                         service_id=service_id_str,
@@ -437,6 +439,8 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
             await asyncio.wait_for(
                 loop.run_in_executor(
                     executor,
+                    # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
+                    # agent.service.deregister exists on Optional[Consul] union type.
                     lambda: client.agent.service.deregister(service_id_str),  # type: ignore[union-attr]
                 ),
                 timeout=self._timeout_seconds,
@@ -541,6 +545,8 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
             def _query_services() -> tuple[int, list[dict[str, object]]]:
                 # Use health endpoint for service discovery (includes health status)
                 tag = tags[0] if tags else None
+                # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
+                # health.service exists on Optional[Consul] union type.
                 result: tuple[int, list[dict[str, object]]] = client.health.service(  # type: ignore[union-attr]
                     service_name,
                     tag=tag,
@@ -684,6 +690,8 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
             leader = await asyncio.wait_for(
                 loop.run_in_executor(
                     executor,
+                    # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
+                    # status.leader exists on Optional[Consul] union type.
                     lambda: client.status.leader(),  # type: ignore[union-attr]
                 ),
                 timeout=5.0,  # Short timeout for health check
