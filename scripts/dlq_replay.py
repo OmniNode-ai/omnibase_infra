@@ -579,7 +579,7 @@ class ModelReplayResult(BaseModel):
 # =============================================================================
 
 # Use centralized enum for non-retryable error types.
-# This ensures consistency with kafka_event_bus.py and other retry logic.
+# This ensures consistency with event_bus_kafka.py and other retry logic.
 # See: src/omnibase_infra/enums/enum_non_retryable_error_category.py
 # Related: OMN-1032
 NON_RETRYABLE_ERRORS = EnumNonRetryableErrorCategory.get_all_values()

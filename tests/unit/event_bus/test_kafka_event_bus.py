@@ -51,7 +51,7 @@ class TestKafkaEventBusLifecycle:
     async def kafka_event_bus(self, mock_producer: AsyncMock) -> EventBusKafka:
         """Create EventBusKafka with mocked producer."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -73,7 +73,7 @@ class TestKafkaEventBusLifecycle:
     ) -> None:
         """Test bus lifecycle - start and close operations."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             # Initially not started
@@ -100,7 +100,7 @@ class TestKafkaEventBusLifecycle:
     ) -> None:
         """Test that multiple start calls are safe (idempotent)."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             await kafka_event_bus.start()
@@ -120,7 +120,7 @@ class TestKafkaEventBusLifecycle:
     ) -> None:
         """Test that multiple close calls are safe (idempotent)."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             await kafka_event_bus.start()
@@ -136,7 +136,7 @@ class TestKafkaEventBusLifecycle:
     ) -> None:
         """Test shutdown() is an alias for close()."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             await kafka_event_bus.start()
@@ -149,7 +149,7 @@ class TestKafkaEventBusLifecycle:
     async def test_initialize_with_config(self, mock_producer: AsyncMock) -> None:
         """Test initialize() method with configuration override."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             event_bus = EventBusKafka()
@@ -229,7 +229,7 @@ class TestKafkaEventBusPublish:
     async def kafka_event_bus(self, mock_producer: AsyncMock) -> EventBusKafka:
         """Create EventBusKafka with mocked producer."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -258,7 +258,7 @@ class TestKafkaEventBusPublish:
     ) -> None:
         """Test basic publish operation (mocked producer)."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             await kafka_event_bus.start()
@@ -280,7 +280,7 @@ class TestKafkaEventBusPublish:
     ) -> None:
         """Test publish with None key."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             await kafka_event_bus.start()
@@ -299,7 +299,7 @@ class TestKafkaEventBusPublish:
     ) -> None:
         """Test publish with custom headers."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             await kafka_event_bus.start()
@@ -327,7 +327,7 @@ class TestKafkaEventBusPublish:
     async def test_publish_circuit_breaker_open(self, mock_producer: AsyncMock) -> None:
         """Test error when circuit breaker is open."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -369,7 +369,7 @@ class TestKafkaEventBusSubscribe:
     async def kafka_event_bus(self, mock_producer: AsyncMock) -> EventBusKafka:
         """Create EventBusKafka with mocked producer."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -391,7 +391,7 @@ class TestKafkaEventBusSubscribe:
     ) -> None:
         """Test that subscribe returns an unsubscribe callable."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             # Don't start the bus - subscribe should still work for registration
@@ -472,7 +472,7 @@ class TestKafkaEventBusHealthCheck:
     async def kafka_event_bus(self, mock_producer: AsyncMock) -> EventBusKafka:
         """Create EventBusKafka with mocked producer."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -510,7 +510,7 @@ class TestKafkaEventBusHealthCheck:
     ) -> None:
         """Test health check when started."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             await kafka_event_bus.start()
@@ -528,7 +528,7 @@ class TestKafkaEventBusHealthCheck:
     ) -> None:
         """Test health check includes circuit breaker status."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             await kafka_event_bus.start()
@@ -579,7 +579,7 @@ class TestKafkaEventBusCircuitBreaker:
     ) -> None:
         """Test circuit breaker opens after consecutive failures."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -609,7 +609,7 @@ class TestKafkaEventBusCircuitBreaker:
     ) -> None:
         """Test circuit breaker resets after successful operation."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -644,7 +644,7 @@ class TestKafkaEventBusCircuitBreaker:
         """
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -697,7 +697,7 @@ class TestKafkaEventBusCircuitBreaker:
     ) -> None:
         """Test circuit breaker blocks operations when open."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -740,7 +740,7 @@ class TestKafkaEventBusErrors:
         )
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
@@ -768,7 +768,7 @@ class TestKafkaEventBusErrors:
         mock_producer.start = AsyncMock(side_effect=TimeoutError("Connection timeout"))
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -818,7 +818,7 @@ class TestKafkaEventBusPublishRetry:
         mock_producer.send = AsyncMock(side_effect=mock_send)
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -849,7 +849,7 @@ class TestKafkaEventBusPublishRetry:
         mock_producer.send = AsyncMock(side_effect=mock_send)
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -902,7 +902,7 @@ class TestKafkaEventBusPublishEnvelope:
             count: int
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -928,7 +928,7 @@ class TestKafkaEventBusPublishEnvelope:
     async def test_publish_envelope_with_dict(self, mock_producer: AsyncMock) -> None:
         """Test publish_envelope with a plain dict."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -978,7 +978,7 @@ class TestKafkaEventBusBroadcast:
     async def test_broadcast_to_environment(self, mock_producer: AsyncMock) -> None:
         """Test broadcast_to_environment publishes to correct topic."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -1009,7 +1009,7 @@ class TestKafkaEventBusBroadcast:
     ) -> None:
         """Test broadcast to a specific target environment."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -1034,7 +1034,7 @@ class TestKafkaEventBusBroadcast:
     async def test_send_to_group(self, mock_producer: AsyncMock) -> None:
         """Test send_to_group publishes to correct topic."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(
@@ -1248,11 +1248,11 @@ class TestKafkaEventBusConsumerManagement:
         """Test consumer is started when subscribing to a topic."""
         with (
             patch(
-                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
                 return_value=mock_producer,
             ),
             patch(
-                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
                 return_value=mock_consumer,
             ),
         ):
@@ -1277,11 +1277,11 @@ class TestKafkaEventBusConsumerManagement:
         """Test close stops all active consumers."""
         with (
             patch(
-                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
                 return_value=mock_producer,
             ),
             patch(
-                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
                 return_value=mock_consumer,
             ),
         ):
@@ -1315,7 +1315,7 @@ class TestKafkaEventBusStartConsuming:
     async def test_start_consuming_auto_starts(self, mock_producer: AsyncMock) -> None:
         """Test that start_consuming auto-starts the bus."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
@@ -1340,7 +1340,7 @@ class TestKafkaEventBusStartConsuming:
     ) -> None:
         """Test that start_consuming exits when shutdown is called."""
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
@@ -1557,7 +1557,7 @@ class TestKafkaEventBusDLQRouting:
         PR #90 feedback: Assert DLQ metrics are incremented.
         """
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             event_bus = EventBusKafka(config=dlq_config)
@@ -1628,7 +1628,7 @@ class TestKafkaEventBusDLQRouting:
         PR #90 feedback: Assert DLQ metrics are incremented.
         """
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             event_bus = EventBusKafka(config=dlq_config)
@@ -1704,11 +1704,11 @@ class TestKafkaEventBusDLQRouting:
         """
         with (
             patch(
-                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
                 return_value=mock_producer,
             ),
             patch(
-                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
             ) as mock_consumer_class,
         ):
             # Create async iterator for consumer
@@ -1791,7 +1791,7 @@ class TestKafkaEventBusDLQRouting:
         )
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             event_bus = EventBusKafka(config=config)
@@ -1860,7 +1860,7 @@ class TestKafkaEventBusDLQRouting:
         mock_producer.send = AsyncMock(side_effect=mock_send)
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             event_bus = EventBusKafka(config=dlq_config)
@@ -1928,7 +1928,7 @@ class TestKafkaEventBusDLQRouting:
         PR #90 feedback: Assert DLQ metrics are incremented.
         """
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
             return_value=mock_producer,
         ):
             event_bus = EventBusKafka(config=dlq_config)

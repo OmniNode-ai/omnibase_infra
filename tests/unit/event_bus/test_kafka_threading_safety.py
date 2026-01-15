@@ -61,7 +61,7 @@ class TestKafkaEventBusThreadingSafety:
 
         # Start the bus (this will fail to connect but we'll mock it)
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer"
         ) as MockProducer:
             MockProducer.return_value = mock_producer
             mock_producer.start = AsyncMock()
@@ -94,7 +94,7 @@ class TestKafkaEventBusThreadingSafety:
         bus = EventBusKafka.default()
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer"
         ) as MockProducer:
             mock_producer = AsyncMock()
             mock_producer.start = AsyncMock()
@@ -131,7 +131,7 @@ class TestKafkaEventBusThreadingSafety:
         bus = EventBusKafka.default()
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer"
         ) as MockProducer:
             mock_producer = AsyncMock()
             MockProducer.return_value = mock_producer
@@ -179,7 +179,7 @@ class TestKafkaEventBusThreadingSafety:
         bus = EventBusKafka.default()
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer"
         ) as MockProducer:
             mock_producer = AsyncMock()
             mock_producer.start = AsyncMock()
@@ -207,7 +207,7 @@ class TestKafkaEventBusThreadingSafety:
         bus = EventBusKafka.default()
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer"
         ) as MockProducer:
             mock_producer = AsyncMock()
             mock_producer.start = AsyncMock()
@@ -248,7 +248,7 @@ class TestKafkaEventBusThreadingSafety:
         bus = EventBusKafka(config=config)
 
         with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer"
         ) as MockProducer:
             mock_producer = AsyncMock()
             MockProducer.return_value = mock_producer

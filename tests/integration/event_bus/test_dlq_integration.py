@@ -18,7 +18,7 @@ Environment Variables:
 
 Related:
     - omnibase_infra.event_bus.topic_constants: DLQ topic utilities
-    - omnibase_infra.event_bus.kafka_event_bus: EventBusKafka with DLQ support
+    - omnibase_infra.event_bus.event_bus_kafka: EventBusKafka with DLQ support
     - omnibase_infra.event_bus.models.model_dlq_event: DLQ event model
 """
 

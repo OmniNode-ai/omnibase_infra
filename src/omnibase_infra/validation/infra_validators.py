@@ -65,14 +65,14 @@ class ExemptionPattern(TypedDict, total=False):
     hardcoded line numbers that break when code changes.
 
     Fields:
-        file_pattern: Regex pattern matching the filename (e.g., r"kafka_event_bus\\.py")
+        file_pattern: Regex pattern matching the filename (e.g., r"event_bus_kafka\\.py")
         class_pattern: Optional regex for class name (e.g., r"Class 'EventBusKafka'")
         method_pattern: Optional regex for method name (e.g., r"Function '__init__'")
         violation_pattern: Regex matching the violation type (e.g., r"too many (methods|parameters)")
 
     Example:
         {
-            "file_pattern": r"kafka_event_bus\\.py",
+            "file_pattern": r"event_bus_kafka\\.py",
             "class_pattern": r"Class 'EventBusKafka'",
             "violation_pattern": r"has \\d+ methods"
         }
@@ -324,7 +324,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #   - Event bus pattern requires: lifecycle (start/stop/health), pub/sub
 #     (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility
 #   - Backwards compatibility during config migration requires multiple __init__ params
-#   - See: kafka_event_bus.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
+#   - See: event_bus_kafka.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
 #
 # RuntimeHostProcess (11+ methods, 6+ __init__ params):
 #   - Central coordinator requires: lifecycle management, message handling,
@@ -337,11 +337,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Exemption Pattern Examples (explicit format):
 # ---------------------------------------------
 # EventBusKafka method count:
-#   {"file_pattern": r"kafka_event_bus\.py", "class_pattern": r"Class 'EventBusKafka'",
+#   {"file_pattern": r"event_bus_kafka\.py", "class_pattern": r"Class 'EventBusKafka'",
 #    "violation_pattern": r"has \d+ methods"}
 #
 # EventBusKafka __init__ params:
-#   {"file_pattern": r"kafka_event_bus\.py", "method_pattern": r"Function '__init__'",
+#   {"file_pattern": r"event_bus_kafka\.py", "method_pattern": r"Function '__init__'",
 #    "violation_pattern": r"has \d+ parameters"}
 #
 # RuntimeHostProcess method count:
@@ -544,16 +544,16 @@ def _filter_exempted_errors(
     Example:
         Pattern:
             {
-                "file_pattern": r"kafka_event_bus\\.py",
+                "file_pattern": r"event_bus_kafka\\.py",
                 "class_pattern": r"Class 'EventBusKafka'",
                 "violation_pattern": r"has \\d+ methods"
             }
 
         Matches error:
-            "kafka_event_bus.py:123: Class 'EventBusKafka' has 14 methods (threshold: 10)"
+            "event_bus_kafka.py:123: Class 'EventBusKafka' has 14 methods (threshold: 10)"
 
         Does not match:
-            "kafka_event_bus.py:50: Function 'connect' has 7 parameters" (no class_pattern)
+            "event_bus_kafka.py:50: Function 'connect' has 7 parameters" (no class_pattern)
             "other_file.py:10: Class 'EventBusKafka' has 14 methods" (wrong file)
     """
     # Defensive type checks for list inputs

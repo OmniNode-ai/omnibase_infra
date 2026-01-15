@@ -91,7 +91,7 @@ Integration Requirements:
 
 See Also:
     - docs/analysis/CIRCUIT_BREAKER_COMPARISON.md for design rationale
-    - src/omnibase_infra/event_bus/kafka_event_bus.py for reference implementation
+    - src/omnibase_infra/event_bus/event_bus_kafka.py for reference implementation
 """
 
 from __future__ import annotations
