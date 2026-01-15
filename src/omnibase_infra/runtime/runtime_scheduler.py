@@ -153,7 +153,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             event_bus: KafkaEventBus instance for publishing tick events.
 
         Raises:
-            ValueError: If config or event_bus is None.
+            ProtocolConfigurationError: If config or event_bus is None.
         """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.RUNTIME,

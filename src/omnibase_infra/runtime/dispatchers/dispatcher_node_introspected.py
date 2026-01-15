@@ -247,6 +247,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="handle_introspection",
+                    correlation_id=correlation_id,
                 )
                 raise EnvelopeValidationError(
                     f"Expected ModelNodeIntrospectionEvent after validation, "

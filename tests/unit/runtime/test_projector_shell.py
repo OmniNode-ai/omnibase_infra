@@ -2462,16 +2462,16 @@ class TestProjectorShellPartialUpdate:
         assert aggregate_id == args[-1]
 
     @pytest.mark.asyncio
-    async def test_partial_update_empty_updates_raises_value_error(
+    async def test_partial_update_empty_updates_raises_protocol_configuration_error(
         self,
         sample_contract: ModelProjectorContract,
         mock_pool: AsyncMock,
     ) -> None:
-        """partial_update raises ValueError for empty updates dict.
+        """partial_update raises ProtocolConfigurationError for empty updates dict.
 
         Given: Empty updates dict
         When: partial_update() called
-        Then: Raises ValueError
+        Then: Raises ProtocolConfigurationError
         """
         from omnibase_infra.runtime.projector_shell import ProjectorShell
 

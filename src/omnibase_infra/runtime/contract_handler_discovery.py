@@ -539,6 +539,7 @@ class ContractHandlerDiscovery:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="import_handler_class",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Invalid class path '{class_path}': must be fully qualified "
@@ -555,6 +556,7 @@ class ContractHandlerDiscovery:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="import_handler_class",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"'{class_path}' is not a class (got {type(handler_class).__name__})",

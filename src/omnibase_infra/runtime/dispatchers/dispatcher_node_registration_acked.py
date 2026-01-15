@@ -249,6 +249,7 @@ class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="handle_registration_acked",
+                    correlation_id=correlation_id,
                 )
                 raise EnvelopeValidationError(
                     f"Expected ModelNodeRegistrationAcked after validation, "

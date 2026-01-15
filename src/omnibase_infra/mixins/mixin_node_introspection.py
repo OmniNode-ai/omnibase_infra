@@ -620,7 +620,7 @@ class MixinNodeIntrospection:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="initialize_introspection",
-                target_name=config.node_id,
+                target_name=str(config.node_id),
                 correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
@@ -1445,7 +1445,7 @@ class MixinNodeIntrospection:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="publish_introspection",
-                target_name=self._introspection_node_id,
+                target_name=str(self._introspection_node_id),
                 correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(

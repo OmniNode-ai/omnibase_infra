@@ -664,7 +664,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
             False if no row was found matching the aggregate_id.
 
         Raises:
-            ValueError: If updates dict is empty.
+            ProtocolConfigurationError: If updates dict is empty.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If update times out.
             RuntimeHostError: For other database errors.
@@ -771,7 +771,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
             True if a row was inserted or updated successfully.
 
         Raises:
-            ValueError: If values dict is empty or missing required conflict columns.
+            ProtocolConfigurationError: If values dict is empty or missing required conflict columns.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If upsert times out.
             RuntimeHostError: For other database errors.
@@ -1042,6 +1042,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="execute_projection",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Unknown projection mode: {mode}",

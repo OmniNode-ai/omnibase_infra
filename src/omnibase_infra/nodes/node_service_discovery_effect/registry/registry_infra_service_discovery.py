@@ -42,7 +42,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
@@ -160,7 +159,6 @@ class RegistryInfraServiceDiscovery:
 
         if not isinstance(handler, ProtocolServiceDiscoveryHandler):
             context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
                 operation="register_handler",
             )
             raise ProtocolConfigurationError(

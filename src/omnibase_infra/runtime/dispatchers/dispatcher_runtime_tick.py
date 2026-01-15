@@ -246,6 +246,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="handle_runtime_tick",
+                    correlation_id=correlation_id,
                 )
                 raise EnvelopeValidationError(
                     f"Expected ModelRuntimeTick after validation, "

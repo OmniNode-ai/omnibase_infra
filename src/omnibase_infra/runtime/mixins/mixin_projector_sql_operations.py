@@ -501,6 +501,7 @@ class MixinProjectorSqlOperations:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="partial_upsert",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "values dict cannot be empty for partial_upsert",
@@ -523,6 +524,7 @@ class MixinProjectorSqlOperations:
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="partial_upsert",
+                    correlation_id=correlation_id,
                 )
                 raise ProtocolConfigurationError(
                     f"values dict must include conflict column '{col}' for partial_upsert",
@@ -672,6 +674,7 @@ class MixinProjectorSqlOperations:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="partial_update",
+                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 "updates dict cannot be empty for partial_update",
