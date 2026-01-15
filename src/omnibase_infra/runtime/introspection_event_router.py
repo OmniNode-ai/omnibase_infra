@@ -20,10 +20,11 @@ Design:
     - Clearer separation between bootstrap and event routing
 
 Dependency Injection:
-    This class follows the ONEX container-based DI pattern:
-    - Constructor accepts ModelONEXContainer for dependency injection
-    - initialize() method accepts runtime configuration and dependencies
-    - Dependencies are resolved from container or passed explicitly
+    This class follows the ONEX container-based DI pattern per CLAUDE.md:
+    - Constructor accepts ``ModelONEXContainer`` for dependency injection
+    - Dependencies are resolved from container via ``get_service()``
+    - Optional explicit dependencies can be passed for testing or when
+      services are not yet registered in the container
 
 Related:
     - OMN-888: Registration Orchestrator
@@ -103,28 +104,20 @@ class IntrospectionEventRouter:
     Dependency Injection:
         This class follows the ONEX container-based DI pattern per CLAUDE.md:
         - Constructor accepts ``ModelONEXContainer`` for dependency injection
-        - ``initialize()`` method accepts runtime dependencies created by kernel
-        - Container provides access to configuration, metrics, and service registry
-
-        Runtime dependencies (dispatcher, event_bus) are passed via ``initialize()``
-        because they are created by the kernel at runtime and are not registered
-        in the container's service registry. The container is still used for:
-        - Access to ONEX configuration
-        - Performance metrics tracking
-        - Service registry for future integrations
+        - Dependencies are resolved from container via ``get_service()``
+        - Optional explicit dependencies can be passed for testing or when
+          services are not yet registered in the container
 
     Attributes:
         _container: ONEX container for dependency injection.
         _dispatcher: The DispatcherNodeIntrospected to route events to.
         _event_bus: The EventBusKafka for publishing output events.
         _output_topic: The topic to publish output events to.
-        _initialized: Whether the router has been initialized.
 
     Example:
-        >>> router = IntrospectionEventRouter(container)
-        >>> router.initialize(
-        ...     dispatcher=introspection_dispatcher,
-        ...     event_bus=kafka_bus,
+        >>> # Preferred: Dependencies pre-registered in container
+        >>> router = IntrospectionEventRouter(
+        ...     container=container,
         ...     output_topic="registration.output",
         ... )
         >>> # Use as callback for event bus subscription
@@ -133,6 +126,14 @@ class IntrospectionEventRouter:
         ...     group_id="my-group",
         ...     on_message=router.handle_message,
         ... )
+        >>>
+        >>> # Alternative: Explicit dependencies when not in container
+        >>> router = IntrospectionEventRouter(
+        ...     container=container,
+        ...     dispatcher=introspection_dispatcher,
+        ...     event_bus=kafka_bus,
+        ...     output_topic="registration.output",
+        ... )
 
     See Also:
         - CLAUDE.md "Container-Based Dependency Injection" section for the
@@ -140,78 +141,154 @@ class IntrospectionEventRouter:
         - docs/patterns/container_dependency_injection.md for detailed DI patterns.
     """
 
-    def __init__(self, container: ModelONEXContainer) -> None:
-        """Initialize IntrospectionEventRouter with required container injection.
+    def __init__(
+        self,
+        container: ModelONEXContainer,
+        output_topic: str,
+        *,
+        dispatcher: DispatcherNodeIntrospected | None = None,
+        event_bus: EventBusKafka | None = None,
+    ) -> None:
+        """Initialize IntrospectionEventRouter with container-based DI.
+
+        Dependencies are resolved from the container's service registry when
+        not explicitly provided. This follows the ONEX container-based DI
+        pattern per CLAUDE.md.
 
         Args:
             container: ONEX container for dependency injection. Required per ONEX
                 pattern (``def __init__(self, container: ModelONEXContainer)``).
-                Provides access to ONEX configuration, metrics, and service registry.
+                Provides access to service registry, configuration, and metrics.
+            output_topic: The topic to publish output events to.
+            dispatcher: Optional explicit dispatcher. If not provided, resolved
+                from container via ``get_service(DispatcherNodeIntrospected)``.
+            event_bus: Optional explicit event bus. If not provided, resolved
+                from container via ``get_service(EventBusKafka)``.
 
-        Note:
-            After construction, call ``initialize()`` to configure the router
-            with its runtime dependencies (dispatcher, event_bus, output_topic).
-            Runtime dependencies are passed to initialize() because they are
-            created by the kernel at runtime, not registered in the container.
+        Raises:
+            ValueError: If output_topic is empty.
+            RuntimeHostError: If dependencies cannot be resolved from container
+                and are not explicitly provided.
+
+        Example:
+            >>> # Container-resolved dependencies (preferred)
+            >>> router = IntrospectionEventRouter(
+            ...     container=container,
+            ...     output_topic="registration.output",
+            ... )
+            >>>
+            >>> # Explicit dependencies (for testing or transition)
+            >>> router = IntrospectionEventRouter(
+            ...     container=container,
+            ...     output_topic="registration.output",
+            ...     dispatcher=mock_dispatcher,
+            ...     event_bus=mock_event_bus,
+            ... )
 
         See Also:
             - CLAUDE.md "Container-Based Dependency Injection" section for the
               standard ONEX container injection pattern.
         """
-        self._container = container
-        self._dispatcher: DispatcherNodeIntrospected | None = None
-        self._event_bus: EventBusKafka | None = None
-        self._output_topic: str | None = None
-        self._initialized: bool = False
-
-    def initialize(
-        self,
-        dispatcher: DispatcherNodeIntrospected,
-        event_bus: EventBusKafka,
-        output_topic: str,
-    ) -> None:
-        """Initialize the router with runtime dependencies.
-
-        This method configures the router with its runtime dependencies
-        after container construction. Must be called before handle_message().
-
-        Args:
-            dispatcher: The DispatcherNodeIntrospected to route events to.
-            event_bus: The EventBusKafka for publishing output events.
-            output_topic: The topic to publish output events to.
-
-        Raises:
-            ValueError: If output_topic is empty.
-
-        Example:
-            >>> router = IntrospectionEventRouter(container)
-            >>> router.initialize(
-            ...     dispatcher=introspection_dispatcher,
-            ...     event_bus=kafka_bus,
-            ...     output_topic="registration.output",
-            ... )
-        """
         if not output_topic:
             raise ValueError("output_topic cannot be empty")
 
-        self._dispatcher = dispatcher
-        self._event_bus = event_bus
+        self._container = container
         self._output_topic = output_topic
-        self._initialized = True
+
+        # Resolve dispatcher from container or use explicit
+        if dispatcher is not None:
+            self._dispatcher = dispatcher
+        else:
+            self._dispatcher = self._resolve_dispatcher_from_container()
+
+        # Resolve event_bus from container or use explicit
+        if event_bus is not None:
+            self._event_bus = event_bus
+        else:
+            self._event_bus = self._resolve_event_bus_from_container()
 
         logger.debug(
             "IntrospectionEventRouter initialized",
             extra={
                 "output_topic": output_topic,
-                "dispatcher_type": type(dispatcher).__name__,
-                "event_bus_type": type(event_bus).__name__,
+                "dispatcher_type": type(self._dispatcher).__name__,
+                "event_bus_type": type(self._event_bus).__name__,
+                "dispatcher_source": "explicit" if dispatcher else "container",
+                "event_bus_source": "explicit" if event_bus else "container",
             },
         )
 
-    @property
-    def is_initialized(self) -> bool:
-        """Return whether the router has been initialized."""
-        return self._initialized
+    def _resolve_dispatcher_from_container(self) -> DispatcherNodeIntrospected:
+        """Resolve DispatcherNodeIntrospected from container service registry.
+
+        Returns:
+            The dispatcher instance from the container.
+
+        Raises:
+            RuntimeHostError: If dispatcher cannot be resolved from container.
+        """
+        # Import here to avoid circular imports
+        from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
+
+        try:
+            dispatcher = self._container.get_service(DispatcherNodeIntrospected)
+            if dispatcher is None:
+                raise RuntimeHostError(
+                    "DispatcherNodeIntrospected not registered in container. "
+                    "Either register it in the container's service registry or "
+                    "pass it explicitly to __init__."
+                )
+            # Type assertion: get_service returns the registered type
+            if not isinstance(dispatcher, DispatcherNodeIntrospected):
+                raise RuntimeHostError(
+                    f"Container returned unexpected type for DispatcherNodeIntrospected: "
+                    f"{type(dispatcher).__name__}"
+                )
+            return dispatcher
+        except RuntimeHostError:
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Failed to resolve DispatcherNodeIntrospected from container: {e}. "
+                "Either register it in the container's service registry or "
+                "pass it explicitly to __init__."
+            ) from e
+
+    def _resolve_event_bus_from_container(self) -> EventBusKafka:
+        """Resolve EventBusKafka from container service registry.
+
+        Returns:
+            The event bus instance from the container.
+
+        Raises:
+            RuntimeHostError: If event bus cannot be resolved from container.
+        """
+        # Import here to avoid circular imports
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+
+        try:
+            event_bus = self._container.get_service(EventBusKafka)
+            if event_bus is None:
+                raise RuntimeHostError(
+                    "EventBusKafka not registered in container. "
+                    "Either register it in the container's service registry or "
+                    "pass it explicitly to __init__."
+                )
+            # Type assertion: get_service returns the registered type
+            if not isinstance(event_bus, EventBusKafka):
+                raise RuntimeHostError(
+                    f"Container returned unexpected type for EventBusKafka: "
+                    f"{type(event_bus).__name__}"
+                )
+            return event_bus
+        except RuntimeHostError:
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Failed to resolve EventBusKafka from container: {e}. "
+                "Either register it in the container's service registry or "
+                "pass it explicitly to __init__."
+            ) from e
 
     @property
     def container(self) -> ModelONEXContainer:
@@ -227,22 +304,29 @@ class IntrospectionEventRouter:
             The ONEX container instance injected at construction.
 
         Example:
-            >>> router = IntrospectionEventRouter(container)
+            >>> router = IntrospectionEventRouter(
+            ...     container=container,
+            ...     output_topic="registration.output",
+            ... )
             >>> # Access container services
             >>> metrics = router.container.get_performance_metrics()
         """
         return self._container
 
-    def _ensure_initialized(self) -> None:
-        """Ensure the router is initialized before operation.
+    @property
+    def output_topic(self) -> str:
+        """Return the configured output topic for event publishing."""
+        return self._output_topic
 
-        Raises:
-            RuntimeHostError: If router not initialized.
-        """
-        if not self._initialized:
-            raise RuntimeHostError(
-                "IntrospectionEventRouter not initialized. Call initialize() first."
-            )
+    @property
+    def dispatcher(self) -> DispatcherNodeIntrospected:
+        """Return the dispatcher instance."""
+        return self._dispatcher
+
+    @property
+    def event_bus(self) -> EventBusKafka:
+        """Return the event bus instance."""
+        return self._event_bus
 
     def _extract_correlation_id_from_message(self, msg: ModelEventMessage) -> UUID:
         """Extract correlation ID from message headers or generate new one.
@@ -319,18 +403,7 @@ class IntrospectionEventRouter:
 
         Args:
             msg: The event message containing raw bytes in .value field.
-
-        Raises:
-            RuntimeHostError: If router not initialized via initialize().
         """
-        # Ensure router is initialized before processing
-        self._ensure_initialized()
-
-        # Type narrowing: after _ensure_initialized(), these are guaranteed non-None
-        assert self._dispatcher is not None
-        assert self._event_bus is not None
-        assert self._output_topic is not None
-
         # Extract correlation_id from message for proper propagation
         # This ensures distributed tracing continuity across service boundaries
         callback_correlation_id = self._extract_correlation_id_from_message(msg)

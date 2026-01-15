@@ -73,10 +73,31 @@ class MixinPolicyValidation:
 
         Raises:
             PolicyRegistryError: If policy_class does not implement ProtocolPolicy:
+                - policy_id is None or empty
                 - Missing all required attributes (comprehensive error)
                 - Missing evaluate() method
                 - evaluate is not callable
         """
+        # Validate policy_id individually before using in error messages
+        if policy_id is None:
+            raise PolicyRegistryError(
+                "policy_id is required and cannot be None",
+                policy_id=None,
+                policy_class=policy_class.__name__ if policy_class else None,
+            )
+        if not isinstance(policy_id, str):
+            raise PolicyRegistryError(
+                f"policy_id must be a string, got {type(policy_id).__name__}",
+                policy_id=str(policy_id),
+                policy_class=policy_class.__name__ if policy_class else None,
+            )
+        if not policy_id.strip():
+            raise PolicyRegistryError(
+                "policy_id is required and cannot be empty",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__ if policy_class else None,
+            )
+
         # Check for required attributes
         has_policy_id = hasattr(policy_class, "policy_id")
         has_policy_type = hasattr(policy_class, "policy_type")
@@ -156,6 +177,26 @@ class MixinPolicyValidation:
             >>> # This will succeed - async explicitly flagged
             >>> mixin._validate_sync_enforcement("async_pol", AsyncPolicy, True)
         """
+        # Validate policy_id individually before using in error messages
+        if policy_id is None:
+            raise PolicyRegistryError(
+                "policy_id is required and cannot be None",
+                policy_id=None,
+                policy_type=None,
+            )
+        if not isinstance(policy_id, str):
+            raise PolicyRegistryError(
+                f"policy_id must be a string, got {type(policy_id).__name__}",
+                policy_id=str(policy_id),
+                policy_type=None,
+            )
+        if not policy_id.strip():
+            raise PolicyRegistryError(
+                "policy_id is required and cannot be empty",
+                policy_id=policy_id,
+                policy_type=None,
+            )
+
         for method_name in self._ASYNC_CHECK_METHODS:
             if hasattr(policy_class, method_name):
                 method = getattr(policy_class, method_name)
@@ -216,8 +257,31 @@ class MixinPolicyValidation:
             PolicyRegistryError: Invalid policy_type: 'invalid'.
                                  Must be one of: ['orchestrator', 'reducer']
         """
+        # Validate policy_type individually before processing
+        if policy_type is None:
+            raise PolicyRegistryError(
+                "policy_type is required and cannot be None",
+                policy_id=None,
+                policy_type=None,
+            )
+
         if isinstance(policy_type, EnumPolicyType):
             return policy_type.value
+
+        # For string type, validate it's not empty
+        if not isinstance(policy_type, str):
+            raise PolicyRegistryError(
+                f"policy_type must be a string or EnumPolicyType, "
+                f"got {type(policy_type).__name__}",
+                policy_id=None,
+                policy_type=str(policy_type),
+            )
+        if not policy_type.strip():
+            raise PolicyRegistryError(
+                "policy_type is required and cannot be empty",
+                policy_id=None,
+                policy_type=policy_type,
+            )
 
         # Validate string against enum values
         valid_types = {e.value for e in EnumPolicyType}

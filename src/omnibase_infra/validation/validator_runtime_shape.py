@@ -124,15 +124,17 @@ Usage:
     ...     RuntimeShapeValidator,
     ...     enforce_execution_shape,
     ... )
+    >>> from omnibase_infra.models.validation import ModelOutputValidationParams
     >>> from omnibase_infra.enums import EnumNodeArchetype, EnumMessageCategory
     >>>
     >>> # Direct validation
     >>> validator = RuntimeShapeValidator()
-    >>> violation = validator.validate_handler_output(
+    >>> params = ModelOutputValidationParams(
     ...     node_archetype=EnumNodeArchetype.REDUCER,
     ...     output=some_event,
     ...     output_category=EnumMessageCategory.EVENT,
     ... )
+    >>> violation = validator.validate_handler_output(params)
     >>> if violation:
     ...     print(f"Violation: {violation.message}")
     >>>
@@ -245,12 +247,14 @@ class ExecutionShapeViolationError(ModelOnexError):
         violation: The full violation result with type, handler, and context.
 
     Example:
+        >>> from omnibase_infra.models.validation import ModelValidateAndRaiseParams
         >>> try:
-        ...     validator.validate_and_raise(
+        ...     params = ModelValidateAndRaiseParams(
         ...         node_archetype=EnumNodeArchetype.REDUCER,
         ...         output=event_output,
         ...         output_category=EnumMessageCategory.EVENT,
         ...     )
+        ...     validator.validate_and_raise(params)
         ... except ExecutionShapeViolationError as e:
         ...     print(f"Violation: {e.violation.violation_type}")
         ...     print(f"Message: {e.violation.message}")
@@ -458,6 +462,10 @@ class RuntimeShapeValidator:
         Create a new instance only if you need custom rules or isolation.
 
     Example:
+        >>> from omnibase_infra.models.validation import (
+        ...     ModelOutputValidationParams,
+        ...     ModelValidateAndRaiseParams,
+        ... )
         >>> validator = RuntimeShapeValidator()
         >>>
         >>> # Check if output is allowed
@@ -465,20 +473,22 @@ class RuntimeShapeValidator:
         ...     print("Reducer cannot return events!")
         >>>
         >>> # Get full violation details
-        >>> violation = validator.validate_handler_output(
+        >>> params = ModelOutputValidationParams(
         ...     node_archetype=EnumNodeArchetype.REDUCER,
         ...     output=event_output,
         ...     output_category=EnumMessageCategory.EVENT,
         ... )
+        >>> violation = validator.validate_handler_output(params)
         >>> if violation:
         ...     print(f"Violation: {violation.format_for_ci()}")
         >>>
         >>> # Raise exception on violation
-        >>> validator.validate_and_raise(
+        >>> raise_params = ModelValidateAndRaiseParams(
         ...     node_archetype=EnumNodeArchetype.REDUCER,
         ...     output=event_output,
         ...     output_category=EnumMessageCategory.EVENT,
-        ... )  # Raises ExecutionShapeViolationError
+        ... )
+        >>> validator.validate_and_raise(raise_params)  # Raises ExecutionShapeViolationError
     """
 
     def __init__(

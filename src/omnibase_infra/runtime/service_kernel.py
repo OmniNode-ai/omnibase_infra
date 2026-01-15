@@ -1130,11 +1130,13 @@ async def bootstrap() -> int:
             event_bus, EventBusKafka
         ):
             # Create extracted event router with container-based DI pattern
-            introspection_event_router = IntrospectionEventRouter(container)
-            introspection_event_router.initialize(
+            # Dependencies are passed explicitly since they are created at runtime
+            # by the kernel and may not be registered in the container yet
+            introspection_event_router = IntrospectionEventRouter(
+                container=container,
+                output_topic=config.output_topic,
                 dispatcher=introspection_dispatcher,
                 event_bus=event_bus,
-                output_topic=config.output_topic,
             )
 
             # Subscribe with callback - returns unsubscribe function

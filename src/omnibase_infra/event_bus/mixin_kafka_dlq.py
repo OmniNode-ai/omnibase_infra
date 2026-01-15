@@ -235,21 +235,14 @@ class MixinKafkaDlq:
             This method logs errors if DLQ publishing fails but does not raise
             exceptions to prevent cascading failures in the consumer loop.
         """
-        # Check if DLQ is configured
-        if self._config.dead_letter_topic is None:
-            logger.debug(
-                "Dead letter queue not configured, skipping DLQ publish",
-                extra={
-                    "topic": original_topic,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return
-
         # Track timing for metrics
         start_time = datetime.now(UTC)
         error_type = type(error).__name__
-        dlq_topic = self._config.dead_letter_topic
+
+        # Get DLQ topic using convention-based resolution
+        # This supports both explicit dead_letter_topic config and automatic
+        # topic generation following ONEX conventions: <env>.dlq.<category>.v1
+        dlq_topic = self._config.get_dlq_topic()
 
         # Sanitize error message to prevent credential leakage in DLQ
         sanitized_failure_reason = sanitize_error_message(error)
@@ -292,7 +285,9 @@ class MixinKafkaDlq:
         dlq_error_message: str | None = None
 
         # Publish to DLQ (without retry - best effort)
-        future = None
+        # Capture producer reference and headers under lock, then send outside lock
+        producer = None
+        kafka_headers: list[tuple[str, bytes]] | None = None
         try:
             async with self._producer_lock:
                 if self._producer is None:
@@ -323,18 +318,18 @@ class MixinKafkaDlq:
                             ),
                         ]
                     )
+                    producer = self._producer
 
-                    future = await self._producer.send(
+            # Send and wait for completion with timeout (outside producer lock)
+            # Using send_and_wait() wrapped in wait_for() for cleaner timeout handling
+            if producer is not None and kafka_headers is not None:
+                await asyncio.wait_for(
+                    producer.send_and_wait(
                         dlq_topic,
                         value=dlq_value,
                         key=failed_message.key,
                         headers=kafka_headers,
-                    )
-
-            # Wait for completion with timeout (outside producer lock)
-            if future is not None:
-                await asyncio.wait_for(
-                    future,
+                    ),
                     timeout=self._timeout_seconds,
                 )
                 success = True
@@ -464,22 +459,14 @@ class MixinKafkaDlq:
             This method logs errors if DLQ publishing fails but does not raise
             exceptions to prevent cascading failures in the consumer loop.
         """
-        # Check if DLQ is configured
-        if self._config.dead_letter_topic is None:
-            logger.debug(
-                "Dead letter queue not configured, skipping DLQ publish for raw message",
-                extra={
-                    "topic": original_topic,
-                    "correlation_id": str(correlation_id),
-                    "failure_type": failure_type,
-                },
-            )
-            return
-
         # Track timing for metrics
         start_time = datetime.now(UTC)
         error_type = type(error).__name__
-        dlq_topic = self._config.dead_letter_topic
+
+        # Get DLQ topic using convention-based resolution
+        # This supports both explicit dead_letter_topic config and automatic
+        # topic generation following ONEX conventions: <env>.dlq.<category>.v1
+        dlq_topic = self._config.get_dlq_topic()
 
         # Sanitize error message
         sanitized_failure_reason = sanitize_error_message(error)
@@ -547,7 +534,9 @@ class MixinKafkaDlq:
         dlq_error_message: str | None = None
 
         # Publish to DLQ
-        future = None
+        # Capture producer reference and headers under lock, then send outside lock
+        producer = None
+        kafka_headers: list[tuple[str, bytes]] | None = None
         try:
             async with self._producer_lock:
                 if self._producer is None:
@@ -579,18 +568,18 @@ class MixinKafkaDlq:
                             ),
                         ]
                     )
+                    producer = self._producer
 
-                    future = await self._producer.send(
+            # Send and wait for completion with timeout (outside producer lock)
+            # Using send_and_wait() wrapped in wait_for() for cleaner timeout handling
+            if producer is not None and kafka_headers is not None:
+                await asyncio.wait_for(
+                    producer.send_and_wait(
                         dlq_topic,
                         value=dlq_value,
                         key=dlq_key,
                         headers=kafka_headers,
-                    )
-
-            # Wait for completion with timeout
-            if future is not None:
-                await asyncio.wait_for(
-                    future,
+                    ),
                     timeout=self._timeout_seconds,
                 )
                 success = True

@@ -1534,7 +1534,11 @@ class TestKafkaEventBusDLQRouting:
             future.set_result(mock_record_metadata)
             return future
 
+        async def mock_send_and_wait(*args: object, **kwargs: object) -> MagicMock:
+            return mock_record_metadata
+
         producer.send = AsyncMock(side_effect=mock_send)
+        producer.send_and_wait = AsyncMock(side_effect=mock_send_and_wait)
         return producer
 
     @pytest.fixture
@@ -1589,9 +1593,9 @@ class TestKafkaEventBusDLQRouting:
                 failure_type="deserialization_error",
             )
 
-            # Verify DLQ publish was called
-            assert mock_producer.send.called
-            call_args = mock_producer.send.call_args
+            # Verify DLQ publish was called (using send_and_wait for cleaner timeout handling)
+            assert mock_producer.send_and_wait.called
+            call_args = mock_producer.send_and_wait.call_args
 
             # Verify the topic is the DLQ topic
             assert call_args[0][0] == "dlq-events"
@@ -1666,9 +1670,9 @@ class TestKafkaEventBusDLQRouting:
                 correlation_id=correlation_id,
             )
 
-            # Verify DLQ publish was called
-            assert mock_producer.send.called
-            call_args = mock_producer.send.call_args
+            # Verify DLQ publish was called (using send_and_wait for cleaner timeout handling)
+            assert mock_producer.send_and_wait.called
+            call_args = mock_producer.send_and_wait.call_args
 
             # Verify the topic is the DLQ topic
             assert call_args[0][0] == "dlq-events"
@@ -1857,7 +1861,19 @@ class TestKafkaEventBusDLQRouting:
             future.set_result(mock_record_metadata)
             return future
 
+        async def mock_send_and_wait(*args: object, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            # Fail when publishing to DLQ
+            if args[0] == "dlq-events":
+                raise RuntimeError("DLQ publish failed")
+            mock_record_metadata = MagicMock()
+            mock_record_metadata.partition = 0
+            mock_record_metadata.offset = call_count
+            return mock_record_metadata
+
         mock_producer.send = AsyncMock(side_effect=mock_send)
+        mock_producer.send_and_wait = AsyncMock(side_effect=mock_send_and_wait)
 
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
@@ -1959,9 +1975,9 @@ class TestKafkaEventBusDLQRouting:
                 failure_type="deserialization_error",
             )
 
-            # Verify DLQ publish was attempted
-            assert mock_producer.send.called
-            call_args = mock_producer.send.call_args
+            # Verify DLQ publish was attempted (using send_and_wait for cleaner timeout handling)
+            assert mock_producer.send_and_wait.called
+            call_args = mock_producer.send_and_wait.call_args
             assert call_args[0][0] == "dlq-events"
 
             # The payload should contain replacement characters for invalid UTF-8

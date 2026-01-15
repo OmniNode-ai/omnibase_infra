@@ -824,7 +824,7 @@ Class Naming Conventions:
 
     # Run infrastructure naming validation
     validator = InfraNamingConventionValidator(repo_path)
-    is_valid = validator.validate_naming_conventions(args.verbose)
+    validator.validate_naming_conventions(args.verbose)
 
     # Optionally run AST validation from omnibase_core
     ast_issues: list[str] = []
