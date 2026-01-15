@@ -142,8 +142,7 @@ class ProjectorSchemaValidator:
     Schema Support:
         Currently defaults to 'public' schema. Both table_exists() and
         _get_table_columns() accept an optional schema_name parameter for
-        custom schema support. Multi-schema support is planned for future
-        implementation - see OMN-multi-schema TODO in the protocol definition.
+        custom schema support.
 
     Thread Safety:
         This class is coroutine-safe for concurrent async calls. Uses asyncpg

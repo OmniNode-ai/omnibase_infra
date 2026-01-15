@@ -1,7 +1,9 @@
-"""Enums for architecture validator node."""
+"""Enums for architecture validator node.
 
-from omnibase_infra.nodes.architecture_validator.enums.enum_validation_severity import (
-    EnumValidationSeverity,
-)
+Re-exports EnumValidationSeverity from the canonical location for backwards
+compatibility. New code should import directly from omnibase_infra.enums.
+"""
+
+from omnibase_infra.enums import EnumValidationSeverity
 
 __all__ = ["EnumValidationSeverity"]
