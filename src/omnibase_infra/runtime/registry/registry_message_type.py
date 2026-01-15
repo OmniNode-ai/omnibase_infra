@@ -875,7 +875,8 @@ class MessageTypeRegistry:
         for message_type, entry in self._entries.items():
             if entry.enabled and len(entry.handler_ids) == 0:
                 errors.append(
-                    f"Message type '{message_type}' is enabled but has no handlers."
+                    f"Invalid message type configuration for '{message_type}': "
+                    f"expected at least one handler, got 0"
                 )
 
         # Validate domain constraints are internally consistent

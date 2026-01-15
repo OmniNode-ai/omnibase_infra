@@ -84,7 +84,10 @@ from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
-from omnibase_infra.runtime.models import ModelRuntimeConfig
+from omnibase_infra.runtime.models import (
+    ModelProjectorPluginLoaderConfig,
+    ModelRuntimeConfig,
+)
 from omnibase_infra.runtime.projector_plugin_loader import (
     ProjectorPluginLoader,
     ProjectorShell,
@@ -648,10 +651,13 @@ async def bootstrap() -> int:
                 )
 
                 # Try to discover projectors from contracts
+                projector_config = ModelProjectorPluginLoaderConfig(
+                    graceful_mode=True,  # Continue on errors during discovery
+                )
                 projector_loader = ProjectorPluginLoader(
+                    config=projector_config,
                     container=container,
                     pool=postgres_pool,
-                    graceful_mode=True,  # Continue on errors during discovery
                 )
 
                 discovered_projectors: list[ProtocolEventProjector] = []

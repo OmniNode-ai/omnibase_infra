@@ -9,9 +9,15 @@ propagation, which breaks distributed tracing capabilities.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from omnibase_core.enums import EnumCoreErrorCode
 
-from omnibase_infra.errors.error_infra import RuntimeHostError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors.error_infra import (
+    ProtocolConfigurationError,
+    RuntimeHostError,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -80,11 +86,19 @@ class ChainPropagationError(RuntimeHostError):
             **extra_context: Additional context information for debugging.
 
         Raises:
-            ValueError: If violations list is empty.
+            ProtocolConfigurationError: If violations list is empty.
         """
         if not violations:
-            msg = "ChainPropagationError requires at least one violation"
-            raise ValueError(msg)
+            err_context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="ChainPropagationError.__init__",
+                correlation_id=context.correlation_id if context else uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                "ChainPropagationError requires at least one violation",
+                context=err_context,
+                parameter="violations",
+            )
 
         # Store violations for access
         self._violations = violations

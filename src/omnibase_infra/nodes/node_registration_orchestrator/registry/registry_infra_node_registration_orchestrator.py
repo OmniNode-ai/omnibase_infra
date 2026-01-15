@@ -227,7 +227,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
 
         # Fail-fast: contract.yaml defines heartbeat routing which requires projector
         if projector is None and require_heartbeat_handler:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="create_registry",
                 target_name="RegistryInfraNodeRegistrationOrchestrator",
@@ -267,7 +267,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
         for handler in handlers_to_register:
             is_valid, missing = _validate_handler_protocol(handler)
             if not is_valid:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
                     target_name="RegistryInfraNodeRegistrationOrchestrator",
@@ -293,7 +293,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
             # Validate heartbeat handler before registration
             is_valid, missing = _validate_handler_protocol(handler_heartbeat)
             if not is_valid:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
                     target_name="RegistryInfraNodeRegistrationOrchestrator",

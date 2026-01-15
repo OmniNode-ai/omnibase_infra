@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.topic_constants import (
     DLQ_CATEGORY_SUFFIXES,
     DLQ_COMMAND_TOPIC_SUFFIX,
@@ -106,18 +107,22 @@ class TestBuildDLQTopic:
         assert topic == "test_env.dlq.intents.v1"
 
     def test_empty_environment_raises(self) -> None:
-        """Empty environment raises ValueError."""
-        with pytest.raises(ValueError, match="environment cannot be empty"):
+        """Empty environment raises ProtocolConfigurationError."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="environment cannot be empty"
+        ):
             build_dlq_topic("", "intents")
 
     def test_whitespace_environment_raises(self) -> None:
-        """Whitespace-only environment raises ValueError."""
-        with pytest.raises(ValueError, match="environment cannot be empty"):
+        """Whitespace-only environment raises ProtocolConfigurationError."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="environment cannot be empty"
+        ):
             build_dlq_topic("   ", "intents")
 
     def test_invalid_category_raises(self) -> None:
-        """Invalid category raises ValueError."""
-        with pytest.raises(ValueError, match="Invalid category"):
+        """Invalid category raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError, match="Invalid category"):
             build_dlq_topic("dev", "invalid")
 
     def test_case_insensitive_category(self) -> None:
@@ -286,14 +291,14 @@ class TestModelKafkaEventBusConfigGetDLQTopic:
         assert config.get_dlq_topic() == "local.dlq.intents.v1"
 
     def test_get_dlq_topic_invalid_category_raises(self) -> None:
-        """Invalid category raises ValueError."""
+        """Invalid category raises ProtocolConfigurationError."""
         from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
             environment="prod",
         )
-        with pytest.raises(ValueError, match="Invalid category"):
+        with pytest.raises(ProtocolConfigurationError, match="Invalid category"):
             config.get_dlq_topic("invalid")
 
 

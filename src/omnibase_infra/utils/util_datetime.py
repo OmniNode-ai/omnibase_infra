@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def ensure_timezone_aware(
     Behavior:
         - Timezone-aware datetimes: Passed through unchanged
         - Naive datetimes with assume_utc=True: Converted to UTC with warning
-        - Naive datetimes with assume_utc=False: Raises ValueError
+        - Naive datetimes with assume_utc=False: Raises ProtocolConfigurationError
 
     Args:
         dt: The datetime to validate/normalize.
@@ -81,7 +81,7 @@ def ensure_timezone_aware(
         datetime with UTC timezone.
 
     Raises:
-        ValueError: If dt is naive and assume_utc=False.
+        ProtocolConfigurationError: If dt is naive and assume_utc=False.
 
     Example:
         >>> from datetime import datetime, UTC, timezone
@@ -98,11 +98,11 @@ def ensure_timezone_aware(
         >>> result.tzinfo == UTC
         True
         >>>
-        >>> # Strict mode - raises ValueError for naive datetimes
+        >>> # Strict mode - raises ProtocolConfigurationError for naive datetimes
         >>> ensure_timezone_aware(naive, assume_utc=False)  # doctest: +ELLIPSIS
         Traceback (most recent call last):
         ...
-        ValueError: Naive datetime not allowed...
+        omnibase_infra.errors...ProtocolConfigurationError: Naive datetime not allowed...
 
     Warning:
         Using assume_utc=True can silently mask timezone bugs in your code.
@@ -119,10 +119,25 @@ def ensure_timezone_aware(
 
     # Handle naive datetime
     if not assume_utc:
-        context_msg = f" (context: {context})" if context else ""
-        raise ValueError(
-            f"Naive datetime not allowed{context_msg}. "
-            "Use timezone-aware datetime (e.g., datetime.now(UTC))."
+        # Lazy imports to avoid circular dependency (utils -> errors -> models -> utils)
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import (
+            ModelInfraErrorContext,
+            ProtocolConfigurationError,
+        )
+
+        error_context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="ensure_timezone_aware",
+            target_name=context,
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            "Naive datetime not allowed. "
+            "Use timezone-aware datetime (e.g., datetime.now(UTC)).",
+            context=error_context,
+            parameter="dt",
+            value=dt.isoformat(),
         )
 
     # Log warning if enabled

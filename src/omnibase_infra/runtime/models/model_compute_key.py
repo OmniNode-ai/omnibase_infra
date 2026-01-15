@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.utils import validate_version_lenient
 
 
@@ -98,21 +100,33 @@ class ModelComputeKey(BaseModel):
                 2 elements, or contains non-string values.
         """
         # Validate tuple type and length
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="from_tuple",
+        )
         if not isinstance(key_tuple, tuple):
-            raise ValueError(
-                f"Expected tuple[str, str], got {type(key_tuple).__name__}"
+            raise ProtocolConfigurationError(
+                f"Expected tuple[str, str], got {type(key_tuple).__name__}",
+                context=context,
             )
         if len(key_tuple) != 2:
-            raise ValueError(f"Expected tuple with 2 elements, got {len(key_tuple)}")
+            raise ProtocolConfigurationError(
+                f"Expected tuple with 2 elements, got {len(key_tuple)}",
+                context=context,
+            )
 
         # Validate element types
         plugin_id, version = key_tuple
         if not isinstance(plugin_id, str):
-            raise ValueError(
-                f"plugin_id must be a string, got {type(plugin_id).__name__}"
+            raise ProtocolConfigurationError(
+                f"plugin_id must be a string, got {type(plugin_id).__name__}",
+                context=context,
             )
         if not isinstance(version, str):
-            raise ValueError(f"version must be a string, got {type(version).__name__}")
+            raise ProtocolConfigurationError(
+                f"version must be a string, got {type(version).__name__}",
+                context=context,
+            )
 
         return cls(
             plugin_id=plugin_id,
