@@ -24,8 +24,10 @@ Table Schema:
         processed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         UNIQUE (domain, message_id)
     );
-    CREATE INDEX idx_idempotency_processed_at ON idempotency_records(processed_at);
-    CREATE INDEX idx_idempotency_domain ON idempotency_records(domain);
+    CREATE INDEX IF NOT EXISTS idx_idempotency_processed_at ON idempotency_records(processed_at);
+    CREATE INDEX IF NOT EXISTS idx_idempotency_domain ON idempotency_records(domain);
+    CREATE INDEX IF NOT EXISTS idx_idempotency_correlation_id ON idempotency_records(correlation_id)
+        WHERE correlation_id IS NOT NULL;
 
 Clock Skew Considerations:
     In distributed systems, nodes may have slightly different system clocks.

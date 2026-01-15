@@ -7,7 +7,7 @@ events in the ONEX kernel. Extracted from kernel.py for better testability
 and separation of concerns.
 
 The router:
-    - Parses incoming Kafka messages as ModelEventEnvelope
+    - Parses incoming event messages as ModelEventEnvelope
     - Validates payload as ModelNodeIntrospectionEvent
     - Routes to the introspection dispatcher
     - Publishes output events to the configured output topic
@@ -18,6 +18,9 @@ Design:
     - Unit testing without full kernel bootstrap
     - Mocking of dependencies for isolation
     - Clearer separation between bootstrap and event routing
+
+    The router uses ProtocolEventBusLike for event publishing, enabling
+    duck typing with any event bus implementation (Kafka, InMemory, etc.).
 
 Related:
     - OMN-888: Registration Orchestrator
@@ -45,8 +48,10 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
+    from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
+        DispatcherNodeIntrospected,
+    )
+    from omnibase_infra.protocols import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +86,9 @@ def _normalize_metadata(metadata: dict[str, object] | None) -> dict[str, object]
 
 
 class IntrospectionEventRouter:
-    """Router for introspection event messages from Kafka.
+    """Router for introspection event messages from event bus.
 
-    This router handles incoming Kafka messages, parses them as
+    This router handles incoming event messages, parses them as
     ModelNodeIntrospectionEvent payloads wrapped in ModelEventEnvelope,
     and routes them to the introspection dispatcher for registration
     orchestration.
@@ -94,13 +99,13 @@ class IntrospectionEventRouter:
 
     Attributes:
         _dispatcher: The DispatcherNodeIntrospected to route events to.
-        _event_bus: The KafkaEventBus for publishing output events.
+        _event_bus: Event bus implementing ProtocolEventBusLike for publishing.
         _output_topic: The topic to publish output events to.
 
     Example:
         >>> router = IntrospectionEventRouter(
         ...     dispatcher=introspection_dispatcher,
-        ...     event_bus=kafka_bus,
+        ...     event_bus=event_bus,
         ...     output_topic="registration.output",
         ... )
         >>> # Use as callback for event bus subscription
@@ -114,14 +119,14 @@ class IntrospectionEventRouter:
     def __init__(
         self,
         dispatcher: DispatcherNodeIntrospected,
-        event_bus: KafkaEventBus,
+        event_bus: ProtocolEventBusLike,
         output_topic: str,
     ) -> None:
         """Initialize the event router.
 
         Args:
             dispatcher: The DispatcherNodeIntrospected to route events to.
-            event_bus: The KafkaEventBus for publishing output events.
+            event_bus: Event bus implementing ProtocolEventBusLike for publishing.
             output_topic: The topic to publish output events to.
         """
         self._dispatcher = dispatcher
