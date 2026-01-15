@@ -53,7 +53,7 @@ Example:
 See Also:
     omnibase_infra.nodes.architecture_validator.protocols.ProtocolArchitectureRule:
         Protocol that produces these results
-    omnibase_infra.nodes.architecture_validator.enums.EnumValidationSeverity:
+    omnibase_infra.enums.EnumValidationSeverity:
         Severity levels for rule violations
 """
 

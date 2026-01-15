@@ -633,15 +633,17 @@ class TestProjectorPluginLoaderSecurity:
         """Root path should be rejected as base_path to prevent DoS."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
 
         # Attempting to use root path should raise
         with pytest.raises(ModelOnexError) as exc_info:
+            config = ModelProjectorPluginLoaderConfig(base_paths=[Path("/")])
             ProjectorPluginLoader(
+                config=config,
                 schema_manager=mock_schema_manager,
-                base_paths=[Path("/")],
             )
 
         assert "root" in str(exc_info.value).lower()
@@ -655,14 +657,16 @@ class TestProjectorPluginLoaderSecurity:
         # This test just verifies the loader can be created with a valid path
         import tempfile
 
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelProjectorPluginLoaderConfig(base_paths=[Path(tmpdir)])
             loader = ProjectorPluginLoader(
+                config=config,
                 schema_manager=mock_schema_manager,
-                base_paths=[Path(tmpdir)],
             )
             assert loader is not None
 
@@ -671,6 +675,7 @@ class TestProjectorPluginLoaderSecurity:
         self, tmp_path: Path, mock_schema_manager: MagicMock
     ) -> None:
         """Symlinks pointing outside allowed paths should be rejected."""
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -693,9 +698,10 @@ class TestProjectorPluginLoaderSecurity:
         symlink_contract.symlink_to(outside_contract)
 
         # Use graceful mode to collect errors rather than raise
+        config = ModelProjectorPluginLoaderConfig(graceful_mode=True)
         loader = ProjectorPluginLoader(
+            config=config,
             schema_manager=mock_schema_manager,
-            graceful_mode=True,
         )
 
         # Search only in allowed directory - symlink should be rejected
@@ -783,6 +789,7 @@ class TestProjectorPluginLoaderSecurity:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Symlinks within allowed paths should be permitted."""
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -805,9 +812,10 @@ class TestProjectorPluginLoaderSecurity:
         symlink_contract.symlink_to(actual_contract)
 
         # Use base_paths to include the tmp_path as allowed
+        config = ModelProjectorPluginLoaderConfig(base_paths=[tmp_path])
         loader = ProjectorPluginLoader(
+            config=config,
             schema_manager=mock_schema_manager,
-            base_paths=[tmp_path],
         )
 
         # Search both directories - symlink should work
@@ -841,6 +849,7 @@ class TestProjectorPluginLoaderModes:
         """Strict mode should fail fast on first error."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -854,9 +863,10 @@ class TestProjectorPluginLoaderModes:
         )
         (tmp_path / "aaa_invalid_projector.yaml").write_text(MALFORMED_YAML_CONTENT)
 
+        config = ModelProjectorPluginLoaderConfig(graceful_mode=False)  # Strict mode
         loader = ProjectorPluginLoader(
+            config=config,
             schema_manager=mock_schema_manager,
-            graceful_mode=False,  # Strict mode
         )
 
         with pytest.raises(ModelOnexError):
@@ -867,6 +877,7 @@ class TestProjectorPluginLoaderModes:
         self, tmp_path: Path, mock_schema_manager: MagicMock
     ) -> None:
         """Graceful mode should continue and load valid contracts despite errors."""
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -883,9 +894,10 @@ class TestProjectorPluginLoaderModes:
             MISSING_REQUIRED_FIELDS_CONTENT
         )
 
+        config = ModelProjectorPluginLoaderConfig(graceful_mode=True)
         loader = ProjectorPluginLoader(
+            config=config,
             schema_manager=mock_schema_manager,
-            graceful_mode=True,  # Graceful mode
         )
 
         projectors = await loader.load_from_directory(tmp_path)
@@ -899,6 +911,7 @@ class TestProjectorPluginLoaderModes:
         self, tmp_path: Path, mock_schema_manager: MagicMock
     ) -> None:
         """discover_with_errors should return both projectors and errors."""
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -911,9 +924,10 @@ class TestProjectorPluginLoaderModes:
         )
         (tmp_path / "malformed_projector.yaml").write_text(MALFORMED_YAML_CONTENT)
 
+        config = ModelProjectorPluginLoaderConfig(graceful_mode=True)
         loader = ProjectorPluginLoader(
+            config=config,
             schema_manager=mock_schema_manager,
-            graceful_mode=True,
         )
 
         result = await loader.discover_with_errors(tmp_path)

@@ -24,8 +24,10 @@ Table Schema:
         processed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         UNIQUE (domain, message_id)
     );
-    CREATE INDEX idx_idempotency_processed_at ON idempotency_records(processed_at);
-    CREATE INDEX idx_idempotency_domain ON idempotency_records(domain);
+    CREATE INDEX IF NOT EXISTS idx_idempotency_processed_at ON idempotency_records(processed_at);
+    CREATE INDEX IF NOT EXISTS idx_idempotency_domain ON idempotency_records(domain);
+    CREATE INDEX IF NOT EXISTS idx_idempotency_correlation_id ON idempotency_records(correlation_id)
+        WHERE correlation_id IS NOT NULL;
 
 Clock Skew Considerations:
     In distributed systems, nodes may have slightly different system clocks.
@@ -214,11 +216,10 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 expected pattern ^[a-zA-Z_][a-zA-Z0-9_]*$
         """
         if not _TABLE_NAME_PATTERN.match(table_name):
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="validate_table_name",
                 target_name="postgres_idempotency_store",
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"Invalid table name: {table_name}. "
@@ -320,7 +321,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         if self._pool is None:
             raise RuntimeHostError(
                 "Pool not initialized - call initialize() first",
-                context=ModelInfraErrorContext(
+                context=ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.DATABASE,
                     operation="_ensure_table_exists",
                     target_name="postgres_idempotency_store",
@@ -523,11 +524,10 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             InfraTimeoutError: If query times out.
             RuntimeHostError: If store is not initialized.
         """
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="is_processed",
             target_name="postgres_idempotency_store",
-            correlation_id=uuid4(),
         )
 
         if not self._initialized or self._pool is None:
@@ -736,11 +736,10 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             ...     max_iterations=10,
             ... )
         """
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="cleanup_expired",
             target_name="postgres_idempotency_store",
-            correlation_id=uuid4(),
         )
 
         if not self._initialized or self._pool is None:

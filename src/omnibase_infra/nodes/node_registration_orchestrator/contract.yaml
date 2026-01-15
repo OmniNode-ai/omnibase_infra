@@ -2,10 +2,6 @@
 # Copyright (c) 2025 OmniNode Team
 # ONEX Node Contract - Registration Orchestrator Node
 #
-# TODO(OMN-XXX): Contract complexity - Consider extracting handler_routing,
-# error_recovery, and timeout_config sections into separate subcontracts
-# as this contract grows. Current size: ~460 lines.
-#
 # =============================================================================
 # SUBCONTRACT ARCHITECTURE NOTE (PR #79 Nitpick)
 # =============================================================================

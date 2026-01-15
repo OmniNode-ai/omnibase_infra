@@ -61,7 +61,7 @@ class TestInfraValidatorConstants:
         - 121 (2025-12-25): OMN-881 introspection feature (+1 non-optional union)
         - 121 (2025-12-25): OMN-949 DLQ, OMN-816, OMN-811, OMN-1006 merges (all used X | None patterns, excluded)
         - 121 (2025-12-26): OMN-1007 registry pattern + merge with main (X | None patterns excluded)
-        - 122 (2026-01): OMN-1203 corpus capture service (+1 non-optional union)
+        - 122 (2026-01-15): OMN-1203 corpus capture service, OMN-1346 extract registration domain plugin
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """

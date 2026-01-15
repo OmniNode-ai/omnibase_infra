@@ -114,10 +114,6 @@ class PolicyRegistry:
     that implement the ProtocolPolicy protocol. ModelPolicyKey provides strong typing
     and replaces the legacy tuple[str, str, str] pattern.
 
-    TODO(Phase 2): Implement ProtocolRegistryBase[tuple[str, str, str], type[ProtocolPolicy]]
-    interface once it's added to omnibase_spi. The external API maintains tuple compatibility
-    while internal operations use ModelPolicyKey for strong typing.
-
     Container Integration:
         PolicyRegistry is designed to be managed by ModelONEXContainer from omnibase_core.
         Use container_wiring.wire_infrastructure_services() to register PolicyRegistry
@@ -1303,9 +1299,6 @@ class PolicyRegistry:
         policy_type: str | EnumPolicyType | None = None,
     ) -> list[tuple[str, str, str]]:
         """List registered policy keys as (id, type, version) tuples.
-
-        TODO(Phase 2): This method will implement ProtocolRegistryBase.list_keys()
-        interface once the protocol is added to omnibase_spi.
 
         Args:
             policy_type: Optional filter to list only policies of a specific type.

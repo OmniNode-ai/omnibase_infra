@@ -8,6 +8,8 @@ All models are strongly typed to eliminate Any usage.
 Exports:
     ModelComputeKey: Strongly-typed compute registry key model
     ModelComputeRegistration: Compute plugin registration parameters model
+    ModelDomainPluginConfig: Configuration for domain plugin lifecycle hooks
+    ModelDomainPluginResult: Result of domain plugin lifecycle operations
     ModelEventBusConfig: Event bus configuration model
     ModelEnabledProtocolsConfig: Enabled protocols configuration model
     ModelProtocolRegistrationConfig: Individual protocol registration config model
@@ -32,6 +34,7 @@ Exports:
     ModelShutdownBatchResult: Result of batch shutdown operation
     ModelHealthCheckResult: Result of component health check operation
     ModelHealthCheckResponse: HTTP response model for health check endpoints
+    ModelProjectorPluginLoaderConfig: Projector plugin loader configuration model
 """
 
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
@@ -40,6 +43,12 @@ from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
 from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
 from omnibase_infra.runtime.models.model_compute_registration import (
     ModelComputeRegistration,
+)
+from omnibase_infra.runtime.models.model_domain_plugin_config import (
+    ModelDomainPluginConfig,
+)
+from omnibase_infra.runtime.models.model_domain_plugin_result import (
+    ModelDomainPluginResult,
 )
 from omnibase_infra.runtime.models.model_duplicate_response import (
     ModelDuplicateResponse,
@@ -71,6 +80,9 @@ from omnibase_infra.runtime.models.model_policy_registration import (
 )
 from omnibase_infra.runtime.models.model_policy_result import ModelPolicyResult
 from omnibase_infra.runtime.models.model_policy_type_filter import ModelPolicyTypeFilter
+from omnibase_infra.runtime.models.model_projector_plugin_loader_config import (
+    ModelProjectorPluginLoaderConfig,
+)
 from omnibase_infra.runtime.models.model_protocol_registration_config import (
     ModelProtocolRegistrationConfig,
 )
@@ -91,6 +103,8 @@ __all__: list[str] = [
     "ModelBatchLifecycleResult",
     "ModelComputeKey",
     "ModelComputeRegistration",
+    "ModelDomainPluginConfig",
+    "ModelDomainPluginResult",
     "ModelDuplicateResponse",
     "ModelEnabledProtocolsConfig",
     "ModelEventBusConfig",
@@ -107,6 +121,7 @@ __all__: list[str] = [
     "ModelPolicyRegistration",
     "ModelPolicyResult",
     "ModelPolicyTypeFilter",
+    "ModelProjectorPluginLoaderConfig",
     "ModelProtocolRegistrationConfig",
     "ModelRuntimeConfig",
     "ModelRuntimeSchedulerConfig",

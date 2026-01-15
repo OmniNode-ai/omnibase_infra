@@ -21,6 +21,7 @@ from omnibase_infra.utils.correlation import (
 from omnibase_infra.utils.util_datetime import (
     ensure_timezone_aware,
     is_timezone_aware,
+    warn_if_naive_datetime,
 )
 from omnibase_infra.utils.util_dsn_validation import (
     parse_and_validate_dsn,
@@ -63,4 +64,5 @@ __all__: list[str] = [
     "set_correlation_id",
     "validate_semver",
     "validate_version_lenient",
+    "warn_if_naive_datetime",
 ]

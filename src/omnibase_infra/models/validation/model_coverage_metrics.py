@@ -14,8 +14,15 @@ and IDE support.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors.error_infra import ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 
 class ModelCoverageMetrics(BaseModel):
@@ -181,7 +188,7 @@ class ModelCoverageMetrics(BaseModel):
             ModelCoverageMetrics with equivalent values.
 
         Raises:
-            TypeError: If any value has an unexpected type.
+            ProtocolConfigurationError: If any value has an unexpected type.
 
         Example:
             >>> legacy = {
@@ -202,14 +209,26 @@ class ModelCoverageMetrics(BaseModel):
         unmapped_types = report["unmapped_types"]
         coverage_percent = report["coverage_percent"]
 
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="from_legacy_dict",
+            correlation_id=uuid4(),
+        )
+
         if not isinstance(total_types, int):
-            raise TypeError("total_types must be int")
+            raise ProtocolConfigurationError("total_types must be int", context=context)
         if not isinstance(registered_types, int):
-            raise TypeError("registered_types must be int")
+            raise ProtocolConfigurationError(
+                "registered_types must be int", context=context
+            )
         if not isinstance(unmapped_types, list):
-            raise TypeError("unmapped_types must be list[str]")
+            raise ProtocolConfigurationError(
+                "unmapped_types must be list[str]", context=context
+            )
         if not isinstance(coverage_percent, (int, float)):
-            raise TypeError("coverage_percent must be int or float")
+            raise ProtocolConfigurationError(
+                "coverage_percent must be int or float", context=context
+            )
 
         return cls(
             total_types=total_types,

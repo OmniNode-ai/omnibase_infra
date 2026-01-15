@@ -13,9 +13,11 @@ Available Dispatchers:
 
 Usage:
     The dispatchers are typically wired via wire_registration_dispatchers()
-    in container_wiring.py, but can also be created directly:
+    in the domain wiring module (wiring.py), but can also be created directly:
 
-    >>> from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
+    >>> from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
+    ...     DispatcherNodeIntrospected,
+    ... )
     >>> dispatcher = DispatcherNodeIntrospected(handler_instance)
     >>> engine.register_dispatcher(dispatcher)
 
@@ -31,20 +33,21 @@ Related:
     - OMN-888: Registration Orchestrator
     - OMN-892: 2-way Registration E2E Integration Test
     - OMN-934: Message Dispatch Engine
+    - OMN-1346: Registration Code Extraction
 """
 
-from omnibase_infra.runtime.dispatchers.dispatcher_node_introspected import (
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_node_introspected import (
     DispatcherNodeIntrospected,
 )
-from omnibase_infra.runtime.dispatchers.dispatcher_node_registration_acked import (
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_node_registration_acked import (
     DispatcherNodeRegistrationAcked,
 )
-from omnibase_infra.runtime.dispatchers.dispatcher_runtime_tick import (
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_runtime_tick import (
     DispatcherRuntimeTick,
 )
 
 __all__: list[str] = [
     "DispatcherNodeIntrospected",
-    "DispatcherRuntimeTick",
     "DispatcherNodeRegistrationAcked",
+    "DispatcherRuntimeTick",
 ]

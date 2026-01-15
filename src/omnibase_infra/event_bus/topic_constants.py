@@ -55,6 +55,9 @@ from __future__ import annotations
 import re
 from typing import Final
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 # ==============================================================================
 # DLQ Topic Version
 # ==============================================================================
@@ -189,20 +192,42 @@ def build_dlq_topic(
     # Validate environment
     env = environment.strip()
     if not env:
-        raise ValueError("environment cannot be empty")
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="build_dlq_topic",
+        )
+        raise ProtocolConfigurationError(
+            "environment cannot be empty",
+            context=context,
+            parameter="environment",
+        )
 
     if not ENV_PATTERN.match(env):
-        raise ValueError(
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="build_dlq_topic",
+        )
+        raise ProtocolConfigurationError(
             f"Invalid environment '{environment}'. "
-            "Must be alphanumeric with optional underscores or hyphens (pattern: [\\w-]+)."
+            "Must be alphanumeric with optional underscores or hyphens (pattern: [\\w-]+).",
+            context=context,
+            parameter="environment",
+            value=environment,
         )
 
     # Normalize category to lowercase and look up suffix
     cat_lower = category.lower().strip()
     if cat_lower not in DLQ_CATEGORY_SUFFIXES:
         valid_categories = ", ".join(sorted(set(DLQ_CATEGORY_SUFFIXES.keys())))
-        raise ValueError(
-            f"Invalid category '{category}'. Valid categories: {valid_categories}"
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="build_dlq_topic",
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid category '{category}'. Valid categories: {valid_categories}",
+            context=context,
+            parameter="category",
+            value=category,
         )
 
     # Determine version to use

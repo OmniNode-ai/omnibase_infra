@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timezone
+from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def ensure_timezone_aware(
     Behavior:
         - Timezone-aware datetimes: Passed through unchanged
         - Naive datetimes with assume_utc=True: Converted to UTC with warning
-        - Naive datetimes with assume_utc=False: Raises ValueError
+        - Naive datetimes with assume_utc=False: Raises ProtocolConfigurationError
 
     Args:
         dt: The datetime to validate/normalize.
@@ -80,7 +81,7 @@ def ensure_timezone_aware(
         datetime with UTC timezone.
 
     Raises:
-        ValueError: If dt is naive and assume_utc=False.
+        ProtocolConfigurationError: If dt is naive and assume_utc=False.
 
     Example:
         >>> from datetime import datetime, UTC, timezone
@@ -97,11 +98,11 @@ def ensure_timezone_aware(
         >>> result.tzinfo == UTC
         True
         >>>
-        >>> # Strict mode - raises ValueError for naive datetimes
+        >>> # Strict mode - raises ProtocolConfigurationError for naive datetimes
         >>> ensure_timezone_aware(naive, assume_utc=False)  # doctest: +ELLIPSIS
         Traceback (most recent call last):
         ...
-        ValueError: Naive datetime not allowed...
+        omnibase_infra.errors...ProtocolConfigurationError: Naive datetime not allowed...
 
     Warning:
         Using assume_utc=True can silently mask timezone bugs in your code.
@@ -118,10 +119,25 @@ def ensure_timezone_aware(
 
     # Handle naive datetime
     if not assume_utc:
-        context_msg = f" (context: {context})" if context else ""
-        raise ValueError(
-            f"Naive datetime not allowed{context_msg}. "
-            "Use timezone-aware datetime (e.g., datetime.now(UTC))."
+        # Lazy imports to avoid circular dependency (utils -> errors -> models -> utils)
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import (
+            ModelInfraErrorContext,
+            ProtocolConfigurationError,
+        )
+
+        error_context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="ensure_timezone_aware",
+            target_name=context,
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            "Naive datetime not allowed. "
+            "Use timezone-aware datetime (e.g., datetime.now(UTC)).",
+            context=error_context,
+            parameter="dt",
+            value=dt.isoformat(),
         )
 
     # Log warning if enabled
@@ -169,7 +185,106 @@ def is_timezone_aware(dt: datetime) -> bool:
     return dt.tzinfo is not None and dt.utcoffset() is not None
 
 
+def warn_if_naive_datetime(
+    dt: datetime,
+    *,
+    field_name: str | None = None,
+    context: str | None = None,
+    correlation_id: UUID | None = None,
+    logger: logging.Logger | None = None,
+) -> None:
+    """Log a warning if the datetime is naive (lacks timezone info).
+
+    This is a WARNING-ONLY function that does not modify or convert the datetime.
+    Use this when you want to detect and log naive datetimes without changing
+    them, such as for auditing or gradual migration scenarios.
+
+    For automatic conversion of naive datetimes to UTC, use :func:`ensure_timezone_aware`
+    instead.
+
+    Args:
+        dt: The datetime to check for timezone awareness.
+        field_name: Optional name of the field/column containing the datetime.
+            Used in the warning message to identify the source.
+        context: Optional context string for the warning message (e.g., operation
+            name, handler name). Provides additional context for debugging.
+        correlation_id: Optional correlation ID for distributed tracing. Included
+            in the log extra dict when provided.
+        logger: Optional logger instance to use. If not provided, uses the
+            module-level logger (omnibase_infra.utils.util_datetime).
+
+    Returns:
+        None. This function only logs a warning and does not return a value.
+
+    Example:
+        >>> from datetime import datetime, UTC
+        >>> from uuid import uuid4
+        >>> from omnibase_infra.utils import warn_if_naive_datetime
+        >>>
+        >>> # Naive datetime triggers warning
+        >>> naive_dt = datetime(2025, 1, 15, 12, 0, 0)
+        >>> warn_if_naive_datetime(
+        ...     naive_dt,
+        ...     field_name="created_at",
+        ...     context="manifest_persistence",
+        ...     correlation_id=uuid4(),
+        ... )  # Logs warning
+        >>>
+        >>> # Aware datetime - no warning logged
+        >>> aware_dt = datetime.now(UTC)
+        >>> warn_if_naive_datetime(aware_dt, field_name="updated_at")  # Silent
+
+    Warning:
+        This function is intentionally warning-only. If you need to convert naive
+        datetimes to UTC, use :func:`ensure_timezone_aware` with ``assume_utc=True``.
+        The separation allows callers to choose between:
+
+        - **warn_if_naive_datetime**: Audit/detect without modification
+        - **ensure_timezone_aware**: Convert with optional warning
+
+    Related:
+        - OMN-1340: Extract datetime warning utility
+        - OMN-1163: Handler manifest persistence datetime handling
+
+    .. versionadded:: 0.9.0
+        Extracted from handler_manifest_persistence.py for reuse across codebase.
+    """
+    # Use module logger if none provided
+    log = logger if logger is not None else globals()["logger"]
+
+    # Check if datetime is timezone-aware - if so, nothing to warn about
+    if dt.tzinfo is not None and dt.utcoffset() is not None:
+        return
+
+    # Build context-aware message parts
+    location_parts: list[str] = []
+    if field_name:
+        location_parts.append(f"field '{field_name}'")
+    if context:
+        location_parts.append(f"context '{context}'")
+
+    location_str = " in ".join(location_parts) if location_parts else "datetime value"
+
+    # Build extra dict for structured logging
+    extra: dict[str, str | None] = {
+        "field_name": field_name,
+        "context": context,
+        "datetime_value": dt.isoformat(),
+    }
+    if correlation_id is not None:
+        extra["correlation_id"] = str(correlation_id)
+
+    log.warning(
+        "Naive datetime detected for %s. For accurate comparisons, use "
+        "timezone-aware datetimes (e.g., datetime.now(UTC)). "
+        "See util_datetime module docstring for timezone handling details.",
+        location_str,
+        extra=extra,
+    )
+
+
 __all__: list[str] = [
     "ensure_timezone_aware",
     "is_timezone_aware",
+    "warn_if_naive_datetime",
 ]

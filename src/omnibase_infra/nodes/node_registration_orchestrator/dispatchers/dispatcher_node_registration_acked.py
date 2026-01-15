@@ -2,16 +2,16 @@
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: TRY400
 # TRY400 disabled: logger.error is intentional to avoid leaking sensitive data in stack traces
-"""Dispatcher adapter for HandlerRuntimeTick.
+"""Dispatcher adapter for HandlerNodeRegistrationAcked.
 
 This module provides a ProtocolMessageDispatcher adapter that wraps
-HandlerRuntimeTick for integration with MessageDispatchEngine.
+HandlerNodeRegistrationAcked for integration with MessageDispatchEngine.
 
 The adapter:
-- Deserializes ModelEventEnvelope payload to ModelRuntimeTick
+- Deserializes ModelEventEnvelope payload to ModelNodeRegistrationAcked
 - Extracts correlation_id from envelope metadata
 - Injects current time via ModelDispatchContext (for ORCHESTRATOR node kind)
-- Calls the wrapped handler and emits timeout events
+- Calls the wrapped handler and emits liveness activation events
 - Provides circuit breaker resilience via MixinAsyncCircuitBreaker
 
 Design:
@@ -40,7 +40,7 @@ Typing Note (ModelEventEnvelope[object]):
     - Payload extraction uses ``isinstance()`` type guards for runtime safety::
 
         payload = envelope.payload
-        if not isinstance(payload, ModelRuntimeTick):
+        if not isinstance(payload, ModelNodeRegistrationAcked):
             # Attempt deserialization from dict
             ...
 
@@ -49,14 +49,14 @@ Typing Note (ModelEventEnvelope[object]):
 
 Related:
     - OMN-888: Registration Orchestrator
-    - OMN-932: Durable Timeout Handling
     - OMN-892: 2-way Registration E2E Integration Test
+    - OMN-1346: Registration Code Extraction
     - docs/patterns/dispatcher_resilience.md
 """
 
 from __future__ import annotations
 
-__all__ = ["DispatcherRuntimeTick"]
+__all__ = ["DispatcherNodeRegistrationAcked"]
 
 import logging
 from datetime import UTC, datetime
@@ -72,15 +72,21 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumMessageCategory,
 )
-from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.errors import (
+    EnvelopeValidationError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
-from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
+from omnibase_infra.models.registration.commands.model_node_registration_acked import (
+    ModelNodeRegistrationAcked,
+)
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerRuntimeTick,
+        HandlerNodeRegistrationAcked,
     )
 
 logger = logging.getLogger(__name__)
@@ -88,16 +94,16 @@ logger = logging.getLogger(__name__)
 # Topic identifier used in dispatch results for tracing and observability.
 # Note: Internal identifier for logging/metrics, NOT the actual Kafka topic.
 # Actual topic is configured via ModelDispatchRoute.topic_pattern.
-TOPIC_ID_RUNTIME_TICK = "runtime.tick"
+TOPIC_ID_NODE_REGISTRATION_ACKED = "node.registration.acked"
 
 
-class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
-    """Dispatcher adapter for HandlerRuntimeTick.
+class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
+    """Dispatcher adapter for HandlerNodeRegistrationAcked.
 
-    This dispatcher wraps HandlerRuntimeTick to integrate it with
+    This dispatcher wraps HandlerNodeRegistrationAcked to integrate it with
     MessageDispatchEngine's category-based routing. It handles:
 
-    - Deserialization: Validates and casts envelope payload to ModelRuntimeTick
+    - Deserialization: Validates and casts payload to ModelNodeRegistrationAcked
     - Time injection: Uses current time from dispatch context
     - Correlation tracking: Extracts or generates correlation_id
     - Error handling: Returns structured ModelDispatchResult on failure
@@ -107,26 +113,28 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         - threshold: 3 consecutive failures before opening circuit
         - reset_timeout: 20.0 seconds before attempting recovery
         - transport_type: KAFKA (event dispatching transport)
-        - service_name: dispatcher.registration.runtime-tick
+        - service_name: dispatcher.registration.node-registration-acked
 
     Thread Safety:
         This dispatcher uses asyncio.Lock for coroutine-safe circuit breaker
         state management. The wrapped handler must also be coroutine-safe.
 
     Attributes:
-        _handler: The wrapped HandlerRuntimeTick instance.
+        _handler: The wrapped HandlerNodeRegistrationAcked instance.
 
     Example:
-        >>> from omnibase_infra.runtime.dispatchers import DispatcherRuntimeTick
-        >>> dispatcher = DispatcherRuntimeTick(handler_instance)
+        >>> from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
+        ...     DispatcherNodeRegistrationAcked,
+        ... )
+        >>> dispatcher = DispatcherNodeRegistrationAcked(handler_instance)
         >>> result = await dispatcher.handle(envelope)
     """
 
-    def __init__(self, handler: HandlerRuntimeTick) -> None:
+    def __init__(self, handler: HandlerNodeRegistrationAcked) -> None:
         """Initialize dispatcher with wrapped handler and circuit breaker.
 
         Args:
-            handler: HandlerRuntimeTick instance to delegate to.
+            handler: HandlerNodeRegistrationAcked instance to delegate to.
 
         Circuit Breaker:
             Initialized with KAFKA transport settings per dispatcher_resilience.md:
@@ -140,7 +148,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         self._init_circuit_breaker(
             threshold=3,  # Open after 3 failures (KAFKA is critical)
             reset_timeout=20.0,  # 20 seconds recovery window
-            service_name="dispatcher.registration.runtime-tick",
+            service_name="dispatcher.registration.node-registration-acked",
             transport_type=EnumInfraTransportType.KAFKA,
         )
 
@@ -151,25 +159,25 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         Returns:
             str: The dispatcher ID used for registration and tracing.
         """
-        return "dispatcher.registration.runtime-tick"
+        return "dispatcher.registration.node-registration-acked"
 
     @property
     def category(self) -> EnumMessageCategory:
         """Message category this dispatcher processes.
 
         Returns:
-            EnumMessageCategory: EVENT category (runtime tick events).
+            EnumMessageCategory: COMMAND category (ack commands).
         """
-        return EnumMessageCategory.EVENT
+        return EnumMessageCategory.COMMAND
 
     @property
     def message_types(self) -> set[str]:
         """Specific message types this dispatcher accepts.
 
         Returns:
-            set[str]: Set containing ModelRuntimeTick type name.
+            set[str]: Set containing ModelNodeRegistrationAcked type name.
         """
-        return {"ModelRuntimeTick"}
+        return {"ModelNodeRegistrationAcked"}
 
     @property
     def node_kind(self) -> EnumNodeKind:
@@ -184,9 +192,9 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         self,
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult:
-        """Handle runtime tick event and return dispatch result.
+        """Handle registration ack command and return dispatch result.
 
-        Deserializes the envelope payload to ModelRuntimeTick,
+        Deserializes the envelope payload to ModelNodeRegistrationAcked,
         delegates to the wrapped handler, and returns a structured result.
 
         Circuit Breaker Integration:
@@ -196,7 +204,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             - InfraUnavailableError propagates to caller for DLQ handling
 
         Args:
-            envelope: Event envelope containing runtime tick payload.
+            envelope: Event envelope containing ack command payload.
 
         Returns:
             ModelDispatchResult: Success with output events or error details.
@@ -215,22 +223,22 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         try:
             # Validate payload type
             payload = envelope.payload
-            if not isinstance(payload, ModelRuntimeTick):
+            if not isinstance(payload, ModelNodeRegistrationAcked):
                 # Try to construct from dict if payload is dict-like
                 if isinstance(payload, dict):
-                    payload = ModelRuntimeTick.model_validate(payload)
+                    payload = ModelNodeRegistrationAcked.model_validate(payload)
                 else:
                     # Reuse started_at timestamp for INVALID_MESSAGE - processing
                     # is minimal (just a type check) so duration is effectively 0
                     return ModelDispatchResult(
                         dispatch_id=uuid4(),
                         status=EnumDispatchStatus.INVALID_MESSAGE,
-                        topic=TOPIC_ID_RUNTIME_TICK,
+                        topic=TOPIC_ID_NODE_REGISTRATION_ACKED,
                         dispatcher_id=self.dispatcher_id,
                         started_at=started_at,
                         completed_at=started_at,
                         duration_ms=0.0,
-                        error_message=f"Expected ModelRuntimeTick payload, "
+                        error_message=f"Expected ModelNodeRegistrationAcked payload, "
                         f"got {type(payload).__name__}",
                         correlation_id=correlation_id,
                         output_events=[],
@@ -238,22 +246,30 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
 
             # Explicit type guard (not assert) for production safety
             # Type narrowing after isinstance/model_validate above
-            if not isinstance(payload, ModelRuntimeTick):
-                raise TypeError(
-                    f"Expected ModelRuntimeTick after validation, "
-                    f"got {type(payload).__name__}"
+            if not isinstance(payload, ModelNodeRegistrationAcked):
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="handle_registration_acked",
+                    correlation_id=correlation_id,
+                )
+                raise EnvelopeValidationError(
+                    f"Expected ModelNodeRegistrationAcked after validation, "
+                    f"got {type(payload).__name__}",
+                    context=context,
                 )
 
             # Get current time for handler
             now = datetime.now(UTC)
 
             # Create envelope for handler (ProtocolMessageHandler signature)
-            handler_envelope: ModelEventEnvelope[ModelRuntimeTick] = ModelEventEnvelope(
-                envelope_id=uuid4(),
-                payload=payload,
-                envelope_timestamp=now,
-                correlation_id=correlation_id,
-                source=self.dispatcher_id,
+            handler_envelope: ModelEventEnvelope[ModelNodeRegistrationAcked] = (
+                ModelEventEnvelope(
+                    envelope_id=uuid4(),
+                    payload=payload,
+                    envelope_timestamp=now,
+                    correlation_id=correlation_id,
+                    source=self.dispatcher_id,
+                )
             )
 
             # Delegate to wrapped handler
@@ -268,9 +284,9 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
                 await self._reset_circuit_breaker()
 
             logger.info(
-                "DispatcherRuntimeTick processed tick",
+                "DispatcherNodeRegistrationAcked processed command",
                 extra={
-                    "tick_id": str(payload.tick_id),
+                    "node_id": str(payload.node_id),
                     "output_count": len(output_events),
                     "duration_ms": duration_ms,
                     "correlation_id": str(correlation_id),
@@ -280,7 +296,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             return ModelDispatchResult(
                 dispatch_id=uuid4(),
                 status=EnumDispatchStatus.SUCCESS,
-                topic=TOPIC_ID_RUNTIME_TICK,
+                topic=TOPIC_ID_NODE_REGISTRATION_ACKED,
                 dispatcher_id=self.dispatcher_id,
                 started_at=started_at,
                 completed_at=completed_at,
@@ -298,7 +314,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             sanitized_error = sanitize_error_message(e)
 
             logger.warning(
-                "DispatcherRuntimeTick received invalid message: %s",
+                "DispatcherNodeRegistrationAcked received invalid message: %s",
                 sanitized_error,
                 extra={
                     "duration_ms": duration_ms,
@@ -310,7 +326,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             return ModelDispatchResult(
                 dispatch_id=uuid4(),
                 status=EnumDispatchStatus.INVALID_MESSAGE,
-                topic=TOPIC_ID_RUNTIME_TICK,
+                topic=TOPIC_ID_NODE_REGISTRATION_ACKED,
                 dispatcher_id=self.dispatcher_id,
                 started_at=started_at,
                 completed_at=completed_at,
@@ -337,7 +353,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             # Use logger.error instead of logger.exception to avoid leaking
             # potentially sensitive data in stack traces (credentials, PII, etc.)
             logger.error(
-                "DispatcherRuntimeTick failed: %s",
+                "DispatcherNodeRegistrationAcked failed: %s",
                 sanitized_error,
                 extra={
                     "duration_ms": duration_ms,
@@ -349,7 +365,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             return ModelDispatchResult(
                 dispatch_id=uuid4(),
                 status=EnumDispatchStatus.HANDLER_ERROR,
-                topic=TOPIC_ID_RUNTIME_TICK,
+                topic=TOPIC_ID_NODE_REGISTRATION_ACKED,
                 dispatcher_id=self.dispatcher_id,
                 started_at=started_at,
                 completed_at=completed_at,

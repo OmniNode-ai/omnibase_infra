@@ -671,6 +671,15 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-1135
+  - file_pattern: 'service_snapshot\.py'
+    class_pattern: "Class name 'ServiceSnapshot'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention for service classes. ServiceSnapshot provides generic snapshot infrastructure for state persistence. File renamed from snapshot_repository.py per PR review feedback.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-1246
   - file_pattern: 'service_health\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
@@ -1541,6 +1550,16 @@ pattern_exemptions:
     documentation:
       - src/omnibase_infra/runtime/handler_contract_source.py (reference pattern)
     ticket: OMN-1168
+  - file_pattern: 'projector_plugin_loader\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      ProjectorPluginLoader.__init__ requires multiple configuration parameters for security controls (allowed_namespaces), observability (correlation_id), and plugin discovery settings. Mirrors HandlerPluginLoader pattern which has similar constructor signature.
+
+    documentation:
+      - src/omnibase_infra/runtime/handler_plugin_loader.py (reference pattern)
+      - docs/patterns/handler_plugin_loader.md (security model)
+    ticket: OMN-1316
   # ==========================================================================
   # ProjectorShell Exemptions (OMN-1169)
   # ==========================================================================

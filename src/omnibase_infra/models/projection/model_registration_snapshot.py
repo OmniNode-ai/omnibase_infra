@@ -23,12 +23,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
@@ -257,7 +258,7 @@ class ModelRegistrationSnapshot(BaseModel):
             True if this snapshot has a higher version, False otherwise
 
         Raises:
-            ValueError: If snapshots are for different entities (entity_id + domain mismatch)
+            ProtocolConfigurationError: If snapshots are for different entities (entity_id + domain mismatch)
 
         Example:
             >>> snap_v1 = ModelRegistrationSnapshot(snapshot_version=1, ...)
@@ -268,9 +269,15 @@ class ModelRegistrationSnapshot(BaseModel):
             False
         """
         if self.entity_id != other.entity_id or self.domain != other.domain:
-            raise ValueError(
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="is_newer_than",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
                 f"Cannot compare snapshots for different entities: "
-                f"{self.to_kafka_key()} vs {other.to_kafka_key()}"
+                f"{self.to_kafka_key()} vs {other.to_kafka_key()}",
+                context=context,
             )
         return self.snapshot_version > other.snapshot_version
 
