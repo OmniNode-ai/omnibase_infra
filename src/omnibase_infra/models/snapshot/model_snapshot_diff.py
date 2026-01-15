@@ -10,7 +10,7 @@ Thread Safety:
     This model is frozen (immutable) for safe sharing across threads.
 
 Related Tickets:
-    - OMN-1246: SnapshotRepository Infrastructure Primitive
+    - OMN-1246: ServiceSnapshot Infrastructure Primitive
 """
 
 from __future__ import annotations

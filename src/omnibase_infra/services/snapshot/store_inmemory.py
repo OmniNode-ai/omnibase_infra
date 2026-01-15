@@ -18,7 +18,7 @@ Thread Safety:
     implementation or wrap with appropriate locks.
 
 Related Tickets:
-    - OMN-1246: SnapshotRepository Infrastructure Primitive
+    - OMN-1246: ServiceSnapshot Infrastructure Primitive
 
 Example:
     >>> import asyncio

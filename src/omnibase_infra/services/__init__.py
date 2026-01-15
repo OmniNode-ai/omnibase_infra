@@ -14,7 +14,7 @@ Exports:
     ModelTimeoutQueryResult: Result model for timeout queries
     ServiceCapabilityQuery: Query nodes by capability, not by name
     ServiceNodeSelector: Select nodes from candidates using various strategies
-    SnapshotRepository: Generic snapshot repository for point-in-time state capture
+    ServiceSnapshot: Generic snapshot service for point-in-time state capture
     ServiceTimeoutEmitter: Emitter for timeout events with markers
     ServiceTimeoutScanner: Scanner for querying overdue registration entities
     StoreSnapshotInMemory: In-memory snapshot store for testing
@@ -39,7 +39,7 @@ from omnibase_infra.services.service_timeout_scanner import (
     ServiceTimeoutScanner,
 )
 from omnibase_infra.services.snapshot import (
-    SnapshotRepository,
+    ServiceSnapshot,
     StoreSnapshotInMemory,
     StoreSnapshotPostgres,
 )
@@ -56,9 +56,9 @@ __all__ = [
     "ModelTimeoutQueryResult",
     "ServiceCapabilityQuery",
     "ServiceNodeSelector",
+    "ServiceSnapshot",
     "ServiceTimeoutEmitter",
     "ServiceTimeoutScanner",
-    "SnapshotRepository",
     "StoreSnapshotInMemory",
     "StoreSnapshotPostgres",
     "TimeoutEmitter",

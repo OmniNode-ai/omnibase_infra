@@ -68,7 +68,7 @@ Security:
     - Connection pool credentials managed externally
 
 Related Tickets:
-    - OMN-1246: SnapshotRepository Infrastructure Primitive
+    - OMN-1246: ServiceSnapshot Infrastructure Primitive
 """
 
 from __future__ import annotations
@@ -76,15 +76,14 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
 from uuid import UUID
+
+import asyncpg
+import asyncpg.exceptions
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
-
-if TYPE_CHECKING:
-    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +148,13 @@ class StoreSnapshotPostgres:
         returns the existing snapshot's ID instead of creating a
         duplicate. This enables safe retries without data duplication.
 
+        Race Condition Handling:
+            This method uses a CTE (Common Table Expression) pattern to
+            atomically check for existing content_hash and conditionally
+            insert. If a concurrent process inserts a row with the same
+            sequence_number (causing UniqueViolationError), the method
+            re-checks for content_hash match to preserve idempotency.
+
         Args:
             snapshot: The snapshot to persist.
 
@@ -159,18 +165,85 @@ class StoreSnapshotPostgres:
             InfraConnectionError: If database connection fails or
                 query execution fails.
         """
+        # Serialize data to JSON for JSONB storage (done outside try for clarity)
+        data_json = json.dumps(snapshot.data, sort_keys=True)
+
         try:
             async with self._pool.acquire() as conn:
-                # Check for duplicate via content_hash
                 if snapshot.content_hash:
+                    # Use CTE for atomic check-and-insert to minimize race window.
+                    # This pattern:
+                    # 1. Checks for existing content_hash in 'existing' CTE
+                    # 2. Conditionally inserts only if no existing row found
+                    # 3. Uses ON CONFLICT DO NOTHING for sequence constraint races
+                    # 4. Returns existing ID or newly inserted ID
+                    result = await conn.fetchval(
+                        """
+                        WITH existing AS (
+                            SELECT id FROM snapshots
+                            WHERE content_hash = $7
+                            LIMIT 1
+                        ), inserted AS (
+                            INSERT INTO snapshots (
+                                id, subject_type, subject_id, data, sequence_number,
+                                version, content_hash, created_at, parent_id
+                            )
+                            SELECT $1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9
+                            WHERE NOT EXISTS (SELECT 1 FROM existing)
+                            ON CONFLICT (subject_type, subject_id, sequence_number)
+                                DO NOTHING
+                            RETURNING id
+                        )
+                        SELECT COALESCE(
+                            (SELECT id FROM existing),
+                            (SELECT id FROM inserted)
+                        )
+                        """,
+                        snapshot.id,
+                        snapshot.subject.subject_type,
+                        snapshot.subject.subject_id,
+                        data_json,
+                        snapshot.sequence_number,
+                        snapshot.version,
+                        snapshot.content_hash,
+                        snapshot.created_at,
+                        snapshot.parent_id,
+                    )
+
+                    if result:
+                        result_id = UUID(str(result))
+                        if result_id != snapshot.id:
+                            logger.debug(
+                                "Duplicate snapshot detected via content_hash, "
+                                "returning existing ID",
+                                extra={
+                                    "existing_id": str(result_id),
+                                    "content_hash": snapshot.content_hash[:16] + "...",
+                                },
+                            )
+                        else:
+                            logger.debug(
+                                "Snapshot saved",
+                                extra={
+                                    "snapshot_id": str(snapshot.id),
+                                    "subject_type": snapshot.subject.subject_type,
+                                    "sequence_number": snapshot.sequence_number,
+                                },
+                            )
+                        return result_id
+
+                    # If result is None, ON CONFLICT DO NOTHING triggered due to
+                    # sequence conflict. Re-check content_hash for race condition
+                    # where another process inserted same content concurrently.
                     existing = await conn.fetchval(
                         "SELECT id FROM snapshots WHERE content_hash = $1",
                         snapshot.content_hash,
                     )
                     if existing:
-                        existing_id: UUID = UUID(str(existing))
+                        existing_id = UUID(str(existing))
                         logger.debug(
-                            "Duplicate snapshot detected via content_hash, returning existing ID",
+                            "Concurrent duplicate detected after sequence conflict, "
+                            "returning existing ID",
                             extra={
                                 "existing_id": str(existing_id),
                                 "content_hash": snapshot.content_hash[:16] + "...",
@@ -178,16 +251,31 @@ class StoreSnapshotPostgres:
                         )
                         return existing_id
 
-                # Serialize data to JSON for JSONB storage
-                data_json = json.dumps(snapshot.data, sort_keys=True)
+                    # Sequence conflict with different content - this is a real
+                    # conflict that the caller should handle
+                    context = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.DATABASE,
+                        operation="save_snapshot",
+                        target_name="snapshots",
+                    )
+                    raise InfraConnectionError(
+                        f"Sequence conflict: sequence_number {snapshot.sequence_number} "
+                        f"already exists for subject "
+                        f"({snapshot.subject.subject_type}, {snapshot.subject.subject_id}) "
+                        f"with different content",
+                        context=context,
+                    )
 
-                # Insert new snapshot
-                await conn.execute(
+                # No content_hash - insert directly with conflict handling
+                result = await conn.fetchval(
                     """
                     INSERT INTO snapshots (
                         id, subject_type, subject_id, data, sequence_number,
                         version, content_hash, created_at, parent_id
                     ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+                    ON CONFLICT (subject_type, subject_id, sequence_number)
+                        DO NOTHING
+                    RETURNING id
                     """,
                     snapshot.id,
                     snapshot.subject.subject_type,
@@ -199,15 +287,72 @@ class StoreSnapshotPostgres:
                     snapshot.created_at,
                     snapshot.parent_id,
                 )
-                logger.debug(
-                    "Snapshot saved",
-                    extra={
-                        "snapshot_id": str(snapshot.id),
-                        "subject_type": snapshot.subject.subject_type,
-                        "sequence_number": snapshot.sequence_number,
-                    },
+
+                if result:
+                    logger.debug(
+                        "Snapshot saved",
+                        extra={
+                            "snapshot_id": str(snapshot.id),
+                            "subject_type": snapshot.subject.subject_type,
+                            "sequence_number": snapshot.sequence_number,
+                        },
+                    )
+                    return UUID(str(result))
+
+                # Sequence conflict - return error
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="save_snapshot",
+                    target_name="snapshots",
                 )
-                return snapshot.id
+                raise InfraConnectionError(
+                    f"Sequence conflict: sequence_number {snapshot.sequence_number} "
+                    f"already exists for subject "
+                    f"({snapshot.subject.subject_type}, {snapshot.subject.subject_id})",
+                    context=context,
+                )
+
+        except asyncpg.exceptions.UniqueViolationError:
+            # Race condition: constraint violation despite ON CONFLICT
+            # (can happen with concurrent transactions in edge cases).
+            # Re-check content_hash to preserve idempotency.
+            if snapshot.content_hash:
+                try:
+                    async with self._pool.acquire() as conn:
+                        existing = await conn.fetchval(
+                            "SELECT id FROM snapshots WHERE content_hash = $1",
+                            snapshot.content_hash,
+                        )
+                        if existing:
+                            existing_id = UUID(str(existing))
+                            logger.debug(
+                                "Race condition resolved: returning existing ID "
+                                "after UniqueViolationError",
+                                extra={
+                                    "existing_id": str(existing_id),
+                                    "content_hash": snapshot.content_hash[:16] + "...",
+                                },
+                            )
+                            return existing_id
+                except Exception:
+                    pass  # Fall through to re-raise original error
+
+            # Re-raise as InfraConnectionError
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="save_snapshot",
+                target_name="snapshots",
+            )
+            raise InfraConnectionError(
+                f"Unique constraint violation during save for subject "
+                f"({snapshot.subject.subject_type}, {snapshot.subject.subject_id})",
+                context=context,
+            )
+
+        except InfraConnectionError:
+            # Re-raise our own errors without wrapping
+            raise
+
         except Exception as e:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,

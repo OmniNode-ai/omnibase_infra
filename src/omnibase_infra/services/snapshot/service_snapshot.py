@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Generic Snapshot Repository for Point-in-Time State Capture.
+"""Generic Snapshot Service for Point-in-Time State Capture.
 
-This module provides the SnapshotRepository class, a high-level repository for
-managing point-in-time snapshots of entity state. The repository handles:
+This module provides the ServiceSnapshot class, a high-level service for
+managing point-in-time snapshots of entity state. The service handles:
 
 - Snapshot creation with automatic sequence numbering
 - Retrieval and querying with subject filtering
@@ -11,7 +11,7 @@ managing point-in-time snapshots of entity state. The repository handles:
 - Fork operations for creating derived snapshots
 
 Architecture Context:
-    SnapshotRepository is the business logic layer for snapshots:
+    ServiceSnapshot is the business logic layer for snapshots:
     - Uses ProtocolSnapshotStore for persistence (injectable backend)
     - Manages sequence number generation with locking
     - Provides convenience methods (diff, fork) over raw storage
@@ -22,18 +22,20 @@ Thread Safety:
     implementation must provide atomic sequence generation.
 
 Related Tickets:
-    - OMN-1246: SnapshotRepository Infrastructure Primitive
+    - OMN-1246: ServiceSnapshot Infrastructure Primitive
 """
 
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_core.container import ModelONEXContainer
+from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.types import JsonType
 
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.snapshot import (
     ModelSnapshot,
     ModelSnapshotDiff,
@@ -41,12 +43,46 @@ from omnibase_infra.models.snapshot import (
 )
 from omnibase_infra.protocols import ProtocolSnapshotStore
 
-if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
+
+class SnapshotNotFoundError(RuntimeHostError):
+    """Raised when a requested snapshot does not exist.
+
+    Used when diff or fork operations reference a snapshot ID that
+    cannot be found in the store. This indicates a caller error
+    (invalid ID) rather than an infrastructure failure.
+
+    Example:
+        >>> raise SnapshotNotFoundError(
+        ...     "Base snapshot not found",
+        ...     snapshot_id=base_id,
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        snapshot_id: UUID | None = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize SnapshotNotFoundError.
+
+        Args:
+            message: Human-readable error message
+            snapshot_id: The UUID of the snapshot that was not found
+            **extra_context: Additional context information
+        """
+        if snapshot_id is not None:
+            extra_context["snapshot_id"] = str(snapshot_id)
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.RESOURCE_NOT_FOUND,
+            context=None,
+            **extra_context,
+        )
 
 
-class SnapshotRepository:
-    """Generic snapshot repository with injectable persistence backend.
+class ServiceSnapshot:
+    """Generic snapshot service with injectable persistence backend.
 
     Provides a high-level interface for snapshot management, including
     creation, retrieval, diffing, and fork operations. Uses a protocol-
@@ -61,29 +97,32 @@ class SnapshotRepository:
 
     Attributes:
         _store: The persistence backend implementing ProtocolSnapshotStore.
-        _container: Optional ONEX container for dependency injection.
+        _container: ONEX container for dependency injection.
         _lock: Asyncio lock for coroutine-safe sequence generation.
 
     Example:
-        >>> from omnibase_infra.services.snapshot import SnapshotRepository
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> from omnibase_infra.services.snapshot import ServiceSnapshot
+        >>> from omnibase_infra.services.snapshot import StoreSnapshotInMemory
         >>> from omnibase_infra.models.snapshot import ModelSubjectRef
         >>>
-        >>> # Create repository with in-memory store (for testing)
-        >>> store = InMemorySnapshotStore()
-        >>> repo = SnapshotRepository(store=store)
+        >>> # Create service with in-memory store (for testing)
+        >>> store = StoreSnapshotInMemory()
+        >>> container = ModelONEXContainer()
+        >>> service = ServiceSnapshot(store=store, container=container)
         >>>
         >>> # Create a snapshot
         >>> subject = ModelSubjectRef(
         ...     subject_type="agent",
         ...     subject_id="agent-001",
         ... )
-        >>> snapshot_id = await repo.create(
+        >>> snapshot_id = await service.create(
         ...     subject=subject,
         ...     data={"status": "active", "config": {"timeout": 30}},
         ... )
         >>>
         >>> # Retrieve latest snapshot
-        >>> latest = await repo.get_latest(subject=subject)
+        >>> latest = await service.get_latest(subject=subject)
         >>> latest.data["status"]
         'active'
     """
@@ -91,13 +130,13 @@ class SnapshotRepository:
     def __init__(
         self,
         store: ProtocolSnapshotStore,
-        container: ModelONEXContainer | None = None,
+        container: ModelONEXContainer,
     ) -> None:
-        """Initialize the snapshot repository.
+        """Initialize the snapshot service.
 
         Args:
             store: Persistence backend implementing ProtocolSnapshotStore.
-            container: Optional ONEX container for dependency injection.
+            container: ONEX container for dependency injection.
         """
         self._store = store
         self._container = container
@@ -258,7 +297,7 @@ class SnapshotRepository:
             A ModelSnapshotDiff describing the structural differences.
 
         Raises:
-            ValueError: If either snapshot is not found.
+            SnapshotNotFoundError: If either snapshot is not found.
             InfraConnectionError: If the store is unavailable.
             InfraTimeoutError: If the operation times out.
 
@@ -273,9 +312,15 @@ class SnapshotRepository:
         target = await self._store.load(target_id)
 
         if base is None:
-            raise ValueError(f"Base snapshot not found: {base_id}")
+            raise SnapshotNotFoundError(
+                f"Base snapshot not found: {base_id}",
+                snapshot_id=base_id,
+            )
         if target is None:
-            raise ValueError(f"Target snapshot not found: {target_id}")
+            raise SnapshotNotFoundError(
+                f"Target snapshot not found: {target_id}",
+                snapshot_id=target_id,
+            )
 
         return ModelSnapshotDiff.compute(
             base_data=base.data,
@@ -307,7 +352,7 @@ class SnapshotRepository:
             The newly created fork snapshot.
 
         Raises:
-            ValueError: If the source snapshot is not found.
+            SnapshotNotFoundError: If the source snapshot is not found.
             InfraConnectionError: If the store is unavailable.
             InfraTimeoutError: If the operation times out.
 
@@ -323,7 +368,10 @@ class SnapshotRepository:
         """
         source = await self._store.load(snapshot_id)
         if source is None:
-            raise ValueError(f"Source snapshot not found: {snapshot_id}")
+            raise SnapshotNotFoundError(
+                f"Source snapshot not found: {snapshot_id}",
+                snapshot_id=snapshot_id,
+            )
 
         # Get next sequence number for the subject
         async with self._lock:
@@ -361,4 +409,4 @@ class SnapshotRepository:
         return await self._store.delete(snapshot_id)
 
 
-__all__: list[str] = ["SnapshotRepository"]
+__all__: list[str] = ["SnapshotNotFoundError", "ServiceSnapshot"]

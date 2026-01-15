@@ -11,7 +11,7 @@ snapshots of entity state. Snapshots support:
 - Lineage tracking for fork scenarios
 
 Related Tickets:
-    - OMN-1246: SnapshotRepository Infrastructure Primitive
+    - OMN-1246: ServiceSnapshot Infrastructure Primitive
 """
 
 from omnibase_infra.models.snapshot.model_field_change import ModelFieldChange

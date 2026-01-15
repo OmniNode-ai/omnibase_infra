@@ -11,7 +11,7 @@ Thread Safety:
     Use with_mutations() to create new snapshots from existing ones.
 
 Related Tickets:
-    - OMN-1246: SnapshotRepository Infrastructure Primitive
+    - OMN-1246: ServiceSnapshot Infrastructure Primitive
 """
 
 from __future__ import annotations
@@ -78,6 +78,7 @@ class ModelSnapshot(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     # Identity
@@ -245,7 +246,12 @@ class ModelSnapshot(BaseModel):
             other: Another snapshot to compare against.
 
         Returns:
-            True if content hashes match, False otherwise.
+            True if both snapshots have non-None content hashes that match,
+            False otherwise (including when either hash is None).
+
+        Note:
+            Returns False when either snapshot has a None content_hash,
+            since we cannot reliably compare content without hashes.
 
         Example:
             >>> from uuid import uuid4
@@ -255,6 +261,9 @@ class ModelSnapshot(BaseModel):
             >>> snap1.is_content_equal(snap2)
             True
         """
+        # Cannot compare content if either hash is None
+        if self.content_hash is None or other.content_hash is None:
+            return False
         return self.content_hash == other.content_hash
 
 

@@ -8,7 +8,7 @@ in-memory stores, or other storage mechanisms.
 
 Architecture Context:
     In the ONEX snapshot system:
-    - SnapshotRepository handles business logic (idempotency, sequencing)
+    - ServiceSnapshot handles business logic (idempotency, sequencing)
     - ProtocolSnapshotStore defines the storage contract
     - Concrete implementations (PostgreSQL, in-memory) provide persistence
 
@@ -73,7 +73,7 @@ Error Handling:
     - ProtocolConfigurationError: Invalid configuration
 
 See Also:
-    - OMN-1246: SnapshotRepository implementation
+    - OMN-1246: ServiceSnapshot implementation
     - omnibase_infra.models.snapshot for model definitions
     - omnibase_infra.services.snapshot for repository logic
 """
@@ -97,7 +97,7 @@ class ProtocolSnapshotStore(Protocol):
     """Backend persistence protocol for snapshot storage.
 
     Implementations provide concrete storage (PostgreSQL, in-memory, etc.)
-    while SnapshotRepository handles business logic.
+    while ServiceSnapshot handles business logic.
 
     Ordering Guarantees:
         - sequence_number is the canonical ordering field
@@ -175,9 +175,9 @@ class ProtocolSnapshotStore(Protocol):
                 id=uuid4(),
                 subject=ModelSubjectRef(
                     subject_type="node_registration",
-                    subject_id=str(node_id),
+                    subject_id=node_id,  # UUID type
                 ),
-                state=state_dict,
+                data=state_dict,
                 sequence_number=42,
                 content_hash="sha256:abc123...",
             )
@@ -210,7 +210,7 @@ class ProtocolSnapshotStore(Protocol):
             if snapshot is None:
                 logger.warning(f"Snapshot {snapshot_id} not found")
                 return None
-            return snapshot.state
+            return snapshot.data
             ```
         """
         ...
@@ -241,7 +241,7 @@ class ProtocolSnapshotStore(Protocol):
             # Get latest snapshot for a specific node
             subject = ModelSubjectRef(
                 subject_type="node_registration",
-                subject_id=str(node_id),
+                subject_id=node_id,  # UUID type
             )
             latest = await store.load_latest(subject=subject)
 
@@ -285,7 +285,7 @@ class ProtocolSnapshotStore(Protocol):
             # Get last 10 snapshots for a subject
             subject = ModelSubjectRef(
                 subject_type="node_registration",
-                subject_id=str(node_id),
+                subject_id=node_id,  # UUID type
             )
             snapshots = await store.query(subject=subject, limit=10)
 
@@ -354,7 +354,7 @@ class ProtocolSnapshotStore(Protocol):
             ```python
             subject = ModelSubjectRef(
                 subject_type="node_registration",
-                subject_id=str(node_id),
+                subject_id=node_id,  # UUID type
             )
             seq = await store.get_next_sequence_number(subject)
             # seq is guaranteed to be greater than any existing

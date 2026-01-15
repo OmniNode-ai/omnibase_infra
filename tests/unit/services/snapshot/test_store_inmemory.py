@@ -6,7 +6,7 @@ Tests the in-memory snapshot store implementation directly, covering
 all ProtocolSnapshotStore methods and test helper methods.
 
 Related Tickets:
-    - OMN-1246: SnapshotRepository Infrastructure Primitive
+    - OMN-1246: ServiceSnapshot Infrastructure Primitive
 """
 
 from __future__ import annotations
