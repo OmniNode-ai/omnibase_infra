@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 if TYPE_CHECKING:
     from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -135,7 +136,8 @@ class EnumNodeOutputType(str, Enum):
             The corresponding EnumMessageCategory for this output type.
 
         Raises:
-            ValueError: If this is PROJECTION, which has no message category.
+            ProtocolConfigurationError: If this is PROJECTION, which cannot be
+                converted to a message category.
 
         Example:
             >>> from omnibase_infra.enums import EnumNodeOutputType
@@ -145,13 +147,20 @@ class EnumNodeOutputType(str, Enum):
             <EnumMessageCategory.COMMAND: 'command'>
             >>> EnumNodeOutputType.INTENT.to_message_category()
             <EnumMessageCategory.INTENT: 'intent'>
-            >>> EnumNodeOutputType.PROJECTION.to_message_category()
+            >>> EnumNodeOutputType.PROJECTION.to_message_category()  # doctest: +IGNORE_EXCEPTION_DETAIL
             Traceback (most recent call last):
                 ...
-            ValueError: PROJECTION has no message category - projections are not routable
+            ProtocolConfigurationError: Invalid output type for message category: expected EVENT, COMMAND, or INTENT, got 'projection'
         """
         # Import at runtime to avoid circular imports
+        from omnibase_infra.enums.enum_infra_transport_type import (
+            EnumInfraTransportType,
+        )
         from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+        from omnibase_infra.errors import (
+            ModelInfraErrorContext,
+            ProtocolConfigurationError,
+        )
 
         if self == EnumNodeOutputType.EVENT:
             return EnumMessageCategory.EVENT
@@ -160,9 +169,17 @@ class EnumNodeOutputType(str, Enum):
         if self == EnumNodeOutputType.INTENT:
             return EnumMessageCategory.INTENT
 
-        # PROJECTION has no message category
-        msg = "PROJECTION has no message category - projections are not routable"
-        raise ValueError(msg)
+        # PROJECTION cannot be converted to message category
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="to_message_category",
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid output type for message category: expected EVENT, COMMAND, or INTENT, got '{self.value}'",
+            context=context,
+            output_type=self.value,
+        )
 
 
 __all__ = ["EnumNodeOutputType"]

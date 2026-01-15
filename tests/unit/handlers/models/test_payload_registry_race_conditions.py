@@ -21,6 +21,7 @@ from typing import ClassVar
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.handlers.models.consul.model_payload_consul import (
     ModelPayloadConsul,
 )
@@ -141,12 +142,12 @@ class TestRegistryPayloadHttpRaceConditions:
         This verifies the race condition fix where:
         1. Thread A acquires lock, checks if type exists, releases lock
         2. Thread B registers the same type between lock release and error raise
-        3. Thread A raises ValueError (incorrectly if not atomic)
+        3. Thread A raises ProtocolConfigurationError (incorrectly if not atomic)
 
         With the fix, the check and error are atomic within the lock.
         """
         num_threads = 10
-        errors: list[ValueError] = []
+        errors: list[ProtocolConfigurationError] = []
         successes = 0
         lock = threading.Lock()
         operation_type = "duplicate_test"
@@ -161,7 +162,7 @@ class TestRegistryPayloadHttpRaceConditions:
 
                 with lock:
                     successes += 1
-            except ValueError as e:
+            except ProtocolConfigurationError as e:
                 with lock:
                     errors.append(e)
             except Exception as e:
@@ -173,7 +174,7 @@ class TestRegistryPayloadHttpRaceConditions:
         for t in threads:
             t.join()
 
-        # Exactly one should succeed, rest should raise ValueError
+        # Exactly one should succeed, rest should raise ProtocolConfigurationError
         assert successes == 1, f"Expected 1 success, got {successes}"
         assert len(errors) == num_threads - 1, (
             f"Expected {num_threads - 1} errors, got {len(errors)}"
@@ -197,7 +198,7 @@ class TestRegistryPayloadHttpRaceConditions:
                         class Payload(ModelPayloadHttp):
                             operation_type: ClassVar[str] = f"clear_test_{i}"  # type: ignore[misc]
 
-                    except ValueError:
+                    except ProtocolConfigurationError:
                         pass  # Expected if already registered
             except Exception as e:
                 with lock:
@@ -264,7 +265,7 @@ class TestRegistryPayloadConsulRaceConditions:
     def test_concurrent_duplicate_registration_raises_error_atomically(self) -> None:
         """Test that duplicate registration errors are raised atomically."""
         num_threads = 10
-        errors: list[ValueError] = []
+        errors: list[ProtocolConfigurationError] = []
         successes = 0
         lock = threading.Lock()
         operation_type = "consul_duplicate_test"
@@ -279,7 +280,7 @@ class TestRegistryPayloadConsulRaceConditions:
 
                 with lock:
                     successes += 1
-            except ValueError as e:
+            except ProtocolConfigurationError as e:
                 with lock:
                     errors.append(e)
             except Exception as e:
@@ -335,7 +336,7 @@ class TestRegistryPayloadVaultRaceConditions:
     def test_concurrent_duplicate_registration_raises_error_atomically(self) -> None:
         """Test that duplicate registration errors are raised atomically."""
         num_threads = 10
-        errors: list[ValueError] = []
+        errors: list[ProtocolConfigurationError] = []
         successes = 0
         lock = threading.Lock()
         operation_type = "vault_duplicate_test"
@@ -350,7 +351,7 @@ class TestRegistryPayloadVaultRaceConditions:
 
                 with lock:
                     successes += 1
-            except ValueError as e:
+            except ProtocolConfigurationError as e:
                 with lock:
                     errors.append(e)
             except Exception as e:
@@ -393,7 +394,7 @@ class TestPayloadRegistryStressTests:
                         class HttpPayload(ModelPayloadHttp):
                             operation_type: ClassVar[str] = op_type  # type: ignore[misc]
 
-                    except ValueError:
+                    except ProtocolConfigurationError:
                         pass
 
                     # Check registration
@@ -437,7 +438,7 @@ class TestPayloadRegistryStressTests:
 
                 with lock:
                     successes += 1
-            except ValueError as e:
+            except ProtocolConfigurationError as e:
                 with lock:
                     errors.append(e)
             except Exception as e:

@@ -29,6 +29,9 @@ import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, ClassVar, TypeVar
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 if TYPE_CHECKING:
     from omnibase_infra.handlers.models.vault.model_payload_vault import (
         ModelPayloadVault,
@@ -99,18 +102,28 @@ class RegistryPayloadVault:
             )
 
             if not issubclass(payload_cls, ModelPayloadVault):
-                raise TypeError(
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="register_payload_type",
+                )
+                raise ProtocolConfigurationError(
                     f"Registered class {payload_cls.__name__!r} must be a subclass "
-                    f"of ModelPayloadVault, got {payload_cls.__mro__}"
+                    f"of ModelPayloadVault, got {payload_cls.__mro__}",
+                    context=context,
                 )
 
             # Thread-safe registration with atomic check-and-set
             with cls._lock:
                 if operation_type in cls._types:
-                    raise ValueError(
+                    context = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.VAULT,
+                        operation="register_payload_type",
+                    )
+                    raise ProtocolConfigurationError(
                         f"Vault payload operation_type '{operation_type}' already registered "
                         f"to {cls._types[operation_type].__name__}. "
-                        f"Cannot register {payload_cls.__name__}."
+                        f"Cannot register {payload_cls.__name__}.",
+                        context=context,
                     )
                 cls._types[operation_type] = payload_cls
             return payload_cls

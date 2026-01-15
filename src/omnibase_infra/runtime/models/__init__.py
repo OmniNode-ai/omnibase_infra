@@ -32,6 +32,7 @@ Exports:
     ModelShutdownBatchResult: Result of batch shutdown operation
     ModelHealthCheckResult: Result of component health check operation
     ModelHealthCheckResponse: HTTP response model for health check endpoints
+    ModelProjectorPluginLoaderConfig: Projector plugin loader configuration model
 """
 
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
@@ -71,6 +72,9 @@ from omnibase_infra.runtime.models.model_policy_registration import (
 )
 from omnibase_infra.runtime.models.model_policy_result import ModelPolicyResult
 from omnibase_infra.runtime.models.model_policy_type_filter import ModelPolicyTypeFilter
+from omnibase_infra.runtime.models.model_projector_plugin_loader_config import (
+    ModelProjectorPluginLoaderConfig,
+)
 from omnibase_infra.runtime.models.model_protocol_registration_config import (
     ModelProtocolRegistrationConfig,
 )
@@ -107,6 +111,7 @@ __all__: list[str] = [
     "ModelPolicyRegistration",
     "ModelPolicyResult",
     "ModelPolicyTypeFilter",
+    "ModelProjectorPluginLoaderConfig",
     "ModelProtocolRegistrationConfig",
     "ModelRuntimeConfig",
     "ModelRuntimeSchedulerConfig",

@@ -301,8 +301,8 @@ def _validate_adapter_constraints(
         error = ModelHandlerValidationError.from_security_violation(
             rule_id=EnumSecurityRuleId.ADAPTER_NON_EFFECT_CATEGORY,
             message=(
-                "Adapter handler has no handler_type_category set "
-                "but adapters must explicitly specify EFFECT category"
+                "Invalid adapter handler configuration: "
+                "expected handler_type_category=EFFECT, got None"
             ),
             remediation_hint=(
                 "Set handler_type_category=EnumHandlerTypeCategory.EFFECT for adapter handlers, "

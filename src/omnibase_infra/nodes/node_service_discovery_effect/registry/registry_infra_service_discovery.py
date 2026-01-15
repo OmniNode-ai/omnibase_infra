@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -142,7 +142,7 @@ class RegistryInfraServiceDiscovery:
             handler: Pre-configured handler implementation.
 
         Raises:
-            TypeError: If handler does not implement ProtocolServiceDiscoveryHandler.
+            ProtocolConfigurationError: If handler does not implement ProtocolServiceDiscoveryHandler.
 
         Example:
             >>> container = ModelONEXContainer()
@@ -158,9 +158,16 @@ class RegistryInfraServiceDiscovery:
         )
 
         if not isinstance(handler, ProtocolServiceDiscoveryHandler):
-            raise TypeError(
+            context = ModelInfraErrorContext(
+                operation="register_handler",
+                target_name="ProtocolServiceDiscoveryHandler",
+                # NOTE: transport_type intentionally omitted - this validation
+                # applies to multi-backend handlers (Consul, K8s, Etcd, etc.)
+            )
+            raise ProtocolConfigurationError(
                 f"Handler must implement ProtocolServiceDiscoveryHandler, "
-                f"got {type(handler).__name__}"
+                f"got {type(handler).__name__}",
+                context=context,
             )
 
         if container.service_registry is None:
