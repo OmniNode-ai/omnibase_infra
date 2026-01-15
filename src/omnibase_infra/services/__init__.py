@@ -22,6 +22,7 @@ Exports:
 
 from omnibase_infra.enums import EnumSelectionStrategy
 from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
+from omnibase_infra.services.service_corpus_capture import ServiceCorpusCapture
 from omnibase_infra.services.service_node_selector import (
     DEFAULT_SELECTION_KEY,
     ServiceNodeSelector,
@@ -47,6 +48,7 @@ __all__ = [
     "ModelTimeoutEmissionResult",
     "ModelTimeoutQueryResult",
     "ServiceCapabilityQuery",
+    "ServiceCorpusCapture",
     "ServiceNodeSelector",
     "ServiceTimeoutEmitter",
     "ServiceTimeoutScanner",
