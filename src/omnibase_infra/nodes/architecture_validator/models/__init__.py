@@ -7,8 +7,8 @@ This module exports all models used by both architecture validators:
 - OMN-1099: NodeArchitectureValidator (core pattern validation)
 """
 
-# Canonical severity enum from enums/ directory
-from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+# Canonical severity enum
+from omnibase_infra.enums import EnumValidationSeverity
 
 # OMN-1138: Models for NodeArchitectureValidatorCompute
 # OMN-1099: Models for NodeArchitectureValidator

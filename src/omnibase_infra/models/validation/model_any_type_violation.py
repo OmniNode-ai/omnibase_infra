@@ -10,11 +10,10 @@ full context for debugging and CI gate integration.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
+from omnibase_infra.enums import EnumAnyTypeViolation, EnumValidationSeverity
 
 
 class ModelAnyTypeViolation(BaseModel):
@@ -78,8 +77,8 @@ class ModelAnyTypeViolation(BaseModel):
         min_length=1,
         description="Human-readable suggestion for fixing the violation",
     )
-    severity: Literal["error", "warning"] = Field(
-        default="error",
+    severity: EnumValidationSeverity = Field(
+        default=EnumValidationSeverity.ERROR,
         description="Severity classification: 'error' blocks CI, 'warning' is advisory",
     )
     context_name: str = Field(
@@ -101,7 +100,7 @@ class ModelAnyTypeViolation(BaseModel):
         Returns:
             True if severity is 'error', False for 'warning'.
         """
-        return self.severity == "error"
+        return self.severity == EnumValidationSeverity.ERROR
 
     def format_for_ci(self) -> str:
         """Format violation for CI output (GitHub Actions compatible).

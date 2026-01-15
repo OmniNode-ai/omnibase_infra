@@ -165,6 +165,7 @@ from omnibase_infra.enums import (
     EnumMessageCategory,
     EnumNodeArchetype,
     EnumNodeOutputType,
+    EnumValidationSeverity,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.validation.model_execution_shape_rule import (
@@ -698,7 +699,7 @@ class RuntimeShapeValidator:
             file_path=file_path,
             line_number=line_number if line_number > 0 else 1,
             message=message,
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
 
     def validate_and_raise(

@@ -39,15 +39,15 @@ State Management:
 
     Example of immutability behavior::
 
-        state1 = ModelRegistrationState(status="idle")
+        state1 = ModelRegistrationState(status=EnumRegistrationStatus.IDLE)
         state2 = state1.with_pending_registration(node_id, event_id)
 
         # state1 is unchanged (immutable)
-        assert state1.status == "idle"
-        assert state2.status == "pending"
+        assert state1.status == EnumRegistrationStatus.IDLE
+        assert state2.status == EnumRegistrationStatus.PENDING
 
         # Attempting to mutate raises TypeError
-        state1.status = "pending"  # Raises TypeError
+        state1.status = EnumRegistrationStatus.PENDING  # Raises TypeError
 
     **STATE TRANSITION METHODS:**
 
@@ -164,8 +164,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Type alias for status literals
-RegistrationStatus = Literal["idle", "pending", "partial", "complete", "failed"]
+from omnibase_infra.enums import EnumRegistrationStatus
 
 # Type alias for failure reason literals
 FailureReason = Literal[
@@ -235,8 +234,8 @@ class ModelRegistrationState(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    status: RegistrationStatus = Field(
-        default="idle",
+    status: EnumRegistrationStatus = Field(
+        default=EnumRegistrationStatus.IDLE,
         description="Current workflow status",
     )
     node_id: UUID | None = Field(
@@ -276,7 +275,7 @@ class ModelRegistrationState(BaseModel):
             New ModelRegistrationState with pending status.
         """
         return ModelRegistrationState(
-            status="pending",
+            status=EnumRegistrationStatus.PENDING,
             node_id=node_id,
             consul_confirmed=False,
             postgres_confirmed=False,
@@ -296,8 +295,10 @@ class ModelRegistrationState(BaseModel):
         Returns:
             New ModelRegistrationState with consul_confirmed=True.
         """
-        new_status: RegistrationStatus = (
-            "complete" if self.postgres_confirmed else "partial"
+        new_status: EnumRegistrationStatus = (
+            EnumRegistrationStatus.COMPLETE
+            if self.postgres_confirmed
+            else EnumRegistrationStatus.PARTIAL
         )
         return ModelRegistrationState(
             status=new_status,
@@ -320,8 +321,10 @@ class ModelRegistrationState(BaseModel):
         Returns:
             New ModelRegistrationState with postgres_confirmed=True.
         """
-        new_status: RegistrationStatus = (
-            "complete" if self.consul_confirmed else "partial"
+        new_status: EnumRegistrationStatus = (
+            EnumRegistrationStatus.COMPLETE
+            if self.consul_confirmed
+            else EnumRegistrationStatus.PARTIAL
         )
         return ModelRegistrationState(
             status=new_status,
@@ -348,7 +351,7 @@ class ModelRegistrationState(BaseModel):
             New ModelRegistrationState with status="failed" and failure_reason set.
         """
         return ModelRegistrationState(
-            status="failed",
+            status=EnumRegistrationStatus.FAILED,
             node_id=self.node_id,
             consul_confirmed=self.consul_confirmed,
             postgres_confirmed=self.postgres_confirmed,
@@ -393,15 +396,18 @@ class ModelRegistrationState(BaseModel):
 
         Example:
             >>> from uuid import uuid4
-            >>> state = ModelRegistrationState(status="failed", failure_reason="consul_failed")
+            >>> from omnibase_infra.enums import EnumRegistrationStatus
+            >>> state = ModelRegistrationState(
+            ...     status=EnumRegistrationStatus.FAILED, failure_reason="consul_failed"
+            ... )
             >>> reset_state = state.with_reset(uuid4())
-            >>> reset_state.status
-            'idle'
+            >>> reset_state.status == EnumRegistrationStatus.IDLE
+            True
             >>> reset_state.failure_reason is None
             True
         """
         return ModelRegistrationState(
-            status="idle",
+            status=EnumRegistrationStatus.IDLE,
             node_id=None,
             consul_confirmed=False,
             postgres_confirmed=False,
@@ -418,7 +424,10 @@ class ModelRegistrationState(BaseModel):
         Returns:
             True if reset is allowed from the current state.
         """
-        return self.status in ("failed", "complete")
+        return self.status in (
+            EnumRegistrationStatus.FAILED,
+            EnumRegistrationStatus.COMPLETE,
+        )
 
 
 __all__ = ["ModelRegistrationState"]

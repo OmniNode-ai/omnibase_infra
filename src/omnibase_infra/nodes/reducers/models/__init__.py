@@ -18,7 +18,6 @@ from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registra
     ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_confirmation import (
-    ConfirmationEventType,
     ModelRegistrationConfirmation,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
@@ -26,7 +25,6 @@ from omnibase_infra.nodes.reducers.models.model_registration_state import (
 )
 
 __all__ = [
-    "ConfirmationEventType",
     "ModelPayloadConsulRegister",
     "ModelPayloadPostgresUpsertRegistration",
     "ModelRegistrationConfirmation",

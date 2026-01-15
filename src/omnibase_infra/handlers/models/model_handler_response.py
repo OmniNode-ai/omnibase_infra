@@ -21,10 +21,11 @@ across all handlers.
 
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.enums import EnumResponseStatus
 
 
 class ModelHandlerResponse[PayloadT: BaseModel](BaseModel):
@@ -47,17 +48,18 @@ class ModelHandlerResponse[PayloadT: BaseModel](BaseModel):
     Example:
         >>> from uuid import uuid4
         >>> from pydantic import BaseModel
+        >>> from omnibase_infra.enums import EnumResponseStatus
         >>>
         >>> class MyPayload(BaseModel):
         ...     data: str
         ...
         >>> response = ModelHandlerResponse[MyPayload](
-        ...     status="success",
+        ...     status=EnumResponseStatus.SUCCESS,
         ...     payload=MyPayload(data="test"),
         ...     correlation_id=uuid4(),
         ... )
         >>> print(response.status)
-        'success'
+        <EnumResponseStatus.SUCCESS: 'success'>
         >>> print(response.payload.data)
         'test'
     """
@@ -69,7 +71,7 @@ class ModelHandlerResponse[PayloadT: BaseModel](BaseModel):
         from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    status: Literal["success", "error"] = Field(
+    status: EnumResponseStatus = Field(
         description="Operation status indicator",
     )
     payload: PayloadT = Field(
@@ -84,18 +86,18 @@ class ModelHandlerResponse[PayloadT: BaseModel](BaseModel):
         """Check if the response indicates a successful operation.
 
         Returns:
-            True if status is "success", False otherwise.
+            True if status is SUCCESS, False otherwise.
         """
-        return self.status == "success"
+        return self.status == EnumResponseStatus.SUCCESS
 
     @property
     def is_error(self) -> bool:
         """Check if the response indicates an error.
 
         Returns:
-            True if status is "error", False otherwise.
+            True if status is ERROR, False otherwise.
         """
-        return self.status == "error"
+        return self.status == EnumResponseStatus.ERROR
 
 
 __all__: list[str] = ["ModelHandlerResponse"]
