@@ -15,14 +15,12 @@ import asyncio
 import hashlib
 import json
 import logging
-import random
+import secrets
 import threading
 import warnings
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
-
-logger = logging.getLogger(__name__)
 
 from omnibase_core.models.manifest.model_execution_manifest import (
     ModelExecutionManifest,
@@ -34,6 +32,8 @@ from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.models.corpus.model_capture_config import ModelCaptureConfig
 from omnibase_infra.models.corpus.model_capture_result import ModelCaptureResult
+
+logger = logging.getLogger(__name__)
 
 
 class ProtocolManifestPersistence(Protocol):
@@ -250,8 +250,9 @@ class ServiceCorpusCapture:
 
         Args:
             persistence: Optional persistence handler for flushing manifests.
-                If provided, manifests will be persisted via this handler
-                when close_corpus() is called or max_executions is reached.
+                If provided, manifests can be persisted via flush_to_persistence()
+                or by calling close_corpus_async(flush=True). The synchronous
+                close_corpus() does NOT automatically flush.
         """
         self._state_machine = CaptureLifecycleFSM()
         self._config: ModelCaptureConfig | None = None
@@ -259,9 +260,8 @@ class ServiceCorpusCapture:
         self._seen_hashes: set[str] = set()
         self._persistence = persistence
 
-        # Lock for thread-safe access to shared mutable state in async methods
-        self._async_lock = asyncio.Lock()
-        # Lock for thread-safe access when capture() runs in thread pool
+        # Lock for thread-safe access to all shared mutable state
+        # Used consistently by sync capture(), async capture_async(), and get_metrics()
         self._sync_lock = threading.Lock()
 
         # Metrics for monitoring
@@ -424,8 +424,9 @@ class ServiceCorpusCapture:
             )
 
         # Apply sample rate filter (using snapshot)
+        # Use secrets.randbelow() for thread-safe randomness (random.random() is NOT thread-safe)
         if config.sample_rate < 1.0:
-            if random.random() > config.sample_rate:
+            if secrets.randbelow(1000000) / 1000000.0 > config.sample_rate:
                 return _create_capture_result(
                     manifest.manifest_id,
                     EnumCaptureOutcome.SKIPPED_SAMPLE_RATE,
@@ -443,6 +444,14 @@ class ServiceCorpusCapture:
                 return _create_capture_result(
                     manifest.manifest_id,
                     EnumCaptureOutcome.SKIPPED_CORPUS_FULL,
+                    start_time,
+                )
+
+            # Re-check can_capture under lock (may have changed to PAUSED)
+            if not self._state_machine.can_capture():
+                return _create_capture_result(
+                    manifest.manifest_id,
+                    EnumCaptureOutcome.SKIPPED_NOT_CAPTURING,
                     start_time,
                 )
 
@@ -514,14 +523,16 @@ class ServiceCorpusCapture:
                 timeout=effective_timeout / 1000.0,  # Convert to seconds
             )
 
-            async with self._async_lock:
+            # Use sync_lock for metrics consistency with get_metrics()
+            with self._sync_lock:
                 if result.was_captured:
                     self._capture_count += 1
 
             return result
 
         except TimeoutError:
-            async with self._async_lock:
+            # Use sync_lock for metrics consistency with get_metrics()
+            with self._sync_lock:
                 self._capture_timeout_count += 1
                 self._capture_missed_count += 1
 
@@ -539,7 +550,8 @@ class ServiceCorpusCapture:
             )
 
         except Exception as e:
-            async with self._async_lock:
+            # Use sync_lock for metrics consistency with get_metrics()
+            with self._sync_lock:
                 self._capture_missed_count += 1
 
             # Log detailed exception internally for debugging
@@ -564,8 +576,8 @@ class ServiceCorpusCapture:
         Flush captured manifests to persistence layer.
 
         This method stores all captured manifests via the persistence handler
-        if one was provided. Called automatically on close_corpus() if
-        persistence is configured.
+        if one was provided. Must be called explicitly or via close_corpus_async(flush=True).
+        The synchronous close_corpus() does NOT call this method.
 
         Returns:
             Number of manifests successfully persisted.
