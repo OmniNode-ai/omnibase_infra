@@ -23,7 +23,7 @@ Handler Implementation:
 Handler Dependencies:
     All handlers require ProjectionReaderRegistration for state queries.
     Some handlers optionally accept:
-    - ProjectorRegistration: For projection persistence
+    - ProjectorShell: For projection persistence
     - HandlerConsul: For Consul service registration (dual registration)
 
 Usage:
@@ -108,10 +108,8 @@ def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import ProjectorShell
 
 
 # TODO(OMN-1316): Tech debt - subcontract should be loaded from contract.yaml
@@ -152,7 +150,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
     @staticmethod
     def create_registry(
         projection_reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration | None = None,
+        projector: ProjectorShell | None = None,
         consul_handler: HandlerConsul | None = None,
         *,
         require_heartbeat_handler: bool = True,
@@ -237,7 +235,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
             raise ProtocolConfigurationError(
                 "Heartbeat handler requires projector but none was provided. "
                 "The contract.yaml defines ModelNodeHeartbeatEvent routing which "
-                "requires a ProjectorRegistration instance to persist heartbeat updates. "
+                "requires a ProjectorShell instance to persist heartbeat updates. "
                 "Either provide a projector or set require_heartbeat_handler=False "
                 "to explicitly disable heartbeat support (testing only).",
                 context=ctx,

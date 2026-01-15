@@ -80,6 +80,7 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
+    EnumResponseStatus,
 )
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -641,7 +642,7 @@ class HandlerDb(MixinEnvelopeExtraction):
     ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Build response wrapped in ModelHandlerOutput from query/execute result."""
         result = ModelDbQueryResponse(
-            status="success",
+            status=EnumResponseStatus.SUCCESS,
             payload=ModelDbQueryPayload(rows=rows, row_count=row_count),
             correlation_id=correlation_id,
         )

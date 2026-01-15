@@ -13,7 +13,7 @@ Fixture Hierarchy:
 
     Function-scoped:
         - pg_pool (from projectors)
-        - projector (from projectors)
+        - projector (from projectors) - ProjectorShell instance
         - reader (from projectors)
         - heartbeat_handler: HandlerNodeHeartbeat instance
 
@@ -22,6 +22,9 @@ Usage:
     1. Container lifecycle management (via projector fixtures)
     2. Handler initialization with projector and reader
     3. Test isolation through schema reset
+
+Related Tickets:
+    - OMN-1169: ProjectorShell for contract-driven projections
 """
 
 from __future__ import annotations
@@ -52,7 +55,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
 #   - event_loop_policy: Session fixture - asyncio event loop policy
 #   - postgres_container: Session fixture - PostgreSQL testcontainer (expensive)
 #   - pg_pool: Function fixture - Fresh asyncpg pool per test (isolated)
-#   - projector: Function fixture - ProjectorRegistration instance
+#   - projector: Function fixture - ProjectorShell instance (contract-driven)
 #   - reader: Function fixture - ProjectionReaderRegistration instance
 #
 # These are re-exported in __all__ for pytest discovery.
@@ -72,10 +75,8 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import ProjectorShell
 
 # Re-export fixtures for pytest discovery
 __all__ = [
@@ -95,7 +96,7 @@ __all__ = [
 @pytest.fixture
 def heartbeat_handler(
     reader: ProjectionReaderRegistration,
-    projector: ProjectorRegistration,
+    projector: ProjectorShell,
 ) -> HandlerNodeHeartbeat:
     """Function-scoped HandlerNodeHeartbeat instance.
 
@@ -104,7 +105,7 @@ def heartbeat_handler(
 
     Args:
         reader: ProjectionReaderRegistration fixture for state lookups.
-        projector: ProjectorRegistration fixture for state updates.
+        projector: ProjectorShell fixture for state updates (contract-driven).
 
     Returns:
         HandlerNodeHeartbeat configured with default liveness window.
@@ -123,7 +124,7 @@ def heartbeat_handler(
 @pytest.fixture
 def heartbeat_handler_fast_window(
     reader: ProjectionReaderRegistration,
-    projector: ProjectorRegistration,
+    projector: ProjectorShell,
 ) -> HandlerNodeHeartbeat:
     """Handler with short liveness window for testing deadline extension.
 
@@ -132,7 +133,7 @@ def heartbeat_handler_fast_window(
 
     Args:
         reader: ProjectionReaderRegistration fixture.
-        projector: ProjectorRegistration fixture.
+        projector: ProjectorShell fixture (contract-driven).
 
     Returns:
         HandlerNodeHeartbeat configured with 5-second liveness window.

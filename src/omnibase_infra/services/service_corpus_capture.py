@@ -13,11 +13,16 @@ based on configurable filters, building a replayable test corpus.
 
 import asyncio
 import hashlib
+import json
+import logging
 import random
+import threading
 import warnings
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from omnibase_core.models.manifest.model_execution_manifest import (
     ModelExecutionManifest,
@@ -71,6 +76,26 @@ class ServiceCorpusCapture:
         Added for OMN-1203
     """
 
+    # Cached state transition map for efficient validation
+    _VALID_TRANSITIONS: dict[EnumCaptureState, set[EnumCaptureState]] = {
+        EnumCaptureState.IDLE: {EnumCaptureState.READY},
+        EnumCaptureState.READY: {
+            EnumCaptureState.CAPTURING,
+            EnumCaptureState.CLOSED,
+        },
+        EnumCaptureState.CAPTURING: {
+            EnumCaptureState.PAUSED,
+            EnumCaptureState.FULL,
+            EnumCaptureState.CLOSED,
+        },
+        EnumCaptureState.PAUSED: {
+            EnumCaptureState.CAPTURING,
+            EnumCaptureState.CLOSED,
+        },
+        EnumCaptureState.FULL: {EnumCaptureState.CLOSED},
+        EnumCaptureState.CLOSED: set(),  # Terminal state
+    }
+
     def __init__(
         self,
         persistence: ProtocolManifestPersistence | None = None,
@@ -89,6 +114,11 @@ class ServiceCorpusCapture:
         self._seen_hashes: set[str] = set()
         self._persistence = persistence
 
+        # Lock for thread-safe access to shared mutable state in async methods
+        self._async_lock = asyncio.Lock()
+        # Lock for thread-safe access when capture() runs in thread pool
+        self._sync_lock = threading.Lock()
+
         # Metrics for monitoring
         self._capture_count: int = 0
         self._capture_missed_count: int = 0
@@ -103,13 +133,16 @@ class ServiceCorpusCapture:
         """
         Transition to a new state with validation.
 
+        Uses the cached class-level transition map for efficient validation.
+
         Args:
             target: The target state to transition to.
 
         Raises:
             ValueError: If the transition is not valid.
         """
-        if not self._state.can_transition_to(target):
+        valid_targets = self._VALID_TRANSITIONS.get(self._state, set())
+        if target not in valid_targets:
             raise ValueError(
                 f"Invalid state transition: {self._state.value} -> {target.value}"
             )
@@ -262,24 +295,46 @@ class ServiceCorpusCapture:
                     start_time,
                 )
 
-        # Apply deduplication
+        # Apply deduplication - compute hash outside lock (pure computation)
         dedupe_hash = self._compute_dedupe_hash(manifest)
-        if dedupe_hash is not None and dedupe_hash in self._seen_hashes:
-            return self._make_result(
-                manifest.manifest_id,
-                EnumCaptureOutcome.SKIPPED_DUPLICATE,
-                start_time,
-                dedupe_hash=dedupe_hash,
-            )
 
-        # Add to corpus
-        self._corpus = self._corpus.with_execution(manifest)
-        if dedupe_hash is not None:
-            self._seen_hashes.add(dedupe_hash)
+        # Thread-safe critical section for shared state access
+        # Protects: _seen_hashes (check + add), _corpus (update), _state (update)
+        with self._sync_lock:
+            # Re-check state under lock (may have changed)
+            if self._state == EnumCaptureState.FULL:
+                return self._make_result(
+                    manifest.manifest_id,
+                    EnumCaptureOutcome.SKIPPED_CORPUS_FULL,
+                    start_time,
+                )
 
-        # Check if we hit max_executions
-        if self._corpus.execution_count >= self._config.max_executions:
-            self._state = EnumCaptureState.FULL
+            if dedupe_hash is not None and dedupe_hash in self._seen_hashes:
+                return self._make_result(
+                    manifest.manifest_id,
+                    EnumCaptureOutcome.SKIPPED_DUPLICATE,
+                    start_time,
+                    dedupe_hash=dedupe_hash,
+                )
+
+            # Add to corpus (requires _corpus not None, checked above)
+            if self._corpus is None:
+                return self._make_result(
+                    manifest.manifest_id,
+                    EnumCaptureOutcome.SKIPPED_NOT_CAPTURING,
+                    start_time,
+                )
+
+            self._corpus = self._corpus.with_execution(manifest)
+            if dedupe_hash is not None:
+                self._seen_hashes.add(dedupe_hash)
+
+            # Check if we hit max_executions
+            if (
+                self._config is not None
+                and self._corpus.execution_count >= self._config.max_executions
+            ):
+                self._state = EnumCaptureState.FULL
 
         return self._make_result(
             manifest.manifest_id,
@@ -312,8 +367,15 @@ class ServiceCorpusCapture:
             return hashlib.sha256(data.encode()).hexdigest()[:16]
 
         if strategy == EnumDedupeStrategy.FULL_MANIFEST_HASH:
-            # Hash based on full manifest (includes manifest_id, so unique)
-            data = manifest.model_dump_json()
+            # Hash based on manifest content, excluding unique identifiers
+            # (manifest_id, created_at, correlation_id) that would defeat deduplication
+            manifest_data = manifest.model_dump(mode="json")
+            # Remove unique per-execution fields to enable content-based deduplication
+            manifest_data.pop("manifest_id", None)
+            manifest_data.pop("created_at", None)
+            manifest_data.pop("correlation_id", None)
+            # Sort keys for deterministic hashing
+            data = json.dumps(manifest_data, sort_keys=True, default=str)
             return hashlib.sha256(data.encode()).hexdigest()[:16]
 
         return None
@@ -372,19 +434,23 @@ class ServiceCorpusCapture:
 
         try:
             # Run capture in executor to avoid blocking if serialization is slow
+            # Use get_running_loop() as the modern approach (get_event_loop() is deprecated)
+            loop = asyncio.get_running_loop()
             result = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, self.capture, manifest),
+                loop.run_in_executor(None, self.capture, manifest),
                 timeout=effective_timeout / 1000.0,  # Convert to seconds
             )
 
-            if result.was_captured:
-                self._capture_count += 1
+            async with self._async_lock:
+                if result.was_captured:
+                    self._capture_count += 1
 
             return result
 
         except TimeoutError:
-            self._capture_timeout_count += 1
-            self._capture_missed_count += 1
+            async with self._async_lock:
+                self._capture_timeout_count += 1
+                self._capture_missed_count += 1
 
             warnings.warn(
                 f"Capture timed out after {effective_timeout}ms for manifest "
@@ -400,13 +466,24 @@ class ServiceCorpusCapture:
             )
 
         except Exception as e:
-            self._capture_missed_count += 1
+            async with self._async_lock:
+                self._capture_missed_count += 1
+
+            # Log detailed exception internally for debugging
+            logger.exception(
+                "Capture failed for manifest %s: %s",
+                manifest.manifest_id,
+                e,
+            )
+
+            # Sanitize error message for external exposure - use exception type only
+            sanitized_error = f"Capture failed: {type(e).__name__}"
 
             return self._make_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.FAILED,
                 start_time,
-                error_message=str(e),
+                error_message=sanitized_error,
             )
 
     # === Persistence Methods ===
@@ -447,8 +524,16 @@ class ServiceCorpusCapture:
                 )
                 persisted_count += 1
             except Exception as e:
+                # Log detailed exception internally for debugging
+                logger.exception(
+                    "Failed to persist manifest %s: %s",
+                    manifest.manifest_id,
+                    e,
+                )
+                # Emit sanitized warning (no raw exception details)
                 warnings.warn(
-                    f"Failed to persist manifest {manifest.manifest_id}: {e}",
+                    f"Failed to persist manifest {manifest.manifest_id}: "
+                    f"{type(e).__name__}",
                     stacklevel=2,
                 )
 

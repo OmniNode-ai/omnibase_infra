@@ -37,10 +37,8 @@ from omnibase_infra.errors import (
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 if TYPE_CHECKING:
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +126,8 @@ class HandlerNodeHeartbeat:
         projector are assumed to be coroutine-safe (they use connection pools).
 
     Example:
-        >>> from omnibase_infra.projectors import (
-        ...     ProjectionReaderRegistration,
-        ...     ProjectorRegistration,
-        ... )
+        >>> from omnibase_infra.projectors import ProjectionReaderRegistration
+        >>> from omnibase_infra.runtime.projector_shell import ProjectorShell
         >>> handler = HandlerNodeHeartbeat(
         ...     projection_reader=reader,
         ...     projector=projector,
@@ -147,14 +143,15 @@ class HandlerNodeHeartbeat:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         liveness_window_seconds: float = DEFAULT_LIVENESS_WINDOW_SECONDS,
     ) -> None:
         """Initialize the heartbeat handler.
 
         Args:
             projection_reader: Projection reader for looking up node state.
-            projector: Projector for persisting heartbeat updates.
+            projector: ProjectorShell for persisting heartbeat updates.
+                Should be loaded from the registration projector contract.
             liveness_window_seconds: How long to extend liveness_deadline from
                 the heartbeat timestamp. Default: 90 seconds (3x the default
                 30-second heartbeat interval, allowing for 2 missed heartbeats).
@@ -289,13 +286,15 @@ class HandlerNodeHeartbeat:
             seconds=self._liveness_window_seconds
         )
 
-        # Update projection via projector
+        # Update projection via projector using partial_update
         try:
-            updated = await self._projector.update_heartbeat(
-                entity_id=event.node_id,
-                domain=domain,
-                last_heartbeat_at=heartbeat_timestamp,
-                liveness_deadline=new_liveness_deadline,
+            updated = await self._projector.partial_update(
+                aggregate_id=event.node_id,
+                updates={
+                    "last_heartbeat_at": heartbeat_timestamp,
+                    "liveness_deadline": new_liveness_deadline,
+                    "updated_at": now,
+                },
                 correlation_id=correlation_id,
             )
 

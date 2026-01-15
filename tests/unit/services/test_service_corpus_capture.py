@@ -12,7 +12,6 @@ Written test-first per OMN-1203 requirements.
 """
 
 import asyncio
-import hashlib
 import random
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
@@ -370,8 +369,12 @@ class TestDeduplication:
         assert result_a.was_captured
         assert result_b.was_captured
 
-    def test_full_manifest_hash_captures_different_outcomes(self) -> None:
-        """Different outcomes with same input should be captured with FULL_MANIFEST_HASH."""
+    def test_full_manifest_hash_deduplicates_same_content(self) -> None:
+        """Identical content manifests should be deduplicated with FULL_MANIFEST_HASH.
+
+        FULL_MANIFEST_HASH excludes unique identifiers (manifest_id, created_at,
+        correlation_id) to enable content-based deduplication.
+        """
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.FULL_MANIFEST_HASH,
@@ -380,14 +383,36 @@ class TestDeduplication:
         service.create_corpus(config)
         service.start_capture()
 
-        # Two different manifests (different manifest_id means different outcome)
+        # Two manifests with same content (only manifest_id/created_at differ)
         manifest1 = create_manifest_with_handler("handler-a")
         manifest2 = create_manifest_with_handler("handler-a")
 
         result1 = service.capture(manifest1)
         result2 = service.capture(manifest2)
 
-        # Both should be captured since manifest_id differs
+        # First captured, second deduplicated (same content)
+        assert result1.was_captured
+        assert result2.was_skipped
+        assert result2.outcome == EnumCaptureOutcome.SKIPPED_DUPLICATE
+
+    def test_full_manifest_hash_allows_different_handlers(self) -> None:
+        """Different handlers should not be deduplicated with FULL_MANIFEST_HASH."""
+        config = ModelCaptureConfig(
+            corpus_display_name="test-corpus",
+            dedupe_strategy=EnumDedupeStrategy.FULL_MANIFEST_HASH,
+        )
+        service = ServiceCorpusCapture()
+        service.create_corpus(config)
+        service.start_capture()
+
+        # Two manifests with different handlers (different content)
+        manifest1 = create_manifest_with_handler("handler-a")
+        manifest2 = create_manifest_with_handler("handler-b")
+
+        result1 = service.capture(manifest1)
+        result2 = service.capture(manifest2)
+
+        # Both captured since content differs
         assert result1.was_captured
         assert result2.was_captured
 

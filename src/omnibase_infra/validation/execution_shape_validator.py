@@ -85,6 +85,7 @@ from omnibase_infra.enums import (
     EnumMessageCategory,
     EnumNodeArchetype,
     EnumNodeOutputType,
+    EnumValidationSeverity,
 )
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
@@ -366,7 +367,7 @@ class ExecutionShapeValidator:
                         f"File: {file_path.name}. Fix the syntax error to enable "
                         f"execution shape validation."
                     ),
-                    severity="error",
+                    severity=EnumValidationSeverity.ERROR,
                 )
             ]
 
@@ -1003,7 +1004,7 @@ class ExecutionShapeValidator:
             file_path=handler.file_path,
             line_number=line_number,
             message=message,
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
 
     def _check_direct_publish_violations(
@@ -1049,7 +1050,7 @@ class ExecutionShapeValidator:
                                     f"and let the dispatcher handle routing. Forbidden methods: "
                                     f"{', '.join(sorted(_FORBIDDEN_PUBLISH_METHODS))}."
                                 ),
-                                severity="error",
+                                severity=EnumValidationSeverity.ERROR,
                             )
                         )
 
@@ -1098,7 +1099,7 @@ class ExecutionShapeValidator:
                                     f"from the event payload instead of system time. "
                                     f"Forbidden patterns: {', '.join(sorted(_SYSTEM_TIME_PATTERNS))}."
                                 ),
-                                severity="error",
+                                severity=EnumValidationSeverity.ERROR,
                             )
                         )
                     # Check for method calls on datetime/time modules
@@ -1123,7 +1124,7 @@ class ExecutionShapeValidator:
                                             f"be deterministic for event replay consistency. Use timestamps "
                                             f"from the event payload instead of system time."
                                         ),
-                                        severity="error",
+                                        severity=EnumValidationSeverity.ERROR,
                                     )
                                 )
 

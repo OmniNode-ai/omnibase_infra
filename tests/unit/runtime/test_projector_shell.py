@@ -2306,6 +2306,342 @@ class TestProjectorShellQueryTimeout:
         assert "timeout" in call_kwargs.kwargs
 
 
+# =============================================================================
+# Partial Update Tests
+# =============================================================================
+
+
+class TestProjectorShellPartialUpdate:
+    """Tests for partial_update column-specific update operations.
+
+    These tests verify that ProjectorShell correctly performs partial updates
+    on specific columns without requiring full event-driven projection.
+    """
+
+    @pytest.mark.asyncio
+    async def test_partial_update_returns_true_when_row_found(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update returns True when row is found and updated.
+
+        Given: Row exists in projection table
+        When: partial_update() called with valid aggregate_id
+        Then: Returns True indicating successful update
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_id = uuid4()
+        correlation_id = uuid4()
+
+        # Mock successful update (1 row affected)
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        updates = {"status": "confirmed", "updated_at": datetime.now(UTC)}
+        result = await projector.partial_update(aggregate_id, updates, correlation_id)
+
+        assert result is True
+        mock_pool.acquire.assert_called()
+        mock_conn.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_partial_update_returns_false_when_row_not_found(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update returns False when no row matches.
+
+        Given: Row does not exist in projection table
+        When: partial_update() called with non-existent aggregate_id
+        Then: Returns False indicating no row was updated
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_id = uuid4()
+        correlation_id = uuid4()
+
+        # Mock no rows affected
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "UPDATE 0"
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        updates = {"status": "confirmed"}
+        result = await projector.partial_update(aggregate_id, updates, correlation_id)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_partial_update_generates_correct_sql(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update generates parameterized UPDATE SQL.
+
+        Given: Contract with table "order_projections" and primary_key "id"
+        When: partial_update() called with {"status": "confirmed", "amount": 150.0}
+        Then: SQL contains UPDATE, SET with column names, WHERE with primary key
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_id = uuid4()
+        correlation_id = uuid4()
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        updates = {"status": "confirmed", "total_amount": 150.0}
+        await projector.partial_update(aggregate_id, updates, correlation_id)
+
+        # Verify SQL structure
+        call_args = mock_conn.execute.call_args
+        assert call_args is not None
+        sql = call_args[0][0]
+
+        # Check UPDATE statement structure
+        assert "UPDATE" in sql
+        assert '"order_projections"' in sql
+        assert "SET" in sql
+        assert '"status"' in sql
+        assert '"total_amount"' in sql
+        assert "WHERE" in sql
+        assert '"id"' in sql  # Primary key from contract
+        # Verify parameterized query format
+        assert "$1" in sql
+        assert "$2" in sql
+        assert "$3" in sql  # PK is last parameter
+
+    @pytest.mark.asyncio
+    async def test_partial_update_uses_parameterized_values(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update passes values as parameters (not inline SQL).
+
+        Given: updates dict with values
+        When: partial_update() called
+        Then: Values are passed as execute() arguments, not embedded in SQL
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_id = uuid4()
+        correlation_id = uuid4()
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        now = datetime.now(UTC)
+        updates = {"status": "shipped", "updated_at": now}
+        await projector.partial_update(aggregate_id, updates, correlation_id)
+
+        # Verify parameters passed to execute
+        call_args = mock_conn.execute.call_args
+        assert call_args is not None
+
+        # Extract positional args (SQL, then values)
+        args = call_args[0]
+        sql = args[0]
+
+        # Values should be in args, not in SQL string
+        assert "shipped" not in sql  # Value not in SQL
+        assert "shipped" in args  # Value in parameters
+        # aggregate_id should be last parameter
+        assert aggregate_id == args[-1]
+
+    @pytest.mark.asyncio
+    async def test_partial_update_empty_updates_raises_value_error(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update raises ValueError for empty updates dict.
+
+        Given: Empty updates dict
+        When: partial_update() called
+        Then: Raises ValueError
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_id = uuid4()
+        correlation_id = uuid4()
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        with pytest.raises(ValueError, match="empty"):
+            await projector.partial_update(aggregate_id, {}, correlation_id)
+
+        # Should not interact with database
+        mock_pool.acquire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_partial_update_connection_error_raises_infra_error(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: MagicMock,
+    ) -> None:
+        """partial_update raises InfraConnectionError on connection failure.
+
+        Given: Database connection fails
+        When: partial_update() called
+        Then: Raises InfraConnectionError (not raw asyncpg exception)
+        """
+        import asyncpg
+
+        from omnibase_infra.errors import InfraConnectionError
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        # Create mock acquire that raises connection error
+        class MockAcquireContextWithError:
+            async def __aenter__(self) -> MagicMock:
+                raise asyncpg.PostgresConnectionError("Connection refused")
+
+            async def __aexit__(
+                self, exc_type: object, exc_val: object, exc_tb: object
+            ) -> None:
+                pass
+
+        mock_pool.acquire.return_value = MockAcquireContextWithError()
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await projector.partial_update(uuid4(), {"status": "confirmed"}, uuid4())
+
+        assert "connect" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_partial_update_timeout_raises_infra_timeout_error(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update raises InfraTimeoutError on query timeout.
+
+        Given: Query times out
+        When: partial_update() called
+        Then: Raises InfraTimeoutError
+        """
+        import asyncpg
+
+        from omnibase_infra.errors import InfraTimeoutError
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.side_effect = asyncpg.QueryCanceledError(
+            "canceling statement due to statement timeout"
+        )
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        with pytest.raises(InfraTimeoutError) as exc_info:
+            await projector.partial_update(uuid4(), {"status": "confirmed"}, uuid4())
+
+        assert "timeout" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_partial_update_generic_error_raises_runtime_error(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update raises RuntimeHostError on generic exceptions.
+
+        Given: Unexpected database error
+        When: partial_update() called
+        Then: Raises RuntimeHostError (wraps the error)
+        """
+        from omnibase_infra.errors import RuntimeHostError
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.side_effect = Exception("column 'nonexistent' does not exist")
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        with pytest.raises(RuntimeHostError):
+            await projector.partial_update(uuid4(), {"nonexistent": "value"}, uuid4())
+
+    @pytest.mark.asyncio
+    async def test_partial_update_single_column(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update works with single column update.
+
+        Given: Updates dict with one column
+        When: partial_update() called
+        Then: SQL contains only that column in SET clause
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        aggregate_id = uuid4()
+        correlation_id = uuid4()
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
+
+        # Single column update (like timeout marker)
+        now = datetime.now(UTC)
+        updates = {"ack_timeout_emitted_at": now}
+        result = await projector.partial_update(aggregate_id, updates, correlation_id)
+
+        assert result is True
+
+        # Verify SQL has only one SET clause
+        call_args = mock_conn.execute.call_args
+        sql = call_args[0][0]
+        assert '"ack_timeout_emitted_at"' in sql
+        assert "$1" in sql  # Value parameter
+        assert "$2" in sql  # PK parameter
+        # Should not have more parameters
+        assert "$3" not in sql
+
+    @pytest.mark.asyncio
+    async def test_partial_update_timeout_config_applied(
+        self,
+        sample_contract: ModelProjectorContract,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update uses configured query timeout.
+
+        Given: ProjectorShell with custom timeout
+        When: partial_update() called
+        Then: timeout parameter is passed to execute()
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        projector = ProjectorShell(
+            contract=sample_contract,
+            pool=mock_pool,
+            query_timeout_seconds=5.0,
+        )
+
+        await projector.partial_update(uuid4(), {"status": "confirmed"}, uuid4())
+
+        # Verify timeout was passed to execute
+        call_kwargs = mock_conn.execute.call_args
+        assert call_kwargs is not None
+        assert "timeout" in call_kwargs.kwargs
+        assert call_kwargs.kwargs["timeout"] == 5.0
+
+
 __all__ = [
     "TestProjectorShellContractAccess",
     "TestProjectorShellErrorHandling",
@@ -2314,6 +2650,7 @@ __all__ = [
     "TestProjectorShellGetStates",
     "TestProjectorShellIdempotency",
     "TestProjectorShellIntegrationReady",
+    "TestProjectorShellPartialUpdate",
     "TestProjectorShellProjectionModes",
     "TestProjectorShellProtocolCompliance",
     "TestProjectorShellQueryTimeout",

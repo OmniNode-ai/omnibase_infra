@@ -28,7 +28,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
@@ -48,11 +47,6 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 from omnibase_infra.runtime.mixins import MixinProjectorSqlOperations
-
-if TYPE_CHECKING:
-    from omnibase_core.models.projectors.model_projector_column import (
-        ModelProjectorColumn,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +105,38 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
             When a violation occurs in append mode, ``RuntimeHostError`` is raised
             to fail fast and signal the need for investigation.
+
+    Composite Primary Key Handling:
+        The contract model (``ModelProjectorContract``) only supports single-column
+        ``primary_key`` and ``upsert_key`` values (type: ``str``). For schemas with
+        composite primary keys, there are two approaches:
+
+        **Approach 1: Add UNIQUE constraint (Recommended)**
+            Add a UNIQUE constraint on the single column specified in the contract.
+            This allows ``ON CONFLICT (column)`` to work even with composite PKs.
+
+            Example SQL schema::
+
+                PRIMARY KEY (entity_id, domain),
+                UNIQUE (entity_id)  -- Enables ON CONFLICT (entity_id)
+
+        **Approach 2: Use upsert_partial() with explicit conflict_columns**
+            For operations requiring composite key semantics, use ``upsert_partial()``
+            with the ``conflict_columns`` parameter instead of ``project()``.
+
+            Example::
+
+                await projector.upsert_partial(
+                    aggregate_id=entity_id,
+                    values={"entity_id": entity_id, "domain": domain, ...},
+                    correlation_id=correlation_id,
+                    conflict_columns=["entity_id", "domain"],  # Composite key
+                )
+
+        **get_state() / get_states() behavior with composite keys**:
+            These methods use only the first column of the primary key for lookups.
+            For schemas where the single-column lookup is not unique, the results
+            may be ambiguous. Consider querying the database directly in such cases.
 
     Thread Safety:
         This implementation is coroutine-safe for concurrent async calls.
@@ -423,6 +449,14 @@ class ProjectorShell(MixinProjectorSqlOperations):
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If query times out.
             RuntimeHostError: For other database errors.
+
+        Note:
+            **Composite Primary Key Handling**: For schemas with composite primary
+            keys (e.g., ``(entity_id, domain)``), this method queries using only
+            the first key column. This works correctly when the first column is
+            globally unique (e.g., UUID), but may return arbitrary results if
+            multiple rows share the same first-column value. For composite key
+            queries, use a direct database query with all key columns.
         """
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
@@ -433,7 +467,13 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        pk_quoted = quote_identifier(schema.primary_key)
+        # primary_key can be str | list[str] - normalize to first column for single-value queries
+        pk_column = (
+            schema.primary_key[0]
+            if isinstance(schema.primary_key, list)
+            else schema.primary_key
+        )
+        pk_quoted = quote_identifier(pk_column)
 
         # Build SELECT query - table/column names from trusted contract
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
@@ -510,6 +550,11 @@ class ProjectorShell(MixinProjectorSqlOperations):
             InfraTimeoutError: If query times out.
             RuntimeHostError: For other database errors.
 
+        Note:
+            **Composite Primary Key Handling**: For schemas with composite primary
+            keys, this method queries using only the first key column. See the
+            note on ``get_state()`` for implications and alternatives.
+
         Example:
             >>> states = await projector.get_states(
             ...     [order_id_1, order_id_2, order_id_3],
@@ -530,7 +575,13 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        pk_quoted = quote_identifier(schema.primary_key)
+        # primary_key can be str | list[str] - normalize to first column for single-value queries
+        pk_column = (
+            schema.primary_key[0]
+            if isinstance(schema.primary_key, list)
+            else schema.primary_key
+        )
+        pk_quoted = quote_identifier(pk_column)
 
         # Build SELECT query with IN clause for bulk fetch
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
@@ -544,7 +595,6 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
             # Build result dict keyed by aggregate ID
             result: dict[UUID, dict[str, object]] = {}
-            pk_column = schema.primary_key
             for row in rows:
                 row_dict: dict[str, object] = dict(row)
                 aggregate_id = row_dict.get(pk_column)
@@ -577,6 +627,214 @@ class ProjectorShell(MixinProjectorSqlOperations):
         except Exception as e:
             raise RuntimeHostError(
                 f"Failed to get states: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def partial_update(
+        self,
+        aggregate_id: UUID,
+        updates: dict[str, object],
+        correlation_id: UUID,
+    ) -> bool:
+        """Perform a partial update on specific columns.
+
+        Updates only the specified columns for the row matching the aggregate_id,
+        without requiring a full event envelope or event-driven value extraction.
+        This is useful for lightweight operations like:
+
+        - Updating heartbeat timestamps (last_heartbeat_at, liveness_deadline)
+        - Setting timeout marker columns (ack_timeout_emitted_at)
+        - Updating tracking fields (updated_at)
+
+        Unlike project() which performs full event-driven projection based on
+        consumed_events and column source paths, partial_update() directly updates
+        the specified columns using the provided values.
+
+        Args:
+            aggregate_id: The primary key value identifying the row to update.
+                Must match the contract's primary_key column type (typically UUID).
+            updates: Dictionary mapping column names to their new values.
+                Column names are quoted for SQL safety. Values are passed as
+                parameterized query arguments for injection protection.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            True if a row was updated (entity found and modified).
+            False if no row was found matching the aggregate_id.
+
+        Raises:
+            ValueError: If updates dict is empty.
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If update times out.
+            RuntimeHostError: For other database errors.
+
+        Security:
+            - Column names are quoted using quote_identifier() for SQL safety
+            - Values use parameterized queries ($1, $2, etc.) to prevent injection
+            - Table and primary key names come from the trusted contract definition
+
+        Example:
+            >>> from datetime import UTC, datetime, timedelta
+            >>> # Update heartbeat tracking fields
+            >>> updated = await projector.partial_update(
+            ...     aggregate_id=node_id,
+            ...     updates={
+            ...         "last_heartbeat_at": datetime.now(UTC),
+            ...         "liveness_deadline": datetime.now(UTC) + timedelta(seconds=90),
+            ...         "updated_at": datetime.now(UTC),
+            ...     },
+            ...     correlation_id=correlation_id,
+            ... )
+            >>> if not updated:
+            ...     logger.warning("Entity not found for heartbeat update")
+
+            >>> # Set a timeout marker
+            >>> await projector.partial_update(
+            ...     aggregate_id=node_id,
+            ...     updates={"ack_timeout_emitted_at": datetime.now(UTC)},
+            ...     correlation_id=correlation_id,
+            ... )
+
+        Related:
+            - OMN-1170: Converting ProjectorRegistration to declarative contracts
+            - project(): Full event-driven projection (uses event envelopes)
+            - get_state(): Read current projected state
+        """
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="partial_update",
+            target_name=f"projector.{self.projector_id}",
+            correlation_id=correlation_id,
+        )
+
+        try:
+            return await self._partial_update(aggregate_id, updates, correlation_id)
+
+        except asyncpg.PostgresConnectionError as e:
+            raise InfraConnectionError(
+                f"Failed to connect to database for partial update: {self.projector_id}",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            raise InfraTimeoutError(
+                f"Partial update timed out for: {self.projector_id}",
+                context=ctx,
+            ) from e
+
+        except ValueError:
+            # Re-raise ValueError (empty updates) as-is
+            raise
+
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Failed to execute partial update: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def upsert_partial(
+        self,
+        aggregate_id: UUID,
+        values: dict[str, object],
+        correlation_id: UUID,
+        conflict_columns: list[str] | None = None,
+    ) -> bool:
+        """Perform a partial UPSERT (INSERT ON CONFLICT DO UPDATE) on specific columns.
+
+        Inserts a new row if no row exists with the given conflict key(s), or updates
+        only the specified columns if the row already exists. This is useful for
+        state transition operations where:
+
+        - A new entity may be created if it doesn't exist (e.g., first registration)
+        - An existing entity should be updated with new state
+
+        Unlike partial_update() which only does UPDATE, upsert_partial() handles
+        both INSERT and UPDATE cases atomically using PostgreSQL's
+        INSERT ON CONFLICT DO UPDATE.
+
+        Supports composite conflict keys for tables with unique constraints on
+        multiple columns (e.g., ``(entity_id, domain)``).
+
+        Args:
+            aggregate_id: The primary aggregate identifier (for logging/tracing).
+            values: Dictionary mapping column names to their values.
+                MUST include all conflict columns specified.
+                Column names are quoted for SQL safety. Values are passed as
+                parameterized query arguments for injection protection.
+            correlation_id: Correlation ID for distributed tracing.
+            conflict_columns: Optional list of column names for ON CONFLICT clause.
+                If not provided, defaults to the contract's primary_key.
+                Use this for composite unique constraints (e.g., ["entity_id", "domain"]).
+
+        Returns:
+            True if a row was inserted or updated successfully.
+
+        Raises:
+            ValueError: If values dict is empty or missing required conflict columns.
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If upsert times out.
+            RuntimeHostError: For other database errors.
+
+        Security:
+            - Column names are quoted using quote_identifier() for SQL safety
+            - Values use parameterized queries ($1, $2, etc.) to prevent injection
+            - Table and primary key names come from the trusted contract definition
+
+        Example:
+            >>> from datetime import UTC, datetime
+            >>> # Upsert with composite conflict key (creates row if not exists)
+            >>> result = await projector.upsert_partial(
+            ...     aggregate_id=node_id,
+            ...     values={
+            ...         "entity_id": node_id,
+            ...         "domain": "registration",
+            ...         "current_state": "pending_registration",
+            ...         "node_type": "effect",
+            ...         "node_version": "1.0.0",
+            ...         "capabilities": "{}",
+            ...         "registered_at": datetime.now(UTC),
+            ...         "updated_at": datetime.now(UTC),
+            ...     },
+            ...     correlation_id=correlation_id,
+            ...     conflict_columns=["entity_id", "domain"],  # Composite key
+            ... )
+
+        Related:
+            - OMN-1170: Converting ProjectorRegistration to declarative contracts
+            - partial_update(): UPDATE only (row must exist)
+            - project(): Full event-driven projection (uses event envelopes)
+        """
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="upsert_partial",
+            target_name=f"projector.{self.projector_id}",
+            correlation_id=correlation_id,
+        )
+
+        try:
+            return await self._partial_upsert(
+                aggregate_id, values, correlation_id, conflict_columns
+            )
+
+        except asyncpg.PostgresConnectionError as e:
+            raise InfraConnectionError(
+                f"Failed to connect to database for partial upsert: {self.projector_id}",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            raise InfraTimeoutError(
+                f"Partial upsert timed out for: {self.projector_id}",
+                context=ctx,
+            ) from e
+
+        except ValueError:
+            # Re-raise ValueError (empty values or missing PK) as-is
+            raise
+
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Failed to execute partial upsert: {type(e).__name__}",
                 context=ctx,
             ) from e
 

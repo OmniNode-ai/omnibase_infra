@@ -27,12 +27,16 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Self
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumHandlerErrorType, EnumHandlerSourceType
+from omnibase_infra.enums import (
+    EnumHandlerErrorType,
+    EnumHandlerSourceType,
+    EnumValidationSeverity,
+)
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 
 
@@ -150,8 +154,8 @@ class ModelHandlerValidationError(BaseModel):
         default=None,
         description="Request correlation ID for distributed tracing (optional)",
     )
-    severity: Literal["error", "warning"] = Field(
-        default="error",
+    severity: EnumValidationSeverity = Field(
+        default=EnumValidationSeverity.ERROR,
         description="Severity level: 'error' blocks startup, 'warning' is advisory",
     )
 
@@ -166,7 +170,7 @@ class ModelHandlerValidationError(BaseModel):
             >>> if error.is_blocking():
             ...     raise RuntimeError("Cannot start with validation errors")
         """
-        return self.severity == "error"
+        return self.severity == EnumValidationSeverity.ERROR
 
     def format_for_logging(self) -> str:
         """Format error for structured logging output.
@@ -289,7 +293,7 @@ class ModelHandlerValidationError(BaseModel):
             "source_type": self.source_type.value,
             "message": self.message,
             "remediation_hint": self.remediation_hint,
-            "severity": self.severity,
+            "severity": self.severity.value,
         }
 
         # Add optional fields if present
@@ -318,7 +322,7 @@ class ModelHandlerValidationError(BaseModel):
         details: dict[str, object] | None = None,
         caused_by: ModelHandlerValidationError | None = None,
         correlation_id: UUID | None = None,
-        severity: Literal["error", "warning"] = "error",
+        severity: EnumValidationSeverity = EnumValidationSeverity.ERROR,
     ) -> Self:
         """Create error from contract validation failure.
 
@@ -404,7 +408,7 @@ class ModelHandlerValidationError(BaseModel):
         details: dict[str, object] | None = None,
         caused_by: ModelHandlerValidationError | None = None,
         correlation_id: UUID | None = None,
-        severity: Literal["error", "warning"] = "error",
+        severity: EnumValidationSeverity = EnumValidationSeverity.ERROR,
     ) -> Self:
         """Create error from security constraint violation.
 
@@ -468,7 +472,7 @@ class ModelHandlerValidationError(BaseModel):
         details: dict[str, object] | None = None,
         caused_by: ModelHandlerValidationError | None = None,
         correlation_id: UUID | None = None,
-        severity: Literal["error", "warning"] = "error",
+        severity: EnumValidationSeverity = EnumValidationSeverity.ERROR,
     ) -> Self:
         """Create error from handler descriptor validation failure.
 
@@ -530,7 +534,7 @@ class ModelHandlerValidationError(BaseModel):
         details: dict[str, object] | None = None,
         caused_by: ModelHandlerValidationError | None = None,
         correlation_id: UUID | None = None,
-        severity: Literal["error", "warning"] = "error",
+        severity: EnumValidationSeverity = EnumValidationSeverity.ERROR,
     ) -> Self:
         """Create error from architecture pattern violation.
 

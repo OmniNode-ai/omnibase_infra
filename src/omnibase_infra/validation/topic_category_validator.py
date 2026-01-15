@@ -41,6 +41,7 @@ from omnibase_infra.enums import (
     EnumMessageCategory,
     EnumNodeArchetype,
     EnumNodeOutputType,
+    EnumValidationSeverity,
 )
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
@@ -236,7 +237,7 @@ class TopicCategoryValidator:
                 f"pattern '<domain>.{expected_suffix}'. Found topic: '{topic_name}'. "
                 f"Expected pattern: '*.{expected_suffix}' (e.g., 'order.{expected_suffix}')."
             ),
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
 
     def validate_subscription(
@@ -300,7 +301,7 @@ class TopicCategoryValidator:
                             f"'<domain>.events', '<domain>.commands', or '<domain>.intents'. "
                             f"Example valid topics: 'order.events', 'user.commands'."
                         ),
-                        severity="warning",
+                        severity=EnumValidationSeverity.WARNING,
                     )
                 )
                 continue
@@ -322,7 +323,7 @@ class TopicCategoryValidator:
                             f"Found: {inferred_category.name}. "
                             f"Review NODE_ARCHETYPE_EXPECTED_CATEGORIES for valid subscriptions."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
 
@@ -592,7 +593,7 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
                         f"'<domain>.events', '<domain>.commands', or '<domain>.intents'. "
                         f"Example: 'order.events', 'user.commands'."
                     ),
-                    severity="warning",
+                    severity=EnumValidationSeverity.WARNING,
                 )
             )
             return
@@ -618,7 +619,7 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
                             f"'{inferred_category.name}' messages. Expected categories for this "
                             f"archetype: [{', '.join(expected_names)}]. Found: {inferred_category.name}."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
 
@@ -675,7 +676,7 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
                         f"'{topic_category.name}' messages.{archetype_context} "
                         f"Expected topic pattern for {message_hint.name}: '*.{expected_topic_suffix}'."
                     ),
-                    severity="error",
+                    severity=EnumValidationSeverity.ERROR,
                 )
             )
 
@@ -992,7 +993,7 @@ def validate_topic_categories_in_file(
                     f"File: {file_path.name}. Fix the syntax error to enable topic "
                     f"category validation."
                 ),
-                severity="error",
+                severity=EnumValidationSeverity.ERROR,
             )
         ]
 

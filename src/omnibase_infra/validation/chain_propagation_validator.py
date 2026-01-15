@@ -124,7 +124,7 @@ from uuid import UUID
 # ModelEventEnvelope is used at runtime in function parameter types, not just for type hints
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
-from omnibase_infra.enums import EnumChainViolationType
+from omnibase_infra.enums import EnumChainViolationType, EnumValidationSeverity
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -369,7 +369,7 @@ class ChainPropagationValidator:
                             f"correlation_id={parent_correlation}. "
                             "All messages in a workflow must share the same correlation_id."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
             elif child_correlation != parent_correlation:
@@ -385,7 +385,7 @@ class ChainPropagationValidator:
                             f"actual={child_correlation}. "
                             "All messages in a workflow must share the same correlation_id."
                         ),
-                        severity="error",
+                        severity=EnumValidationSeverity.ERROR,
                     )
                 )
 
@@ -437,7 +437,7 @@ class ChainPropagationValidator:
                         "Every message must reference its parent's message_id "
                         "to maintain causation chain integrity."
                     ),
-                    severity="error",
+                    severity=EnumValidationSeverity.ERROR,
                 )
             )
         elif child_causation_id != parent_message_id:
@@ -453,7 +453,7 @@ class ChainPropagationValidator:
                         f"actual={child_causation_id}. "
                         "Every message must reference its direct parent's message_id."
                     ),
-                    severity="error",
+                    severity=EnumValidationSeverity.ERROR,
                 )
             )
 
@@ -591,7 +591,7 @@ class ChainPropagationValidator:
                                 f"but workflow uses correlation_id={reference_correlation_id}. "
                                 "All messages in a workflow must share the same correlation_id."
                             ),
-                            severity="error",
+                            severity=EnumValidationSeverity.ERROR,
                         )
                     )
                 elif envelope_correlation_id != reference_correlation_id:
@@ -607,7 +607,7 @@ class ChainPropagationValidator:
                                 f"expected={reference_correlation_id}, actual={envelope_correlation_id}. "
                                 "All messages must share the same correlation_id for distributed tracing."
                             ),
-                            severity="error",
+                            severity=EnumValidationSeverity.ERROR,
                         )
                     )
 
@@ -629,7 +629,7 @@ class ChainPropagationValidator:
                                 "causation_id. Every message (except root) must reference its "
                                 "parent's message_id to maintain causation chain."
                             ),
-                            severity="error",
+                            severity=EnumValidationSeverity.ERROR,
                         )
                     )
                 # Check if causation_id references a message in the chain
@@ -647,7 +647,7 @@ class ChainPropagationValidator:
                                 "not in this workflow chain. "
                                 "Causation chains must form an unbroken sequence."
                             ),
-                            severity="error",
+                            severity=EnumValidationSeverity.ERROR,
                         )
                     )
                 else:
@@ -670,7 +670,7 @@ class ChainPropagationValidator:
                                     "but parents must appear before children in the causation chain. "
                                     "Check message ordering."
                                 ),
-                                severity="warning",
+                                severity=EnumValidationSeverity.WARNING,
                             )
                         )
 

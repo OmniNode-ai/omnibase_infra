@@ -7,18 +7,22 @@ protocol identification, policy classification, dispatch status,
 message categories, topic types, topic standards, chain validation,
 registration states, handler types, handler error types, handler source types,
 node archetypes, introspection reasons, contract types, circuit breaker states, retry error categories,
-any type violations, security validation, validation severity, selection strategies, and other infrastructure concerns.
+any type violations, security validation, validation severity, selection strategies, backend types,
+registration status, confirmation events, and other infrastructure concerns.
 
 Exports:
     EnumAnyTypeViolation: Any type violation categories for strong typing validation
+    EnumBackendType: Infrastructure backend types (CONSUL, POSTGRES)
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
+    EnumConfirmationEventType: Registration confirmation event types
     EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
     EnumDispatchStatus: Dispatch operation status enumeration
     EnumEnvironment: Deployment environment classification (DEVELOPMENT, STAGING, PRODUCTION, CI)
     EnumExecutionShapeViolation: Specific execution shape violation types
     EnumHandlerErrorType: Handler error types for validation and lifecycle
     EnumHandlerLoaderError: Handler loader error codes for plugin loading
+    EnumResponseStatus: Handler response status (SUCCESS, ERROR)
     EnumHandlerSourceType: Handler validation error source types
     EnumHandlerType: Handler architectural roles (INFRA_HANDLER, NODE_HANDLER)
     EnumHandlerTypeCategory: Behavioral classification (COMPUTE, EFFECT)
@@ -30,6 +34,8 @@ Exports:
     EnumNonRetryableErrorCategory: Non-retryable error categories for DLQ
     EnumPolicyType: Policy types for PolicyRegistry plugins
     EnumRegistrationState: Registration FSM states for two-way registration
+    EnumRegistrationStatus: Registration workflow status (IDLE, PENDING, PARTIAL, COMPLETE, FAILED)
+    EnumRegistryResponseStatus: Registry operation response status (SUCCESS, PARTIAL, FAILED)
     EnumRetryErrorCategory: Error categories for retry decision making
     EnumSecurityRuleId: Security validation rule identifiers for OMN-1098
     EnumSelectionStrategy: Selection strategies for capability-based discovery (FIRST, RANDOM, ROUND_ROBIN, LEAST_LOADED)
@@ -41,10 +47,12 @@ Exports:
 from omnibase_core.enums import EnumTopicType
 
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
+from omnibase_infra.enums.enum_backend_type import EnumBackendType
 from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
 from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
+from omnibase_infra.enums.enum_confirmation_event_type import EnumConfirmationEventType
 from omnibase_infra.enums.enum_contract_type import EnumContractType
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
@@ -67,6 +75,11 @@ from omnibase_infra.enums.enum_non_retryable_error_category import (
 )
 from omnibase_infra.enums.enum_policy_type import EnumPolicyType
 from omnibase_infra.enums.enum_registration_state import EnumRegistrationState
+from omnibase_infra.enums.enum_registration_status import EnumRegistrationStatus
+from omnibase_infra.enums.enum_registry_response_status import (
+    EnumRegistryResponseStatus,
+)
+from omnibase_infra.enums.enum_response_status import EnumResponseStatus
 from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.enums.enum_selection_strategy import EnumSelectionStrategy
@@ -75,10 +88,12 @@ from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
 
 __all__: list[str] = [
     "EnumAnyTypeViolation",
+    "EnumBackendType",
     "EnumCaptureOutcome",
     "EnumCaptureState",
     "EnumChainViolationType",
     "EnumCircuitState",
+    "EnumConfirmationEventType",
     "EnumContractType",
     "EnumDedupeStrategy",
     "EnumDispatchStatus",
@@ -97,6 +112,9 @@ __all__: list[str] = [
     "EnumNonRetryableErrorCategory",
     "EnumPolicyType",
     "EnumRegistrationState",
+    "EnumRegistrationStatus",
+    "EnumRegistryResponseStatus",
+    "EnumResponseStatus",
     "EnumRetryErrorCategory",
     "EnumSecurityRuleId",
     "EnumSelectionStrategy",

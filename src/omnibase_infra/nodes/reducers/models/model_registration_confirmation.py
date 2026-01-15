@@ -54,13 +54,11 @@ Related:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Type alias for confirmation event types
-ConfirmationEventType = Literal["consul.registered", "postgres.registration_upserted"]
+from omnibase_infra.enums import EnumConfirmationEventType
 
 
 class ModelRegistrationConfirmation(BaseModel):
@@ -108,21 +106,23 @@ class ModelRegistrationConfirmation(BaseModel):
     Example:
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
+        >>> from omnibase_infra.enums import EnumConfirmationEventType
         >>> confirmation = ModelRegistrationConfirmation(
-        ...     event_type="consul.registered",
+        ...     event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
         ...     correlation_id=uuid4(),
         ...     node_id=uuid4(),
         ...     success=True,
         ...     timestamp=datetime.now(UTC),
         ... )
         >>> confirmation.event_type
-        'consul.registered'
+        <EnumConfirmationEventType.CONSUL_REGISTERED: 'consul.registered'>
         >>> confirmation.success
         True
 
     Example (failure case):
+        >>> from omnibase_infra.enums import EnumConfirmationEventType
         >>> confirmation = ModelRegistrationConfirmation(
-        ...     event_type="postgres.registration_upserted",
+        ...     event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
         ...     correlation_id=uuid4(),
         ...     node_id=uuid4(),
         ...     success=False,
@@ -137,7 +137,7 @@ class ModelRegistrationConfirmation(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    event_type: ConfirmationEventType = Field(
+    event_type: EnumConfirmationEventType = Field(
         ...,
         description="The type of confirmation event (consul or postgres)",
     )
@@ -163,4 +163,4 @@ class ModelRegistrationConfirmation(BaseModel):
     )
 
 
-__all__ = ["ConfirmationEventType", "ModelRegistrationConfirmation"]
+__all__ = ["ModelRegistrationConfirmation"]
