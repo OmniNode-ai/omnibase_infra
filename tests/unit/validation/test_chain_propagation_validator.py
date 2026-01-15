@@ -25,7 +25,7 @@ import pytest
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
-from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
+from omnibase_infra.enums import EnumChainViolationType, EnumValidationSeverity
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationValidator,
@@ -438,7 +438,7 @@ class TestViolationModel:
             actual_value=uuid4(),
             message_id=uuid4(),
             violation_message="Test violation",
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
 
         assert violation.is_blocking() is True
@@ -451,7 +451,7 @@ class TestViolationModel:
             actual_value=uuid4(),
             message_id=uuid4(),
             violation_message="Test warning",
-            severity="warning",
+            severity=EnumValidationSeverity.WARNING,
         )
 
         assert violation.is_blocking() is False
@@ -468,7 +468,7 @@ class TestViolationModel:
             actual_value=actual,
             message_id=msg_id,
             violation_message="Correlation mismatch detected",
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
 
         log_output = violation.format_for_logging()
@@ -489,7 +489,7 @@ class TestViolationModel:
             actual_value=actual,
             message_id=msg_id,
             violation_message="Chain broken",
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
 
         structured = violation.to_structured_dict()

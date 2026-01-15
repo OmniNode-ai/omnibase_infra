@@ -50,6 +50,7 @@ from omnibase_infra.enums import (
     EnumExecutionShapeViolation,
     EnumMessageCategory,
     EnumNodeOutputType,
+    EnumValidationSeverity,
 )
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.validation.model_category_match_result import (
@@ -784,7 +785,7 @@ class RoutingCoverageValidator:
                     f"Message type '{type_name}' ({category_name}) is not registered "
                     f"in routing configuration"
                 ),
-                severity="error",
+                severity=EnumValidationSeverity.ERROR,
             )
             violations.append(violation)
 

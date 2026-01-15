@@ -18,11 +18,12 @@ Related:
 
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.enums import EnumBackendType
 
 
 class ModelPartialRetryRequest(BaseModel):
@@ -58,7 +59,7 @@ class ModelPartialRetryRequest(BaseModel):
         ...,
         description="Semantic version of the node",
     )
-    target_backend: Literal["consul", "postgres"] = Field(
+    target_backend: EnumBackendType = Field(
         ...,
         description="Backend to retry: 'consul' or 'postgres'",
     )

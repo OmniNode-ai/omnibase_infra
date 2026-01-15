@@ -43,6 +43,7 @@ from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumConfirmationEventType
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -1997,14 +1998,10 @@ class TestCompleteStateTransitions:
 
     def test_all_valid_states_exist(self) -> None:
         """Document all valid FSM states."""
-        from typing import get_args
+        from omnibase_infra.enums import EnumRegistrationStatus
 
-        from omnibase_infra.nodes.reducers.models.model_registration_state import (
-            RegistrationStatus,
-        )
-
-        # Extract valid states from the Literal type
-        valid_states = set(get_args(RegistrationStatus))
+        # Extract valid states from the enum values
+        valid_states = {status.value for status in EnumRegistrationStatus}
 
         expected_states = {"idle", "pending", "partial", "complete", "failed"}
         assert valid_states == expected_states, (
@@ -2013,9 +2010,11 @@ class TestCompleteStateTransitions:
 
     def test_initial_state_is_idle(self) -> None:
         """Verify that the default initial state is idle."""
+        from omnibase_infra.enums import EnumRegistrationStatus
+
         state = ModelRegistrationState()
 
-        assert state.status == "idle"
+        assert state.status == EnumRegistrationStatus.IDLE
         assert state.node_id is None
         assert state.consul_confirmed is False
         assert state.postgres_confirmed is False
@@ -6107,7 +6106,7 @@ class TestReduceConfirmation:
 
         # Create a valid confirmation event
         confirmation = ModelRegistrationConfirmation(
-            event_type="consul.registered",
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
             correlation_id=uuid4(),
             node_id=uuid4(),
             success=True,
@@ -6131,7 +6130,7 @@ class TestReduceConfirmation:
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
         confirmation = ModelRegistrationConfirmation(
-            event_type="postgres.registration_upserted",
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
             correlation_id=uuid4(),
             node_id=uuid4(),
             success=False,

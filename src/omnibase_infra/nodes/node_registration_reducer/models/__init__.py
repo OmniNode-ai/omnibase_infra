@@ -22,7 +22,6 @@ from omnibase_infra.nodes.node_registration_reducer.models.model_validation_resu
 # Re-export shared models from the legacy location for compatibility
 # These will be migrated to this location in a future refactoring
 from omnibase_infra.nodes.reducers.models import (
-    ConfirmationEventType,
     ModelPayloadConsulRegister,
     ModelPayloadPostgresUpsertRegistration,
     ModelRegistrationConfirmation,
@@ -30,7 +29,6 @@ from omnibase_infra.nodes.reducers.models import (
 )
 
 __all__ = [
-    "ConfirmationEventType",
     "ModelPayloadConsulRegister",
     "ModelPayloadPostgresUpsertRegistration",
     "ModelRegistrationConfirmation",
