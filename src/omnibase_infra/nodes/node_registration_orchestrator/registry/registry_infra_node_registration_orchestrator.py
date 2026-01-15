@@ -307,7 +307,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
         # Fail-fast: contract.yaml defines heartbeat routing which requires projector
         if projector is None and require_heartbeat_handler:
             ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
+                transport_type=EnumInfraTransportType.RUNTIME,
                 operation="create_registry",
                 target_name="RegistryInfraNodeRegistrationOrchestrator",
             )

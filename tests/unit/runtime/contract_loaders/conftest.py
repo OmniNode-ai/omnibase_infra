@@ -111,6 +111,34 @@ handler_routing:
         module: "test.handlers"
 """
 
+CONTRACT_WITH_INVALID_ROUTING_STRATEGY_YAML = """
+name: "orchestrator_with_invalid_strategy"
+version: "1.0.0"
+handler_routing:
+  routing_strategy: "first_match"
+  handlers:
+    - event_model:
+        name: "TestEventModel"
+        module: "test.models"
+      handler:
+        name: "TestHandler"
+        module: "test.handlers"
+"""
+
+CONTRACT_WITH_UNKNOWN_ROUTING_STRATEGY_YAML = """
+name: "orchestrator_with_unknown_strategy"
+version: "1.0.0"
+handler_routing:
+  routing_strategy: "some_unknown_strategy"
+  handlers:
+    - event_model:
+        name: "TestEventModel"
+        module: "test.models"
+      handler:
+        name: "TestHandler"
+        module: "test.handlers"
+"""
+
 INVALID_YAML_SYNTAX = """
 name: "broken_contract"
 handler_routing:
@@ -238,6 +266,89 @@ def nonexistent_contract_path(tmp_path: Path) -> Path:
     return tmp_path / "nonexistent" / "contract.yaml"
 
 
+@pytest.fixture
+def contract_with_invalid_routing_strategy_path(tmp_path: Path) -> Path:
+    """Create a contract file with an unimplemented routing strategy.
+
+    Uses "first_match" which was listed in the old constant but never implemented.
+
+    Returns:
+        Path to the contract.yaml file with invalid routing strategy.
+    """
+    contract_file = tmp_path / "contract.yaml"
+    contract_file.write_text(CONTRACT_WITH_INVALID_ROUTING_STRATEGY_YAML)
+    return contract_file
+
+
+@pytest.fixture
+def contract_with_unknown_routing_strategy_path(tmp_path: Path) -> Path:
+    """Create a contract file with a completely unknown routing strategy.
+
+    Returns:
+        Path to the contract.yaml file with unknown routing strategy.
+    """
+    contract_file = tmp_path / "contract.yaml"
+    contract_file.write_text(CONTRACT_WITH_UNKNOWN_ROUTING_STRATEGY_YAML)
+    return contract_file
+
+
+@pytest.fixture
+def oversized_contract_path(tmp_path: Path) -> Path:
+    """Create a contract file that exceeds the maximum allowed size.
+
+    Creates a file that is slightly larger than MAX_CONTRACT_FILE_SIZE_BYTES (10MB + 1 byte).
+    This is used to test the file size security control.
+
+    Returns:
+        Path to the oversized contract.yaml file.
+    """
+    from omnibase_infra.runtime.contract_loaders import MAX_CONTRACT_FILE_SIZE_BYTES
+
+    contract_file = tmp_path / "contract.yaml"
+    # Create a file that exceeds the limit by 1 byte
+    oversized_content = "x" * (MAX_CONTRACT_FILE_SIZE_BYTES + 1)
+    contract_file.write_text(oversized_content)
+    return contract_file
+
+
+@pytest.fixture
+def contract_at_size_limit_path(tmp_path: Path) -> Path:
+    """Create a contract file that is exactly at the maximum allowed size.
+
+    Creates a file that is exactly MAX_CONTRACT_FILE_SIZE_BYTES (10MB).
+    This tests the boundary condition where the file should still be accepted.
+
+    Returns:
+        Path to the contract.yaml file at the size limit.
+    """
+    from omnibase_infra.runtime.contract_loaders import MAX_CONTRACT_FILE_SIZE_BYTES
+
+    contract_file = tmp_path / "contract.yaml"
+    # Create valid YAML content that is exactly at the limit
+    # We'll pad a valid contract with comments to reach the limit
+    base_content = """name: "test"
+version: "1.0.0"
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "TestEvent"
+        module: "test.models"
+      handler:
+        name: "TestHandler"
+        module: "test.handlers"
+"""
+    # Pad with comment characters to reach exact size
+    padding_needed = MAX_CONTRACT_FILE_SIZE_BYTES - len(base_content.encode("utf-8"))
+    if padding_needed > 0:
+        # Add a comment line with the right amount of padding
+        padded_content = base_content + "\n# " + ("x" * (padding_needed - 3))
+    else:
+        padded_content = base_content
+    contract_file.write_text(padded_content)
+    return contract_file
+
+
 # =============================================================================
 # Module Exports
 # =============================================================================
@@ -246,8 +357,10 @@ __all__ = [
     # Contract YAML constants
     "CONTRACT_WITH_EMPTY_HANDLERS_YAML",
     "CONTRACT_WITH_INCOMPLETE_HANDLER_YAML",
+    "CONTRACT_WITH_INVALID_ROUTING_STRATEGY_YAML",
     "CONTRACT_WITH_MISSING_EVENT_MODEL_NAME_YAML",
     "CONTRACT_WITH_MISSING_HANDLER_NAME_YAML",
+    "CONTRACT_WITH_UNKNOWN_ROUTING_STRATEGY_YAML",
     "CONTRACT_WITHOUT_HANDLER_ROUTING_YAML",
     "EMPTY_CONTRACT_YAML",
     "INVALID_YAML_SYNTAX",
@@ -255,13 +368,17 @@ __all__ = [
     "VALID_HANDLER_ROUTING_CONTRACT_YAML",
     "YAML_WITH_ONLY_WHITESPACE",
     # Fixtures
+    "contract_at_size_limit_path",
     "contract_with_empty_handlers_path",
     "contract_with_incomplete_handler_path",
+    "contract_with_invalid_routing_strategy_path",
+    "contract_with_unknown_routing_strategy_path",
     "contract_without_routing_path",
     "empty_contract_path",
     "invalid_yaml_path",
     "minimal_contract_path",
     "nonexistent_contract_path",
+    "oversized_contract_path",
     "valid_contract_path",
     "whitespace_only_contract_path",
 ]
