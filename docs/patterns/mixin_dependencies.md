@@ -13,19 +13,33 @@ Mixins in ONEX follow the naming convention: `mixin_<name>.py` -> `Mixin<Name>`.
 
 ## Quick Reference: Mixin Dependencies
 
-| Mixin | Depends On | Required Attributes | Init Method |
-|-------|-----------|---------------------|-------------|
-| `MixinAsyncCircuitBreaker` | None | None | `_init_circuit_breaker()` |
-| `MixinEnvelopeExtraction` | None | None | None |
-| `MixinDictLikeAccessors` | None | None | None |
-| `MixinRetryExecution` | `MixinAsyncCircuitBreaker` | `_circuit_breaker_initialized`, `_executor` | None |
-| `MixinKafkaDlq` | None (uses Protocol) | See [detailed section](#mixinkafkadlq) | `_init_dlq()` |
-| `MixinKafkaBroadcast` | None (uses Protocol) | See [detailed section](#mixinkafkabroadcast) | None |
-| `MixinNodeIntrospection` | None | None | `initialize_introspection()` |
-| `MixinPolicyValidation` | None | None | None |
-| `MixinSemverCache` | None | None | None (class-level) |
-| `MixinConsulInitialization` | `MixinAsyncCircuitBreaker` | See [detailed section](#mixinconsulinitialization) | None |
-| `MixinVaultInitialization` | `MixinAsyncCircuitBreaker` | See [detailed section](#mixinvaultinitialization) | None |
+Use this table to quickly identify mixin requirements and common usage patterns. For detailed implementation guidance, see the linked sections.
+
+| Mixin | Dependencies | Init Method | Common Use Case |
+|-------|-------------|-------------|-----------------|
+| [`MixinAsyncCircuitBreaker`](#mixinasynccircuitbreaker) | None | `_init_circuit_breaker()` | Fault tolerance for external service calls |
+| [`MixinKafkaDlq`](#mixinkafkadlq) | Protocol-based | `_init_dlq()` | Dead letter queue for failed Kafka messages |
+| [`MixinKafkaBroadcast`](#mixinkafkabroadcast) | Protocol-based | None | Environment/group broadcast messaging |
+| [`MixinNodeIntrospection`](#mixinnodeintrospection) | None | `initialize_introspection()` | Node capability discovery and heartbeat |
+| [`MixinProjectorSqlOperations`](#mixin-index-by-category) | None | None | SQL operations for projectors |
+| [`MixinRetryExecution`](#mixinretryexecution) | `MixinAsyncCircuitBreaker` | None | Retry with exponential backoff |
+| [`MixinConsulInitialization`](#mixinconsulinitialization) | `MixinAsyncCircuitBreaker` | None | Consul client setup and connection |
+| [`MixinVaultInitialization`](#mixinvaultinitialization) | `MixinAsyncCircuitBreaker` | None | Vault client setup and authentication |
+| [`MixinEnvelopeExtraction`](#mixinenvelopeextraction) | None | None | Extract correlation/envelope IDs |
+| [`MixinDictLikeAccessors`](#mixindictlikeaccessors) | None | None | Dict-like access for Pydantic models |
+| [`MixinPolicyValidation`](#mixinpolicyvalidation) | None | None | Policy registration validation |
+| [`MixinSemverCache`](#mixinsemvercache) | None | Class-level config | Cached semantic version parsing |
+
+### Key Dependencies Summary
+
+**Mixins requiring `MixinAsyncCircuitBreaker`** (must inherit first):
+- `MixinRetryExecution` - Needs `_circuit_breaker_lock`, `_circuit_breaker_initialized`
+- `MixinConsulInitialization` - Uses `_init_circuit_breaker()` for setup
+- `MixinVaultInitialization` - Uses `_init_circuit_breaker()` for setup
+
+**Protocol-based mixins** (require host class attributes):
+- `MixinKafkaDlq` - Requires `_config`, `_producer`, `_producer_lock`, `_model_headers_to_kafka()`
+- `MixinKafkaBroadcast` - Requires `_environment`, `_group`, `publish()`
 
 ---
 

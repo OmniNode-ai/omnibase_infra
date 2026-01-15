@@ -301,6 +301,10 @@ class InfraNamingConventionValidator:
         r".*Error$",  # Exception classes (end with Error)
         r".*Exception$",  # Exception classes (end with Exception)
         r"^Exception[A-Z].*",  # Exception classes (start with Exception)
+        # Common ONEX suffix patterns that may appear across different directories
+        r".*Config$",  # Configuration classes (e.g., ModelKafkaEventBusConfig)
+        r".*Result$",  # Result model classes (e.g., ModelValidationResult)
+        r".*Response$",  # Response model classes (e.g., ModelApiResponse)
     ]
 
     # PERFORMANCE: Pre-compiled regex patterns (compiled once at class load time)
@@ -313,6 +317,10 @@ class InfraNamingConventionValidator:
         re.compile(r".*Error$"),
         re.compile(r".*Exception$"),
         re.compile(r"^Exception[A-Z].*"),
+        # Common ONEX suffix patterns
+        re.compile(r".*Config$"),
+        re.compile(r".*Result$"),
+        re.compile(r".*Response$"),
     ]
 
     # PERFORMANCE: Pre-compiled naming patterns for fast class name validation
