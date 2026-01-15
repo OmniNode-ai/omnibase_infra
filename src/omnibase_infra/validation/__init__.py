@@ -101,6 +101,11 @@ from omnibase_core.validation import (
     validate_union_usage,
 )
 
+# Contract linting for CI gate (PR #57)
+from omnibase_infra.validation.enums.enum_contract_violation_severity import (
+    EnumContractViolationSeverity,
+)
+
 # Infrastructure-specific wrappers will be imported from infra_validators
 from omnibase_infra.validation.infra_validators import (
     INFRA_MAX_UNIONS,
@@ -112,16 +117,17 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_patterns,
     validate_infra_union_usage,
 )
-
-# Contract linting for CI gate (PR #57)
 from omnibase_infra.validation.linter_contract import (
     ContractLinter,
-    EnumContractViolationSeverity,
-    ModelContractLintResult,
-    ModelContractViolation,
     lint_contract_file,
     lint_contracts_ci,
     lint_contracts_in_directory,
+)
+from omnibase_infra.validation.models.model_contract_lint_result import (
+    ModelContractLintResult,
+)
+from omnibase_infra.validation.models.model_contract_violation import (
+    ModelContractViolation,
 )
 
 # Validation error aggregation and reporting for startup (OMN-1091)

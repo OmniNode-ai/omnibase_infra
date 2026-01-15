@@ -7,7 +7,9 @@ in the ONEX infrastructure layer.
 
 Models:
     - ModelInfraErrorContext: Context for infrastructure errors including
-      transport type, operation, and correlation ID
+      transport type, operation, and correlation ID (all fields optional)
+    - ModelTimeoutErrorContext: Stricter context for timeout errors with
+      required correlation_id, transport_type, and operation
     - ModelHandlerValidationError: Structured error model for handler
       validation failures (contract, descriptor, security, architecture)
 
@@ -25,8 +27,12 @@ from omnibase_infra.models.errors.model_handler_validation_error import (
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.models.errors.model_timeout_error_context import (
+    ModelTimeoutErrorContext,
+)
 
 __all__: list[str] = [
     "ModelHandlerValidationError",
     "ModelInfraErrorContext",
+    "ModelTimeoutErrorContext",
 ]

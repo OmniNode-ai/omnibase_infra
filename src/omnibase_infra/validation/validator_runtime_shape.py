@@ -172,6 +172,12 @@ from omnibase_infra.models.validation.model_execution_shape_rule import (
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
+from omnibase_infra.models.validation.model_output_validation_params import (
+    ModelOutputValidationParams,
+)
+from omnibase_infra.models.validation.model_validate_and_raise_params import (
+    ModelValidateAndRaiseParams,
+)
 
 # Import canonical execution shape rules from validator_execution_shape (single source of truth)
 from omnibase_infra.validation.validator_execution_shape import (
@@ -584,26 +590,19 @@ class RuntimeShapeValidator:
 
     def validate_handler_output(
         self,
-        node_archetype: EnumNodeArchetype,
-        output: object,
-        output_category: EnumMessageCategory | EnumNodeOutputType,
-        file_path: str = "<runtime>",
-        line_number: int = 0,
+        params: ModelOutputValidationParams,
     ) -> ModelExecutionShapeViolationResult | None:
         """Validate handler output against execution shape constraints.
 
         Args:
-            node_archetype: The declared node archetype.
-            output: The actual output object (used for context in violation message).
-            output_category: The message category or node output type of the output.
-            file_path: Optional file path for violation reporting.
-            line_number: Optional line number for violation reporting.
+            params: Parameters encapsulating node_archetype, output, output_category,
+                and optional file_path and line_number for violation reporting.
 
         Returns:
             A ModelExecutionShapeViolationResult if a violation is detected,
             or None if the output is valid.
         """
-        if self.is_output_allowed(node_archetype, output_category):
+        if self.is_output_allowed(params.node_archetype, params.output_category):
             return None
 
         # Determine specific violation type.
@@ -619,7 +618,7 @@ class RuntimeShapeValidator:
         # The generic FORBIDDEN_RETURN_TYPE is semantically appropriate for these
         # cases because they represent allow-list violations rather than explicit
         # architectural constraint violations.
-        violation_key = (node_archetype, output_category)
+        violation_key = (params.node_archetype, params.output_category)
         violation_type = _VIOLATION_TYPE_MAP.get(
             violation_key,
             EnumExecutionShapeViolation.FORBIDDEN_RETURN_TYPE,
@@ -628,13 +627,15 @@ class RuntimeShapeValidator:
         # Build descriptive message with clear actionable guidance.
         # The message distinguishes between explicit forbidden types (architectural
         # constraint) and implicit forbidden types (not in allow-list).
-        output_type_name = type(output).__name__
-        archetype_name = node_archetype.value.upper()
-        category_name = output_category.value.upper()
+        output_type_name = type(params.output).__name__
+        archetype_name = params.node_archetype.value.upper()
+        category_name = params.output_category.value.upper()
 
         # Check if this is a PROJECTION violation - these need educational context
         # about the distinction between node output types and message categories
-        is_projection_violation = output_category == EnumNodeOutputType.PROJECTION
+        is_projection_violation = (
+            params.output_category == EnumNodeOutputType.PROJECTION
+        )
 
         # Provide context-specific guidance based on whether this is an explicit
         # or implicit violation
@@ -659,7 +660,7 @@ class RuntimeShapeValidator:
         # Explicit violation: known architectural constraint
         elif is_projection_violation:
             # PROJECTION violations get enhanced educational message
-            allowed_types = self._get_allowed_types_for_handler(node_archetype)
+            allowed_types = self._get_allowed_types_for_handler(params.node_archetype)
             message = (
                 f"{archetype_name} handler cannot return PROJECTION type "
                 f"'{output_type_name}'. PROJECTION is a node output type "
@@ -677,21 +678,16 @@ class RuntimeShapeValidator:
 
         return ModelExecutionShapeViolationResult(
             violation_type=violation_type,
-            node_archetype=node_archetype,
-            file_path=file_path,
-            line_number=line_number if line_number > 0 else 1,
+            node_archetype=params.node_archetype,
+            file_path=params.file_path,
+            line_number=params.line_number if params.line_number > 0 else 1,
             message=message,
             severity=EnumValidationSeverity.ERROR,
         )
 
     def validate_and_raise(
         self,
-        node_archetype: EnumNodeArchetype,
-        output: object,
-        output_category: EnumMessageCategory | EnumNodeOutputType,
-        file_path: str = "<runtime>",
-        line_number: int = 0,
-        correlation_id: UUID | None = None,
+        params: ModelValidateAndRaiseParams,
     ) -> None:
         """Validate handler output and raise exception if invalid.
 
@@ -699,28 +695,26 @@ class RuntimeShapeValidator:
         but raises an ExecutionShapeViolationError if a violation is detected.
 
         Args:
-            node_archetype: The declared node archetype.
-            output: The actual output object.
-            output_category: The message category or node output type of the output.
-            file_path: Optional file path for violation reporting.
-            line_number: Optional line number for violation reporting.
-            correlation_id: Optional correlation ID for distributed tracing.
-                When provided, the exception includes this ID for tracking
-                validation failures across service boundaries.
+            params: Parameters encapsulating node_archetype, output, output_category,
+                optional file_path and line_number for violation reporting,
+                and optional correlation_id for distributed tracing.
 
         Raises:
             ExecutionShapeViolationError: If the output violates execution
                 shape constraints for the node archetype.
         """
-        violation = self.validate_handler_output(
-            node_archetype=node_archetype,
-            output=output,
-            output_category=output_category,
-            file_path=file_path,
-            line_number=line_number,
+        validation_params = ModelOutputValidationParams(
+            node_archetype=params.node_archetype,
+            output=params.output,
+            output_category=params.output_category,
+            file_path=params.file_path,
+            line_number=params.line_number,
         )
+        violation = self.validate_handler_output(validation_params)
         if violation is not None:
-            raise ExecutionShapeViolationError(violation, correlation_id=correlation_id)
+            raise ExecutionShapeViolationError(
+                violation, correlation_id=params.correlation_id
+            )
 
 
 # ==============================================================================
@@ -849,13 +843,14 @@ def enforce_execution_shape(node_archetype: EnumNodeArchetype) -> Callable[[F], 
                 return result
 
             # Validate against execution shape rules
-            _default_validator.validate_and_raise(
+            validate_params = ModelValidateAndRaiseParams(
                 node_archetype=node_archetype,
                 output=result,
                 output_category=output_category,
                 file_path=source_file,
                 line_number=line_number,
             )
+            _default_validator.validate_and_raise(validate_params)
 
             return result
 

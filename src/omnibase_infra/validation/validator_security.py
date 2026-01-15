@@ -52,6 +52,7 @@ from typing import Final
 
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
+from omnibase_infra.models.validation import ModelValidationErrorParams
 
 # Security rule IDs for structured error reporting
 # These IDs enable tracking and remediation of specific security violations
@@ -358,13 +359,7 @@ def validate_handler_security(
 
 
 def convert_to_validation_error(
-    rule_id: str,
-    message: str,
-    remediation_hint: str,
-    handler_identity: ModelHandlerIdentifier,
-    file_path: str | None = None,
-    line_number: int | None = None,
-    details: dict[str, object] | None = None,
+    params: ModelValidationErrorParams,
 ) -> ModelHandlerValidationError:
     """Convert a security issue to ModelHandlerValidationError.
 
@@ -373,37 +368,33 @@ def convert_to_validation_error(
     into existing validation pipelines.
 
     Args:
-        rule_id: Unique identifier for the validation rule
-        message: Human-readable error message
-        remediation_hint: Actionable fix suggestion
-        handler_identity: Handler identification information
-        file_path: Optional file path where error occurred
-        line_number: Optional line number (1-indexed)
-        details: Optional additional context
+        params: Parameters encapsulating rule_id, message, remediation_hint,
+            handler_identity, and optional file_path, line_number, details.
 
     Returns:
         ModelHandlerValidationError configured for security violations
 
     Example:
-        >>> error = convert_to_validation_error(
-        ...     rule_id=SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
+        >>> params = ModelValidationErrorParams(
+        ...     rule_code=SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
         ...     message="Handler exposes 'get_password' method",
         ...     remediation_hint="Prefix with underscore: '_get_password'",
         ...     handler_identity=ModelHandlerIdentifier.from_handler_id("auth"),
         ...     file_path="nodes/auth/handlers/handler_authenticate.py",
         ...     line_number=42,
         ... )
+        >>> error = convert_to_validation_error(params)
         >>> error.error_type == EnumHandlerErrorType.SECURITY_VALIDATION_ERROR
         True
     """
     return ModelHandlerValidationError.from_security_violation(
-        rule_id=rule_id,
-        message=message,
-        remediation_hint=remediation_hint,
-        handler_identity=handler_identity,
-        file_path=file_path,
-        line_number=line_number,
-        details=details,
+        rule_id=params.rule_code,
+        message=params.message,
+        remediation_hint=params.remediation_hint,
+        handler_identity=params.handler_identity,
+        file_path=params.file_path,
+        line_number=params.line_number,
+        details=params.details,
     )
 
 

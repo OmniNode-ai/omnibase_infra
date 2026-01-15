@@ -44,7 +44,7 @@ Example Usage:
     await wire_infrastructure_services(container)
     registry = await container.service_registry.resolve_service(RegistryPolicy)
 
-    # Register a synchronous policy using the model (preferred)
+    # Register a synchronous policy using the model (PREFERRED API)
     registration = ModelPolicyRegistration(
         policy_id="exponential_backoff",
         policy_class=ExponentialBackoffPolicy,
@@ -54,6 +54,7 @@ Example Usage:
     registry.register(registration)
 
     # Register using convenience method (preserves original API)
+    # Note: For new code, prefer register(ModelPolicyRegistration(...)) instead
     registry.register_policy(
         policy_id="async_merge",
         policy_class=AsyncMergePolicy,
@@ -79,21 +80,17 @@ Integration Points:
 
 from __future__ import annotations
 
-import asyncio
-import functools
 import threading
 import warnings
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from omnibase_core.models.errors import ModelOnexError
-from omnibase_core.models.primitives import ModelSemVer
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
+from omnibase_infra.runtime.mixin_policy_validation import MixinPolicyValidation
+from omnibase_infra.runtime.mixin_semver_cache import MixinSemverCache
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
-from omnibase_infra.runtime.util_version import normalize_version
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -104,7 +101,7 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
-class RegistryPolicy:
+class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
     """SINGLE SOURCE OF TRUTH for policy plugin registration in omnibase_infra.
 
     Thread-safe registry for policy plugins. Manages pure decision logic plugins
@@ -113,6 +110,10 @@ class RegistryPolicy:
     The registry maintains a mapping from ModelPolicyKey instances to policy classes
     that implement the ProtocolPolicy protocol. ModelPolicyKey provides strong typing
     and replaces the legacy tuple[str, str, str] pattern.
+
+    This class inherits from:
+    - MixinPolicyValidation: Validation methods for policy registration
+    - MixinSemverCache: Semantic version parsing and caching
 
     TODO(Phase 2): Implement ProtocolRegistryBase[tuple[str, str, str], type[ProtocolPolicy]]
     interface once it's added to omnibase_spi. The external API maintains tuple compatibility
@@ -212,7 +213,7 @@ class RegistryPolicy:
         Secondary Indexes (Performance Optimization):
 
             Current Indexes:
-                - _policy_id_index: Maps policy_id → list[ModelPolicyKey]
+                - _policy_id_index: Maps policy_id -> list[ModelPolicyKey]
                     - Purpose: O(1) lookup by policy_id (avoids O(n) scan of all registrations)
                     - Updated on: register(), unregister()
                     - Memory: ~50 bytes per policy_id + 8 bytes per version
@@ -232,7 +233,7 @@ class RegistryPolicy:
 
                 Trade-off Analysis:
                     - Each index adds ~50-100 bytes per entry
-                    - Benefits: O(n) → O(1) for filtered queries
+                    - Benefits: O(n) -> O(1) for filtered queries
                     - Costs: Write amplification (update multiple indexes per register/unregister)
                     - Recommendation: Profile first, optimize only if proven bottleneck
 
@@ -405,6 +406,8 @@ class RegistryPolicy:
         _registry: Internal dictionary mapping ModelPolicyKey instances to policy classes
         _lock: Threading lock for thread-safe registration operations
         _policy_id_index: Secondary index for O(1) policy_id lookup
+
+    Inherited from MixinSemverCache:
         SEMVER_CACHE_SIZE: Class variable for configuring LRU cache size (default: 128)
 
     Class-Level Configuration:
@@ -437,28 +440,6 @@ class RegistryPolicy:
         [('retry_backoff', 'orchestrator', '1.0.0')]
     """
 
-    # ==========================================================================
-    # Class-level semver cache configuration
-    # ==========================================================================
-
-    # Semver cache size - can be overridden via class attribute before first parse
-    # or via configure_semver_cache() method
-    SEMVER_CACHE_SIZE: int = 128
-
-    # Cached semver parser function (lazily initialized)
-    # This is the outer wrapper function that normalizes before calling the cached function
-    _semver_cache: Callable[[str], ModelSemVer] | None = None
-
-    # Inner LRU-cached function (stores reference for cache_clear() access)
-    # This is the actual @lru_cache decorated function
-    _semver_cache_inner: Callable[[str], ModelSemVer] | None = None
-
-    # Lock for thread-safe cache initialization
-    _semver_cache_lock: threading.Lock = threading.Lock()
-
-    # Methods to check for async validation
-    _ASYNC_CHECK_METHODS: tuple[str, ...] = ("reduce", "decide", "evaluate")
-
     def __init__(self) -> None:
         """Initialize an empty policy registry with thread lock."""
         # Key: ModelPolicyKey -> policy_class (strong typing replaces tuple pattern)
@@ -469,233 +450,6 @@ class RegistryPolicy:
         # Maps policy_id -> list of ModelPolicyKey instances
         self._policy_id_index: dict[str, list[ModelPolicyKey]] = {}
 
-    def _validate_protocol_implementation(
-        self,
-        policy_id: str,
-        policy_class: type[ProtocolPolicy],
-    ) -> None:
-        """Validate that policy class implements ProtocolPolicy protocol.
-
-        Performs runtime type validation using duck typing to ensure the policy
-        class has the required methods and properties before registration.
-
-        Validation Order:
-            Validations are performed in fail-fast order with cheap checks first:
-
-            1. **Comprehensive check**: If class is missing all required attributes
-               (policy_id, policy_type, evaluate), raise a comprehensive error
-               listing all missing requirements.
-
-            2. **evaluate() existence** (O(1) hasattr check):
-               Verifies policy_class has evaluate() method.
-
-            3. **evaluate() callability** (O(1) callable check):
-               Verifies evaluate is actually callable.
-
-        Args:
-            policy_id: Unique identifier for the policy being validated
-            policy_class: The policy class to validate
-
-        Raises:
-            PolicyRegistryError: If policy_class does not implement ProtocolPolicy:
-                - Missing all required attributes (comprehensive error)
-                - Missing evaluate() method
-                - evaluate is not callable
-        """
-        # Check for required attributes
-        has_policy_id = hasattr(policy_class, "policy_id")
-        has_policy_type = hasattr(policy_class, "policy_type")
-        has_evaluate = hasattr(policy_class, "evaluate")
-
-        # If all required attributes are missing, provide comprehensive error
-        if not has_policy_id and not has_policy_type and not has_evaluate:
-            raise PolicyRegistryError(
-                f"Policy class {policy_class.__name__!r} does not implement "
-                f"ProtocolPolicy protocol. Missing: policy_id property, "
-                f"policy_type property, evaluate() method",
-                policy_id=policy_id,
-                policy_class=policy_class.__name__,
-            )
-
-        # Check evaluate() method exists
-        if not has_evaluate:
-            raise PolicyRegistryError(
-                f"Policy class {policy_class.__name__!r} is missing evaluate() "
-                f"method from ProtocolPolicy protocol",
-                policy_id=policy_id,
-                policy_class=policy_class.__name__,
-            )
-
-        # Check evaluate is callable
-        evaluate_attr = getattr(policy_class, "evaluate", None)
-        if not callable(evaluate_attr):
-            raise PolicyRegistryError(
-                f"Policy class {policy_class.__name__!r} has evaluate() method "
-                f"(not callable) - must be a callable method",
-                policy_id=policy_id,
-                policy_class=policy_class.__name__,
-            )
-
-    def _validate_sync_enforcement(
-        self,
-        policy_id: str,
-        policy_class: type[ProtocolPolicy],
-        allow_async: bool,
-    ) -> None:
-        """Validate that policy methods are synchronous unless explicitly async.
-
-        This validation enforces the synchronous-by-default policy execution model.
-        Policy plugins are expected to be pure decision logic without I/O or async
-        operations. If a policy needs async methods (e.g., for deterministic async
-        computation), it must be explicitly flagged with allow_async=True
-        during registration.
-
-        Validation Process:
-            1. Inspect policy class for methods: reduce(), decide(), evaluate()
-            2. Check if any of these methods are async (coroutine functions)
-            3. If async methods found and allow_async=False, raise error
-            4. If async methods found and allow_async=True, allow registration
-
-        This validation helps prevent accidental async policy registration and ensures
-        that async policies are consciously marked as such for proper runtime handling.
-
-        Args:
-            policy_id: Unique identifier for the policy being validated
-            policy_class: The policy class to validate for async methods
-            allow_async: If True, allows async interface; if False, enforces sync
-
-        Raises:
-            PolicyRegistryError: If policy has async methods (reduce, decide, evaluate)
-                                and allow_async=False. Error includes the policy_id
-                                and the name of the async method that caused validation failure.
-
-        Example:
-            >>> # This will fail - async policy without explicit flag
-            >>> class AsyncPolicy:
-            ...     async def evaluate(self, context):
-            ...         return True
-            >>> registry._validate_sync_enforcement("async_pol", AsyncPolicy, False)
-            PolicyRegistryError: Policy 'async_pol' has async evaluate() but
-                                 allow_async=True not specified.
-
-            >>> # This will succeed - async explicitly flagged
-            >>> registry._validate_sync_enforcement("async_pol", AsyncPolicy, True)
-        """
-        for method_name in self._ASYNC_CHECK_METHODS:
-            if hasattr(policy_class, method_name):
-                method = getattr(policy_class, method_name)
-                if asyncio.iscoroutinefunction(method):
-                    if not allow_async:
-                        raise PolicyRegistryError(
-                            f"Policy '{policy_id}' has async {method_name}() but "
-                            f"allow_async=True not specified. "
-                            f"Policy plugins must be synchronous by default.",
-                            policy_id=policy_id,
-                            policy_type=None,
-                            async_method=method_name,
-                        )
-
-    def _normalize_policy_type(
-        self,
-        policy_type: str | EnumPolicyType,
-    ) -> str:
-        """Normalize policy type to string value and validate against EnumPolicyType.
-
-        This method provides centralized policy type validation logic used by all
-        registration and query methods. It accepts both EnumPolicyType enum values
-        and string literals, normalizing them to their string representation while
-        ensuring they match valid EnumPolicyType values.
-
-        Validation Process:
-            1. If policy_type is EnumPolicyType instance, extract .value
-            2. If policy_type is string, validate against EnumPolicyType values
-            3. Raise PolicyRegistryError if string doesn't match any enum value
-            4. Return normalized string value
-
-        This centralized validation ensures consistent policy type handling across
-        all registry operations (register, get, list_keys, is_registered, unregister).
-
-        Args:
-            policy_type: Policy type as EnumPolicyType enum or string literal.
-                        Valid values: "orchestrator", "reducer"
-
-        Returns:
-            Normalized string value for the policy type (e.g., "orchestrator", "reducer")
-
-        Raises:
-            PolicyRegistryError: If policy_type is a string that doesn't match any
-                                EnumPolicyType value. Error includes the invalid value
-                                and list of valid options.
-
-        Example:
-            >>> from omnibase_infra.enums import EnumPolicyType
-            >>> registry = RegistryPolicy()
-            >>> # Enum to string
-            >>> registry._normalize_policy_type(EnumPolicyType.ORCHESTRATOR)
-            'orchestrator'
-            >>> # Valid string passthrough
-            >>> registry._normalize_policy_type("reducer")
-            'reducer'
-            >>> # Invalid string raises error
-            >>> registry._normalize_policy_type("invalid")
-            PolicyRegistryError: Invalid policy_type: 'invalid'.
-                                 Must be one of: ['orchestrator', 'reducer']
-        """
-        if isinstance(policy_type, EnumPolicyType):
-            return policy_type.value
-
-        # Validate string against enum values
-        valid_types = {e.value for e in EnumPolicyType}
-        if policy_type not in valid_types:
-            raise PolicyRegistryError(
-                f"Invalid policy_type: {policy_type!r}. "
-                f"Must be one of: {sorted(valid_types)}",
-                policy_id=None,
-                policy_type=policy_type,
-            )
-
-        return policy_type
-
-    @staticmethod
-    def _normalize_version(version: str) -> str:
-        """Normalize version string for consistent lookups.
-
-        Delegates to the shared normalize_version utility which is the
-        SINGLE SOURCE OF TRUTH for version normalization in omnibase_infra.
-
-        This method wraps the shared utility to convert ValueError to
-        ProtocolConfigurationError for PolicyRegistry's error contract.
-
-        Normalization rules:
-            1. Strip leading/trailing whitespace
-            2. Strip leading 'v' or 'V' prefix
-            3. Expand partial versions (1 -> 1.0.0, 1.0 -> 1.0.0)
-            4. Parse with ModelSemVer.parse() for validation
-            5. Preserve prerelease suffix if present
-
-        Args:
-            version: The version string to normalize
-
-        Returns:
-            Normalized version string in "x.y.z" or "x.y.z-prerelease" format
-
-        Raises:
-            ProtocolConfigurationError: If the version format is invalid
-
-        Example:
-            >>> RegistryPolicy._normalize_version("1.0")
-            '1.0.0'
-            >>> RegistryPolicy._normalize_version("v2.1")
-            '2.1.0'
-        """
-        try:
-            return normalize_version(version)
-        except ValueError as e:
-            raise ProtocolConfigurationError(
-                str(e),
-                version=version,
-            ) from e
-
     def register(
         self,
         registration: ModelPolicyRegistration,
@@ -705,6 +459,9 @@ class RegistryPolicy:
         Associates a (policy_id, policy_type, version) tuple with a policy class.
         If the combination is already registered, the existing registration is
         overwritten.
+
+        This is the PREFERRED API for registering policies. For new code, use this
+        method with ModelPolicyRegistration instead of register_policy().
 
         Args:
             registration: ModelPolicyRegistration containing all registration parameters:
@@ -782,6 +539,10 @@ class RegistryPolicy:
         Wraps parameters in ModelPolicyRegistration and calls register().
         Partial version strings (e.g., "1", "1.0") are auto-normalized to
         "x.y.z" format by ModelPolicyRegistration.
+
+        Note:
+            For new code, prefer using register(ModelPolicyRegistration(...))
+            directly. This method is maintained for backwards compatibility.
 
         Args:
             policy_id: Unique identifier for the policy (e.g., 'exponential_backoff')
@@ -903,7 +664,7 @@ class RegistryPolicy:
 
         with self._lock:
             # Performance optimization: Use secondary index for O(1) lookup by policy_id
-            # This avoids iterating through all registry entries (O(n) → O(1))
+            # This avoids iterating through all registry entries (O(n) -> O(1))
             candidate_keys = self._policy_id_index.get(policy_id, [])
 
             # Early exit if policy_id not found - avoid building matches list
@@ -915,7 +676,14 @@ class RegistryPolicy:
                 if version is not None:
                     filters.append(f"version={version!r}")
 
-                registered = self._list_internal()
+                # Inline list generation for error message (avoids separate method)
+                registered = [
+                    k.to_tuple()
+                    for k in sorted(
+                        self._registry.keys(),
+                        key=lambda k: (k.policy_id, k.policy_type, k.version),
+                    )
+                ]
                 raise PolicyRegistryError(
                     f"No policy registered matching: {', '.join(filters)}. "
                     f"Registered policies: {registered}",
@@ -960,8 +728,14 @@ class RegistryPolicy:
                     if version is not None:
                         filters.append(f"version={version!r}")
 
-                    # Defer expensive _list_internal() call until actually raising error
-                    registered = self._list_internal()
+                    # Inline list generation for error message (avoids separate method)
+                    registered = [
+                        k.to_tuple()
+                        for k in sorted(
+                            self._registry.keys(),
+                            key=lambda k: (k.policy_id, k.policy_type, k.version),
+                        )
+                    ]
                     raise PolicyRegistryError(
                         f"No policy registered matching: {', '.join(filters)}. "
                         f"Registered policies: {registered}",
@@ -978,325 +752,6 @@ class RegistryPolicy:
                     )
 
                 return matches[0][1]
-
-    # ==========================================================================
-    # Semver Cache Configuration Methods
-    # ==========================================================================
-
-    @classmethod
-    def configure_semver_cache(cls, maxsize: int) -> None:
-        """Configure semver cache size. Must be called before first parse.
-
-        This method allows configuring the LRU cache size for semver parsing
-        in large deployments with many policy versions. For most deployments,
-        the default of 128 entries is sufficient.
-
-        When to Increase Cache Size:
-            - Very large deployments with > 100 unique policy versions
-            - High-frequency lookups across many version combinations
-            - Observed cache eviction causing performance regression
-
-        Args:
-            maxsize: Maximum cache entries (default: 128).
-                     Recommended range: 64-512 for most deployments.
-                     Each entry uses ~100 bytes.
-
-        Raises:
-            RuntimeError: If cache already initialized (first parse already occurred)
-
-        Example:
-            >>> # Configure before any registry operations
-            >>> RegistryPolicy.configure_semver_cache(maxsize=256)
-            >>> registry = RegistryPolicy()
-
-        Note:
-            For testing purposes, use _reset_semver_cache() to clear the cache
-            and allow reconfiguration.
-        """
-        with cls._semver_cache_lock:
-            if cls._semver_cache is not None:
-                raise RuntimeError(
-                    "Cannot reconfigure semver cache after first use. "
-                    "Set RegistryPolicy.SEMVER_CACHE_SIZE before creating any "
-                    "registry instances, or use _reset_semver_cache() for testing."
-                )
-            cls.SEMVER_CACHE_SIZE = maxsize
-
-    @classmethod
-    def _reset_semver_cache(cls) -> None:
-        """Reset semver cache. For testing only.
-
-        Clears the cached semver parser, allowing reconfiguration of cache size.
-        This should only be used in test fixtures to ensure test isolation.
-
-        Thread Safety:
-            This method is thread-safe and uses the class-level lock. The reset
-            operation is atomic - either the cache is fully reset or not at all.
-
-            In-flight Operations:
-                If other threads have already obtained a reference to the cache
-                via _get_semver_parser(), they will continue using the old cache
-                until they complete. This is safe because the old cache remains
-                a valid callable until garbage collected. New operations after
-                reset will get the new cache instance when created.
-
-            Memory Reclamation:
-                The old cache's internal LRU entries are explicitly cleared via
-                cache_clear() before the reference is released. This ensures
-                prompt memory reclamation rather than waiting for garbage
-                collection.
-
-            Concurrent Reset:
-                Multiple concurrent reset calls are safe. Each reset will clear
-                the current cache (if any) and set the reference to None. The
-                lock ensures only one reset executes at a time.
-
-        Example:
-            >>> # In test fixture
-            >>> RegistryPolicy._reset_semver_cache()
-            >>> RegistryPolicy.SEMVER_CACHE_SIZE = 64
-            >>> # Now cache will be initialized with size 64 on next use
-        """
-        with cls._semver_cache_lock:
-            # Clear the inner LRU-cached function (has the actual cache)
-            inner_cache = cls._semver_cache_inner
-            if inner_cache is not None:
-                # Clear internal LRU cache entries before releasing reference.
-                # This ensures prompt memory reclamation rather than waiting
-                # for garbage collection of the orphaned function object.
-                # Note: cache_clear() is added by @lru_cache decorator but not
-                # reflected in Callable type annotation. This is a known mypy
-                # limitation with lru_cache wrappers.
-                inner_cache.cache_clear()  # type: ignore[attr-defined]
-            cls._semver_cache = None
-            cls._semver_cache_inner = None
-
-    @classmethod
-    def _get_semver_parser(cls) -> Callable[[str], ModelSemVer]:
-        """Get or create the semver parser with configured cache size.
-
-        This method implements lazy initialization of the LRU-cached semver parser.
-        The cache size is determined by SEMVER_CACHE_SIZE at initialization time.
-
-        Thread Safety:
-            Uses double-checked locking pattern for thread-safe lazy initialization.
-            The fast path stores the cache reference in a local variable to prevent
-            TOCTOU (time-of-check-time-of-use) race conditions where another thread
-            could call _reset_semver_cache() between the None check and the return.
-
-        Cache Key Normalization:
-            Version strings are normalized BEFORE being used as cache keys to ensure
-            that equivalent versions (e.g., "1.0" and "1.0.0") share the same cache
-            entry. This prevents cache fragmentation and improves hit rates.
-
-        Returns:
-            Cached semver parsing function that returns ModelSemVer instances.
-
-        Performance:
-            - First call: Creates LRU-cached function (one-time cost)
-            - Subsequent calls: Returns cached function reference (O(1))
-            - Cache hit rate improved by normalizing keys before lookup
-        """
-        # Fast path: cache already initialized
-        # CRITICAL: Store in local variable to prevent TOCTOU race condition.
-        # Without this, another thread could call _reset_semver_cache() between
-        # the None check and the return, causing this method to return None.
-        cache = cls._semver_cache
-        if cache is not None:
-            return cache
-
-        # Slow path: initialize with lock
-        with cls._semver_cache_lock:
-            # Double-check after acquiring lock
-            if cls._semver_cache is not None:
-                return cls._semver_cache
-
-            # Create LRU-cached parser with configured size
-            # The cache key is the NORMALIZED version string to prevent
-            # fragmentation (e.g., "1.0" and "1.0.0" share the same entry)
-            @functools.lru_cache(maxsize=cls.SEMVER_CACHE_SIZE)
-            def _parse_semver_cached(normalized_version: str) -> ModelSemVer:
-                """Parse normalized semantic version string into ModelSemVer.
-
-                This function receives ALREADY NORMALIZED version strings.
-                The normalization is done by the wrapper function before
-                caching to ensure equivalent versions share cache entries.
-
-                Args:
-                    normalized_version: Pre-normalized version in "x.y.z" or
-                        "x.y.z-prerelease" format
-
-                Returns:
-                    ModelSemVer instance for comparison
-
-                Raises:
-                    ProtocolConfigurationError: If version format is invalid
-                """
-                # ModelOnexError is imported at module level
-                try:
-                    return ModelSemVer.parse(normalized_version)
-                except ModelOnexError as e:
-                    raise ProtocolConfigurationError(
-                        str(e),
-                        version=normalized_version,
-                    ) from e
-                except ValueError as e:
-                    raise ProtocolConfigurationError(
-                        str(e),
-                        version=normalized_version,
-                    ) from e
-
-            def _parse_semver_impl(version: str) -> ModelSemVer:
-                """Parse semantic version string into ModelSemVer.
-
-                Implementation moved here to support configurable cache size.
-                See _parse_semver docstring for full documentation.
-
-                IMPORTANT: This wrapper normalizes version strings BEFORE
-                passing to the LRU-cached parsing function. This ensures that
-                equivalent versions (e.g., "1.0" and "1.0.0", "v1.0.0" and "1.0.0")
-                share the same cache entry, improving cache hit rates.
-
-                All validation (empty strings, prerelease suffix, format) is
-                delegated to _normalize_version to eliminate code duplication.
-                """
-                # Delegate all validation to _normalize_version (single source of truth)
-                # This eliminates duplicated validation logic (empty check, prerelease suffix)
-                normalized = RegistryPolicy._normalize_version(version)
-
-                # Now call the cached function with the NORMALIZED version
-                # This ensures "1.0", "1.0.0", "v1.0.0" all use the same cache entry
-                return _parse_semver_cached(normalized)
-
-            # Store both the outer wrapper and inner cached function
-            # The wrapper is what callers use (_semver_cache)
-            # The inner function is needed for cache_clear() access (_semver_cache_inner)
-            cls._semver_cache = _parse_semver_impl
-            cls._semver_cache_inner = _parse_semver_cached
-            return cls._semver_cache
-
-    @classmethod
-    def _parse_semver(cls, version: str) -> ModelSemVer:
-        """Parse semantic version string into ModelSemVer for comparison.
-
-        This method implements SEMANTIC VERSION SORTING, not lexicographic sorting.
-        This is critical for correct "latest version" selection.
-
-        Why This Matters (PR #36 feedback):
-            Lexicographic sorting (string comparison):
-                "1.10.0" < "1.9.0" WRONG (because '1' < '9' in strings)
-                "10.0.0" < "2.0.0" WRONG (because '1' < '2' in strings)
-
-            Semantic version sorting (integer comparison):
-                1.10.0 > 1.9.0 CORRECT (because 10 > 9 as integers)
-                10.0.0 > 2.0.0 CORRECT (because 10 > 2 as integers)
-
-        Implementation:
-            - Returns ModelSemVer instance with integer major, minor, patch
-            - ModelSemVer implements comparison operators for correct ordering
-            - Prerelease is parsed but NOT used in comparisons (major.minor.patch only)
-            - "1.0.0-alpha" and "1.0.0" compare as EQUAL (same major.minor.patch)
-
-        Supported Formats:
-            - Full: "1.2.3", "1.2.3-beta"
-            - Partial: "1" -> (1, 0, 0), "1.2" -> (1, 2, 0)
-            - Prerelease: "1.0.0-alpha", "2.1.0-rc.1"
-
-        Validation:
-            - Rejects empty strings
-            - Rejects non-numeric components
-            - Rejects negative numbers
-            - Rejects >3 version parts (e.g., "1.2.3.4")
-
-        Performance:
-            This method uses an LRU cache with configurable size (default: 128)
-            to avoid re-parsing the same version strings repeatedly, improving
-            performance for lookups that compare multiple versions.
-
-            Cache Size Configuration:
-                For large deployments, configure before first use:
-                    RegistryPolicy.configure_semver_cache(maxsize=256)
-
-            Cache Size Rationale (default 128):
-                - Typical registry: 10-50 unique policy versions
-                - Peak scenarios: 50-100 versions across multiple policy types
-                - Each cache entry: ~200 bytes (string key + ModelSemVer instance)
-                - Total memory: ~25.6KB worst case (negligible overhead)
-                - Hit rate: >95% for repeated get() calls with version comparisons
-                - Eviction: Rare in practice, LRU ensures least-used versions purged
-
-        Args:
-            version: Semantic version string (e.g., "1.2.3" or "1.0.0-beta")
-
-        Returns:
-            ModelSemVer instance for comparison.
-            Components are INTEGERS (not strings) for correct semantic sorting.
-            Prerelease is parsed and stored but ignored in version comparisons.
-
-        Raises:
-            ProtocolConfigurationError: If version format is invalid
-
-        Examples:
-            >>> RegistryPolicy._parse_semver("1.9.0")
-            ModelSemVer(major=1, minor=9, patch=0, prerelease='')
-            >>> RegistryPolicy._parse_semver("1.10.0")
-            ModelSemVer(major=1, minor=10, patch=0, prerelease='')
-            >>> RegistryPolicy._parse_semver("1.10.0") > RegistryPolicy._parse_semver("1.9.0")
-            True
-            >>> RegistryPolicy._parse_semver("10.0.0") > RegistryPolicy._parse_semver("2.0.0")
-            True
-            >>> RegistryPolicy._parse_semver("1.0.0-alpha")
-            ModelSemVer(major=1, minor=0, patch=0, prerelease='alpha')
-            >>> # Prerelease is parsed but NOT used in comparisons:
-            >>> RegistryPolicy._parse_semver("1.0.0-alpha") == RegistryPolicy._parse_semver("1.0.0")
-            True  # Same major.minor.patch, prerelease ignored
-        """
-        parser = cls._get_semver_parser()
-        return parser(version)
-
-    @classmethod
-    def _get_semver_cache_info(cls) -> functools._CacheInfo | None:
-        """Get cache statistics for the semver parser. For testing only.
-
-        Returns the cache_info() from the inner LRU-cached function.
-        This allows tests to verify cache behavior without accessing
-        internal implementation details.
-
-        Returns:
-            functools._CacheInfo with hits, misses, maxsize, currsize,
-            or None if cache not yet initialized.
-
-        Example:
-            >>> RegistryPolicy._reset_semver_cache()
-            >>> RegistryPolicy._parse_semver("1.0.0")
-            >>> info = RegistryPolicy._get_semver_cache_info()
-            >>> info.misses  # First call is a miss
-            1
-            >>> RegistryPolicy._parse_semver("1.0.0")
-            >>> info = RegistryPolicy._get_semver_cache_info()
-            >>> info.hits  # Second call is a hit
-            1
-        """
-        if cls._semver_cache_inner is None:
-            return None
-        # cache_info() is added by @lru_cache decorator
-        # The return type is functools._CacheInfo
-        result: functools._CacheInfo = cls._semver_cache_inner.cache_info()  # type: ignore[attr-defined]
-        return result
-
-    def _list_internal(self) -> list[tuple[str, str, str]]:
-        """Internal list method (assumes lock is held).
-
-        Returns:
-            List of (policy_id, policy_type, version) tuples.
-        """
-        return [
-            k.to_tuple()
-            for k in sorted(
-                self._registry.keys(),
-                key=lambda k: (k.policy_id, k.policy_type, k.version),
-            )
-        ]
 
     def list_keys(
         self,

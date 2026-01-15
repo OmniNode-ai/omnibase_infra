@@ -19,6 +19,12 @@ Design:
     - Mocking of dependencies for isolation
     - Clearer separation between bootstrap and event routing
 
+Dependency Injection:
+    This class follows the ONEX container-based DI pattern:
+    - Constructor accepts ModelONEXContainer for dependency injection
+    - initialize() method accepts runtime configuration and dependencies
+    - Dependencies are resolved from container or passed explicitly
+
 Related:
     - OMN-888: Registration Orchestrator
     - OMN-892: 2-way Registration E2E Integration Test
@@ -35,9 +41,11 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import ValidationError
 
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
@@ -92,13 +100,22 @@ class IntrospectionEventRouter:
     distributed tracing. If no correlation ID is present, it generates
     a new one to ensure all operations can be traced.
 
+    Dependency Injection:
+        This class follows the ONEX container-based DI pattern per CLAUDE.md:
+        - Constructor accepts ``ModelONEXContainer`` for dependency injection
+        - ``initialize()`` method accepts runtime configuration and dependencies
+        - Dependencies resolved from container or passed explicitly to initialize()
+
     Attributes:
+        _container: ONEX container for dependency injection.
         _dispatcher: The DispatcherNodeIntrospected to route events to.
         _event_bus: The EventBusKafka for publishing output events.
         _output_topic: The topic to publish output events to.
+        _initialized: Whether the router has been initialized.
 
     Example:
-        >>> router = IntrospectionEventRouter(
+        >>> router = IntrospectionEventRouter(container)
+        >>> router.initialize(
         ...     dispatcher=introspection_dispatcher,
         ...     event_bus=kafka_bus,
         ...     output_topic="registration.output",
@@ -109,24 +126,94 @@ class IntrospectionEventRouter:
         ...     group_id="my-group",
         ...     on_message=router.handle_message,
         ... )
+
+    See Also:
+        - CLAUDE.md "Container-Based Dependency Injection" section for the
+          standard ONEX container injection pattern.
+        - docs/patterns/container_dependency_injection.md for detailed DI patterns.
     """
 
-    def __init__(
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize IntrospectionEventRouter with required container injection.
+
+        Args:
+            container: ONEX container for dependency injection. Required per ONEX
+                pattern (``def __init__(self, container: ModelONEXContainer)``).
+                Enables full ONEX integration (logging, metrics, service discovery).
+
+        Note:
+            After construction, call ``initialize()`` to configure the router
+            with its runtime dependencies (dispatcher, event_bus, output_topic).
+
+        See Also:
+            - CLAUDE.md "Container-Based Dependency Injection" section for the
+              standard ONEX container injection pattern.
+        """
+        self._container = container
+        self._dispatcher: DispatcherNodeIntrospected | None = None
+        self._event_bus: EventBusKafka | None = None
+        self._output_topic: str | None = None
+        self._initialized: bool = False
+
+    def initialize(
         self,
         dispatcher: DispatcherNodeIntrospected,
         event_bus: EventBusKafka,
         output_topic: str,
     ) -> None:
-        """Initialize the event router.
+        """Initialize the router with runtime dependencies.
+
+        This method configures the router with its runtime dependencies
+        after container construction. Must be called before handle_message().
 
         Args:
             dispatcher: The DispatcherNodeIntrospected to route events to.
             event_bus: The EventBusKafka for publishing output events.
             output_topic: The topic to publish output events to.
+
+        Raises:
+            ValueError: If output_topic is empty.
+
+        Example:
+            >>> router = IntrospectionEventRouter(container)
+            >>> router.initialize(
+            ...     dispatcher=introspection_dispatcher,
+            ...     event_bus=kafka_bus,
+            ...     output_topic="registration.output",
+            ... )
         """
+        if not output_topic:
+            raise ValueError("output_topic cannot be empty")
+
         self._dispatcher = dispatcher
         self._event_bus = event_bus
         self._output_topic = output_topic
+        self._initialized = True
+
+        logger.debug(
+            "IntrospectionEventRouter initialized",
+            extra={
+                "output_topic": output_topic,
+                "dispatcher_type": type(dispatcher).__name__,
+                "event_bus_type": type(event_bus).__name__,
+            },
+        )
+
+    @property
+    def is_initialized(self) -> bool:
+        """Return whether the router has been initialized."""
+        return self._initialized
+
+    def _ensure_initialized(self) -> None:
+        """Ensure the router is initialized before operation.
+
+        Raises:
+            RuntimeHostError: If router not initialized.
+        """
+        if not self._initialized:
+            raise RuntimeHostError(
+                "IntrospectionEventRouter not initialized. Call initialize() first."
+            )
 
     def _extract_correlation_id_from_message(self, msg: ModelEventMessage) -> UUID:
         """Extract correlation ID from message headers or generate new one.
@@ -203,7 +290,18 @@ class IntrospectionEventRouter:
 
         Args:
             msg: The event message containing raw bytes in .value field.
+
+        Raises:
+            RuntimeHostError: If router not initialized via initialize().
         """
+        # Ensure router is initialized before processing
+        self._ensure_initialized()
+
+        # Type narrowing: after _ensure_initialized(), these are guaranteed non-None
+        assert self._dispatcher is not None
+        assert self._event_bus is not None
+        assert self._output_topic is not None
+
         # Extract correlation_id from message for proper propagation
         # This ensures distributed tracing continuity across service boundaries
         callback_correlation_id = self._extract_correlation_id_from_message(msg)

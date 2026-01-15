@@ -89,30 +89,31 @@ skip_directories:
 # These handle method count, parameter count, naming, and style violations
 pattern_exemptions:
   # ==========================================================================
-  # KafkaEventBus Exemptions (OMN-934, PR #61)
+  # EventBusKafka Exemptions (OMN-934, OMN-1305)
   # ==========================================================================
   # Event bus pattern requires many methods for lifecycle (start/stop/health),
   # pub/sub (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility.
-  # See: kafka_event_bus.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
-  - file_pattern: 'kafka_event_bus\.py'
-    class_pattern: "Class 'KafkaEventBus'"
+  # Complexity managed through mixin composition (MixinKafkaDlq, MixinKafkaBroadcast).
+  # See: event_bus_kafka.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
+  - file_pattern: 'event_bus_kafka\.py'
+    class_pattern: "Class 'EventBusKafka'"
     violation_pattern: 'has \d+ methods'
     reason: >
-      Event bus pattern requires lifecycle (start/stop/health), pub/sub (subscribe/unsubscribe/publish), circuit breaker, and protocol compatibility methods. Threshold: 10 methods, KafkaEventBus has 14+.
+      Event bus pattern requires lifecycle (start/stop/health), pub/sub (subscribe/unsubscribe/publish), circuit breaker, and protocol compatibility methods. DLQ and broadcast methods extracted to mixins. Core class has 12+ methods for protocol compliance.
 
     documentation:
-      - CLAUDE.md (Accepted Pattern Exceptions - KafkaEventBus Complexity)
+      - CLAUDE.md (Accepted Pattern Exceptions - EventBusKafka Complexity)
       - docs/patterns/circuit_breaker_implementation.md
-    ticket: OMN-934
-  - file_pattern: 'kafka_event_bus\.py'
+    ticket: OMN-1305
+  - file_pattern: 'event_bus_kafka\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
-      Configuration migration from direct parameters to ModelKafkaConfig object. Threshold: 5 params, KafkaEventBus has 10+ due to flexible configuration requirements.
+      Configuration managed via ModelKafkaEventBusConfig. Init requires config model parameter.
 
     documentation:
-      - CLAUDE.md (Accepted Pattern Exceptions - KafkaEventBus Complexity)
-    ticket: OMN-934
+      - CLAUDE.md (Accepted Pattern Exceptions - EventBusKafka Complexity)
+    ticket: OMN-1305
   # ==========================================================================
   # Protocol Plugin Architecture Exemptions
   # ==========================================================================
@@ -173,13 +174,22 @@ pattern_exemptions:
       - docs/patterns/container_dependency_injection.md (Registry patterns)
       - CLAUDE.md (Container-Based Dependency Injection section)
     ticket: null
-  - file_pattern: 'policy_registry\.py'
+  - file_pattern: 'registry_policy\.py'
     method_pattern: "Function 'register_policy'"
     violation_pattern: 'has \d+ parameters'
-    reason: Policy registration requires multiple fields for complete policy definition.
+    reason: Policy registration requires multiple fields for complete policy definition. ModelPolicyRegistration is available as the preferred API for new code.
     documentation:
       - docs/patterns/container_dependency_injection.md
     ticket: null
+  - file_pattern: 'registry_policy\.py'
+    class_pattern: "Class 'RegistryPolicy'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Registry pattern after mixin extraction (MixinPolicyValidation, MixinSemverCache). Core class has 12 methods for CRUD, query, and lifecycle operations. This is at the threshold and acceptable per CLAUDE.md registry patterns.
+
+    documentation:
+      - docs/patterns/container_dependency_injection.md
+    ticket: OMN-1305
   # ==========================================================================
   # Policy ID Exemptions (OMN-812)
   # ==========================================================================
@@ -274,11 +284,11 @@ pattern_exemptions:
   # ==========================================================================
   # AST-based validator for Any type usage enforcement. The class requires
   # multiple visitor methods and helper methods for comprehensive detection.
-  - file_pattern: 'any_type_validator\.py'
+  - file_pattern: 'validator_any_type\.py'
     class_pattern: "Class 'AnyTypeDetector'"
     violation_pattern: 'has \d+ methods'
     reason: >
-      AST visitor class requires multiple methods for comprehensive Any type detection: visit methods (ClassDef, FunctionDef, AsyncFunctionDef, AnnAssign, Assign, Subscript), helper methods (_check_annotation_for_any, _check_subscript_for_any, _is_field_call, _is_field_with_note, _contains_any, _add_violation), and exemption handling (_has_allow_decorator, _allow_all_lines_in_node). Standard AST visitor pattern.
+      AST visitor class after mixin extraction (MixinAnyTypeClassification, MixinAnyTypeExemption, MixinAnyTypeReporting). Core class has 12 methods for visit methods and annotation checking. This is at the threshold and acceptable per standard AST visitor pattern.
 
     documentation:
       - docs/decisions/adr-any-type-pydantic-workaround.md
@@ -707,10 +717,10 @@ pattern_exemptions:
   # MessageTypeRegistry Exemptions (OMN-983)
   # ==========================================================================
   - file_pattern: 'registry_message_type\.py'
-    class_pattern: "Class 'MessageTypeRegistry'"
+    class_pattern: "Class 'RegistryMessageType'"
     violation_pattern: 'has \d+ methods'
     reason: >
-      Domain registry pattern requires comprehensive message type management: CRUD operations (register, unregister, get), query operations (list, filter, search by topic/domain), validation operations (validate_topic, resolve_type), and statistics (get_statistics). This is an established domain registry pattern.
+      Domain registry pattern after mixin extraction (MixinMessageTypeRegistration, MixinMessageTypeQuery). Core class has 11 methods for domain registry operations. This is below the threshold and acceptable per established domain registry pattern.
 
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md

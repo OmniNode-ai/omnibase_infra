@@ -74,6 +74,34 @@ def check_service_registry_available() -> bool:
 # =============================================================================
 # Duck Typing Conformance Helpers
 # =============================================================================
+# Protocol Compliance Strategy:
+#
+# ONEX uses TWO complementary approaches for protocol conformance:
+#
+# 1. Duck Typing Helpers (assert_has_methods, assert_has_async_methods):
+#    - Check method presence and callability at runtime
+#    - Work with ANY object, regardless of explicit Protocol inheritance
+#    - Preferred for verifying expected interface contracts
+#    - No dependency on @runtime_checkable decorator
+#
+# 2. isinstance() with @runtime_checkable Protocols:
+#    - Used when protocols are marked with @runtime_checkable
+#    - Provides IDE autocompletion and type checker support
+#    - Valid for integration tests verifying handler compliance
+#    - Example: assert isinstance(handler, ProtocolDiscoveryOperations)
+#
+# WHY BOTH APPROACHES:
+#   - Duck typing: Maximum flexibility, works with any implementation
+#   - isinstance: Type safety, IDE support, explicit contract verification
+#   - Tests may use EITHER or BOTH depending on context
+#
+# WHEN TO USE WHICH:
+#   - Use duck typing helpers when testing generic interfaces
+#   - Use isinstance when testing specific protocol implementations
+#   - Use both when you want to verify BOTH interface shape AND type
+#
+# Related: src/omnibase_infra/protocols/ (protocol definitions with @runtime_checkable)
+# =============================================================================
 
 
 def assert_has_methods(
@@ -84,9 +112,13 @@ def assert_has_methods(
 ) -> None:
     """Assert that an object has all required methods (duck typing conformance).
 
-    Per ONEX conventions, protocol conformance is verified via duck typing
-    by checking for required method presence and callability, rather than
-    using isinstance checks with Protocol types.
+    This helper verifies protocol conformance via duck typing by checking
+    for required method presence and callability. This approach works with
+    any object regardless of explicit Protocol inheritance.
+
+    For @runtime_checkable protocols, you can ALSO use isinstance() checks
+    in addition to or instead of these helpers. Both approaches are valid
+    in ONEX tests.
 
     Args:
         obj: The object to check for method presence.
@@ -406,10 +438,10 @@ def container_with_policy_registry(mock_container: MagicMock) -> RegistryPolicy:
         RegistryPolicy instance that can be resolved from mock_container.
 
     Example:
-        >>> def test_container_based_policy_access(container_with_policy_registry, mock_container):
+        >>> async def test_container_based_policy_access(container_with_policy_registry, mock_container):
         ...     # Registry is already registered in mock_container
         ...     from omnibase_infra.runtime.registry_policy import RegistryPolicy
-        ...     registry = mock_container.service_registry.resolve_service(RegistryPolicy)
+        ...     registry = await mock_container.service_registry.resolve_service(RegistryPolicy)
         ...     assert registry is container_with_policy_registry
         ...
         ...     # Use registry to register and retrieve policies
@@ -1070,3 +1102,62 @@ def mock_runtime_handler() -> MagicMock:
     mock_handler.health_check = AsyncMock(return_value={"healthy": True})
     mock_handler.initialized = True
     return mock_handler
+
+
+# =============================================================================
+# Event Bus Fixtures
+# =============================================================================
+# These fixtures provide in-memory event bus instances for testing.
+# The EventBusInmemory uses async yield pattern to guarantee cleanup
+# even when tests fail, preventing resource leaks.
+#
+# Configuration Defaults:
+#   - environment: "local" (appropriate for local development/testing)
+#   - group: "default" (generic consumer group)
+#   These defaults align with local development scenarios. Tests can
+#   override by creating their own fixtures with custom values.
+#
+# Transport Type:
+#   EventBusInmemory uses EnumInfraTransportType.INMEMORY (not KAFKA)
+#   to correctly identify its transport in error contexts and logging.
+# =============================================================================
+
+
+@pytest.fixture
+async def event_bus() -> AsyncGenerator[object, None]:
+    """Create and start an in-memory event bus with guaranteed cleanup.
+
+    This fixture provides an EventBusInmemory instance configured for testing.
+    The async yield pattern ensures proper cleanup even if tests fail.
+
+    Default Configuration:
+        - environment: "test" (identifies test environment in logs)
+        - group: "test-group" (test-specific consumer group)
+        - max_history: 1000 (sufficient for most test scenarios)
+
+    Yields:
+        Started EventBusInmemory instance.
+
+    Note:
+        The cleanup (await bus.close()) is guaranteed to run after each test,
+        even if the test fails. This prevents resource leaks in test suites.
+
+    Example:
+        >>> async def test_publish_subscribe(event_bus):
+        ...     received = []
+        ...     async def handler(msg):
+        ...         received.append(msg)
+        ...     await event_bus.subscribe("topic", "group", handler)
+        ...     await event_bus.publish("topic", None, b"test")
+        ...     assert len(received) == 1
+    """
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+
+    bus = EventBusInmemory(
+        environment="test",
+        group="test-group",
+        max_history=1000,
+    )
+    await bus.start()
+    yield bus
+    await bus.close()

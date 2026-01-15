@@ -34,7 +34,7 @@ from omnibase_infra.nodes.node_service_discovery_effect.models import (
 
 
 @runtime_checkable
-class ProtocolHandlerServiceDiscovery(Protocol):
+class ProtocolDiscoveryOperations(Protocol):
     """Protocol for service discovery handler implementations.
 
     Defines the interface that all service discovery handlers must implement.
@@ -152,4 +152,4 @@ class ProtocolHandlerServiceDiscovery(Protocol):
         ...
 
 
-__all__ = ["ProtocolHandlerServiceDiscovery"]
+__all__ = ["ProtocolDiscoveryOperations"]

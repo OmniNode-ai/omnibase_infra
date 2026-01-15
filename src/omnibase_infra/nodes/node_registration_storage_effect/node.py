@@ -11,7 +11,7 @@ Core Principle:
 This node follows the ONEX declarative pattern:
     - DECLARATIVE effect driven by contract.yaml
     - Zero custom storage logic - all behavior from handler protocol
-    - Lightweight shell that delegates to ProtocolHandlerRegistrationStorage
+    - Lightweight shell that delegates to ProtocolRegistrationPersistence
     - Pattern: "Contract-driven, handlers wired externally"
 
 Extends NodeEffect from omnibase_core for external I/O operations.
@@ -60,7 +60,7 @@ Design Decisions:
 
 Related:
     - contract.yaml: Capability definitions and IO operations
-    - ProtocolHandlerRegistrationStorage: Handler protocol for backends
+    - ProtocolRegistrationPersistence: Handler protocol for backends
     - models/: Input, output, and record models
 """
 

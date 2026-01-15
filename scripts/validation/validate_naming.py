@@ -452,12 +452,18 @@ class InfraNamingConventionValidator:
         file_prefix = rules.get("file_prefix")
         expected_dir = rules.get("directory")
 
+        # Collect all candidate files into a set to avoid duplicate validations.
+        # A file like handlers/handler_consul.py could match both the prefix pattern
+        # (handler_*.py) and the directory pattern (*/handlers/*.py), so we
+        # deduplicate before validation.
+        files_to_validate: set[Path] = set()
+
         # Scan for files matching the prefix pattern
         if file_prefix:
             for file_path in self.repo_path.rglob(f"{file_prefix}*.py"):
                 if "__pycache__" in str(file_path) or "/archived/" in str(file_path):
                     continue
-                self._validate_class_names_in_file(file_path, category, rules, verbose)
+                files_to_validate.add(file_path)
 
         # Also check files in expected directories
         if expected_dir:
@@ -466,7 +472,11 @@ class InfraNamingConventionValidator:
                     continue
                 if "__pycache__" in str(file_path) or "/archived/" in str(file_path):
                     continue
-                self._validate_class_names_in_file(file_path, category, rules, verbose)
+                files_to_validate.add(file_path)
+
+        # Validate each unique file once
+        for file_path in files_to_validate:
+            self._validate_class_names_in_file(file_path, category, rules, verbose)
 
     def _validate_class_names_in_file(
         self,
@@ -834,6 +844,11 @@ Class Naming Conventions:
     warnings = len([v for v in validator.violations if v.severity == "warning"])
     ast_count = len(ast_issues)
 
+    # Determine pass/fail status (used for both JSON output and exit code)
+    has_failures = (
+        errors > 0 or ast_count > 0 or (args.fail_on_warnings and warnings > 0)
+    )
+
     if args.json:
         import json
 
@@ -854,7 +869,7 @@ Class Naming Conventions:
                 for v in validator.violations
                 if not args.errors_only or v.severity == "error"
             ],
-            "passed": errors == 0 and ast_count == 0,
+            "passed": not has_failures,
         }
         print(json.dumps(output, indent=2))
     else:
@@ -866,10 +881,6 @@ Class Naming Conventions:
             ]
             validator.violations = filtered_violations
         print("\n" + validator.generate_report())
-
-    has_failures = (
-        errors > 0 or ast_count > 0 or (args.fail_on_warnings and warnings > 0)
-    )
 
     if not args.json:
         if not has_failures:

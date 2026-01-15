@@ -1,0 +1,275 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Policy Validation Mixin.
+
+This module provides validation functionality for policy registration,
+extracted from RegistryPolicy to reduce class method count.
+
+The mixin provides:
+- Protocol implementation validation
+- Sync enforcement validation
+- Policy type normalization
+- Version string normalization
+
+This mixin is designed to be used with RegistryPolicy and follows the
+ONEX naming convention: mixin_<name>.py -> Mixin<Name>.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import TYPE_CHECKING
+
+from omnibase_infra.enums import EnumPolicyType
+from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
+from omnibase_infra.runtime.util_version import normalize_version
+
+if TYPE_CHECKING:
+    from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+
+
+class MixinPolicyValidation:
+    """Mixin providing policy validation functionality.
+
+    This mixin extracts validation methods from RegistryPolicy to reduce
+    the class method count and provide better separation of concerns.
+
+    Methods:
+        _validate_protocol_implementation: Validate policy implements ProtocolPolicy
+        _validate_sync_enforcement: Validate sync/async policy methods
+        _normalize_policy_type: Normalize and validate policy type
+        _normalize_version: Normalize version string format
+    """
+
+    # Methods to check for async validation (class attribute shared with RegistryPolicy)
+    _ASYNC_CHECK_METHODS: tuple[str, ...] = ("reduce", "decide", "evaluate")
+
+    def _validate_protocol_implementation(
+        self,
+        policy_id: str,
+        policy_class: type[ProtocolPolicy],
+    ) -> None:
+        """Validate that policy class implements ProtocolPolicy protocol.
+
+        Performs runtime type validation using duck typing to ensure the policy
+        class has the required methods and properties before registration.
+
+        Validation Order:
+            Validations are performed in fail-fast order with cheap checks first:
+
+            1. **Comprehensive check**: If class is missing all required attributes
+               (policy_id, policy_type, evaluate), raise a comprehensive error
+               listing all missing requirements.
+
+            2. **evaluate() existence** (O(1) hasattr check):
+               Verifies policy_class has evaluate() method.
+
+            3. **evaluate() callability** (O(1) callable check):
+               Verifies evaluate is actually callable.
+
+        Args:
+            policy_id: Unique identifier for the policy being validated
+            policy_class: The policy class to validate
+
+        Raises:
+            PolicyRegistryError: If policy_class does not implement ProtocolPolicy:
+                - Missing all required attributes (comprehensive error)
+                - Missing evaluate() method
+                - evaluate is not callable
+        """
+        # Check for required attributes
+        has_policy_id = hasattr(policy_class, "policy_id")
+        has_policy_type = hasattr(policy_class, "policy_type")
+        has_evaluate = hasattr(policy_class, "evaluate")
+
+        # If all required attributes are missing, provide comprehensive error
+        if not has_policy_id and not has_policy_type and not has_evaluate:
+            raise PolicyRegistryError(
+                f"Policy class {policy_class.__name__!r} does not implement "
+                f"ProtocolPolicy protocol. Missing: policy_id property, "
+                f"policy_type property, evaluate() method",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__,
+            )
+
+        # Check evaluate() method exists
+        if not has_evaluate:
+            raise PolicyRegistryError(
+                f"Policy class {policy_class.__name__!r} is missing evaluate() "
+                f"method from ProtocolPolicy protocol",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__,
+            )
+
+        # Check evaluate is callable
+        evaluate_attr = getattr(policy_class, "evaluate", None)
+        if not callable(evaluate_attr):
+            raise PolicyRegistryError(
+                f"Policy class {policy_class.__name__!r} has evaluate() method "
+                f"(not callable) - must be a callable method",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__,
+            )
+
+    def _validate_sync_enforcement(
+        self,
+        policy_id: str,
+        policy_class: type[ProtocolPolicy],
+        allow_async: bool,
+    ) -> None:
+        """Validate that policy methods are synchronous unless explicitly async.
+
+        This validation enforces the synchronous-by-default policy execution model.
+        Policy plugins are expected to be pure decision logic without I/O or async
+        operations. If a policy needs async methods (e.g., for deterministic async
+        computation), it must be explicitly flagged with allow_async=True
+        during registration.
+
+        Validation Process:
+            1. Inspect policy class for methods: reduce(), decide(), evaluate()
+            2. Check if any of these methods are async (coroutine functions)
+            3. If async methods found and allow_async=False, raise error
+            4. If async methods found and allow_async=True, allow registration
+
+        This validation helps prevent accidental async policy registration and ensures
+        that async policies are consciously marked as such for proper runtime handling.
+
+        Args:
+            policy_id: Unique identifier for the policy being validated
+            policy_class: The policy class to validate for async methods
+            allow_async: If True, allows async interface; if False, enforces sync
+
+        Raises:
+            PolicyRegistryError: If policy has async methods (reduce, decide, evaluate)
+                                and allow_async=False. Error includes the policy_id
+                                and the name of the async method that caused validation failure.
+
+        Example:
+            >>> # This will fail - async policy without explicit flag
+            >>> class AsyncPolicy:
+            ...     async def evaluate(self, context):
+            ...         return True
+            >>> mixin._validate_sync_enforcement("async_pol", AsyncPolicy, False)
+            PolicyRegistryError: Policy 'async_pol' has async evaluate() but
+                                 allow_async=True not specified.
+
+            >>> # This will succeed - async explicitly flagged
+            >>> mixin._validate_sync_enforcement("async_pol", AsyncPolicy, True)
+        """
+        for method_name in self._ASYNC_CHECK_METHODS:
+            if hasattr(policy_class, method_name):
+                method = getattr(policy_class, method_name)
+                if asyncio.iscoroutinefunction(method):
+                    if not allow_async:
+                        raise PolicyRegistryError(
+                            f"Policy '{policy_id}' has async {method_name}() but "
+                            f"allow_async=True not specified. "
+                            f"Policy plugins must be synchronous by default.",
+                            policy_id=policy_id,
+                            policy_type=None,
+                            async_method=method_name,
+                        )
+
+    def _normalize_policy_type(
+        self,
+        policy_type: str | EnumPolicyType,
+    ) -> str:
+        """Normalize policy type to string value and validate against EnumPolicyType.
+
+        This method provides centralized policy type validation logic used by all
+        registration and query methods. It accepts both EnumPolicyType enum values
+        and string literals, normalizing them to their string representation while
+        ensuring they match valid EnumPolicyType values.
+
+        Validation Process:
+            1. If policy_type is EnumPolicyType instance, extract .value
+            2. If policy_type is string, validate against EnumPolicyType values
+            3. Raise PolicyRegistryError if string doesn't match any enum value
+            4. Return normalized string value
+
+        This centralized validation ensures consistent policy type handling across
+        all registry operations (register, get, list_keys, is_registered, unregister).
+
+        Args:
+            policy_type: Policy type as EnumPolicyType enum or string literal.
+                        Valid values: "orchestrator", "reducer"
+
+        Returns:
+            Normalized string value for the policy type (e.g., "orchestrator", "reducer")
+
+        Raises:
+            PolicyRegistryError: If policy_type is a string that doesn't match any
+                                EnumPolicyType value. Error includes the invalid value
+                                and list of valid options.
+
+        Example:
+            >>> from omnibase_infra.enums import EnumPolicyType
+            >>> mixin = MixinPolicyValidation()
+            >>> # Enum to string
+            >>> mixin._normalize_policy_type(EnumPolicyType.ORCHESTRATOR)
+            'orchestrator'
+            >>> # Valid string passthrough
+            >>> mixin._normalize_policy_type("reducer")
+            'reducer'
+            >>> # Invalid string raises error
+            >>> mixin._normalize_policy_type("invalid")
+            PolicyRegistryError: Invalid policy_type: 'invalid'.
+                                 Must be one of: ['orchestrator', 'reducer']
+        """
+        if isinstance(policy_type, EnumPolicyType):
+            return policy_type.value
+
+        # Validate string against enum values
+        valid_types = {e.value for e in EnumPolicyType}
+        if policy_type not in valid_types:
+            raise PolicyRegistryError(
+                f"Invalid policy_type: {policy_type!r}. "
+                f"Must be one of: {sorted(valid_types)}",
+                policy_id=None,
+                policy_type=policy_type,
+            )
+
+        return policy_type
+
+    @staticmethod
+    def _normalize_version(version: str) -> str:
+        """Normalize version string for consistent lookups.
+
+        Delegates to the shared normalize_version utility which is the
+        SINGLE SOURCE OF TRUTH for version normalization in omnibase_infra.
+
+        This method wraps the shared utility to convert ValueError to
+        ProtocolConfigurationError for PolicyRegistry's error contract.
+
+        Normalization rules:
+            1. Strip leading/trailing whitespace
+            2. Strip leading 'v' or 'V' prefix
+            3. Expand partial versions (1 -> 1.0.0, 1.0 -> 1.0.0)
+            4. Parse with ModelSemVer.parse() for validation
+            5. Preserve prerelease suffix if present
+
+        Args:
+            version: The version string to normalize
+
+        Returns:
+            Normalized version string in "x.y.z" or "x.y.z-prerelease" format
+
+        Raises:
+            ProtocolConfigurationError: If the version format is invalid
+
+        Example:
+            >>> MixinPolicyValidation._normalize_version("1.0")
+            '1.0.0'
+            >>> MixinPolicyValidation._normalize_version("v2.1")
+            '2.1.0'
+        """
+        try:
+            return normalize_version(version)
+        except ValueError as e:
+            raise ProtocolConfigurationError(
+                str(e),
+                version=version,
+            ) from e
+
+
+__all__: list[str] = ["MixinPolicyValidation"]

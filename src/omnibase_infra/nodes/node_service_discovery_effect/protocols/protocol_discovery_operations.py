@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Protocol for Service Discovery Handlers.
+"""Protocol for Service Discovery Operations.
 
-This module defines ProtocolHandlerServiceDiscovery, the protocol for
+This module defines ProtocolDiscoveryOperations, the protocol for
 pluggable service discovery backends in the NodeServiceDiscoveryEffect node.
 
 Architecture:
-    ProtocolHandlerServiceDiscovery defines the interface for service
+    ProtocolDiscoveryOperations defines the interface for service
     discovery backends. Implementations include:
     - Consul: HashiCorp Consul service discovery
     - Kubernetes: K8s native service discovery
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class ProtocolHandlerServiceDiscovery(Protocol):
+class ProtocolDiscoveryOperations(Protocol):
     """Protocol for service discovery backends.
 
     Defines the interface that all service discovery backend handlers
@@ -252,4 +252,4 @@ class ProtocolHandlerServiceDiscovery(Protocol):
         ...
 
 
-__all__ = ["ProtocolHandlerServiceDiscovery"]
+__all__ = ["ProtocolDiscoveryOperations"]

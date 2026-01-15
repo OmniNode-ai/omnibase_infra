@@ -69,12 +69,25 @@ class EventBusInmemory:
     ensured via asyncio.Lock. This implementation provides a lightweight
     event bus for testing and local development without external dependencies.
 
+    Transport Type:
+        Uses EnumInfraTransportType.INMEMORY for error context and logging,
+        correctly identifying this as an in-memory transport (not KAFKA).
+
+    Default Configuration:
+        - environment: "local" - Appropriate for local development scenarios.
+          Tests typically override with "test" for clarity in logs.
+        - group: "default" - Generic consumer group identifier.
+          Tests typically override with test-specific group names.
+        - max_history: 1000 - Sufficient for most testing/debugging scenarios.
+        - circuit_breaker_threshold: 5 - Consecutive failures before circuit opens.
+
     Features:
         - Topic-based message routing with FIFO ordering
         - Multiple subscribers per topic with group-based filtering
         - Event history tracking with configurable retention
         - Async-safe operations using asyncio.Lock
         - Environment and group-based message routing
+        - Circuit breaker pattern for subscriber failure isolation
         - Debugging utilities for inspecting event flow
 
     Attributes:
@@ -121,7 +134,7 @@ class EventBusInmemory:
         """
         if circuit_breaker_threshold < 1:
             context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.KAFKA,
+                transport_type=EnumInfraTransportType.INMEMORY,
                 operation="init",
                 target_name="inmemory_event_bus",
                 correlation_id=uuid4(),
@@ -259,7 +272,7 @@ class EventBusInmemory:
         """
         if not self._started:
             context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.KAFKA,
+                transport_type=EnumInfraTransportType.INMEMORY,
                 operation="publish",
                 target_name=f"event_bus.{self._environment}",
                 correlation_id=(

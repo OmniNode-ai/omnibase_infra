@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Protocol for Registration Storage Handlers.
+"""Protocol for Registration Persistence Operations.
 
-This module defines ProtocolHandlerRegistrationStorage, the interface for
+This module defines ProtocolRegistrationPersistence, the interface for
 pluggable storage backends in the registration storage effect node.
 
 Architecture:
@@ -36,7 +36,7 @@ Related:
 
 from __future__ import annotations
 
-__all__ = ["ProtocolHandlerRegistrationStorage"]
+__all__ = ["ProtocolRegistrationPersistence"]
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class ProtocolHandlerRegistrationStorage(Protocol):
+class ProtocolRegistrationPersistence(Protocol):
     """Protocol for registration storage backend handlers.
 
     Defines the interface for pluggable storage backends. Each implementation

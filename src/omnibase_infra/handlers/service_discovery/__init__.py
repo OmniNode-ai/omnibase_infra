@@ -15,7 +15,7 @@ Models:
     - ModelDiscoveryResult: Discovery operation result
 
 Protocols:
-    - ProtocolHandlerServiceDiscovery: Handler protocol definition
+    - ProtocolDiscoveryOperations: Discovery operations protocol definition
 """
 
 from omnibase_infra.handlers.service_discovery.handler_service_discovery_consul import (
@@ -29,8 +29,8 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelHandlerRegistrationResult,
     ModelServiceInfo,
 )
-from omnibase_infra.handlers.service_discovery.protocol_handler_service_discovery import (
-    ProtocolHandlerServiceDiscovery,
+from omnibase_infra.handlers.service_discovery.protocol_discovery_operations import (
+    ProtocolDiscoveryOperations,
 )
 
 __all__: list[str] = [
@@ -39,5 +39,5 @@ __all__: list[str] = [
     "ModelDiscoveryResult",
     "ModelHandlerRegistrationResult",
     "ModelServiceInfo",
-    "ProtocolHandlerServiceDiscovery",
+    "ProtocolDiscoveryOperations",
 ]

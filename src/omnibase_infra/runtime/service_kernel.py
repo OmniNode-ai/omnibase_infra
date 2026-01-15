@@ -1129,8 +1129,9 @@ async def bootstrap() -> int:
         if introspection_dispatcher is not None and isinstance(
             event_bus, EventBusKafka
         ):
-            # Create extracted event router with proper dependency injection
-            introspection_event_router = IntrospectionEventRouter(
+            # Create extracted event router with container-based DI pattern
+            introspection_event_router = IntrospectionEventRouter(container)
+            introspection_event_router.initialize(
                 dispatcher=introspection_dispatcher,
                 event_bus=event_bus,
                 output_topic=config.output_topic,

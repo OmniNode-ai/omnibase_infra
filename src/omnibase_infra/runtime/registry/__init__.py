@@ -51,12 +51,19 @@ from omnibase_infra.models.registry.model_message_type_entry import (
 from omnibase_infra.protocols.protocol_message_type_registry import (
     ProtocolMessageTypeRegistry,
 )
+from omnibase_infra.runtime.registry.mixin_message_type_query import (
+    MixinMessageTypeQuery,
+)
+from omnibase_infra.runtime.registry.mixin_message_type_registration import (
+    MixinMessageTypeRegistration,
+)
 from omnibase_infra.runtime.registry.registry_event_bus_binding import (
     RegistryEventBusBinding,
 )
 from omnibase_infra.runtime.registry.registry_message_type import (
     MessageTypeRegistryError,
     RegistryMessageType,
+    extract_domain_from_topic,
 )
 from omnibase_infra.runtime.registry.registry_protocol_binding import (
     RegistryError,
@@ -65,6 +72,9 @@ from omnibase_infra.runtime.registry.registry_protocol_binding import (
 
 __all__: list[str] = [
     "MessageTypeRegistryError",
+    # Mixins
+    "MixinMessageTypeQuery",
+    "MixinMessageTypeRegistration",
     "ModelDomainConstraint",
     # Models
     "ModelMessageTypeEntry",
@@ -78,4 +88,6 @@ __all__: list[str] = [
     "RegistryMessageType",
     # Protocol binding registry
     "RegistryProtocolBinding",
+    # Utility functions
+    "extract_domain_from_topic",
 ]

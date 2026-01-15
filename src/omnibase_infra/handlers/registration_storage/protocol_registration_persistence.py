@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Protocol for Registration Storage Handler.
+"""Protocol for Registration Persistence Operations.
 
 This module defines the protocol that registration storage handlers must implement
 to be used with capability-oriented nodes.
@@ -37,7 +37,7 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
 
 
 @runtime_checkable
-class ProtocolHandlerRegistrationStorage(Protocol):
+class ProtocolRegistrationPersistence(Protocol):
     """Protocol for registration storage handler implementations.
 
     Defines the interface that all registration storage handlers must implement.
@@ -174,4 +174,4 @@ class ProtocolHandlerRegistrationStorage(Protocol):
         ...
 
 
-__all__ = ["ProtocolHandlerRegistrationStorage"]
+__all__ = ["ProtocolRegistrationPersistence"]

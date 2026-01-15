@@ -38,11 +38,12 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.models.discovery import ModelDependencySpec
 from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -690,7 +691,11 @@ class TestErrorPropagation:
     ) -> None:
         """Test InfraTimeoutError propagates through resolve_dependency."""
         mock_projection_reader.get_by_intent_types.side_effect = InfraTimeoutError(
-            "Query timed out after 30s"
+            "Query timed out after 30s",
+            context=ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_by_intent_types",
+            ),
         )
 
         spec = ModelDependencySpec(

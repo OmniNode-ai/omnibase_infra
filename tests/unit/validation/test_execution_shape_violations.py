@@ -32,6 +32,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
+from omnibase_infra.models.validation import ModelOutputValidationParams
 from omnibase_infra.validation import (
     ExecutionShapeValidator,
     ExecutionShapeViolationError,
@@ -120,11 +121,12 @@ class TestReducerReturningEventsRejected:
         validator = RuntimeShapeValidator()
 
         # Should detect violation when reducer returns EVENT
-        violation = validator.validate_handler_output(
+        params = ModelOutputValidationParams(
             node_archetype=EnumNodeArchetype.REDUCER,
             output=OrderCreatedEvent(),
             output_category=EnumMessageCategory.EVENT,
         )
+        violation = validator.validate_handler_output(params)
 
         assert violation is not None
         assert (
@@ -217,11 +219,12 @@ class TestOrchestratorPerformingIORejected:
             category = EnumMessageCategory.INTENT
 
         validator = RuntimeShapeValidator()
-        violation = validator.validate_handler_output(
+        params = ModelOutputValidationParams(
             node_archetype=EnumNodeArchetype.ORCHESTRATOR,
             output=CheckoutIntent(),
             output_category=EnumMessageCategory.INTENT,
         )
+        violation = validator.validate_handler_output(params)
 
         assert violation is not None
         assert (
@@ -236,11 +239,12 @@ class TestOrchestratorPerformingIORejected:
             category = EnumNodeOutputType.PROJECTION
 
         validator = RuntimeShapeValidator()
-        violation = validator.validate_handler_output(
+        params = ModelOutputValidationParams(
             node_archetype=EnumNodeArchetype.ORCHESTRATOR,
             output=OrderProjection(),
             output_category=EnumNodeOutputType.PROJECTION,
         )
+        violation = validator.validate_handler_output(params)
 
         assert violation is not None
         assert (
@@ -346,11 +350,12 @@ class TestEffectReturningProjectionsRejected:
             category = EnumNodeOutputType.PROJECTION
 
         validator = RuntimeShapeValidator()
-        violation = validator.validate_handler_output(
+        params = ModelOutputValidationParams(
             node_archetype=EnumNodeArchetype.EFFECT,
             output=UserProfileProjection(),
             output_category=EnumNodeOutputType.PROJECTION,
         )
+        violation = validator.validate_handler_output(params)
 
         assert violation is not None
         assert (
@@ -667,13 +672,14 @@ class TestViolationFormatting:
             category = EnumMessageCategory.EVENT
 
         validator = RuntimeShapeValidator()
-        violation = validator.validate_handler_output(
+        params = ModelOutputValidationParams(
             node_archetype=EnumNodeArchetype.REDUCER,
             output=OrderCreatedEvent(),
             output_category=EnumMessageCategory.EVENT,
             file_path="test_handler.py",
             line_number=42,
         )
+        violation = validator.validate_handler_output(params)
 
         assert violation is not None
         ci_output = violation.format_for_ci()
@@ -692,11 +698,12 @@ class TestValidHandlers:
             category = EnumNodeOutputType.PROJECTION
 
         validator = RuntimeShapeValidator()
-        violation = validator.validate_handler_output(
+        params = ModelOutputValidationParams(
             node_archetype=EnumNodeArchetype.REDUCER,
             output=OrderSummaryProjection(),
             output_category=EnumNodeOutputType.PROJECTION,
         )
+        violation = validator.validate_handler_output(params)
 
         assert violation is None
 
@@ -707,11 +714,12 @@ class TestValidHandlers:
             category = EnumMessageCategory.EVENT
 
         validator = RuntimeShapeValidator()
-        violation = validator.validate_handler_output(
+        params = ModelOutputValidationParams(
             node_archetype=EnumNodeArchetype.EFFECT,
             output=OrderCreatedEvent(),
             output_category=EnumMessageCategory.EVENT,
         )
+        violation = validator.validate_handler_output(params)
 
         assert violation is None
 
@@ -722,11 +730,12 @@ class TestValidHandlers:
             category = EnumMessageCategory.COMMAND
 
         validator = RuntimeShapeValidator()
-        violation = validator.validate_handler_output(
+        params = ModelOutputValidationParams(
             node_archetype=EnumNodeArchetype.ORCHESTRATOR,
             output=ProcessOrderCommand(),
             output_category=EnumMessageCategory.COMMAND,
         )
+        violation = validator.validate_handler_output(params)
 
         assert violation is None
 
@@ -746,11 +755,12 @@ class TestValidHandlers:
             return TestMessage()
 
         for category in EnumMessageCategory:
-            violation = validator.validate_handler_output(
+            params = ModelOutputValidationParams(
                 node_archetype=EnumNodeArchetype.COMPUTE,
                 output=make_test_message(category),
                 output_category=category,
             )
+            violation = validator.validate_handler_output(params)
 
             assert violation is None, f"Compute should allow {category.value}"
 
@@ -1383,7 +1393,7 @@ class TestEnumMappingCompleteness:
         method which converts EnumMessageCategory values to EnumNodeOutputType for
         validation against execution shape rules.
         """
-        from omnibase_infra.validation.validator_execution_shape import (
+        from omnibase_infra.validation.mixin_execution_shape_violation_checks import (
             _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
         )
 
@@ -1401,7 +1411,7 @@ class TestEnumMappingCompleteness:
             f"_MESSAGE_CATEGORY_TO_OUTPUT_TYPE mapping: {missing_mappings}. "
             f"When adding new values to EnumMessageCategory, you MUST also update "
             f"the _MESSAGE_CATEGORY_TO_OUTPUT_TYPE mapping in "
-            f"omnibase_infra/validation/execution_shape_validator.py"
+            f"omnibase_infra/validation/mixin_execution_shape_violation_checks.py"
         )
 
     def test_mapping_values_are_valid_node_output_types(self) -> None:
@@ -1409,7 +1419,7 @@ class TestEnumMappingCompleteness:
 
         This ensures the mapping doesn't contain typos or invalid output types.
         """
-        from omnibase_infra.validation.validator_execution_shape import (
+        from omnibase_infra.validation.mixin_execution_shape_violation_checks import (
             _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
         )
 
@@ -1425,7 +1435,7 @@ class TestEnumMappingCompleteness:
         EVENT, COMMAND, and INTENT should map to their EnumNodeOutputType
         counterparts with identical string values, ensuring semantic consistency.
         """
-        from omnibase_infra.validation.validator_execution_shape import (
+        from omnibase_infra.validation.mixin_execution_shape_violation_checks import (
             _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
         )
 
@@ -1442,7 +1452,7 @@ class TestEnumMappingCompleteness:
         If an EnumMessageCategory value is ever removed, this test ensures
         the mapping is also cleaned up.
         """
-        from omnibase_infra.validation.validator_execution_shape import (
+        from omnibase_infra.validation.mixin_execution_shape_violation_checks import (
             _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
         )
 

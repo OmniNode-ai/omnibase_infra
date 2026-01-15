@@ -15,7 +15,7 @@ Models (from omnibase_infra.nodes.node_registration_storage_effect.models):
     - ModelStorageResult: Storage query result
 
 Protocols:
-    - ProtocolHandlerRegistrationStorage: Handler protocol definition
+    - ProtocolRegistrationPersistence: Registration persistence protocol definition
 """
 
 from omnibase_infra.handlers.registration_storage.handler_registration_storage_mock import (
@@ -24,8 +24,8 @@ from omnibase_infra.handlers.registration_storage.handler_registration_storage_m
 from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
     HandlerRegistrationStoragePostgres,
 )
-from omnibase_infra.handlers.registration_storage.protocol_handler_registration_storage import (
-    ProtocolHandlerRegistrationStorage,
+from omnibase_infra.handlers.registration_storage.protocol_registration_persistence import (
+    ProtocolRegistrationPersistence,
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelRegistrationRecord,
@@ -39,5 +39,5 @@ __all__: list[str] = [
     "ModelRegistrationRecord",
     "ModelStorageResult",
     "ModelUpsertResult",
-    "ProtocolHandlerRegistrationStorage",
+    "ProtocolRegistrationPersistence",
 ]

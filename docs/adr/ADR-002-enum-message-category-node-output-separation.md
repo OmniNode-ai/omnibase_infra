@@ -254,7 +254,7 @@ Each enum can evolve independently:
 - `src/omnibase_infra/enums/enum_message_category.py` - Reduced to 3 values (EVENT, COMMAND, INTENT)
 - `src/omnibase_infra/enums/enum_node_output_type.py` - New file with 4 values (EVENT, COMMAND, INTENT, PROJECTION)
 - `src/omnibase_infra/validation/validator_execution_shape.py` - Updated to use union types
-- `src/omnibase_infra/validation/runtime_shape_validator.py` - Updated to use union types
+- `src/omnibase_infra/validation/validator_runtime_shape.py` - Updated to use union types
 - `src/omnibase_infra/models/validation/model_execution_shape_rule.py` - Uses EnumNodeOutputType for allowed/forbidden types
 
 ### Migration Pattern

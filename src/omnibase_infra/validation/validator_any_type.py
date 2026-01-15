@@ -55,24 +55,17 @@ from omnibase_infra.models.validation.model_any_type_validation_result import (
 from omnibase_infra.models.validation.model_any_type_violation import (
     ModelAnyTypeViolation,
 )
+from omnibase_infra.validation.mixin_any_type_classification import (
+    MixinAnyTypeClassification,
+)
+from omnibase_infra.validation.mixin_any_type_exemption import MixinAnyTypeExemption
+from omnibase_infra.validation.mixin_any_type_reporting import MixinAnyTypeReporting
 
 logger = logging.getLogger(__name__)
-
-# Decorator names that allow Any type usage
-_ALLOW_DECORATORS: frozenset[str] = frozenset({"allow_any", "allow_any_type"})
 
 # Comment patterns for exemptions
 _ONEX_EXCLUDE_PATTERN = "ONEX_EXCLUDE:"
 _ONEX_EXCLUDE_ANY_TYPE = "any_type"
-_NOTE_PATTERN = "NOTE:"
-
-# Number of lines to look back for NOTE comments.
-# 5 lines is sufficient because NOTE comments typically appear:
-# - Immediately above the field (1-2 lines)
-# - After blank lines and decorators (3-4 lines)
-# - With docstring gap (5 lines max)
-# Larger values would risk matching unrelated NOTE comments.
-_NOTE_LOOKBACK_LINES = 5
 
 # Maximum file size to process (in bytes).
 # Files larger than this are skipped to prevent hangs on auto-generated
@@ -80,12 +73,22 @@ _NOTE_LOOKBACK_LINES = 5
 _MAX_FILE_SIZE_BYTES: int = 1_000_000  # 1MB
 
 
-class AnyTypeDetector(ast.NodeVisitor):
+class AnyTypeDetector(
+    MixinAnyTypeClassification,
+    MixinAnyTypeExemption,
+    MixinAnyTypeReporting,
+    ast.NodeVisitor,
+):
     """AST visitor to detect Any type usage violations.
 
     This visitor walks the AST and identifies Any type annotations that
     violate the ONEX strong typing policy. It supports exemption via
     decorators and comments.
+
+    The class is composed of mixins to keep method count manageable:
+    - MixinAnyTypeClassification: Type classification helpers
+    - MixinAnyTypeExemption: Exemption management (decorators, NOTE comments)
+    - MixinAnyTypeReporting: Violation reporting
 
     Attributes:
         filepath: Path to the file being analyzed.
@@ -113,41 +116,6 @@ class AnyTypeDetector(ast.NodeVisitor):
         self.current_function: str = ""
         self.current_class: str = ""
         self.has_file_level_note: bool = self._check_file_level_note()
-
-    def _check_file_level_note(self) -> bool:
-        """Check if file has a NOTE comment near the Any import.
-
-        A file-level NOTE comment (within 5 lines of 'from typing import Any'
-        or 'import typing') exempts all Pydantic Field() usages with Any in
-        that file. This supports the common pattern of documenting the
-        workaround once at the import rather than at each field.
-
-        Returns:
-            True if file has a valid file-level NOTE comment.
-
-        Note:
-            Only scans first 100 lines for performance. Imports should
-            always appear near the top of Python files per PEP 8.
-        """
-        # Only scan first 100 lines - imports must be at top per PEP 8
-        max_lines = min(100, len(self.source_lines))
-        for i, line in enumerate(self.source_lines[:max_lines]):
-            # Look for Any import
-            if "from typing import" in line and "Any" in line:
-                # Check surrounding lines (5 before and 5 after)
-                start = max(0, i - 5)
-                end = min(len(self.source_lines), i + 6)
-                context = "\n".join(self.source_lines[start:end])
-                if _NOTE_PATTERN in context and "Any" in context:
-                    return True
-            elif "import typing" in line:
-                # Also check for 'import typing' style
-                start = max(0, i - 5)
-                end = min(len(self.source_lines), i + 6)
-                context = "\n".join(self.source_lines[start:end])
-                if _NOTE_PATTERN in context and "Any" in context:
-                    return True
-        return False
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Visit a class definition.
@@ -338,25 +306,6 @@ class AnyTypeDetector(ast.NodeVisitor):
         # This is handled within _check_annotation_for_any via recursion
         self.generic_visit(node)
 
-    def _is_likely_type_alias_name(self, name: str) -> bool:
-        """Check if a name is likely a type alias based on naming conventions.
-
-        Args:
-            name: The variable name to check.
-
-        Returns:
-            True if the name suggests a type alias.
-        """
-        if not name:
-            return False
-        # Explicit type alias suffixes
-        if name.endswith(("Type", "Types")):
-            return True
-        # PascalCase without underscores (like type names)
-        if name[0].isupper() and "_" not in name and not name.isupper():
-            return True
-        return False
-
     def _check_annotation_for_any(
         self,
         annotation: ast.expr,
@@ -443,240 +392,6 @@ class AnyTypeDetector(ast.NodeVisitor):
                 EnumAnyTypeViolation.GENERIC_ARGUMENT,
                 context_name=context_name,
             )
-
-    def _get_code_snippet(self, line_number: int, max_length: int = 80) -> str:
-        """Get a code snippet for a violation, with smart truncation.
-
-        Truncates at word/syntax boundaries to avoid cutting mid-identifier.
-
-        Args:
-            line_number: 1-based line number to extract.
-            max_length: Maximum length of the returned snippet.
-
-        Returns:
-            The code snippet, truncated smartly if necessary.
-        """
-        if not (0 < line_number <= len(self.source_lines)):
-            return ""
-
-        snippet = self.source_lines[line_number - 1].strip()
-        if len(snippet) <= max_length:
-            return snippet
-
-        # Find last space or punctuation before max_length
-        truncate_at = snippet.rfind(" ", 0, max_length - 3)
-        if truncate_at == -1:
-            # No space found, try common delimiters
-            for delim in [",", ":", "(", "[", "="]:
-                pos = snippet.rfind(delim, 0, max_length - 3)
-                truncate_at = max(pos, truncate_at)
-        if truncate_at > 0:
-            return snippet[:truncate_at] + "..."
-        return snippet[: max_length - 3] + "..."
-
-    def _add_violation(
-        self,
-        line_number: int,
-        column: int,
-        violation_type: EnumAnyTypeViolation,
-        context_name: str = "",
-    ) -> None:
-        """Add a violation to the list.
-
-        Args:
-            line_number: Line number where violation was detected.
-            column: Column offset where Any appears.
-            violation_type: The type of violation.
-            context_name: Context identifier (function/variable name).
-        """
-        if line_number in self.allowed_lines:
-            return
-
-        # Get code snippet with smart truncation
-        snippet = self._get_code_snippet(line_number)
-
-        # Get suggestion from enum
-        suggestion = violation_type.suggestion
-
-        self.violations.append(
-            ModelAnyTypeViolation(
-                file_path=Path(self.filepath),
-                line_number=line_number,
-                column=column,
-                violation_type=violation_type,
-                code_snippet=snippet,
-                suggestion=suggestion,
-                severity=EnumValidationSeverity.ERROR,
-                context_name=context_name,
-            )
-        )
-
-    def _has_allow_decorator(self, decorator_list: list[ast.expr]) -> bool:
-        """Check if any decorator allows Any type usage.
-
-        Args:
-            decorator_list: List of decorator AST expressions.
-
-        Returns:
-            True if an allow decorator is present.
-        """
-        for decorator in decorator_list:
-            # Direct decorator: @allow_any
-            if isinstance(decorator, ast.Name) and decorator.id in _ALLOW_DECORATORS:
-                return True
-            # Call decorator: @allow_any("reason")
-            if isinstance(decorator, ast.Call):
-                if (
-                    isinstance(decorator.func, ast.Name)
-                    and decorator.func.id in _ALLOW_DECORATORS
-                ):
-                    return True
-        return False
-
-    def _allow_all_lines_in_node(self, node: ast.AST) -> None:
-        """Allow Any usage in all lines within a node.
-
-        Args:
-            node: The AST node whose lines should be exempted.
-        """
-        for stmt in ast.walk(node):
-            if hasattr(stmt, "lineno"):
-                self.allowed_lines.add(stmt.lineno)
-
-    def _is_type_alias_annotation(self, node: ast.AnnAssign) -> bool:
-        """Check if an annotated assignment is a type alias.
-
-        Type aliases are detected by:
-        - Annotation is TypeAlias
-        - Target name follows type alias conventions (PascalCase or ends with Type)
-
-        Args:
-            node: The annotated assignment node.
-
-        Returns:
-            True if this appears to be a type alias definition.
-        """
-        # Check for TypeAlias annotation
-        if isinstance(node.annotation, ast.Name) and node.annotation.id == "TypeAlias":
-            return True
-        if (
-            isinstance(node.annotation, ast.Attribute)
-            and node.annotation.attr == "TypeAlias"
-        ):
-            return True
-
-        # Check target name conventions
-        if isinstance(node.target, ast.Name):
-            name = node.target.id
-            # Type aliases typically use PascalCase or end with "Type"
-            if name.endswith("Type") or (name[0].isupper() and "_" not in name):
-                # Only consider it a type alias if value is a type expression
-                if node.value is not None:
-                    return self._is_type_expression(node.value)
-
-        return False
-
-    def _is_type_expression(self, node: ast.expr) -> bool:
-        """Check if an expression is likely a type expression.
-
-        Args:
-            node: The AST expression.
-
-        Returns:
-            True if the expression appears to be a type definition.
-        """
-        if isinstance(node, ast.Name):
-            return True
-        if isinstance(node, ast.Subscript):
-            return True
-        if isinstance(node, ast.BinOp):
-            # Union syntax: X | Y
-            return True
-        if isinstance(node, ast.Attribute):
-            return True
-        return False
-
-    def _is_field_call(self, node: ast.expr) -> bool:
-        """Check if an expression is a Pydantic Field() call.
-
-        Args:
-            node: The AST expression.
-
-        Returns:
-            True if this is a Field() call.
-        """
-        if not isinstance(node, ast.Call):
-            return False
-
-        func = node.func
-        if isinstance(func, ast.Name) and func.id == "Field":
-            return True
-        if isinstance(func, ast.Attribute) and func.attr == "Field":
-            return True
-
-        return False
-
-    def _is_field_with_note(self, node: ast.AnnAssign) -> bool:
-        """Check if an annotated assignment is a Field() with NOTE comment.
-
-        The NOTE comment must appear:
-        - At file level (near the Any import), OR
-        - On the same line as the field (inline comment), OR
-        - In the contiguous comment block immediately preceding the field
-
-        File-level NOTE comments (within 5 lines of Any import) exempt all
-        Field() usages in that file, supporting the common pattern of
-        documenting the workaround once at the import.
-
-        Args:
-            node: The annotated assignment node.
-
-        Returns:
-            True if this is a Field() call with a proper NOTE comment.
-        """
-        # Check if value is a Field() call
-        if node.value is None or not self._is_field_call(node.value):
-            return False
-
-        # Check if annotation contains Any
-        if not self._contains_any(node.annotation):
-            return False
-
-        # File-level NOTE comment exempts all Field() usages
-        if self.has_file_level_note:
-            return True
-
-        line_num = node.lineno
-
-        # First, check for inline NOTE comment on the same line
-        if 0 < line_num <= len(self.source_lines):
-            current_line = self.source_lines[line_num - 1]
-            if _NOTE_PATTERN in current_line and "Any" in current_line:
-                return True
-
-        # Look for NOTE comment in contiguous comment block immediately above
-        # Stop as soon as we hit a non-comment, non-blank line
-        for i in range(line_num - 2, max(-1, line_num - _NOTE_LOOKBACK_LINES - 2), -1):
-            if i < 0 or i >= len(self.source_lines):
-                break
-
-            line_content = self.source_lines[i].strip()
-
-            # Skip blank lines
-            if not line_content:
-                continue
-
-            # Check if this is a comment line
-            if line_content.startswith("#"):
-                if _NOTE_PATTERN in line_content and "Any" in line_content:
-                    return True
-                # Continue looking in the comment block
-                continue
-
-            # Non-comment, non-blank line - stop looking
-            break
-
-        return False
 
     def _contains_any(self, node: ast.expr) -> bool:
         """Check if an annotation contains Any type.

@@ -3,7 +3,7 @@
 """Unit tests for Registration Storage Handler Protocol Compliance.
 
 This module validates that registration storage handler implementations
-correctly implement the ProtocolHandlerRegistrationStorage protocol.
+correctly implement the ProtocolRegistrationPersistence protocol.
 
 Protocol Compliance Testing
 ---------------------------
@@ -12,7 +12,7 @@ Per ONEX patterns, protocol compliance is verified using duck typing
 structural subtyping. This approach allows handlers to implement the
 protocol without explicit inheritance.
 
-ProtocolHandlerRegistrationStorage Interface
+ProtocolRegistrationPersistence Interface
 --------------------------------------------
 Required Members:
     - handler_type (property): Returns handler type identifier string
@@ -28,7 +28,7 @@ Handler Implementations Tested:
 
 Related:
     - OMN-1131: Capability-oriented node architecture
-    - ProtocolHandlerRegistrationStorage: Protocol definition
+    - ProtocolRegistrationPersistence: Protocol definition
     - PR #119: Test coverage for protocol compliance
 """
 
@@ -45,8 +45,8 @@ from omnibase_infra.handlers.registration_storage.handler_registration_storage_m
 from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
     HandlerRegistrationStoragePostgres,
 )
-from omnibase_infra.handlers.registration_storage.protocol_handler_registration_storage import (
-    ProtocolHandlerRegistrationStorage,
+from omnibase_infra.handlers.registration_storage.protocol_registration_persistence import (
+    ProtocolRegistrationPersistence,
 )
 
 # =============================================================================
@@ -99,33 +99,33 @@ def postgres_handler() -> HandlerRegistrationStoragePostgres:
 # =============================================================================
 
 
-class TestProtocolHandlerRegistrationStorageInterface:
-    """Verify ProtocolHandlerRegistrationStorage is a valid runtime-checkable protocol.
+class TestProtocolRegistrationPersistenceInterface:
+    """Verify ProtocolRegistrationPersistence is a valid runtime-checkable protocol.
 
     These tests ensure the protocol definition itself is correct and can be
     used for runtime type checking with isinstance().
     """
 
     def test_protocol_is_runtime_checkable(self) -> None:
-        """ProtocolHandlerRegistrationStorage is decorated with @runtime_checkable."""
+        """ProtocolRegistrationPersistence is decorated with @runtime_checkable."""
         # Protocol should be decorated with @runtime_checkable
         assert hasattr(
-            ProtocolHandlerRegistrationStorage, "__protocol_attrs__"
-        ) or hasattr(ProtocolHandlerRegistrationStorage, "_is_runtime_protocol"), (
-            "ProtocolHandlerRegistrationStorage should be @runtime_checkable"
+            ProtocolRegistrationPersistence, "__protocol_attrs__"
+        ) or hasattr(ProtocolRegistrationPersistence, "_is_runtime_protocol"), (
+            "ProtocolRegistrationPersistence should be @runtime_checkable"
         )
 
     def test_protocol_defines_handler_type_property(self) -> None:
         """Protocol defines handler_type property."""
         # Check that handler_type is in the protocol's annotations or attrs
-        assert "handler_type" in dir(ProtocolHandlerRegistrationStorage), (
+        assert "handler_type" in dir(ProtocolRegistrationPersistence), (
             "Protocol must define handler_type property"
         )
 
     def test_protocol_defines_required_methods(self) -> None:
         """Protocol defines all required async methods."""
         for method_name in REQUIRED_PROTOCOL_METHODS:
-            assert hasattr(ProtocolHandlerRegistrationStorage, method_name), (
+            assert hasattr(ProtocolRegistrationPersistence, method_name), (
                 f"Protocol must define {method_name} method"
             )
 
@@ -136,7 +136,7 @@ class TestProtocolHandlerRegistrationStorageInterface:
 
 
 class TestHandlerRegistrationStorageMockProtocolCompliance:
-    """Validate HandlerRegistrationStorageMock implements ProtocolHandlerRegistrationStorage.
+    """Validate HandlerRegistrationStorageMock implements ProtocolRegistrationPersistence.
 
     Uses duck typing verification per ONEX patterns to ensure the mock handler
     correctly implements all protocol requirements.
@@ -146,9 +146,9 @@ class TestHandlerRegistrationStorageMockProtocolCompliance:
         self, mock_handler: HandlerRegistrationStorageMock
     ) -> None:
         """HandlerRegistrationStorageMock passes isinstance check for protocol."""
-        assert isinstance(mock_handler, ProtocolHandlerRegistrationStorage), (
+        assert isinstance(mock_handler, ProtocolRegistrationPersistence), (
             "HandlerRegistrationStorageMock must be an instance of "
-            "ProtocolHandlerRegistrationStorage protocol"
+            "ProtocolRegistrationPersistence protocol"
         )
 
     def test_mock_handler_has_handler_type_property(
@@ -264,7 +264,7 @@ class TestHandlerRegistrationStorageMockProtocolCompliance:
 
 
 class TestHandlerRegistrationStoragePostgresProtocolCompliance:
-    """Validate HandlerRegistrationStoragePostgres implements ProtocolHandlerRegistrationStorage.
+    """Validate HandlerRegistrationStoragePostgres implements ProtocolRegistrationPersistence.
 
     Uses duck typing verification per ONEX patterns to ensure the PostgreSQL handler
     correctly implements all protocol requirements.
@@ -277,9 +277,9 @@ class TestHandlerRegistrationStoragePostgresProtocolCompliance:
         self, postgres_handler: HandlerRegistrationStoragePostgres
     ) -> None:
         """HandlerRegistrationStoragePostgres passes isinstance check for protocol."""
-        assert isinstance(postgres_handler, ProtocolHandlerRegistrationStorage), (
+        assert isinstance(postgres_handler, ProtocolRegistrationPersistence), (
             "HandlerRegistrationStoragePostgres must be an instance of "
-            "ProtocolHandlerRegistrationStorage protocol"
+            "ProtocolRegistrationPersistence protocol"
         )
 
     def test_postgres_handler_has_handler_type_property(
@@ -414,11 +414,11 @@ class TestCrossHandlerProtocolCompliance:
         init_kwargs: dict[str, object],
         expected_handler_type: str,
     ) -> None:
-        """All handlers pass isinstance check for ProtocolHandlerRegistrationStorage."""
+        """All handlers pass isinstance check for ProtocolRegistrationPersistence."""
         handler = handler_class(**init_kwargs)
-        assert isinstance(handler, ProtocolHandlerRegistrationStorage), (
+        assert isinstance(handler, ProtocolRegistrationPersistence), (
             f"{handler_class.__name__} must be an instance of "
-            "ProtocolHandlerRegistrationStorage protocol"
+            "ProtocolRegistrationPersistence protocol"
         )
 
     @pytest.mark.parametrize(
@@ -603,7 +603,7 @@ class TestTypeAnnotationCompleteness:
 __all__: list[str] = [
     "REQUIRED_PROTOCOL_METHODS",
     "REQUIRED_PROTOCOL_PROPERTIES",
-    "TestProtocolHandlerRegistrationStorageInterface",
+    "TestProtocolRegistrationPersistenceInterface",
     "TestHandlerRegistrationStorageMockProtocolCompliance",
     "TestHandlerRegistrationStoragePostgresProtocolCompliance",
     "TestCrossHandlerProtocolCompliance",

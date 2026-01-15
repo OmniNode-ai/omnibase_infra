@@ -3,7 +3,7 @@
 """Unit tests for Service Discovery Handler Protocol Compliance.
 
 This module validates that service discovery handler implementations
-correctly implement the ProtocolHandlerServiceDiscovery protocol.
+correctly implement the ProtocolDiscoveryOperations protocol.
 
 Protocol Compliance Testing
 ---------------------------
@@ -12,7 +12,7 @@ Per ONEX patterns, protocol compliance is verified using duck typing
 structural subtyping. This approach allows handlers to implement the
 protocol without explicit inheritance.
 
-ProtocolHandlerServiceDiscovery Interface
+ProtocolDiscoveryOperations Interface
 -----------------------------------------
 Required Members:
     - handler_type (property): Returns handler type identifier string
@@ -27,7 +27,7 @@ Handler Implementations Tested:
 
 Related:
     - OMN-1131: Capability-oriented node architecture
-    - ProtocolHandlerServiceDiscovery: Protocol definition
+    - ProtocolDiscoveryOperations: Protocol definition
     - PR #119: Test coverage for protocol compliance
 """
 
@@ -44,8 +44,8 @@ from omnibase_infra.handlers.service_discovery.handler_service_discovery_consul 
 from omnibase_infra.handlers.service_discovery.handler_service_discovery_mock import (
     HandlerServiceDiscoveryMock,
 )
-from omnibase_infra.handlers.service_discovery.protocol_handler_service_discovery import (
-    ProtocolHandlerServiceDiscovery,
+from omnibase_infra.handlers.service_discovery.protocol_discovery_operations import (
+    ProtocolDiscoveryOperations,
 )
 
 # =============================================================================
@@ -94,33 +94,31 @@ def consul_handler() -> HandlerServiceDiscoveryConsul:
 # =============================================================================
 
 
-class TestProtocolHandlerServiceDiscoveryInterface:
-    """Verify ProtocolHandlerServiceDiscovery is a valid runtime-checkable protocol.
+class TestProtocolDiscoveryOperationsInterface:
+    """Verify ProtocolDiscoveryOperations is a valid runtime-checkable protocol.
 
     These tests ensure the protocol definition itself is correct and can be
     used for runtime type checking with isinstance().
     """
 
     def test_protocol_is_runtime_checkable(self) -> None:
-        """ProtocolHandlerServiceDiscovery is decorated with @runtime_checkable."""
+        """ProtocolDiscoveryOperations is decorated with @runtime_checkable."""
         # Protocol should be decorated with @runtime_checkable
-        assert hasattr(
-            ProtocolHandlerServiceDiscovery, "__protocol_attrs__"
-        ) or hasattr(ProtocolHandlerServiceDiscovery, "_is_runtime_protocol"), (
-            "ProtocolHandlerServiceDiscovery should be @runtime_checkable"
-        )
+        assert hasattr(ProtocolDiscoveryOperations, "__protocol_attrs__") or hasattr(
+            ProtocolDiscoveryOperations, "_is_runtime_protocol"
+        ), "ProtocolDiscoveryOperations should be @runtime_checkable"
 
     def test_protocol_defines_handler_type_property(self) -> None:
         """Protocol defines handler_type property."""
         # Check that handler_type is in the protocol's annotations or attrs
-        assert "handler_type" in dir(ProtocolHandlerServiceDiscovery), (
+        assert "handler_type" in dir(ProtocolDiscoveryOperations), (
             "Protocol must define handler_type property"
         )
 
     def test_protocol_defines_required_methods(self) -> None:
         """Protocol defines all required async methods."""
         for method_name in REQUIRED_PROTOCOL_METHODS:
-            assert hasattr(ProtocolHandlerServiceDiscovery, method_name), (
+            assert hasattr(ProtocolDiscoveryOperations, method_name), (
                 f"Protocol must define {method_name} method"
             )
 
@@ -131,7 +129,7 @@ class TestProtocolHandlerServiceDiscoveryInterface:
 
 
 class TestHandlerServiceDiscoveryMockProtocolCompliance:
-    """Validate HandlerServiceDiscoveryMock implements ProtocolHandlerServiceDiscovery.
+    """Validate HandlerServiceDiscoveryMock implements ProtocolDiscoveryOperations.
 
     Uses duck typing verification per ONEX patterns to ensure the mock handler
     correctly implements all protocol requirements.
@@ -141,9 +139,9 @@ class TestHandlerServiceDiscoveryMockProtocolCompliance:
         self, mock_handler: HandlerServiceDiscoveryMock
     ) -> None:
         """HandlerServiceDiscoveryMock passes isinstance check for protocol."""
-        assert isinstance(mock_handler, ProtocolHandlerServiceDiscovery), (
+        assert isinstance(mock_handler, ProtocolDiscoveryOperations), (
             "HandlerServiceDiscoveryMock must be an instance of "
-            "ProtocolHandlerServiceDiscovery protocol"
+            "ProtocolDiscoveryOperations protocol"
         )
 
     def test_mock_handler_has_handler_type_property(
@@ -275,7 +273,7 @@ class TestHandlerServiceDiscoveryMockProtocolCompliance:
 
 
 class TestHandlerServiceDiscoveryConsulProtocolCompliance:
-    """Validate HandlerServiceDiscoveryConsul implements ProtocolHandlerServiceDiscovery.
+    """Validate HandlerServiceDiscoveryConsul implements ProtocolDiscoveryOperations.
 
     Uses duck typing verification per ONEX patterns to ensure the Consul handler
     correctly implements all protocol requirements.
@@ -288,9 +286,9 @@ class TestHandlerServiceDiscoveryConsulProtocolCompliance:
         self, consul_handler: HandlerServiceDiscoveryConsul
     ) -> None:
         """HandlerServiceDiscoveryConsul passes isinstance check for protocol."""
-        assert isinstance(consul_handler, ProtocolHandlerServiceDiscovery), (
+        assert isinstance(consul_handler, ProtocolDiscoveryOperations), (
             "HandlerServiceDiscoveryConsul must be an instance of "
-            "ProtocolHandlerServiceDiscovery protocol"
+            "ProtocolDiscoveryOperations protocol"
         )
 
     def test_consul_handler_has_handler_type_property(
@@ -459,11 +457,11 @@ class TestCrossHandlerProtocolCompliance:
         init_kwargs: dict[str, object],
         expected_handler_type: str,
     ) -> None:
-        """All handlers pass isinstance check for ProtocolHandlerServiceDiscovery."""
+        """All handlers pass isinstance check for ProtocolDiscoveryOperations."""
         handler = handler_class(**init_kwargs)
-        assert isinstance(handler, ProtocolHandlerServiceDiscovery), (
+        assert isinstance(handler, ProtocolDiscoveryOperations), (
             f"{handler_class.__name__} must be an instance of "
-            "ProtocolHandlerServiceDiscovery protocol"
+            "ProtocolDiscoveryOperations protocol"
         )
 
     @pytest.mark.parametrize(
@@ -638,7 +636,7 @@ class TestTypeAnnotationCompleteness:
 __all__: list[str] = [
     "REQUIRED_PROTOCOL_METHODS",
     "REQUIRED_PROTOCOL_PROPERTIES",
-    "TestProtocolHandlerServiceDiscoveryInterface",
+    "TestProtocolDiscoveryOperationsInterface",
     "TestHandlerServiceDiscoveryMockProtocolCompliance",
     "TestHandlerServiceDiscoveryConsulProtocolCompliance",
     "TestCrossHandlerProtocolCompliance",

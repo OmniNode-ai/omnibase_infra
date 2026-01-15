@@ -23,10 +23,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from omnibase_infra.handlers.registration_storage.handler_mock_registration_storage import (
     MockRegistrationStorageHandler,
 )
+
 from omnibase_infra.nodes.node_registration_storage_effect.registry import (
     RegistryInfraRegistrationStorage,
 )

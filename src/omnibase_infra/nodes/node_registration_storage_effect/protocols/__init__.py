@@ -6,7 +6,7 @@ This module exports protocols for the NodeRegistrationStorageEffect,
 defining interfaces for pluggable storage backends.
 
 Available Protocols:
-    - ProtocolHandlerRegistrationStorage: Interface for storage backends
+    - ProtocolRegistrationPersistence: Interface for storage backends
 
 Protocol Compliance:
     Per ONEX conventions, protocol compliance is verified via duck typing.
@@ -17,6 +17,6 @@ Implementations:
     - HandlerRegistrationStorageMock: Mock backend for testing
 """
 
-from .protocol_handler_registration_storage import ProtocolHandlerRegistrationStorage
+from .protocol_registration_persistence import ProtocolRegistrationPersistence
 
-__all__ = ["ProtocolHandlerRegistrationStorage"]
+__all__ = ["ProtocolRegistrationPersistence"]

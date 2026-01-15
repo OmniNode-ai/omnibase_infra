@@ -23,11 +23,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
-from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.handlers.service_discovery.handler_mock_service_discovery import (
     MockServiceDiscoveryHandler,
 )
+
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_service_discovery_effect.registry import (
     RegistryInfraServiceDiscovery,
 )
