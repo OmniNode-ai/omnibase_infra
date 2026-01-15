@@ -153,7 +153,7 @@ def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:
     return (len(missing_members) == 0, missing_members)
 
 
-def _load_handler_class(class_name: str, module_path: str) -> type:
+def _load_handler_class(class_name: str, module_path: str) -> type[object]:
     """Dynamically load a handler class from a module.
 
     Security: This function validates the module_path against ALLOWED_NAMESPACES
@@ -176,7 +176,7 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
     # Security: Validate namespace before import
     # Error code: NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)
     if not any(module_path.startswith(ns) for ns in ALLOWED_NAMESPACES):
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="load_handler_class",
             target_name=f"{module_path}.{class_name}",
@@ -192,7 +192,7 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
     try:
         module = importlib.import_module(module_path)
     except ModuleNotFoundError as e:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="load_handler_class",
             target_name=f"{module_path}.{class_name}",
@@ -204,7 +204,7 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
             context=ctx,
         ) from e
     except ImportError as e:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="load_handler_class",
             target_name=f"{module_path}.{class_name}",
@@ -217,7 +217,7 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
         ) from e
 
     if not hasattr(module, class_name):
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="load_handler_class",
             target_name=f"{module_path}.{class_name}",
@@ -229,7 +229,7 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
             context=ctx,
         )
 
-    handler_class: type = getattr(module, class_name)
+    handler_class: type[object] = getattr(module, class_name)
     return handler_class
 
 
@@ -346,7 +346,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
         """
         # Fail-fast: contract.yaml defines heartbeat routing which requires projector
         if projector is None and require_heartbeat_handler:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="create_registry",
                 target_name="RegistryInfraNodeRegistrationOrchestrator",
@@ -430,7 +430,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
             # Missing entries indicate a contract.yaml/registry mismatch that must be fixed.
             deps = handler_dependencies.get(handler_class_name, {})
             if not deps:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
                     target_name="RegistryInfraNodeRegistrationOrchestrator",
@@ -481,7 +481,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
             try:
                 handler_instance = handler_cls(**filtered_deps)
             except TypeError as e:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
                     target_name=handler_class_name,
@@ -496,7 +496,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
             # Validate handler implements ProtocolMessageHandler
             is_valid, missing = _validate_handler_protocol(handler_instance)
             if not is_valid:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
                     target_name=handler_class_name,

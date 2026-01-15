@@ -101,7 +101,7 @@ def _check_file_size(contract_path: Path, operation: str) -> None:
         return
 
     if file_size > MAX_CONTRACT_FILE_SIZE_BYTES:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.FILESYSTEM,
             operation=operation,
             target_name=str(contract_path),
@@ -172,7 +172,7 @@ def _load_and_validate_contract_yaml(
         with contract_path.open("r", encoding="utf-8") as f:
             contract = yaml.safe_load(f)
     except FileNotFoundError as e:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.FILESYSTEM,
             operation=operation,
             target_name=str(contract_path),
@@ -188,7 +188,7 @@ def _load_and_validate_contract_yaml(
             context=ctx,
         ) from e
     except yaml.YAMLError as e:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.FILESYSTEM,
             operation=operation,
             target_name=str(contract_path),
@@ -209,7 +209,7 @@ def _load_and_validate_contract_yaml(
 
     # Validate contract is not empty
     if contract is None:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.FILESYSTEM,
             operation=operation,
             target_name=str(contract_path),
@@ -225,7 +225,7 @@ def _load_and_validate_contract_yaml(
     # Validate handler_routing section exists
     handler_routing = contract.get("handler_routing")
     if handler_routing is None:
-        ctx = ModelInfraErrorContext(
+        ctx = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.FILESYSTEM,
             operation=operation,
             target_name=str(contract_path),
