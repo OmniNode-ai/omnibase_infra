@@ -309,7 +309,7 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                     executor,
                     # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
                     # agent.service.register exists on Optional[Consul] union type.
-                    lambda: client.agent.service.register(  # type: ignore[union-attr]
+                    lambda: client.agent.service.register(  # type: ignore[union-attr]  # NOTE: duck-typed client
                         name=service_info.service_name,
                         service_id=service_id_str,
                         address=service_info.address,
@@ -441,7 +441,7 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                     executor,
                     # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
                     # agent.service.deregister exists on Optional[Consul] union type.
-                    lambda: client.agent.service.deregister(service_id_str),  # type: ignore[union-attr]
+                    lambda: client.agent.service.deregister(service_id_str),  # type: ignore[union-attr]  # NOTE: duck-typed client
                 ),
                 timeout=self._timeout_seconds,
             )
@@ -547,7 +547,7 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                 tag = tags[0] if tags else None
                 # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
                 # health.service exists on Optional[Consul] union type.
-                result: tuple[int, list[dict[str, object]]] = client.health.service(  # type: ignore[union-attr]
+                result: tuple[int, list[dict[str, object]]] = client.health.service(  # type: ignore[union-attr]  # NOTE: duck-typed client
                     service_name,
                     tag=tag,
                     passing=True,  # Only healthy services
@@ -692,7 +692,7 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                     executor,
                     # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
                     # status.leader exists on Optional[Consul] union type.
-                    lambda: client.status.leader(),  # type: ignore[union-attr]
+                    lambda: client.status.leader(),  # type: ignore[union-attr]  # NOTE: duck-typed client
                 ),
                 timeout=5.0,  # Short timeout for health check
             )

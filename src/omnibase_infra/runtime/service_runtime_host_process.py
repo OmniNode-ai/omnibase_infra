@@ -356,7 +356,7 @@ class RuntimeHostProcess:
         self._output_topic: str = str(config.get("output_topic", output_topic))
         # Note: ModelRuntimeConfig uses field name "consumer_group" with alias "group_id".
         # When config.model_dump() is called, it outputs "consumer_group" by default.
-        # We check both keys for backwards compatibility with existing configs.
+        # We check both keys to support either field name or alias.
         # Empty strings and whitespace-only strings fall through to the next option.
         consumer_group = config.get("consumer_group")
         group_id = config.get("group_id")
@@ -1428,7 +1428,7 @@ class RuntimeHostProcess:
             # Handler expected to have async execute(envelope) method
             # NOTE: MVP adapters use legacy execute(envelope: dict) signature.
             # TODO(OMN-40): Migrate handlers to new protocol signature execute(request, operation_config)
-            response = await handler.execute(envelope)  # type: ignore[call-arg]
+            response = await handler.execute(envelope)  # type: ignore[call-arg]  # NOTE: legacy signature
 
             # Ensure response has correlation_id
             # Make a copy to avoid mutating handler's internal state

@@ -74,7 +74,7 @@ def _parse_version(v: ModelSemVer | str | dict[str, JsonType]) -> ModelSemVer:
         return ModelSemVer.model_validate(v)
     # NOTE: Return as-is for unhandled types and let Pydantic's own
     # validation raise an appropriate error with type information.
-    return v  # type: ignore[return-value]
+    return v  # type: ignore[return-value]  # NOTE: Pydantic validation handles unknown types
 
 
 # Annotated type for version field that accepts string, dict, or ModelSemVer

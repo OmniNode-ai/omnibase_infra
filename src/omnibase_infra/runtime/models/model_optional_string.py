@@ -33,7 +33,7 @@ class ModelOptionalString(BaseModel):
         'default'
     """
 
-    model_config = ConfigDict(frozen=True, from_attributes=True)
+    model_config = ConfigDict(frozen=True, from_attributes=True, extra="forbid")
 
     value: str | None = Field(default=None, description="Optional string value")
 

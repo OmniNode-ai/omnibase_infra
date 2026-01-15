@@ -1493,10 +1493,10 @@ class MessageDispatchEngine:
         if inspect.iscoroutinefunction(dispatcher):
             if context is not None:
                 # NOTE: Dispatcher signature varies - context param may be optional.
-                # Return type depends on dispatcher implementation.
-                return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]
+                # Return type depends on dispatcher implementation (dict or model).
+                return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
             # NOTE: Return type depends on dispatcher implementation (dict or model).
-            return await dispatcher(envelope)  # type: ignore[no-any-return]
+            return await dispatcher(envelope)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
         else:
             # Sync dispatcher execution via ThreadPoolExecutor
             # -----------------------------------------------
@@ -1517,7 +1517,7 @@ class MessageDispatchEngine:
                     sync_ctx_dispatcher,
                     # NOTE: run_in_executor expects positional args as *args,
                     # type checker cannot verify generic envelope type matches dispatcher.
-                    envelope,  # type: ignore[arg-type]
+                    envelope,  # type: ignore[arg-type]  # NOTE: generic envelope type erasure
                     context,
                 )
             else:
@@ -1529,7 +1529,7 @@ class MessageDispatchEngine:
                     sync_dispatcher,
                     # NOTE: run_in_executor expects positional args as *args,
                     # type checker cannot verify generic envelope type matches dispatcher.
-                    envelope,  # type: ignore[arg-type]
+                    envelope,  # type: ignore[arg-type]  # NOTE: generic envelope type erasure
                 )
 
     def _create_context_for_entry(

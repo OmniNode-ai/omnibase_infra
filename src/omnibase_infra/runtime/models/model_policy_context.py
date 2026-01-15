@@ -7,7 +7,7 @@ structured context to policy evaluation methods.
 
 Design Notes:
     - Uses ConfigDict(extra="allow") to support arbitrary policy-specific fields
-    - Supports dict-like access via __getitem__ for backwards compatibility
+    - Supports dict-like access via __getitem__ for flexible API usage
     - Can be instantiated from dicts using model_validate()
     - Follows ONEX naming convention: Model<Name>
 
@@ -54,13 +54,13 @@ class ModelPolicyContext(MixinDictLikeAccessors, BaseModel):
             max_delay_seconds=60.0,
         )
 
-        # Access with get (dict-like, backwards compatible)
+        # Access with get (dict-like API)
         attempt = context.get("attempt", 0)
 
         # Access as attribute
         corr_id = context.correlation_id
 
-        # Create from dict (backwards compatible with JsonType usage)
+        # Create from dict
         context = ModelPolicyContext.model_validate({"attempt": 3, "error_type": "timeout"})
         ```
 

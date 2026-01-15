@@ -157,9 +157,9 @@ class ModelTimeoutCoordinationResult(BaseModel):
         # NOTE: isinstance checks validate runtime type, but mypy cannot narrow
         # the generic Sequence type to tuple[str, ...] in this validator context.
         if isinstance(v, tuple):
-            return v  # type: ignore[return-value]
+            return v  # type: ignore[return-value]  # NOTE: runtime type validated above
         if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
-            return tuple(v)  # type: ignore[return-value]
+            return tuple(v)  # type: ignore[return-value]  # NOTE: runtime type validated above
         raise ValueError(
             f"errors must be a tuple or Sequence (excluding str/bytes), "
             f"got {type(v).__name__}"

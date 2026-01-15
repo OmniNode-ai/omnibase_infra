@@ -21,13 +21,7 @@ Related:
 
 from __future__ import annotations
 
-__all__ = ["RegistryInfraRegistrationStorage"]
-
 from typing import TYPE_CHECKING, cast
-from uuid import uuid4
-
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -35,6 +29,8 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
         ProtocolRegistrationPersistence,
     )
+
+__all__ = ["RegistryInfraRegistrationStorage"]
 
 
 class RegistryInfraRegistrationStorage:
@@ -70,7 +66,8 @@ class RegistryInfraRegistrationStorage:
     """
 
     # Protocol key for container registration
-    PROTOCOL_KEY = "protocol_registration_storage_handler"
+    # Aligned with protocol name: ProtocolRegistrationPersistence
+    PROTOCOL_KEY = "protocol_registration_persistence"
 
     # Default handler type when multiple are registered
     DEFAULT_HANDLER_TYPE = "postgresql"

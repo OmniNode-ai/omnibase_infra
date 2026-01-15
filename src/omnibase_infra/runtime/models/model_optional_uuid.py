@@ -49,7 +49,7 @@ class ModelOptionalUUID(BaseModel):
         False
     """
 
-    model_config = ConfigDict(frozen=True, from_attributes=True)
+    model_config = ConfigDict(frozen=True, from_attributes=True, extra="forbid")
 
     value: UUID | None = Field(default=None, description="Optional UUID value")
 

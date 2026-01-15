@@ -18,7 +18,7 @@ Example:
     >>> contracts_dir = Path("./contracts")
     >>> config = load_runtime_config(contracts_dir)
     >>> print(config.input_topic)
-    'requests'
+    requests
 
 Note:
     This module serves as a stable public API. The implementation resides

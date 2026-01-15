@@ -132,11 +132,8 @@ except Exception:
 DEFAULT_CONTRACTS_DIR = "./contracts"
 DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 
-# Environment variable names for contracts directory
+# Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
-# DEPRECATED: CONTRACTS_DIR - will be removed in v2.0.0 (Q2 2026)
-# Use ONEX_CONTRACTS_DIR instead. See .env.example for migration steps.
-ENV_CONTRACTS_DIR_LEGACY = "CONTRACTS_DIR"
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
@@ -150,13 +147,7 @@ def _get_contracts_dir() -> Path:
     """Get contracts directory from environment.
 
     Reads the ONEX_CONTRACTS_DIR environment variable. If not set,
-    falls back to CONTRACTS_DIR (deprecated) with a warning.
-    If neither is set, returns the default contracts directory.
-
-    Environment Variable Precedence:
-        1. ONEX_CONTRACTS_DIR (preferred)
-        2. CONTRACTS_DIR (deprecated, logs warning)
-        3. Default: ./contracts
+    returns the default contracts directory.
 
     Returns:
         Path to the contracts directory.
@@ -164,20 +155,6 @@ def _get_contracts_dir() -> Path:
     onex_value = os.environ.get(ENV_CONTRACTS_DIR)
     if onex_value:
         return Path(onex_value)
-
-    # Check deprecated CONTRACTS_DIR for backwards compatibility
-    legacy_value = os.environ.get(ENV_CONTRACTS_DIR_LEGACY)
-    if legacy_value:
-        logger.warning(
-            "DEPRECATED: CONTRACTS_DIR environment variable is deprecated and will be "
-            "removed in v2.0.0. Please use ONEX_CONTRACTS_DIR instead.",
-            extra={
-                "deprecated_env_var": ENV_CONTRACTS_DIR_LEGACY,
-                "replacement_env_var": ENV_CONTRACTS_DIR,
-                "current_value": legacy_value,
-            },
-        )
-        return Path(legacy_value)
 
     return Path(DEFAULT_CONTRACTS_DIR)
 
@@ -225,9 +202,9 @@ def load_runtime_config(
         >>> contracts_dir = Path("./contracts")
         >>> config = load_runtime_config(contracts_dir)
         >>> print(config.input_topic)
-        'requests'
+        requests
         >>> print(config.event_bus.type)
-        'inmemory'
+        inmemory
 
     Example Error:
         >>> # If runtime_config.yaml has invalid YAML syntax
@@ -446,13 +423,19 @@ async def bootstrap() -> int:
         config_start_time = time.time()
         config = load_runtime_config(contracts_dir, correlation_id=correlation_id)
         config_duration = time.time() - config_start_time
+        # Log only safe config fields (no credentials or sensitive data)
+        # Full config.model_dump() could leak passwords, API keys, connection strings
         logger.debug(
             "Runtime config loaded in %.3fs (correlation_id=%s)",
             config_duration,
             correlation_id,
             extra={
                 "duration_seconds": config_duration,
-                "config": config.model_dump(),
+                "input_topic": config.input_topic,
+                "output_topic": config.output_topic,
+                "consumer_group": config.consumer_group,
+                "event_bus_type": config.event_bus.type,
+                "shutdown_grace_period": config.shutdown.grace_period_seconds,
             },
         )
 
@@ -498,7 +481,7 @@ async def bootstrap() -> int:
             # NOTE: bootstrap_servers is guaranteed non-empty at this point due to validation
             # above, but mypy cannot narrow the Optional[str] type through control flow.
             kafka_config = ModelKafkaEventBusConfig(
-                bootstrap_servers=kafka_bootstrap_servers,  # type: ignore[arg-type]
+                bootstrap_servers=kafka_bootstrap_servers,  # type: ignore[arg-type]  # NOTE: control flow narrowing limitation
                 environment=environment,
                 group=config.consumer_group,
                 circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
@@ -1546,7 +1529,6 @@ if __name__ == "__main__":
 
 __all__: list[str] = [
     "ENV_CONTRACTS_DIR",
-    "ENV_CONTRACTS_DIR_LEGACY",
     "bootstrap",
     "load_runtime_config",
     "main",

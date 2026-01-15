@@ -857,7 +857,9 @@ class InfraNamingConventionValidator:
         """
         for directory, exempted_patterns in self.ARCHITECTURAL_EXEMPTIONS.items():
             # Check if file is in the exempted directory
-            if directory not in str(file_path):
+            # Use path.parts for reliable directory matching (not string containment)
+            dir_name = directory.rstrip("/")
+            if dir_name not in file_path.parts:
                 continue
 
             # Check if class matches any exempted pattern

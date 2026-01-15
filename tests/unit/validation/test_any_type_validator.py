@@ -488,7 +488,7 @@ class TestPydanticFieldWithNote:
         from pydantic import BaseModel, Field
 
         class MyModel(BaseModel):
-            data: Any = Field(...)  # NOTE: Using Any for JSON payload
+            data: Any = Field(...)  # NOTE: Any required for JSON payload
         """
         filepath = _create_test_file(temp_dir, code)
         violations = validate_any_types_in_file(filepath)
@@ -502,7 +502,7 @@ class TestPydanticFieldWithNote:
         from pydantic import BaseModel, Field
 
         class MyModel(BaseModel):
-            # NOTE: Using Any because JSON schema requires dynamic typing
+            # NOTE: Any required for JSON schema dynamic typing
             data: Any = Field(...)
         """
         filepath = _create_test_file(temp_dir, code)
@@ -622,7 +622,7 @@ class TestFileLevelNoteComment:
     def test_file_level_note_above_import(self, temp_dir: Path) -> None:
         """File-level NOTE comment above import should work."""
         code = """
-        # NOTE: This module uses Any for JSON compatibility
+        # NOTE: Any required for JSON compatibility
         from typing import Any
 
         from pydantic import BaseModel, Field
@@ -1541,7 +1541,7 @@ class TestAnyTypeDetectorInternals:
     def test_check_file_level_note_found(self) -> None:
         """File-level NOTE near import is detected."""
         source_lines = [
-            "from typing import Any  # NOTE: For JSON compatibility",
+            "from typing import Any  # NOTE: Any required for JSON compatibility",
             "",
             "class Model:",
             "    pass",
@@ -1565,7 +1565,7 @@ class TestAnyTypeDetectorInternals:
     def test_check_file_level_note_import_typing(self) -> None:
         """File-level NOTE with 'import typing' is detected."""
         source_lines = [
-            "import typing  # NOTE: typing.Any used for JSON",
+            "import typing  # NOTE: Any required for JSON compatibility",
             "",
             "class Model:",
             "    pass",
@@ -1745,7 +1745,7 @@ class TestPydanticFieldAttribute:
         import pydantic
 
         class MyModel(pydantic.BaseModel):
-            # NOTE: Using Any for JSON payload
+            # NOTE: Any required for JSON payload
             data: Any = pydantic.Field(...)
         """
         filepath = _create_test_file(temp_dir, code)

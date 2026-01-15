@@ -39,7 +39,7 @@ import json
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
@@ -238,13 +238,10 @@ class IntrospectionEventRouter:
                     "Either register it in the container's service registry or "
                     "pass it explicitly to __init__."
                 )
-            # Type assertion: get_service returns the registered type
-            if not isinstance(dispatcher, DispatcherNodeIntrospected):
-                raise RuntimeHostError(
-                    f"Container returned unexpected type for DispatcherNodeIntrospected: "
-                    f"{type(dispatcher).__name__}"
-                )
-            return dispatcher
+            # Trust container's type system - duck typing per CLAUDE.md
+            # Protocol compliance is validated at registration, not resolution
+            # Use cast() for static type checker - no runtime isinstance check
+            return cast(DispatcherNodeIntrospected, dispatcher)
         except RuntimeHostError:
             raise
         except Exception as e:
@@ -274,13 +271,10 @@ class IntrospectionEventRouter:
                     "Either register it in the container's service registry or "
                     "pass it explicitly to __init__."
                 )
-            # Type assertion: get_service returns the registered type
-            if not isinstance(event_bus, EventBusKafka):
-                raise RuntimeHostError(
-                    f"Container returned unexpected type for EventBusKafka: "
-                    f"{type(event_bus).__name__}"
-                )
-            return event_bus
+            # Trust container's type system - duck typing per CLAUDE.md
+            # Protocol compliance is validated at registration, not resolution
+            # Use cast() for static type checker - no runtime isinstance check
+            return cast(EventBusKafka, event_bus)
         except RuntimeHostError:
             raise
         except Exception as e:

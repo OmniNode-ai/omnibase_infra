@@ -148,10 +148,10 @@ class MixinSemverCache:
                 # Clear internal LRU cache entries before releasing reference.
                 # This ensures prompt memory reclamation rather than waiting
                 # for garbage collection of the orphaned function object.
-                # Note: cache_clear() is added by @lru_cache decorator but not
+                # NOTE: cache_clear() is added by @lru_cache decorator but not
                 # reflected in Callable type annotation. This is a known mypy
                 # limitation with lru_cache wrappers.
-                inner_cache.cache_clear()  # type: ignore[attr-defined]
+                inner_cache.cache_clear()  # type: ignore[attr-defined]  # NOTE: lru_cache dynamic method
             cls._semver_cache = None
             cls._semver_cache_inner = None
 
@@ -372,7 +372,7 @@ class MixinSemverCache:
         # NOTE: cache_info() is dynamically added by @lru_cache decorator but not
         # reflected in Callable type annotation. This is a known mypy limitation.
         # The return type is functools._CacheInfo.
-        result: functools._CacheInfo = cls._semver_cache_inner.cache_info()  # type: ignore[attr-defined]
+        result: functools._CacheInfo = cls._semver_cache_inner.cache_info()  # type: ignore[attr-defined]  # NOTE: lru_cache dynamic method
         return result
 
 

@@ -374,6 +374,11 @@ class MixinKafkaDlq:
             )
 
         # Create DLQ event for metrics and callbacks
+        # Convert message_offset to string for type consistency with ModelDlqEvent
+        # (which expects str | None) and consistency with _publish_raw_to_dlq
+        message_offset_str = (
+            str(failed_message.offset) if failed_message.offset is not None else None
+        )
         dlq_event = ModelDlqEvent(
             original_topic=original_topic,
             dlq_topic=dlq_topic,
@@ -381,7 +386,7 @@ class MixinKafkaDlq:
             error_type=error_type,
             error_message=sanitized_failure_reason,
             retry_count=failed_message.headers.retry_count,
-            message_offset=failed_message.offset,
+            message_offset=message_offset_str,
             message_partition=failed_message.partition,
             success=success,
             dlq_error_type=dlq_error_type,

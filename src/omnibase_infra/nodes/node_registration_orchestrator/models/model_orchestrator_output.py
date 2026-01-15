@@ -145,7 +145,7 @@ class ModelOrchestratorOutput(BaseModel):
                         f"intent_results[{i}] must be a ModelIntentExecutionResult, "
                         f"got {type(item).__name__}"
                     )
-            return v  # type: ignore[return-value]  # Runtime validated above
+            return v  # type: ignore[return-value]  # NOTE: runtime type validated above
         if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
             # Validate and convert to tuple - strict mode requires model instances
             result: list[ModelIntentExecutionResult] = []

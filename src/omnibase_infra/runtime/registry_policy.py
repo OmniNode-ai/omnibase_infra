@@ -534,7 +534,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
 
         Note:
             For new code, prefer using register(ModelPolicyRegistration(...))
-            directly. This method is maintained for backwards compatibility.
+            directly. This is a convenience method for simple registrations.
 
         Args:
             policy_id: Unique identifier for the policy (e.g., 'exponential_backoff')

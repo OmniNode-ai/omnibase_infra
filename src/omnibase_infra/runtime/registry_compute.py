@@ -1124,10 +1124,10 @@ class RegistryCompute:
                 # Clear internal LRU cache entries before releasing reference.
                 # This ensures prompt memory reclamation rather than waiting
                 # for garbage collection of the orphaned function object.
-                # Note: cache_clear() is added by @lru_cache decorator but not
+                # NOTE: cache_clear() is added by @lru_cache decorator but not
                 # reflected in Callable type annotation. This is a known mypy
                 # limitation with lru_cache wrappers.
-                old_cache.cache_clear()  # type: ignore[attr-defined]
+                old_cache.cache_clear()  # type: ignore[attr-defined]  # NOTE: lru_cache dynamic method
             cls._semver_cache = None
 
 

@@ -17,6 +17,21 @@ _ALLOW_DECORATORS: frozenset[str] = frozenset({"allow_any", "allow_any_type"})
 # Comment patterns for exemptions
 _NOTE_PATTERN = "NOTE:"
 
+# Specific patterns for file-level Any exemption notes
+# These patterns must appear in a comment near the Any import to indicate
+# intentional Any usage. Generic "NOTE:" comments don't qualify.
+# The pattern is: "# NOTE: Any <keyword>" where keyword indicates intent
+_ANY_EXEMPTION_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "required",  # "NOTE: Any required for..."
+        "needed",  # "NOTE: Any needed for..."
+        "necessary",  # "NOTE: Any necessary for..."
+        "used",  # "NOTE: Any used for..."
+        "workaround",  # "NOTE: Any workaround for..."
+        # "type" intentionally omitted - too generic, matches "the Any type"
+    }
+)
+
 # Number of lines to look back for NOTE comments.
 # 5 lines is sufficient because NOTE comments typically appear:
 # - Immediately above the field (1-2 lines)
@@ -24,6 +39,59 @@ _NOTE_PATTERN = "NOTE:"
 # - With docstring gap (5 lines max)
 # Larger values would risk matching unrelated NOTE comments.
 _NOTE_LOOKBACK_LINES = 5
+
+
+def _is_any_exemption_note(text: str) -> bool:
+    """Check if text contains a valid Any type exemption note.
+
+    A valid exemption note must have "NOTE:" followed by "Any" and then
+    one of the exemption keywords (required, needed, necessary, etc.).
+    This prevents generic NOTE comments from accidentally matching.
+
+    Valid examples:
+        - "# NOTE: Any required for Pydantic discriminated union"
+        - "# NOTE: Any type needed for dynamic payloads"
+        - "# NOTE: Any workaround - see ADR-123"
+
+    Invalid examples (too generic):
+        - "# NOTE: This handles Any input" (no keyword after Any)
+        - "# NOTE: Any questions?" (not an exemption)
+        - "# Any type is needed" (no NOTE:)
+
+    Args:
+        text: Text to check (can be single line or multi-line context).
+
+    Returns:
+        True if text contains a valid Any exemption note.
+    """
+    # Must contain NOTE: pattern
+    if _NOTE_PATTERN not in text:
+        return False
+
+    # Convert to lowercase for case-insensitive matching
+    text_lower = text.lower()
+
+    # Find NOTE: position first
+    note_pos = text_lower.find("note:")
+    if note_pos == -1:
+        return False
+
+    # Look for "any" AFTER the NOTE: position (not just anywhere in the text)
+    # This avoids matching "Any" from "from typing import Any" before the NOTE
+    text_after_note = text_lower[note_pos + 5 :]  # Start after "note:"
+    any_pos_in_note = text_after_note.find("any")
+    if any_pos_in_note == -1:
+        return False
+
+    # Check for exemption keyword after "any" (within reasonable distance)
+    # Look at the text after "any" (limited window to avoid false matches)
+    after_any = text_after_note[any_pos_in_note + 3 : any_pos_in_note + 50]
+
+    for keyword in _ANY_EXEMPTION_KEYWORDS:
+        if keyword in after_any:
+            return True
+
+    return False
 
 
 class MixinAnyTypeExemption:
@@ -57,6 +125,13 @@ class MixinAnyTypeExemption:
         that file. This supports the common pattern of documenting the
         workaround once at the import rather than at each field.
 
+        The NOTE comment must follow the specific format:
+            # NOTE: Any required for <reason>
+            # NOTE: Any needed for <reason>
+            # NOTE: Any type <reason>
+
+        Generic NOTE comments that happen to mention "Any" do not qualify.
+
         Returns:
             True if file has a valid file-level NOTE comment.
 
@@ -73,14 +148,16 @@ class MixinAnyTypeExemption:
                 start = max(0, i - 5)
                 end = min(len(self.source_lines), i + 6)
                 context = "\n".join(self.source_lines[start:end])
-                if _NOTE_PATTERN in context and "Any" in context:
+                # Use strict matching - must have exemption keyword after "Any"
+                if _is_any_exemption_note(context):
                     return True
             elif "import typing" in line:
                 # Also check for 'import typing' style
                 start = max(0, i - 5)
                 end = min(len(self.source_lines), i + 6)
                 context = "\n".join(self.source_lines[start:end])
-                if _NOTE_PATTERN in context and "Any" in context:
+                # Use strict matching - must have exemption keyword after "Any"
+                if _is_any_exemption_note(context):
                     return True
         return False
 
@@ -124,6 +201,13 @@ class MixinAnyTypeExemption:
         - On the same line as the field (inline comment), OR
         - In the contiguous comment block immediately preceding the field
 
+        The NOTE comment must follow the specific format:
+            # NOTE: Any required for <reason>
+            # NOTE: Any needed for <reason>
+            # NOTE: Any type <reason>
+
+        Generic NOTE comments that happen to mention "Any" do not qualify.
+
         File-level NOTE comments (within 5 lines of Any import) exempt all
         Field() usages in that file, supporting the common pattern of
         documenting the workaround once at the import.
@@ -141,13 +225,13 @@ class MixinAnyTypeExemption:
         # Check if value is a Field() call
         # NOTE: _is_field_call is provided by MixinAnyTypeClassification via multiple
         # inheritance. Mypy cannot verify mixin method availability at static analysis.
-        if node.value is None or not self._is_field_call(node.value):  # type: ignore[attr-defined]
+        if node.value is None or not self._is_field_call(node.value):  # type: ignore[attr-defined]  # NOTE: mixin method
             return False
 
         # Check if annotation contains Any
         # NOTE: _contains_any is provided by the main class via multiple inheritance.
         # Mypy cannot verify method availability in mixin composition.
-        if not self._contains_any(node.annotation):  # type: ignore[attr-defined]
+        if not self._contains_any(node.annotation):  # type: ignore[attr-defined]  # NOTE: mixin method
             return False
 
         # File-level NOTE comment exempts all Field() usages
@@ -157,9 +241,10 @@ class MixinAnyTypeExemption:
         line_num = node.lineno
 
         # First, check for inline NOTE comment on the same line
+        # Use strict matching - must have exemption keyword after "Any"
         if 0 < line_num <= len(self.source_lines):
             current_line = self.source_lines[line_num - 1]
-            if _NOTE_PATTERN in current_line and "Any" in current_line:
+            if _is_any_exemption_note(current_line):
                 return True
 
         # Look for NOTE comment in contiguous comment block immediately above
@@ -176,7 +261,8 @@ class MixinAnyTypeExemption:
 
             # Check if this is a comment line
             if line_content.startswith("#"):
-                if _NOTE_PATTERN in line_content and "Any" in line_content:
+                # Use strict matching - must have exemption keyword after "Any"
+                if _is_any_exemption_note(line_content):
                     return True
                 # Continue looking in the comment block
                 continue

@@ -102,7 +102,7 @@ class ModelConsulIntentPayload(BaseModel):
                     raise ValueError(
                         f"tags[{i}] must be a string, got {type(item).__name__}"
                     )
-            return v  # type: ignore[return-value]  # Runtime validated by Pydantic
+            return v  # type: ignore[return-value]  # NOTE: runtime type validated by Pydantic
         if isinstance(v, (list, set, frozenset)):
             # Validate and convert to tuple - strict mode requires string elements
             result: list[str] = []
@@ -162,7 +162,7 @@ class ModelConsulIntentPayload(BaseModel):
                     raise ValueError(
                         f"meta[{i}][1] (value) must be a string, got {type(val).__name__}"
                     )
-            return v  # type: ignore[return-value]  # Runtime validated by Pydantic
+            return v  # type: ignore[return-value]  # NOTE: runtime type validated by Pydantic
         if isinstance(v, Mapping):
             # Validate and convert to tuple - strict mode requires string keys/values
             result: list[tuple[str, str]] = []

@@ -166,10 +166,11 @@ logger = logging.getLogger(__name__)
 # They will be migrated to ProtocolHandler.execute(request, operation_config) in future.
 # Type ignore comments suppress MyPy errors during MVP phase.
 _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
-    HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]
-    HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]
-    HANDLER_TYPE_HTTP: (HandlerHttpRest, "HTTP REST protocol handler"),  # type: ignore[dict-item]
-    HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]
+    # NOTE: Handlers implement ProtocolHandler structurally but concrete types differ from protocol.
+    HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
+    HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
+    HANDLER_TYPE_HTTP: (HandlerHttpRest, "HTTP REST protocol handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
+    HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
 }
 
 # Known event bus kinds that can be wired via this module.
@@ -229,8 +230,9 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
     # Register all known handlers
     for handler_type, (handler_cls, description) in _KNOWN_HANDLERS.items():
-        # Note: Handlers implement ProtocolHandler structurally but don't inherit from it
-        handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]
+        # NOTE: Handlers implement ProtocolHandler structurally but don't inherit from it.
+        # Mypy cannot verify structural subtyping for registration argument.
+        handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]  # NOTE: structural subtyping
         logger.debug(
             "Registered handler",
             extra={
@@ -376,8 +378,9 @@ def wire_handlers_from_contract(
 
             # Register the handler
             handler_cls, description = _KNOWN_HANDLERS[handler_type]
-            # Note: Handlers implement ProtocolHandler structurally but don't inherit from it
-            handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]
+            # NOTE: Handlers implement ProtocolHandler structurally but don't inherit from it.
+            # Mypy cannot verify structural subtyping for registration argument.
+            handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]  # NOTE: structural subtyping
             registered_handlers.append(handler_type)
 
             logger.debug(

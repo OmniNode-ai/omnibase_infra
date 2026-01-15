@@ -87,7 +87,7 @@ Security Design (Intentional Fail-Open Architecture):
 
     See individual validator modules for detailed fail-open documentation:
     - validator_execution_shape.py: AST-based static analysis (module docstring, lines 17-49)
-    - validator_runtime_shape.py: Runtime validation (Security Design section, lines 52-121)
+    - validator_runtime_shape.py: Runtime validation (Security Design section, lines 52-128)
     - validator_routing_coverage.py: Routing gap detection (module docstring)
 """
 

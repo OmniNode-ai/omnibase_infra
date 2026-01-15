@@ -325,10 +325,13 @@ class TestRegistryHandlerSwapping:
         assert retrieved2 is not handler1
 
     def test_protocol_key_constant(self) -> None:
-        """PROTOCOL_KEY constant is correctly defined."""
+        """PROTOCOL_KEY constant is correctly defined.
+
+        PROTOCOL_KEY should align with protocol name: ProtocolRegistrationPersistence.
+        """
         assert (
             RegistryInfraRegistrationStorage.PROTOCOL_KEY
-            == "protocol_registration_storage_handler"
+            == "protocol_registration_persistence"
         )
 
     def test_default_handler_type_constant(self) -> None:

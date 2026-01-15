@@ -18,7 +18,7 @@ This model uses sentinel values internally instead of ``None``:
 - Enum fields: kept as ``None`` (unavoidable for type safety)
 
 **Input Conversion**:
-For backwards compatibility, constructors accept ``None`` and convert to sentinels.
+Constructors accept ``None`` and convert to sentinel values for convenience.
 
 .. versionadded:: 0.6.0
     Created as part of Union Reduction Phase 2 (OMN-1002).
@@ -61,9 +61,9 @@ class ModelDispatchLogContext(BaseModel):
     - ``correlation_id=UUID(int=0)``: Not set (nil UUID)
     - ``trace_id=UUID(int=0)``: Not set (nil UUID)
 
-    **Backwards Compatibility**:
+    **None Handling**:
     Constructors accept ``None`` for any field and convert to the sentinel value.
-    This ensures existing code that passes ``None`` continues to work.
+    This provides a convenient API for optional fields.
 
     The model is designed for immutability (frozen=True) for thread-safety.
 
