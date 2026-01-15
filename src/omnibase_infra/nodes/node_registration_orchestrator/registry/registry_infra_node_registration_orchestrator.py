@@ -26,6 +26,12 @@ Handler Dependencies:
     - ProjectorShell: For projection persistence
     - HandlerConsul: For Consul service registration (dual registration)
 
+Maintenance Note:
+    When adding a new handler to contract.yaml, you MUST also update the
+    ``handler_dependencies`` dict in ``create_registry()`` with the handler's
+    constructor arguments. Failure to do so will raise ProtocolConfigurationError
+    at runtime with the message: "No dependency configuration found for handler..."
+
 Usage:
     ```python
     from omnibase_infra.nodes.node_registration_orchestrator.registry import (
@@ -164,7 +170,9 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
             target_name=f"{module_path}.{class_name}",
         )
         raise ProtocolConfigurationError(
-            f"Handler module not found: {module_path}. Error: {e}",
+            f"Handler module not found: {module_path}. "
+            f"Verify the module path is correct and the package is installed. "
+            f"Error code: MODULE_NOT_FOUND (HANDLER_LOADER_010)",
             context=ctx,
         ) from e
     except ImportError as e:
@@ -174,7 +182,9 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
             target_name=f"{module_path}.{class_name}",
         )
         raise ProtocolConfigurationError(
-            f"Failed to import handler module: {module_path}. Error: {e}",
+            f"Failed to import handler module: {module_path}. "
+            f"Check for syntax errors or missing dependencies. "
+            f"Error code: IMPORT_ERROR (HANDLER_LOADER_012)",
             context=ctx,
         ) from e
 
@@ -185,7 +195,9 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
             target_name=f"{module_path}.{class_name}",
         )
         raise ProtocolConfigurationError(
-            f"Handler class {class_name} not found in module {module_path}",
+            f"Handler class '{class_name}' not found in module '{module_path}'. "
+            f"Verify the class name matches the contract.yaml handler.name field. "
+            f"Error code: CLASS_NOT_FOUND (HANDLER_LOADER_011)",
             context=ctx,
         )
 
@@ -325,8 +337,13 @@ class RegistryInfraNodeRegistrationOrchestrator:
         contract_path = Path(__file__).parent.parent / "contract.yaml"
         handler_configs = load_handler_class_info_from_contract(contract_path)
 
-        # Map of handler dependencies by handler class name
-        # Each handler class has specific dependencies based on its constructor
+        # Map of handler dependencies by handler class name.
+        # Each handler class has specific dependencies based on its constructor.
+        #
+        # MAINTENANCE: When adding a new handler to contract.yaml, you MUST add
+        # a corresponding entry here with the handler's constructor arguments.
+        # The keys match handler class names from contract.yaml handler_routing.handlers[].handler.name.
+        # See module docstring "Maintenance Note" for details.
         handler_dependencies: dict[str, dict[str, object]] = {
             "HandlerNodeIntrospected": {
                 "projection_reader": projection_reader,
@@ -382,14 +399,26 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 )
 
             # Filter dependencies for handler instantiation.
-            # Logic:
-            # - projection_reader: ALWAYS included (required by all handlers, even if
-            #   None triggers validation). We keep it to ensure handlers receive it
-            #   and can perform their own validation if needed.
-            # - projector: Only included if provided (optional for handlers that
-            #   don't persist state changes).
-            # - consul_handler: Only included if provided (optional for handlers
-            #   that don't interact with service discovery).
+            #
+            # WHY projection_reader is ALWAYS included (even if None):
+            #   - projection_reader is a REQUIRED dependency for all handlers
+            #   - Even if the value is None, we pass it so handlers can perform
+            #     their own validation and raise clear errors if missing
+            #   - This is intentional: handlers should fail-fast with clear messages
+            #     rather than silently receiving no projection_reader parameter
+            #
+            # WHY projector and consul_handler are only included when not None:
+            #   - These are OPTIONAL dependencies used by specific handlers
+            #   - projector: Only handlers that persist state changes need this
+            #     (e.g., HandlerNodeHeartbeat for updating heartbeat timestamps)
+            #   - consul_handler: Only handlers that interact with service discovery
+            #     (e.g., HandlerNodeIntrospected for dual Consul registration)
+            #   - Passing None would override handler defaults or cause TypeErrors
+            #
+            # Summary:
+            #   projection_reader: Required by all handlers -> always pass
+            #   projector: Optional -> pass only if provided
+            #   consul_handler: Optional -> pass only if provided
             filtered_deps = {
                 k: v
                 for k, v in deps.items()
@@ -417,13 +446,14 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
-                    target_name="RegistryInfraNodeRegistrationOrchestrator",
+                    target_name=handler_class_name,
                 )
                 raise ProtocolConfigurationError(
-                    f"Handler {handler_class_name} does not implement ProtocolMessageHandler. "
+                    f"Handler '{handler_class_name}' does not implement ProtocolMessageHandler. "
                     f"Missing required members: {', '.join(missing)}. "
                     f"Handlers must have: handler_id, category, message_types, node_kind properties "
-                    f"and handle(envelope) method.",
+                    f"and handle(envelope) method. "
+                    f"Error code: PROTOCOL_NOT_IMPLEMENTED (HANDLER_LOADER_006)",
                     context=ctx,
                 )
 

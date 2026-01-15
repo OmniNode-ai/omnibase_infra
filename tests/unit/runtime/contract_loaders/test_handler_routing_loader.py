@@ -166,17 +166,28 @@ class TestConvertClassToHandlerKey:
         ],
     )
     def test_underscore_handling(self, class_name: str, expected: str) -> None:
-        """Test underscore handling in class name to handler key conversion.
+        """Test underscore handling - documents ACTUAL behavior, not IDEAL behavior.
 
-        Note: Underscores are atypical in Python class names (PEP 8 recommends
-        CamelCase for classes). This test documents the ACTUAL behavior of the
-        regex-based conversion, which may produce non-ideal output like
-        "my_-handler" (mixed underscore and hyphen). The regex operates only
-        on letter case boundaries, not underscore characters.
+        IMPORTANT: This test is a CHARACTERIZATION TEST that documents the current
+        (possibly surprising) behavior of the regex-based conversion. The expected
+        values reflect what the function ACTUALLY produces, not what might be
+        considered IDEAL output.
 
-        If underscore handling needs to change (e.g., converting underscores
-        to hyphens), update the convert_class_to_handler_key function and
-        these expected values accordingly.
+        Why this matters:
+            - Underscores are atypical in Python class names (PEP 8 recommends
+              CamelCase for classes)
+            - The regex operates only on letter case boundaries, not underscores
+            - This produces outputs like "my_-handler" (mixed underscore and hyphen)
+              which is technically "correct" per the regex logic but visually odd
+
+        Why we keep the current behavior:
+            - Real-world handler classes follow PEP 8 (CamelCase, no underscores)
+            - Changing the regex could break existing handler key mappings
+            - The edge cases documented here are unlikely in practice
+
+        If you need to change underscore handling (e.g., convert underscores to
+        hyphens), update BOTH the convert_class_to_handler_key function AND these
+        expected values. Consider the impact on existing handler registrations.
         """
         from omnibase_infra.runtime.contract_loaders import convert_class_to_handler_key
 

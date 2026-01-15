@@ -133,6 +133,17 @@ def _load_and_validate_contract_yaml(
     - Empty contract validation
     - handler_routing section validation
 
+    Note on direct file operations:
+        This function uses direct file I/O rather than a FileRegistry abstraction.
+        See handler_contract_source.py for the same pattern and rationale:
+        - RegistryFileBased (FileRegistry) does not yet exist in omnibase_core
+        - Once available, this should be refactored for consistency
+        - See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
+
+    Security Note:
+        File size is checked BEFORE YAML parsing (line ~152) to prevent memory
+        exhaustion attacks via oversized files. This ordering is critical.
+
     Args:
         contract_path: Path to the contract.yaml file to load.
         operation: Name of the calling operation for error context
@@ -167,7 +178,8 @@ def _load_and_validate_contract_yaml(
         )
         raise ProtocolConfigurationError(
             f"Contract file not found: {contract_path}. "
-            f"Ensure the contract.yaml exists in the orchestrator directory.",
+            f"Ensure the contract.yaml exists in the orchestrator directory. "
+            f"Error code: CONTRACT_NOT_FOUND (HANDLER_LOADER_020)",
             context=ctx,
         ) from e
     except yaml.YAMLError as e:
@@ -184,7 +196,9 @@ def _load_and_validate_contract_yaml(
             error_type,
         )
         raise ProtocolConfigurationError(
-            f"Invalid YAML syntax in contract.yaml at {contract_path}: {error_type}",
+            f"Invalid YAML syntax in contract.yaml at {contract_path}: {error_type}. "
+            f"Verify the YAML syntax is correct. "
+            f"Error code: YAML_PARSE_ERROR (HANDLER_LOADER_021)",
             context=ctx,
         ) from e
 
@@ -197,7 +211,8 @@ def _load_and_validate_contract_yaml(
         )
         msg = (
             f"Contract file is empty: {contract_path}. "
-            f"The contract.yaml must contain valid YAML with a 'handler_routing' section."
+            f"The contract.yaml must contain valid YAML with a 'handler_routing' section. "
+            f"Error code: CONTRACT_EMPTY (HANDLER_LOADER_022)"
         )
         logger.error(msg)
         raise ProtocolConfigurationError(msg, context=ctx)
@@ -212,7 +227,8 @@ def _load_and_validate_contract_yaml(
         )
         msg = (
             f"Missing 'handler_routing' section in contract: {contract_path}. "
-            f"Add a handler_routing section with routing_strategy and handlers."
+            f"Add a handler_routing section with routing_strategy and handlers. "
+            f"Error code: MISSING_HANDLER_ROUTING (HANDLER_LOADER_023)"
         )
         logger.error(msg)
         raise ProtocolConfigurationError(msg, context=ctx)
