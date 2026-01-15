@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import re
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 # Valid PostgreSQL identifier pattern: starts with letter or underscore,
 # followed by letters, digits, or underscores
 IDENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -53,24 +56,29 @@ def quote_identifier(ident: str) -> str:
     return f'"{escaped}"'
 
 
-def validate_identifier(name: str, context: str = "identifier") -> str:
+def validate_identifier(name: str, context_name: str = "identifier") -> str:
     """Validate that a name is a valid PostgreSQL identifier.
 
     Args:
         name: Identifier to validate.
-        context: Description of what's being validated (for error messages).
+        context_name: Description of what's being validated (for error messages).
 
     Returns:
         The validated identifier.
 
     Raises:
-        ValueError: If the identifier contains invalid characters.
+        ProtocolConfigurationError: If the identifier contains invalid characters.
     """
     if not IDENT_PATTERN.match(name):
-        raise ValueError(
-            f"Invalid {context} '{name}': must match pattern "
+        error_context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="validate_identifier",
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid {context_name} '{name}': must match pattern "
             "[A-Za-z_][A-Za-z0-9_]* (letters, digits, underscores only, "
-            "starting with letter or underscore)"
+            "starting with letter or underscore)",
+            context=error_context,
         )
     return name
 

@@ -44,7 +44,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumHandlerTypeCategory
+from omnibase_infra.enums import EnumHandlerTypeCategory, EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.security.model_security_error import ModelSecurityError
 from omnibase_infra.models.security.model_security_warning import ModelSecurityWarning
 
@@ -286,7 +287,7 @@ class ModelSecurityValidationResult(BaseModel):
             ModelSecurityValidationResult with valid=False and errors.
 
         Raises:
-            ValueError: If errors is empty (failures must have errors).
+            ProtocolConfigurationError: If errors is empty (failures must have errors).
 
         Example:
             >>> error = ModelSecurityError(
@@ -306,7 +307,13 @@ class ModelSecurityValidationResult(BaseModel):
             True
         """
         if not errors:
-            raise ValueError("errors must be non-empty for failure results")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="failure",
+            )
+            raise ProtocolConfigurationError(
+                "errors must be non-empty for failure results", context=context
+            )
         return cls(
             valid=False,
             subject=subject,

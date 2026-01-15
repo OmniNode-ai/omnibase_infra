@@ -46,6 +46,9 @@ Example:
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 
 class ModelLifecycleResult(BaseModel):
     """Result of a single handler lifecycle operation (e.g., shutdown).
@@ -158,7 +161,14 @@ class ModelLifecycleResult(BaseModel):
             'Connection refused'
         """
         if not error_message:
-            raise ValueError("error_message must be non-empty for failed results")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="lifecycle_failed",
+            )
+            raise ProtocolConfigurationError(
+                "error_message must be non-empty for failed results",
+                context=context,
+            )
         return cls(
             handler_type=handler_type, success=False, error_message=error_message
         )

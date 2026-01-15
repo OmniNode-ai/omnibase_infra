@@ -23,6 +23,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors.error_infra import ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
+
 
 class ModelValidationOutcome(BaseModel):
     """Outcome of a validation operation.
@@ -129,7 +135,7 @@ class ModelValidationOutcome(BaseModel):
             ModelValidationOutcome with is_valid=False and the error message.
 
         Raises:
-            ValueError: If error_message is empty.
+            ProtocolConfigurationError: If error_message is empty.
 
         Example:
             >>> outcome = ModelValidationOutcome.failure("Missing required field")
@@ -145,7 +151,13 @@ class ModelValidationOutcome(BaseModel):
             Added validation that error_message must be non-empty.
         """
         if not error_message:
-            raise ValueError("error_message must be non-empty for failure outcomes")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="failure",
+            )
+            raise ProtocolConfigurationError(
+                "error_message must be non-empty for failure outcomes", context=context
+            )
         return cls(is_valid=False, error_message=error_message)
 
     @classmethod

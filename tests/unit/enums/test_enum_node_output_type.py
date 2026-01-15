@@ -9,6 +9,7 @@ EnumNodeOutputType for OMN-974.
 import pytest
 
 from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
+from omnibase_infra.errors import ProtocolConfigurationError
 
 
 class TestIsRoutable:
@@ -64,9 +65,9 @@ class TestToMessageCategory:
         assert result == EnumMessageCategory.INTENT
         assert isinstance(result, EnumMessageCategory)
 
-    def test_projection_raises_value_error(self) -> None:
-        """PROJECTION should raise ValueError - no message category equivalent."""
-        with pytest.raises(ValueError) as exc_info:
+    def test_projection_raises_configuration_error(self) -> None:
+        """PROJECTION should raise ProtocolConfigurationError - no message category equivalent."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             EnumNodeOutputType.PROJECTION.to_message_category()
 
         assert "PROJECTION has no message category" in str(exc_info.value)
@@ -99,10 +100,10 @@ class TestIsRoutableAndToMessageCategoryConsistency:
                 assert isinstance(result, EnumMessageCategory)
 
     def test_non_routable_types_raise_on_convert(self) -> None:
-        """All non-routable types should raise ValueError on conversion."""
+        """All non-routable types should raise ProtocolConfigurationError on conversion."""
         for output_type in EnumNodeOutputType:
             if not output_type.is_routable():
-                with pytest.raises(ValueError):
+                with pytest.raises(ProtocolConfigurationError):
                     output_type.to_message_category()
 
     def test_consistency_between_methods(self) -> None:
@@ -113,5 +114,5 @@ class TestIsRoutableAndToMessageCategoryConsistency:
                 output_type.to_message_category()
             else:
                 # Should fail
-                with pytest.raises(ValueError):
+                with pytest.raises(ProtocolConfigurationError):
                     output_type.to_message_category()

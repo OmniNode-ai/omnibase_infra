@@ -46,6 +46,8 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_compute import NodeCompute
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
@@ -211,7 +213,7 @@ class NodeArchitectureValidator(NodeCompute):
             List of Python file paths to validate.
 
         Raises:
-            ValueError: If path attempts directory traversal or is absolute outside cwd.
+            ProtocolConfigurationError: If path attempts directory traversal or is absolute outside cwd.
 
         Examples:
             - File: "src/module/file.py" -> [Path("src/module/file.py")]
@@ -224,15 +226,27 @@ class NodeArchitectureValidator(NodeCompute):
         for path_str in paths:
             # Security: reject path traversal attempts
             if ".." in path_str:
-                raise ValueError(f"Path traversal not allowed: {path_str}")
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.FILESYSTEM,
+                    operation="collect_files",
+                )
+                raise ProtocolConfigurationError(
+                    f"Path traversal not allowed: {path_str}",
+                    context=context,
+                )
 
             path = Path(path_str)
 
             # Security: resolve and verify path is within cwd or is relative
             resolved = path.resolve() if path.exists() else (cwd / path).resolve()
             if path.is_absolute() and not str(resolved).startswith(str(cwd)):
-                raise ValueError(
-                    f"Absolute path outside working directory not allowed: {path_str}"
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.FILESYSTEM,
+                    operation="collect_files",
+                )
+                raise ProtocolConfigurationError(
+                    f"Absolute path outside working directory not allowed: {path_str}",
+                    context=context,
                 )
 
             if path.is_file() and path.suffix == ".py":

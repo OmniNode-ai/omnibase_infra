@@ -22,6 +22,7 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumHandlerTypeCategory, EnumValidationSeverity
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.security import (
     ModelSecurityError,
     ModelSecurityValidationResult,
@@ -302,7 +303,9 @@ class TestModelSecurityValidationResultFactoryMethods:
 
     def test_failure_factory_requires_errors(self) -> None:
         """failure() factory should raise if errors is empty."""
-        with pytest.raises(ValueError, match="errors must be non-empty"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="errors must be non-empty"
+        ):
             ModelSecurityValidationResult.failure(
                 subject="bad_handler",
                 handler_type=EnumHandlerTypeCategory.EFFECT,

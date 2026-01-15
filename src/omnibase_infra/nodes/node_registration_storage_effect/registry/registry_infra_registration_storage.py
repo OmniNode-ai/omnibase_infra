@@ -25,6 +25,9 @@ __all__ = ["RegistryInfraRegistrationStorage"]
 
 from typing import TYPE_CHECKING, cast
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
@@ -114,7 +117,7 @@ class RegistryInfraRegistrationStorage:
             handler: Handler implementation to register.
 
         Raises:
-            TypeError: If handler does not implement ProtocolRegistrationStorageHandler.
+            ProtocolConfigurationError: If handler does not implement ProtocolRegistrationStorageHandler.
 
         Example:
             >>> from omnibase_infra.handlers.registration_storage import (
@@ -129,9 +132,14 @@ class RegistryInfraRegistrationStorage:
         )
 
         if not isinstance(handler, ProtocolRegistrationStorageHandler):
-            raise TypeError(
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="register_handler",
+            )
+            raise ProtocolConfigurationError(
                 f"Handler must implement ProtocolRegistrationStorageHandler, "
-                f"got {type(handler).__name__}"
+                f"got {type(handler).__name__}",
+                context=context,
             )
 
         if container.service_registry is None:

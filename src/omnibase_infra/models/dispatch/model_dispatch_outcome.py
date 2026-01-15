@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING, overload
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 if TYPE_CHECKING:
     from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 
@@ -98,7 +101,7 @@ class ModelDispatchOutcome(BaseModel):
             ModelDispatchOutcome with normalized topics list.
 
         Raises:
-            TypeError: If output is not str, list[str], None, or ModelDispatchResult.
+            ProtocolConfigurationError: If output is not str, list[str], None, or ModelDispatchResult.
 
         Example:
             >>> ModelDispatchOutcome.from_legacy_output(None).topics
@@ -130,9 +133,14 @@ class ModelDispatchOutcome(BaseModel):
                 if outputs_attr is not None and hasattr(outputs_attr, "topics"):
                     return cls(topics=list(outputs_attr.topics))
                 return cls(topics=[])
-            raise TypeError(
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="from_legacy_output",
+            )
+            raise ProtocolConfigurationError(
                 f"Expected str, list[str], None, or ModelDispatchResult, "
-                f"got {type(output).__name__}"
+                f"got {type(output).__name__}",
+                context=context,
             )
 
     @classmethod

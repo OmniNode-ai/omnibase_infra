@@ -32,6 +32,8 @@ from uuid import UUID
 
 import asyncpg
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 from omnibase_infra.utils.util_datetime import ensure_timezone_aware
 
@@ -496,7 +498,14 @@ class MixinProjectorSqlOperations:
             ... )
         """
         if not values:
-            raise ValueError("values dict cannot be empty for partial_upsert")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="partial_upsert",
+            )
+            raise ProtocolConfigurationError(
+                "values dict cannot be empty for partial_upsert",
+                context=context,
+            )
 
         # Normalize values (datetime timezone validation, etc.)
         values = self._normalize_values(values)
@@ -511,8 +520,13 @@ class MixinProjectorSqlOperations:
         # Verify all conflict columns are in values
         for col in conflict_cols:
             if col not in values:
-                raise ValueError(
-                    f"values dict must include conflict column '{col}' for partial_upsert"
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="partial_upsert",
+                )
+                raise ProtocolConfigurationError(
+                    f"values dict must include conflict column '{col}' for partial_upsert",
+                    context=context,
                 )
 
         table_quoted = quote_identifier(schema.table)
@@ -655,7 +669,14 @@ class MixinProjectorSqlOperations:
             ...     logger.warning("Entity not found for heartbeat update")
         """
         if not updates:
-            raise ValueError("updates dict cannot be empty for partial_update")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="partial_update",
+            )
+            raise ProtocolConfigurationError(
+                "updates dict cannot be empty for partial_update",
+                context=context,
+            )
 
         # Normalize values (datetime timezone validation, etc.)
         updates = self._normalize_values(updates)

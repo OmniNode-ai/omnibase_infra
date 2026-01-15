@@ -809,8 +809,14 @@ class ServiceHealth:
             # NOTE: Use explicit if/raise instead of assert - assertions can be
             # disabled with Python's -O flag, which would skip this safety check
             if not isinstance(health_details, dict):
-                raise TypeError(
-                    f"health_check() must return dict, got {type(health_details).__name__}"
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="validate_health_check_response",
+                    target_name="RuntimeHostProcess.health_check",
+                )
+                raise ProtocolConfigurationError(
+                    f"health_check() must return dict, got {type(health_details).__name__}",
+                    context=context,
                 )
 
             # Determine overall status based on health check results

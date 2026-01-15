@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 if TYPE_CHECKING:
     from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -151,7 +152,14 @@ class EnumNodeOutputType(str, Enum):
             ValueError: PROJECTION has no message category - projections are not routable
         """
         # Import at runtime to avoid circular imports
+        from omnibase_infra.enums.enum_infra_transport_type import (
+            EnumInfraTransportType,
+        )
         from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+        from omnibase_infra.errors import (
+            ModelInfraErrorContext,
+            ProtocolConfigurationError,
+        )
 
         if self == EnumNodeOutputType.EVENT:
             return EnumMessageCategory.EVENT
@@ -161,8 +169,16 @@ class EnumNodeOutputType(str, Enum):
             return EnumMessageCategory.INTENT
 
         # PROJECTION has no message category
-        msg = "PROJECTION has no message category - projections are not routable"
-        raise ValueError(msg)
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="to_message_category",
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            "PROJECTION has no message category - projections are not routable",
+            context=context,
+            output_type=self.value,
+        )
 
 
 __all__ = ["EnumNodeOutputType"]

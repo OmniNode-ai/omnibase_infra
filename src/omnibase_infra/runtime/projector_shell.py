@@ -43,6 +43,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
@@ -722,8 +723,8 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 context=ctx,
             ) from e
 
-        except ValueError:
-            # Re-raise ValueError (empty updates) as-is
+        except ProtocolConfigurationError:
+            # Re-raise ProtocolConfigurationError (empty updates) as-is
             raise
 
         except Exception as e:
@@ -828,8 +829,8 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 context=ctx,
             ) from e
 
-        except ValueError:
-            # Re-raise ValueError (empty values or missing PK) as-is
+        except ProtocolConfigurationError:
+            # Re-raise ProtocolConfigurationError (empty values or missing PK) as-is
             raise
 
         except Exception as e:
@@ -1038,7 +1039,14 @@ class ProjectorShell(MixinProjectorSqlOperations):
             return await self._append(values, correlation_id, event_type)
         else:
             # This should never happen due to contract validation
-            raise ValueError(f"Unknown projection mode: {mode}")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="execute_projection",
+            )
+            raise ProtocolConfigurationError(
+                f"Unknown projection mode: {mode}",
+                context=context,
+            )
 
     def __repr__(self) -> str:
         """Return string representation."""

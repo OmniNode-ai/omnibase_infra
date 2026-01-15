@@ -46,13 +46,33 @@ def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
     Returns:
         The scheme cast to the appropriate Literal type
 
+    Raises:
+        ProtocolConfigurationError: If scheme is not 'postgresql' or 'postgres'.
+
     Note:
         This function should only be called AFTER validating
         that scheme is one of the valid values.
     """
     if scheme not in ("postgresql", "postgres"):
-        msg = f"Invalid scheme: {scheme}"
-        raise ValueError(msg)
+        # Lazy imports to avoid circular dependency (utils -> errors -> models -> utils)
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import (
+            ModelInfraErrorContext,
+            ProtocolConfigurationError,
+        )
+
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="validate_dsn_scheme",
+            target_name="dsn_validator",
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid scheme: expected 'postgresql' or 'postgres', got '{scheme}'",
+            context=context,
+            parameter="scheme",
+            value=scheme,
+        )
     return cast(Literal["postgresql", "postgres"], scheme)
 
 

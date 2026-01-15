@@ -44,6 +44,8 @@ from omnibase_core.models.projectors import (
 )
 from pydantic import BaseModel
 
+from omnibase_infra.errors import ProtocolConfigurationError
+
 # =============================================================================
 # Test Payload Models
 # =============================================================================
@@ -2478,7 +2480,7 @@ class TestProjectorShellPartialUpdate:
 
         projector = ProjectorShell(contract=sample_contract, pool=mock_pool)
 
-        with pytest.raises(ValueError, match="empty"):
+        with pytest.raises(ProtocolConfigurationError, match="empty"):
             await projector.partial_update(aggregate_id, {}, correlation_id)
 
         # Should not interact with database
