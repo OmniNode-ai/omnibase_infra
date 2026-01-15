@@ -64,7 +64,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.runtime.model_discovery_error import ModelDiscoveryError
 from omnibase_infra.models.runtime.model_discovery_result import ModelDiscoveryResult
 from omnibase_infra.models.runtime.model_discovery_warning import (
@@ -378,12 +379,15 @@ class ContractHandlerDiscovery:
                                 },
                             )
                         )
-                    except (ImportError, AttributeError, TypeError, ValueError) as e:
+                    except (
+                        AttributeError,
+                        ImportError,
+                        ProtocolConfigurationError,
+                    ) as e:
                         # Module/class import failed
-                        # ImportError: Module not found or import failure
                         # AttributeError: Class not found in module (from getattr)
-                        # TypeError: Path resolved to non-class (from isinstance check)
-                        # ValueError: Invalid class path format (no module separator)
+                        # ImportError: Module not found or import failure
+                        # ProtocolConfigurationError: Invalid class path or non-class type
                         # Uses IMPORT_ERROR for consistency with EnumHandlerLoaderError
                         errors.append(
                             ModelDiscoveryError(
@@ -532,9 +536,15 @@ class ContractHandlerDiscovery:
             very fast due to module caching.
         """
         if "." not in class_path:
-            raise ValueError(
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="import_handler_class",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
                 f"Invalid class path '{class_path}': must be fully qualified "
-                "(e.g., 'myapp.handlers.AuthHandler')"
+                "(e.g., 'myapp.handlers.AuthHandler')",
+                context=context,
             )
 
         module_path, class_name = class_path.rsplit(".", 1)
@@ -543,8 +553,14 @@ class ContractHandlerDiscovery:
 
         # Verify it's actually a class (also serves as type narrowing for mypy)
         if not isinstance(handler_class, type):
-            raise TypeError(
-                f"'{class_path}' is not a class (got {type(handler_class).__name__})"
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="import_handler_class",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                f"'{class_path}' is not a class (got {type(handler_class).__name__})",
+                context=context,
             )
 
         logger.debug(

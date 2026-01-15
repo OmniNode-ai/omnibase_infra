@@ -274,8 +274,19 @@ class TestPolicyRegistryContainerIntegration:
         class LazyPolicy:
             """Policy for lazy initialization test."""
 
+            @property
+            def policy_id(self) -> str:
+                return "lazy_policy"
+
+            @property
+            def policy_type(self) -> EnumPolicyType:
+                return EnumPolicyType.ORCHESTRATOR
+
             def evaluate(self, context: dict[str, object]) -> dict[str, object]:
                 return {"lazy": True}
+
+            def decide(self, context: dict[str, object]) -> dict[str, object]:
+                return self.evaluate(context)
 
         registry1.register_policy(
             policy_id="lazy_policy",
@@ -367,20 +378,53 @@ class TestPolicyRegistryContainerIntegration:
         class PolicyV1:
             """Version 1.0.0 of test policy."""
 
+            @property
+            def policy_id(self) -> str:
+                return "versioned_policy"
+
+            @property
+            def policy_type(self) -> EnumPolicyType:
+                return EnumPolicyType.ORCHESTRATOR
+
             def evaluate(self, context: dict[str, object]) -> dict[str, object]:
                 return {"version": "1.0.0"}
+
+            def decide(self, context: dict[str, object]) -> dict[str, object]:
+                return self.evaluate(context)
 
         class PolicyV2:
             """Version 2.0.0 of test policy."""
 
+            @property
+            def policy_id(self) -> str:
+                return "versioned_policy"
+
+            @property
+            def policy_type(self) -> EnumPolicyType:
+                return EnumPolicyType.ORCHESTRATOR
+
             def evaluate(self, context: dict[str, object]) -> dict[str, object]:
                 return {"version": "2.0.0"}
+
+            def decide(self, context: dict[str, object]) -> dict[str, object]:
+                return self.evaluate(context)
 
         class PolicyV10:
             """Version 10.0.0 of test policy (tests semantic versioning)."""
 
+            @property
+            def policy_id(self) -> str:
+                return "versioned_policy"
+
+            @property
+            def policy_type(self) -> EnumPolicyType:
+                return EnumPolicyType.ORCHESTRATOR
+
             def evaluate(self, context: dict[str, object]) -> dict[str, object]:
                 return {"version": "10.0.0"}
+
+            def decide(self, context: dict[str, object]) -> dict[str, object]:
+                return self.evaluate(context)
 
         # Register multiple versions
         registry.register_policy(
@@ -465,8 +509,19 @@ class TestContainerWiringErrorHandling:
 
         # Register a policy
         class TestPolicy:
+            @property
+            def policy_id(self) -> str:
+                return "before_rewire"
+
+            @property
+            def policy_type(self) -> EnumPolicyType:
+                return EnumPolicyType.ORCHESTRATOR
+
             def evaluate(self, context: dict[str, object]) -> dict[str, object]:
                 return {}
+
+            def decide(self, context: dict[str, object]) -> dict[str, object]:
+                return self.evaluate(context)
 
         registry1.register_policy(
             policy_id="before_rewire",
@@ -530,8 +585,19 @@ class TestContainerWithRegistriesFixture:
         )
 
         class FixtureTestPolicy:
+            @property
+            def policy_id(self) -> str:
+                return "fixture_test"
+
+            @property
+            def policy_type(self) -> EnumPolicyType:
+                return EnumPolicyType.REDUCER
+
             def evaluate(self, context: dict[str, object]) -> dict[str, object]:
                 return {"from_fixture": True}
+
+            def decide(self, context: dict[str, object]) -> dict[str, object]:
+                return self.evaluate(context)
 
         policy_registry.register_policy(
             policy_id="fixture_test",

@@ -267,7 +267,7 @@ class TestHandlerConsulInitialization:
             with pytest.raises(InfraConnectionError) as exc_info:
                 await handler.initialize(consul_config)
 
-            assert "no leader" in str(exc_info.value).lower()
+            assert "expected a leader" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
     async def test_config_model_validation(self) -> None:

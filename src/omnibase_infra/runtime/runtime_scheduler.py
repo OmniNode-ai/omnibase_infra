@@ -83,6 +83,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
     ModelTimeoutErrorContext,
+    ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -153,12 +154,18 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             event_bus: EventBusKafka instance for publishing tick events.
 
         Raises:
-            ValueError: If config or event_bus is None.
+            ProtocolConfigurationError: If config or event_bus is None.
         """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="scheduler_init",
+        )
         if config is None:
-            raise ValueError("config cannot be None")
+            raise ProtocolConfigurationError("config cannot be None", context=context)
         if event_bus is None:
-            raise ValueError("event_bus cannot be None")
+            raise ProtocolConfigurationError(
+                "event_bus cannot be None", context=context
+            )
 
         # Store configuration
         self._config = config
@@ -369,6 +376,11 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         Args:
             now: Optional override for current time. If None, uses actual
                 current time (datetime.now(timezone.utc)).
+
+        Raises:
+            InfraUnavailableError: When the circuit breaker is open.
+            InfraTimeoutError: When tick emission to Kafka times out.
+            InfraConnectionError: When tick emission fails due to connection issues.
 
         Concurrency Safety:
             This method is safe for concurrent coroutine calls. State modifications

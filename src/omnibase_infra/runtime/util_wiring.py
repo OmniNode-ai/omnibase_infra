@@ -115,7 +115,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from omnibase_core.types import JsonType
 
@@ -329,10 +328,9 @@ def wire_handlers_from_contract(
         operation: str, target_name: str = "wiring"
     ) -> ModelInfraErrorContext:
         """Create standardized error context for configuration errors."""
-        return ModelInfraErrorContext(
+        return ModelInfraErrorContext.with_correlation(
             operation=operation,
             target_name=target_name,
-            correlation_id=uuid4(),
         )
 
     # Process handler configurations

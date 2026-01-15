@@ -44,6 +44,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     ModelInfraErrorContext,
     ModelTimeoutErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
@@ -682,7 +683,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
             False if no row was found matching the aggregate_id.
 
         Raises:
-            ValueError: If updates dict is empty.
+            ProtocolConfigurationError: If updates dict is empty.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If update times out.
             RuntimeHostError: For other database errors.
@@ -747,8 +748,8 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 context=timeout_ctx,
             ) from e
 
-        except ValueError:
-            # Re-raise ValueError (empty updates) as-is
+        except ProtocolConfigurationError:
+            # Re-raise ProtocolConfigurationError (empty updates) as-is
             raise
 
         except Exception as e:
@@ -795,7 +796,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
             True if a row was inserted or updated successfully.
 
         Raises:
-            ValueError: If values dict is empty or missing required conflict columns.
+            ProtocolConfigurationError: If values dict is empty or missing required conflict columns.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If upsert times out.
             RuntimeHostError: For other database errors.
@@ -859,8 +860,8 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 context=timeout_ctx,
             ) from e
 
-        except ValueError:
-            # Re-raise ValueError (empty values or missing PK) as-is
+        except ProtocolConfigurationError:
+            # Re-raise ProtocolConfigurationError (empty values or missing PK) as-is
             raise
 
         except Exception as e:
@@ -1069,7 +1070,16 @@ class ProjectorShell(MixinProjectorSqlOperations):
             return await self._append(values, correlation_id, event_type)
         else:
             # This should never happen due to contract validation
-            raise ValueError(f"Unknown projection mode: {mode}")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="execute_projection",
+                target_name=f"projector.{self.projector_id}",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                f"Unknown projection mode: {mode}",
+                context=context,
+            )
 
     def __repr__(self) -> str:
         """Return string representation."""

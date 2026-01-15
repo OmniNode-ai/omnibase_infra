@@ -1609,8 +1609,13 @@ class RuntimeHostProcess:
             # Explicit type guard (not assert) for production safety
             # health_check() returns dict per contract
             if not isinstance(event_bus_health, dict):
-                raise TypeError(
-                    f"health_check() must return dict, got {type(event_bus_health).__name__}"
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="health_check",
+                )
+                raise ProtocolConfigurationError(
+                    f"health_check() must return dict, got {type(event_bus_health).__name__}",
+                    context=context,
                 )
             event_bus_healthy = bool(event_bus_health.get("healthy", False))
         except Exception as e:

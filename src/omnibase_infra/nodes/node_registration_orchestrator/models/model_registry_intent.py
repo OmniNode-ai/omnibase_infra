@@ -43,9 +43,12 @@ import threading
 import warnings
 from collections.abc import Callable
 from typing import ClassVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 
 class RegistryIntent:
@@ -101,9 +104,15 @@ class RegistryIntent:
             # Thread-safe registration with atomic check-and-set
             with cls._lock:
                 if kind in cls._types:
-                    raise ValueError(
+                    context = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="register_intent",
+                        correlation_id=uuid4(),
+                    )
+                    raise ProtocolConfigurationError(
                         f"Intent kind '{kind}' already registered to {cls._types[kind].__name__}. "
-                        f"Cannot register {intent_cls.__name__}."
+                        f"Cannot register {intent_cls.__name__}.",
+                        context=context,
                     )
                 cls._types[kind] = intent_cls
             return intent_cls

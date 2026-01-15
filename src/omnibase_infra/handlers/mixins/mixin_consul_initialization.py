@@ -187,7 +187,7 @@ class MixinConsulInitialization:
                     correlation_id=correlation_id,
                 )
                 raise InfraConnectionError(
-                    "Consul cluster has no leader - cluster may be unavailable",
+                    "Consul leader check failed: expected a leader, got empty response",
                     context=ctx,
                 )
         except consul.ConsulException as e:

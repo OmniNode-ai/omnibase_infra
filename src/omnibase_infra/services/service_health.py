@@ -254,7 +254,7 @@ class ServiceHealth:
 
         # Validate that at least one dependency source is provided
         if container is None and runtime is None:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize_health_server",
                 target_name="ServiceHealth",
@@ -362,7 +362,7 @@ class ServiceHealth:
             :meth:`create_from_container`: Factory method that resolves runtime
         """
         if self._runtime is None:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="get_runtime",
                 target_name="ServiceHealth.runtime",
@@ -811,8 +811,14 @@ class ServiceHealth:
             # NOTE: Use explicit if/raise instead of assert - assertions can be
             # disabled with Python's -O flag, which would skip this safety check
             if not isinstance(health_details, dict):
-                raise TypeError(
-                    f"health_check() must return dict, got {type(health_details).__name__}"
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="validate_health_check_response",
+                    target_name="RuntimeHostProcess.health_check",
+                )
+                raise ProtocolConfigurationError(
+                    f"health_check() must return dict, got {type(health_details).__name__}",
+                    context=context,
                 )
 
             # Determine overall status based on health check results

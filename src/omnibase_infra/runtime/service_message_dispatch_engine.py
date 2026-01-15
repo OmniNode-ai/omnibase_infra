@@ -146,7 +146,12 @@ from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumDispatchStatus, EnumMessageCategory
+from omnibase_infra.enums import (
+    EnumDispatchStatus,
+    EnumInfraTransportType,
+    EnumMessageCategory,
+)
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
     ModelDispatchLogContext,
@@ -646,8 +651,13 @@ class MessageDispatchEngine:
             from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
             if not isinstance(node_kind, EnumNodeKind):
-                raise ValueError(
-                    f"node_kind must be EnumNodeKind or None, got {type(node_kind).__name__}"
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="register_dispatcher",
+                )
+                raise ProtocolConfigurationError(
+                    f"node_kind must be EnumNodeKind or None, got {type(node_kind).__name__}",
+                    context=context,
                 )
 
         with self._registration_lock:

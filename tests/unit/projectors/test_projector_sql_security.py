@@ -33,6 +33,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.projectors import (
     ModelProjectorColumn,
     ModelProjectorIndex,
@@ -96,7 +97,7 @@ class TestIdentifierValidation:
     ) -> None:
         """Test that invalid identifiers are rejected ({description})."""
         assert not is_valid_identifier(identifier)
-        with pytest.raises(ValueError, match="Invalid"):
+        with pytest.raises(ProtocolConfigurationError, match="Invalid"):
             validate_identifier(identifier)
 
 
@@ -350,7 +351,7 @@ class TestIndexSqlInjection:
             name="idx_valid",
             columns=["col1"],
         )
-        with pytest.raises(ValueError, match="Invalid table name"):
+        with pytest.raises(ProtocolConfigurationError, match="Invalid table name"):
             index.to_sql_definition("table; DROP TABLE users;--")
 
     def test_to_sql_definition_quotes_all_identifiers(self) -> None:

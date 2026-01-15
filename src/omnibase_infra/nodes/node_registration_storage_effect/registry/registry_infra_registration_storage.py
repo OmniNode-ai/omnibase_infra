@@ -24,6 +24,10 @@ from __future__ import annotations
 __all__ = ["RegistryInfraRegistrationStorage"]
 
 from typing import TYPE_CHECKING, cast
+from uuid import uuid4
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer

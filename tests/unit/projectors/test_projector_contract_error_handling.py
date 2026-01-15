@@ -764,6 +764,7 @@ class TestGracefulModeErrorCollection:
         When: Loader discovers with graceful_mode=True
         Then: Returns result with errors collected, valid contracts loaded
         """
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import ProjectorPluginLoader
 
         # Create one valid and multiple invalid contracts
@@ -795,9 +796,10 @@ behavior:
             tmp_path, CONTRACT_MISSING_AGGREGATE_TYPE, "malformed2_projector.yaml"
         )
 
+        config = ModelProjectorPluginLoaderConfig(graceful_mode=True)
         loader = ProjectorPluginLoader(
+            config=config,
             schema_manager=mock_schema_manager,
-            graceful_mode=True,
         )
 
         result = await loader.discover_with_errors(tmp_path)
@@ -819,15 +821,17 @@ behavior:
         When: Loader discovers with graceful_mode=True
         Then: Error contains remediation hint
         """
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import ProjectorPluginLoader
 
         _write_contract(
             tmp_path, CONTRACT_MALFORMED_YAML_UNCLOSED_QUOTE, "malformed_projector.yaml"
         )
 
+        config = ModelProjectorPluginLoaderConfig(graceful_mode=True)
         loader = ProjectorPluginLoader(
+            config=config,
             schema_manager=mock_schema_manager,
-            graceful_mode=True,
         )
 
         result = await loader.discover_with_errors(tmp_path)

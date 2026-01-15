@@ -61,6 +61,12 @@ from omnibase_infra.models.security import (
     ModelEnvironmentPolicy,
     ModelHandlerSecurityPolicy,
 )
+from omnibase_infra.models.snapshot import (
+    ModelFieldChange,
+    ModelSnapshot,
+    ModelSnapshotDiff,
+    ModelSubjectRef,
+)
 from omnibase_infra.models.validation import (
     ModelCoverageMetrics,
     ModelExecutionShapeRule,
@@ -122,4 +128,9 @@ __all__: list[str] = [
     "ModelSnapshotTopicConfig",
     "ModelTopicParser",
     "ModelValidationOutcome",
+    # Snapshot models
+    "ModelFieldChange",
+    "ModelSnapshot",
+    "ModelSnapshotDiff",
+    "ModelSubjectRef",
 ]

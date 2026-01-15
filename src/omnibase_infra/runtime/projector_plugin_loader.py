@@ -49,6 +49,7 @@ from omnibase_infra.protocols import (
     ProtocolEventProjector,
     ProtocolProjectorSchemaValidator,
 )
+from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
 
 if TYPE_CHECKING:
     from omnibase_core.models.events import ModelEventEnvelope
@@ -220,10 +221,8 @@ class ProjectorPluginLoader:
         >>> print(f"Loaded projector: {projector.projector_id}")
 
         >>> # Graceful mode with error collection
-        >>> loader = ProjectorPluginLoader(
-        ...     schema_manager=schema_mgr,
-        ...     graceful_mode=True,
-        ... )
+        >>> config = ModelProjectorPluginLoaderConfig(graceful_mode=True)
+        >>> loader = ProjectorPluginLoader(config=config, schema_manager=schema_mgr)
         >>> result = await loader.discover_with_errors(Path("./projectors"))
         >>> print(f"Found {result.success_count} projectors")
         >>> print(f"Encountered {result.error_count} errors")
@@ -240,30 +239,26 @@ class ProjectorPluginLoader:
 
     def __init__(
         self,
+        config: ModelProjectorPluginLoaderConfig | None = None,
         container: ModelONEXContainer | None = None,
         schema_manager: ProtocolProjectorSchemaValidator | None = None,
-        graceful_mode: bool = False,
-        base_paths: list[Path] | None = None,
         pool: asyncpg.Pool | None = None,
     ) -> None:
         """Initialize the projector plugin loader.
 
         Args:
+            config: Configuration for the loader. If None, uses default settings.
             container: ONEX container for dependency injection. If provided,
                 can be used to resolve dependencies like schema_manager.
             schema_manager: Schema validator for validating database schemas.
                 If None, schema validation is skipped during loading.
-            graceful_mode: If True, collect errors and continue discovery.
-                If False (default), raise on first error.
-            base_paths: Optional list of base paths for security validation.
-                Symlinks are only allowed if they resolve within these paths.
-                If None, uses the paths provided to discovery methods.
             pool: Optional asyncpg connection pool for database access.
                 If provided, loaded projectors will be full ProjectorShell
                 instances capable of actual projections. If None (default),
                 loaded projectors will be ProjectorShellPlaceholder instances
                 that hold contract metadata but cannot perform projections.
         """
+        self._config = config or ModelProjectorPluginLoaderConfig()
         self._container = container
         self._schema_manager = schema_manager
         if schema_manager is not None:
@@ -277,10 +272,11 @@ class ProjectorPluginLoader:
             logger.debug(
                 "No database pool provided - will create placeholder instances"
             )
-        self._graceful_mode = graceful_mode
+        self._graceful_mode = self._config.graceful_mode
 
         # Security: Validate base_paths don't contain filesystem root
         # to prevent DoS via filesystem-wide glob scanning
+        base_paths = self._config.base_paths
         if base_paths:
             for base_path in base_paths:
                 resolved = base_path.resolve()
