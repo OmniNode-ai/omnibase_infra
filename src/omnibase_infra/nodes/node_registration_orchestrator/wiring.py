@@ -384,6 +384,13 @@ async def wire_registration_handlers(
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
         RuntimeError: If service registration fails.
+
+    Note:
+        Services are registered with scope="global" and may conflict if multiple
+        plugins register the same interface type. This is acceptable for the
+        Registration domain as these handlers are singletons by design. If you
+        need to register multiple implementations of the same interface, use
+        domain-specific interface types or scoped registrations to ensure isolation.
     """
     _validate_service_registry(container, "wire_registration_handlers")
 

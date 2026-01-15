@@ -172,6 +172,7 @@ class PluginRegistration:
         self._projector: ProjectorShell | None = None
         self._consul_handler: HandlerConsul | None = None
         self._introspection_dispatcher: DispatcherNodeIntrospected | None = None
+        self._shutdown_in_progress: bool = False
 
     @property
     def plugin_id(self) -> str:
@@ -260,6 +261,12 @@ class PluginRegistration:
                 min_size=2,
                 max_size=10,
             )
+            # Validate pool creation succeeded - asyncpg.create_pool() can return None
+            # in edge cases (e.g., connection issues during pool warmup)
+            if self._pool is None:
+                raise RuntimeError(
+                    "PostgreSQL pool creation returned None - connection may have failed"
+                )
             resources_created.append("postgres_pool")
             logger.info(
                 "PostgreSQL pool created (correlation_id=%s)",
@@ -788,6 +795,37 @@ class PluginRegistration:
 
         Closes the PostgreSQL pool. Other resources (handlers, dispatchers)
         are managed by the container.
+
+        Thread Safety:
+            Guards against concurrent shutdown calls via _shutdown_in_progress flag.
+            While the kernel's LIFO shutdown prevents double-shutdown at the
+            orchestration level, this guard protects against direct concurrent
+            calls to the plugin's shutdown method.
+
+        Args:
+            config: Plugin configuration.
+
+        Returns:
+            Result indicating cleanup success/failure.
+        """
+        # Guard against concurrent shutdown calls
+        if self._shutdown_in_progress:
+            return ModelDomainPluginResult.skipped(
+                plugin_id=self.plugin_id,
+                reason="Shutdown already in progress",
+            )
+        self._shutdown_in_progress = True
+
+        try:
+            return await self._do_shutdown(config)
+        finally:
+            self._shutdown_in_progress = False
+
+    async def _do_shutdown(
+        self,
+        config: ModelDomainPluginConfig,
+    ) -> ModelDomainPluginResult:
+        """Internal shutdown implementation.
 
         Args:
             config: Plugin configuration.
