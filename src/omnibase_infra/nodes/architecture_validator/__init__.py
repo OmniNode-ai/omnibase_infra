@@ -40,8 +40,8 @@ Example:
     Added NodeArchitectureValidator as part of OMN-1099.
 """
 
-# Canonical severity enum (from enums/ directory)
-from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+# Canonical severity enum
+from omnibase_infra.enums import EnumValidationSeverity
 
 # Models
 from omnibase_infra.nodes.architecture_validator.models import (

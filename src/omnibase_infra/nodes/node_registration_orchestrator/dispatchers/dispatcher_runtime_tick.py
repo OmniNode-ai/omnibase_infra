@@ -73,7 +73,11 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumMessageCategory,
 )
-from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.errors import (
+    EnvelopeValidationError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
@@ -242,9 +246,15 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             # Explicit type guard (not assert) for production safety
             # Type narrowing after isinstance/model_validate above
             if not isinstance(payload, ModelRuntimeTick):
-                raise TypeError(
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="handle_runtime_tick",
+                    correlation_id=correlation_id,
+                )
+                raise EnvelopeValidationError(
                     f"Expected ModelRuntimeTick after validation, "
-                    f"got {type(payload).__name__}"
+                    f"got {type(payload).__name__}",
+                    context=context,
                 )
 
             # Get current time for handler

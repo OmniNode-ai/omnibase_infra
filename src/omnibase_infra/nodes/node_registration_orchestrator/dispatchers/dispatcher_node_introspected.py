@@ -72,7 +72,11 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumMessageCategory,
 )
-from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.errors import (
+    EnvelopeValidationError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.registration.model_node_introspection_event import (
@@ -243,9 +247,15 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # Explicit type guard (not assert) for production safety
             # Type narrowing after isinstance/model_validate above
             if not isinstance(payload, ModelNodeIntrospectionEvent):
-                raise TypeError(
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="handle_introspection",
+                    correlation_id=correlation_id,
+                )
+                raise EnvelopeValidationError(
                     f"Expected ModelNodeIntrospectionEvent after validation, "
-                    f"got {type(payload).__name__}"
+                    f"got {type(payload).__name__}",
+                    context=context,
                 )
 
             # Get current time for handler

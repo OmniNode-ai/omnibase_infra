@@ -29,6 +29,9 @@ import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, ClassVar, TypeVar
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 if TYPE_CHECKING:
     from omnibase_infra.handlers.models.consul.model_payload_consul import (
         ModelPayloadConsul,
@@ -100,18 +103,28 @@ class RegistryPayloadConsul:
             )
 
             if not issubclass(payload_cls, ModelPayloadConsul):
-                raise TypeError(
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="register_payload_type",
+                )
+                raise ProtocolConfigurationError(
                     f"Registered class {payload_cls.__name__!r} must be a subclass "
-                    f"of ModelPayloadConsul, got {payload_cls.__mro__}"
+                    f"of ModelPayloadConsul, got {payload_cls.__mro__}",
+                    context=context,
                 )
 
             # Thread-safe registration with atomic check-and-set
             with cls._lock:
                 if operation_type in cls._types:
-                    raise ValueError(
+                    context = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.CONSUL,
+                        operation="register_payload_type",
+                    )
+                    raise ProtocolConfigurationError(
                         f"Consul payload operation_type '{operation_type}' already registered "
                         f"to {cls._types[operation_type].__name__}. "
-                        f"Cannot register {payload_cls.__name__}."
+                        f"Cannot register {payload_cls.__name__}.",
+                        context=context,
                     )
                 cls._types[operation_type] = payload_cls
             return payload_cls

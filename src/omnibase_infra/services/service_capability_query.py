@@ -760,12 +760,6 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
 
         # No matches found
         if not candidates:
-            # TODO: Implement fallback_module support here when needed.
-            # If dependency_spec.fallback_module is set, could use:
-            #   module = importlib.import_module(fallback_module_path)
-            #   adapter_class = getattr(module, class_name)
-            #   return adapter_class(...)
-            # See ModelDependencySpec.fallback_module for details.
             logger.debug(
                 "No candidates found for dependency",
                 extra={

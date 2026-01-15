@@ -39,6 +39,7 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ModelConsulIntentPayload,
     ModelConsulRegistrationIntent,
@@ -228,7 +229,7 @@ class TestRegistryIntent:
                 RegistryIntent._types[kind] = cls
 
     def test_register_duplicate_kind_raises_valueerror(self) -> None:
-        """Registering the same kind twice raises ValueError.
+        """Registering the same kind twice raises ProtocolConfigurationError.
 
         This prevents accidental overwrites of existing intent types.
         """
@@ -244,7 +245,7 @@ class TestRegistryIntent:
                 kind: Literal["duplicate_test"] = "duplicate_test"
 
             # Second registration with same kind should fail
-            with pytest.raises(ValueError) as exc_info:
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
 
                 @RegistryIntent.register("duplicate_test")
                 class SecondIntent(ModelRegistryIntent):
@@ -1214,7 +1215,7 @@ class TestUnionRegistrySync:
             # Get the kind from the class default
             kind_default = getattr(union_type, "model_fields", {}).get("kind")
             assert kind_default is not None, (
-                f"{union_type.__name__} has no 'kind' field"
+                f"Invalid union type '{union_type.__name__}': expected 'kind' field, got None"
             )
 
             kind_value = kind_default.default

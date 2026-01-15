@@ -644,33 +644,53 @@ async def bootstrap() -> int:
 
             # Initialize plugin resources
             init_result = await plugin.initialize(plugin_config)
-            if not init_result:
+            # Use explicit None check for type narrowing - init_result may be
+            # a failed result (success=False) which is falsy but still has valid
+            # error_message. We only use "unknown" when init_result is None.
+            if init_result is None or not init_result.success:
+                error_msg = (
+                    init_result.error_message if init_result is not None else "unknown"
+                )
                 logger.warning(
                     "Plugin %s initialization failed: %s (correlation_id=%s)",
                     plugin.plugin_id,
-                    init_result.error_message,
+                    error_msg,
                     correlation_id,
                 )
                 continue
 
             # Wire handlers
             wire_result = await plugin.wire_handlers(plugin_config)
-            if not wire_result:
+            # Use explicit None check for type narrowing - wire_result may be
+            # a failed result (success=False) which is falsy but still has valid
+            # error_message. We only use "unknown" when wire_result is None.
+            if wire_result is None or not wire_result.success:
+                error_msg = (
+                    wire_result.error_message if wire_result is not None else "unknown"
+                )
                 logger.warning(
                     "Plugin %s handler wiring failed: %s (correlation_id=%s)",
                     plugin.plugin_id,
-                    wire_result.error_message,
+                    error_msg,
                     correlation_id,
                 )
                 # Continue with partial activation - handlers failed but resources exist
 
             # Wire dispatchers
             dispatcher_result = await plugin.wire_dispatchers(plugin_config)
-            if not dispatcher_result:
+            # Use explicit None check for type narrowing - dispatcher_result may be
+            # a failed result (success=False) which is falsy but still has valid
+            # error_message. We only use "unknown" when dispatcher_result is None.
+            if dispatcher_result is None or not dispatcher_result.success:
+                error_msg = (
+                    dispatcher_result.error_message
+                    if dispatcher_result is not None
+                    else "unknown"
+                )
                 logger.warning(
                     "Plugin %s dispatcher wiring failed: %s (correlation_id=%s)",
                     plugin.plugin_id,
-                    dispatcher_result.error_message,
+                    error_msg,
                     correlation_id,
                 )
                 # Continue - dispatcher wiring is optional
@@ -1062,7 +1082,13 @@ async def bootstrap() -> int:
         # - If a plugin needs to release shared resources, it must handle graceful
         #   degradation in case those resources are already released by another plugin
         # - Shutdown errors are logged but do not block other plugins from shutting down
-        for plugin in reversed(activated_plugins):
+        #
+        # DOUBLE-SHUTDOWN PREVENTION:
+        # We use while/pop() instead of for-loop to remove plugins as they're processed.
+        # This ensures that if an exception occurs mid-shutdown, the finally block
+        # will only see unprocessed plugins, preventing double-shutdown attempts.
+        while activated_plugins:
+            plugin = activated_plugins.pop()  # LIFO order - removes as processed
             try:
                 shutdown_result = await plugin.shutdown(plugin_config)
                 if shutdown_result:
@@ -1093,7 +1119,6 @@ async def bootstrap() -> int:
                     sanitize_error_message(plugin_shutdown_error),
                     correlation_id,
                 )
-        activated_plugins.clear()
 
         shutdown_duration = time.time() - shutdown_start_time
         logger.info(
@@ -1184,6 +1209,8 @@ async def bootstrap() -> int:
         # Shutdown plugins (close pools, connections, etc.)
         # Use empty config for cleanup - plugins should handle gracefully
         # Only create cleanup config if there are plugins to clean up
+        # NOTE: Uses while/pop() for consistency with normal shutdown and to
+        # ensure idempotent cleanup (each plugin removed as it's processed).
         if activated_plugins:
             cleanup_config = ModelDomainPluginConfig(
                 container=ModelONEXContainer(),  # Minimal container for cleanup
@@ -1193,7 +1220,8 @@ async def bootstrap() -> int:
                 output_topic="",
                 consumer_group="",
             )
-            for plugin in reversed(activated_plugins):
+            while activated_plugins:
+                plugin = activated_plugins.pop()  # LIFO order - removes as processed
                 try:
                     await plugin.shutdown(cleanup_config)
                 except Exception as cleanup_error:

@@ -209,7 +209,8 @@ from uuid import UUID, uuid4
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.enums import EnumIntrospectionReason
+from omnibase_infra.enums import EnumInfraTransportType, EnumIntrospectionReason
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.discovery import (
     ModelDiscoveredCapabilities,
     ModelIntrospectionConfig,
@@ -616,8 +617,16 @@ class MixinNodeIntrospection:
             self._introspection_node_type = EnumNodeKind(config.node_type.lower())
         else:
             # Should never happen with proper ModelIntrospectionConfig, but handle gracefully
-            raise TypeError(
-                f"node_type must be EnumNodeKind or str, got {type(config.node_type).__name__}"
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="initialize_introspection",
+                target_name=str(config.node_id),
+            )
+            raise ProtocolConfigurationError(
+                f"node_type must be EnumNodeKind or str, got {type(config.node_type).__name__}",
+                context=context,
+                parameter="node_type",
+                actual_type=type(config.node_type).__name__,
             )
         self._introspection_event_bus = config.event_bus
         self._introspection_version = config.version
@@ -1432,8 +1441,16 @@ class MixinNodeIntrospection:
                 )
                 reason_enum = EnumIntrospectionReason.HEARTBEAT
         else:
-            raise TypeError(
-                f"reason must be str or EnumIntrospectionReason, got {type(reason).__name__}"
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="publish_introspection",
+                target_name=str(self._introspection_node_id),
+            )
+            raise ProtocolConfigurationError(
+                f"reason must be str or EnumIntrospectionReason, got {type(reason).__name__}",
+                context=context,
+                parameter="reason",
+                actual_type=type(reason).__name__,
             )
 
         if self._introspection_event_bus is None:

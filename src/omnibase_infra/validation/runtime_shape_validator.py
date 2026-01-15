@@ -154,18 +154,20 @@ import functools
 import inspect
 from collections.abc import Callable
 from typing import TypeVar, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
 
 from omnibase_infra.enums import (
     EnumExecutionShapeViolation,
+    EnumInfraTransportType,
     EnumMessageCategory,
     EnumNodeArchetype,
     EnumNodeOutputType,
     EnumValidationSeverity,
 )
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
 )
@@ -331,11 +333,27 @@ def _to_node_output_type(
         if category in _MESSAGE_CATEGORY_TO_NODE_OUTPUT:
             return _MESSAGE_CATEGORY_TO_NODE_OUTPUT[category]
         # This should never happen with valid EnumMessageCategory values
-        raise ValueError(f"Cannot convert {category} to EnumNodeOutputType")
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="to_node_output_type",
+            correlation_id=uuid4(),
+        )
+        raise ProtocolConfigurationError(
+            f"Cannot convert {category} to EnumNodeOutputType",
+            context=context,
+            category=str(category),
+        )
 
     # Type safety fallback (should not be reached with proper typing)
-    raise TypeError(
-        f"Expected EnumMessageCategory or EnumNodeOutputType, got {type(category)}"
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="to_node_output_type",
+        correlation_id=uuid4(),
+    )
+    raise ProtocolConfigurationError(
+        f"Expected EnumMessageCategory or EnumNodeOutputType, got {type(category)}",
+        context=context,
+        actual_type=type(category).__name__,
     )
 
 

@@ -50,12 +50,6 @@ class ProtocolProjectorSchemaValidator(Protocol):
         """
         ...
 
-    # TODO(OMN-multi-schema): Extend to support configurable schema names beyond 'public'.
-    # Requirements for multi-schema support:
-    # 1. Add schema_name field to ModelProjectorSchema
-    # 2. Update validation to check schema exists
-    # 3. Handle schema-qualified table names (schema.table)
-    # 4. Consider PostgreSQL search_path implications
     async def table_exists(
         self,
         table_name: str,
@@ -78,13 +72,7 @@ class ProtocolProjectorSchemaValidator(Protocol):
             InfraTimeoutError: If query times out.
 
         Note:
-            Currently defaults to 'public' schema. Multi-schema support is planned
-            for future implementation. When implementing multi-schema support:
-
-            - Add schema_name to ModelProjectorSchema
-            - Support schema prefixes in table names (e.g., "analytics.projections")
-            - Consider cross-schema dependencies and permissions
-            - See OMN-multi-schema TODO for tracking
+            Currently defaults to 'public' schema.
         """
         ...
 

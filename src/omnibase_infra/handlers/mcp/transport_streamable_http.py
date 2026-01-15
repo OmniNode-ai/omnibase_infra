@@ -37,6 +37,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
 
 if TYPE_CHECKING:
@@ -184,7 +186,14 @@ class TransportMCPStreamableHttp:
         from mcp.server.fastmcp import FastMCP
 
         if not isinstance(mcp, FastMCP):
-            raise TypeError(f"Expected FastMCP instance, got {type(mcp).__name__}")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.MCP,
+                operation="register_tool",
+            )
+            raise ProtocolConfigurationError(
+                f"Expected FastMCP instance, got {type(mcp).__name__}",
+                context=context,
+            )
 
         tool_name = tool_def.name
 

@@ -122,7 +122,9 @@ def validate_union_registry_sync() -> tuple[bool, list[str]]:
         # Get the kind from the class default
         kind_default = getattr(union_type, "model_fields", {}).get("kind")
         if kind_default is None:
-            errors.append(f"Union type {union_type.__name__} has no 'kind' field")
+            errors.append(
+                f"Invalid union type '{union_type.__name__}': expected 'kind' field, got None"
+            )
             continue
 
         # Get the default value from the field

@@ -514,15 +514,17 @@ class TestRuntimeSchedulerLifecycle:
         assert scheduler.current_sequence_number == 0
 
     async def test_scheduler_requires_config(self, mock_event_bus: AsyncMock) -> None:
-        """Test scheduler raises ValueError if config is None."""
-        with pytest.raises(ValueError, match="config cannot be None"):
+        """Test scheduler raises ProtocolConfigurationError if config is None."""
+        with pytest.raises(ProtocolConfigurationError, match="config cannot be None"):
             RuntimeScheduler(config=None, event_bus=mock_event_bus)  # type: ignore[arg-type]
 
     async def test_scheduler_requires_event_bus(
         self, scheduler_config: ModelRuntimeSchedulerConfig
     ) -> None:
-        """Test scheduler raises ValueError if event_bus is None."""
-        with pytest.raises(ValueError, match="event_bus cannot be None"):
+        """Test scheduler raises ProtocolConfigurationError if event_bus is None."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="event_bus cannot be None"
+        ):
             RuntimeScheduler(config=scheduler_config, event_bus=None)  # type: ignore[arg-type]
 
     async def test_scheduler_start_stop_cycle(
