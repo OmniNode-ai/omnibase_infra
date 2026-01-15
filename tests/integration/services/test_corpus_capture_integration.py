@@ -10,6 +10,8 @@ Tests the full pipeline integration: ManifestGenerator callback -> ServiceCorpus
     Added for OMN-1203
 """
 
+import inspect
+
 import pytest
 from omnibase_core.enums.enum_execution_status import EnumExecutionStatus
 from omnibase_core.enums.enum_handler_execution_phase import EnumHandlerExecutionPhase
@@ -27,6 +29,15 @@ from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.models.corpus.model_capture_config import ModelCaptureConfig
 from omnibase_infra.services.service_corpus_capture import ServiceCorpusCapture
+
+# Check if ManifestGenerator supports callbacks (feature not yet released to PyPI)
+_sig = inspect.signature(ManifestGenerator.__init__)
+_has_callback_support = "on_manifest_built" in _sig.parameters
+
+pytestmark = pytest.mark.skipif(
+    not _has_callback_support,
+    reason="Requires omnibase_core with on_manifest_built callback support (not yet released)",
+)
 
 
 class TestManifestGeneratorIntegration:

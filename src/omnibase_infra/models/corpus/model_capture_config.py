@@ -8,6 +8,7 @@ Capture configuration model for corpus capture service.
     Added for ServiceCorpusCapture (OMN-1203)
 """
 
+from collections.abc import Sequence
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -33,7 +34,7 @@ class ModelCaptureConfig(BaseModel):
         Added for ServiceCorpusCapture (OMN-1203)
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     corpus_display_name: str = Field(
         ...,
@@ -91,10 +92,8 @@ class ModelCaptureConfig(BaseModel):
 
     @field_validator("handler_filter", mode="before")
     @classmethod
-    def _convert_list_to_tuple(
-        cls, v: list[str] | tuple[str, ...] | None
-    ) -> tuple[str, ...] | None:
-        """Convert list to tuple for immutability."""
+    def _convert_list_to_tuple(cls, v: Sequence[str] | None) -> tuple[str, ...] | None:
+        """Convert sequence to tuple for immutability."""
         if v is None:
             return None
         return tuple(v)

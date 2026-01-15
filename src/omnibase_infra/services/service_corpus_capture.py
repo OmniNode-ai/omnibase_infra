@@ -272,7 +272,8 @@ class ServiceCorpusCapture:
     @property
     def state(self) -> EnumCaptureState:
         """Get the current capture state."""
-        return self._state_machine.state
+        with self._sync_lock:
+            return self._state_machine.state
 
     def create_corpus(self, config: ModelCaptureConfig) -> ModelExecutionCorpus:
         """
@@ -308,7 +309,8 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If not in READY state.
         """
-        self._state_machine.transition_to(EnumCaptureState.CAPTURING)
+        with self._sync_lock:
+            self._state_machine.transition_to(EnumCaptureState.CAPTURING)
 
     def pause_capture(self) -> None:
         """
@@ -317,7 +319,8 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If not in CAPTURING state.
         """
-        self._state_machine.transition_to(EnumCaptureState.PAUSED)
+        with self._sync_lock:
+            self._state_machine.transition_to(EnumCaptureState.PAUSED)
 
     def resume_capture(self) -> None:
         """
@@ -326,7 +329,8 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If not in PAUSED state.
         """
-        self._state_machine.transition_to(EnumCaptureState.CAPTURING)
+        with self._sync_lock:
+            self._state_machine.transition_to(EnumCaptureState.CAPTURING)
 
     def close_corpus(self) -> ModelExecutionCorpus:
         """
@@ -636,9 +640,10 @@ class ServiceCorpusCapture:
             Dict with capture_count, capture_missed_count, capture_timeout_count,
             and corpus_size.
         """
-        return {
-            "capture_count": self._capture_count,
-            "capture_missed_count": self._capture_missed_count,
-            "capture_timeout_count": self._capture_timeout_count,
-            "corpus_size": self._corpus.execution_count if self._corpus else 0,
-        }
+        with self._sync_lock:
+            return {
+                "capture_count": self._capture_count,
+                "capture_missed_count": self._capture_missed_count,
+                "capture_timeout_count": self._capture_timeout_count,
+                "corpus_size": self._corpus.execution_count if self._corpus else 0,
+            }
