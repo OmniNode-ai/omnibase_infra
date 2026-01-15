@@ -8,11 +8,11 @@ used by the HandlerDb.
 
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumResponseStatus
 from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPayload
 
 
@@ -29,13 +29,14 @@ class ModelDbQueryResponse(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from omnibase_infra.enums import EnumResponseStatus
         >>> response = ModelDbQueryResponse(
-        ...     status="success",
+        ...     status=EnumResponseStatus.SUCCESS,
         ...     payload=ModelDbQueryPayload(rows=[], row_count=0),
         ...     correlation_id=uuid4(),
         ... )
         >>> print(response.status)
-        'success'
+        <EnumResponseStatus.SUCCESS: 'success'>
     """
 
     model_config = ConfigDict(
@@ -45,7 +46,7 @@ class ModelDbQueryResponse(BaseModel):
         from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    status: Literal["success", "error"] = Field(
+    status: EnumResponseStatus = Field(
         description="Operation status indicator",
     )
     payload: ModelDbQueryPayload = Field(

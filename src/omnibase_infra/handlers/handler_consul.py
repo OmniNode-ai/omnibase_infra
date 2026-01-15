@@ -38,6 +38,7 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
+    EnumResponseStatus,
 )
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -430,7 +431,7 @@ class HandlerConsul(
             ModelHandlerOutput wrapping ModelConsulHandlerResponse.
         """
         response = ModelConsulHandlerResponse(
-            status="success",
+            status=EnumResponseStatus.SUCCESS,
             payload=ModelConsulHandlerPayload(data=typed_payload),
             correlation_id=correlation_id,
         )

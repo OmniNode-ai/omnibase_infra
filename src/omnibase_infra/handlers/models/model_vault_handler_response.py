@@ -12,11 +12,11 @@ Pydantic models with consistent interfaces (status, payload, correlation_id).
 
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumResponseStatus
 from omnibase_infra.handlers.models.vault import (
     ModelVaultHandlerPayload,
 )
@@ -38,12 +38,13 @@ class ModelVaultHandlerResponse(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from omnibase_infra.enums import EnumResponseStatus
         >>> from omnibase_infra.handlers.models.vault import (
         ...     ModelVaultSecretPayload,
         ...     ModelVaultHandlerPayload,
         ... )
         >>> response = ModelVaultHandlerResponse(
-        ...     status="success",
+        ...     status=EnumResponseStatus.SUCCESS,
         ...     payload=ModelVaultHandlerPayload(
         ...         data=ModelVaultSecretPayload(
         ...             data={"username": "admin"},
@@ -53,7 +54,7 @@ class ModelVaultHandlerResponse(BaseModel):
         ...     correlation_id=uuid4(),
         ... )
         >>> print(response.status)
-        'success'
+        <EnumResponseStatus.SUCCESS: 'success'>
         >>> print(response.payload.data.operation_type)
         <EnumVaultOperationType.READ_SECRET: 'read_secret'>
     """
@@ -65,7 +66,7 @@ class ModelVaultHandlerResponse(BaseModel):
         from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    status: Literal["success", "error"] = Field(
+    status: EnumResponseStatus = Field(
         description="Operation status indicator",
     )
     payload: ModelVaultHandlerPayload = Field(
@@ -80,18 +81,18 @@ class ModelVaultHandlerResponse(BaseModel):
         """Check if the response indicates a successful operation.
 
         Returns:
-            True if status is "success", False otherwise.
+            True if status is SUCCESS, False otherwise.
         """
-        return self.status == "success"
+        return self.status == EnumResponseStatus.SUCCESS
 
     @property
     def is_error(self) -> bool:
         """Check if the response indicates an error.
 
         Returns:
-            True if status is "error", False otherwise.
+            True if status is ERROR, False otherwise.
         """
-        return self.status == "error"
+        return self.status == EnumResponseStatus.ERROR
 
 
 __all__: list[str] = ["ModelVaultHandlerResponse"]

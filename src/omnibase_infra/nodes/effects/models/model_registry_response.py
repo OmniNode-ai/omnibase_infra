@@ -9,16 +9,16 @@ Architecture:
     ModelRegistryResponse captures the outcome of registering a node in both
     Consul and PostgreSQL backends, with support for partial failure scenarios:
 
-    - status="success": Both backends succeeded
-    - status="partial": One backend succeeded, one failed
-    - status="failed": Both backends failed
+    - status=EnumRegistryResponseStatus.SUCCESS: Both backends succeeded
+    - status=EnumRegistryResponseStatus.PARTIAL: One backend succeeded, one failed
+    - status=EnumRegistryResponseStatus.FAILED: Both backends failed
 
     Each backend's individual result is captured in consul_result and
     postgres_result fields, enabling targeted retry strategies.
 
 Partial Failure Handling:
     When one backend fails but the other succeeds:
-    1. Status is set to "partial"
+    1. Status is set to EnumRegistryResponseStatus.PARTIAL
     2. The successful backend's result shows success=True
     3. The failed backend's result shows success=False with error details
     4. Retry logic can target only the failed backend
@@ -36,17 +36,14 @@ Related:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumRegistryResponseStatus
 from omnibase_infra.nodes.effects.models.model_backend_result import (
     ModelBackendResult,
 )
-
-# Type alias for response status
-RegistryResponseStatus = Literal["success", "partial", "failed"]
 
 
 class ModelRegistryResponse(BaseModel):
@@ -56,9 +53,9 @@ class ModelRegistryResponse(BaseModel):
     and PostgreSQL backends, with individual results for each backend.
 
     Status Semantics:
-        - "success": Both consul_result.success AND postgres_result.success are True
-        - "partial": Exactly one of consul_result.success or postgres_result.success is True
-        - "failed": Both consul_result.success AND postgres_result.success are False
+        - SUCCESS: Both consul_result.success AND postgres_result.success are True
+        - PARTIAL: Exactly one of consul_result.success or postgres_result.success is True
+        - FAILED: Both consul_result.success AND postgres_result.success are False
 
     Immutability:
         This model uses frozen=True to ensure responses are immutable
@@ -76,8 +73,9 @@ class ModelRegistryResponse(BaseModel):
 
     Example (success):
         >>> from uuid import uuid4
+        >>> from omnibase_infra.enums import EnumRegistryResponseStatus
         >>> response = ModelRegistryResponse(
-        ...     status="success",
+        ...     status=EnumRegistryResponseStatus.SUCCESS,
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     consul_result=ModelBackendResult(
@@ -88,12 +86,12 @@ class ModelRegistryResponse(BaseModel):
         ...     ),
         ...     processing_time_ms=75.0,
         ... )
-        >>> response.status
-        'success'
+        >>> response.status == EnumRegistryResponseStatus.SUCCESS
+        True
 
     Example (partial failure):
         >>> response = ModelRegistryResponse(
-        ...     status="partial",
+        ...     status=EnumRegistryResponseStatus.PARTIAL,
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     consul_result=ModelBackendResult(
@@ -108,8 +106,8 @@ class ModelRegistryResponse(BaseModel):
         ...     processing_time_ms=5045.0,
         ...     error_summary="PostgreSQL: Connection refused",
         ... )
-        >>> response.status
-        'partial'
+        >>> response.status == EnumRegistryResponseStatus.PARTIAL
+        True
         >>> response.consul_result.success
         True
         >>> response.postgres_result.success
@@ -118,7 +116,7 @@ class ModelRegistryResponse(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    status: RegistryResponseStatus = Field(
+    status: EnumRegistryResponseStatus = Field(
         ...,
         description="Overall status: success, partial, or failed",
     )
@@ -165,9 +163,9 @@ class ModelRegistryResponse(BaseModel):
         """Create a response from individual backend results.
 
         Automatically determines the status based on backend success flags:
-        - Both success -> "success"
-        - One success, one failure -> "partial"
-        - Both failure -> "failed"
+        - Both success -> SUCCESS
+        - One success, one failure -> PARTIAL
+        - Both failure -> FAILED
 
         Processing time is calculated from the sum of backend durations.
 
@@ -183,11 +181,11 @@ class ModelRegistryResponse(BaseModel):
         """
         # Determine status based on backend results
         if consul_result.success and postgres_result.success:
-            status: RegistryResponseStatus = "success"
+            status = EnumRegistryResponseStatus.SUCCESS
         elif consul_result.success or postgres_result.success:
-            status = "partial"
+            status = EnumRegistryResponseStatus.PARTIAL
         else:
-            status = "failed"
+            status = EnumRegistryResponseStatus.FAILED
 
         # Calculate processing time from backend durations
         processing_time_ms = consul_result.duration_ms + postgres_result.duration_ms
@@ -215,25 +213,25 @@ class ModelRegistryResponse(BaseModel):
         """Check if both backends succeeded.
 
         Returns:
-            True if status is "success", False otherwise.
+            True if status is SUCCESS, False otherwise.
         """
-        return self.status == "success"
+        return self.status == EnumRegistryResponseStatus.SUCCESS
 
     def is_partial_failure(self) -> bool:
         """Check if exactly one backend failed.
 
         Returns:
-            True if status is "partial", False otherwise.
+            True if status is PARTIAL, False otherwise.
         """
-        return self.status == "partial"
+        return self.status == EnumRegistryResponseStatus.PARTIAL
 
     def is_complete_failure(self) -> bool:
         """Check if both backends failed.
 
         Returns:
-            True if status is "failed", False otherwise.
+            True if status is FAILED, False otherwise.
         """
-        return self.status == "failed"
+        return self.status == EnumRegistryResponseStatus.FAILED
 
     def get_failed_backends(self) -> list[str]:
         """Get list of backends that failed.
@@ -262,4 +260,4 @@ class ModelRegistryResponse(BaseModel):
         return succeeded
 
 
-__all__ = ["ModelRegistryResponse", "RegistryResponseStatus"]
+__all__ = ["ModelRegistryResponse"]

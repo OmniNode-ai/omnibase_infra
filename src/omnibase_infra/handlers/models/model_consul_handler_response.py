@@ -12,11 +12,11 @@ interfaces (status, payload, correlation_id).
 
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumResponseStatus
 from omnibase_infra.handlers.models.consul import (
     ModelConsulHandlerPayload,
 )
@@ -38,9 +38,10 @@ class ModelConsulHandlerResponse(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from omnibase_infra.enums import EnumResponseStatus
         >>> from omnibase_infra.handlers.models.consul import ModelConsulRegisterPayload
         >>> response = ModelConsulHandlerResponse(
-        ...     status="success",
+        ...     status=EnumResponseStatus.SUCCESS,
         ...     payload=ModelConsulHandlerPayload(
         ...         data=ModelConsulRegisterPayload(
         ...             registered=True,
@@ -51,7 +52,7 @@ class ModelConsulHandlerResponse(BaseModel):
         ...     correlation_id=uuid4(),
         ... )
         >>> print(response.status)
-        'success'
+        <EnumResponseStatus.SUCCESS: 'success'>
         >>> print(response.payload.data.operation_type)
         'register'
     """
@@ -63,7 +64,7 @@ class ModelConsulHandlerResponse(BaseModel):
         from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    status: Literal["success", "error"] = Field(
+    status: EnumResponseStatus = Field(
         description="Operation status indicator",
     )
     payload: ModelConsulHandlerPayload = Field(

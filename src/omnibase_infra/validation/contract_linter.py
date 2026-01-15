@@ -68,6 +68,7 @@ from uuid import UUID, uuid4
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumValidationSeverity
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 
@@ -255,10 +256,10 @@ def convert_violation_to_handler_error(
     rule_id = _map_violation_to_rule_id(violation)
 
     # Map severity
-    severity: Literal["error", "warning"] = (
-        "error"
+    severity = (
+        EnumValidationSeverity.ERROR
         if violation.severity == EnumContractViolationSeverity.ERROR
-        else "warning"
+        else EnumValidationSeverity.WARNING
     )
 
     # Use suggestion as remediation hint, or provide default

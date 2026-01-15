@@ -25,7 +25,7 @@ from textwrap import dedent
 
 import pytest
 
-from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
+from omnibase_infra.enums import EnumAnyTypeViolation, EnumValidationSeverity
 from omnibase_infra.models.validation.model_any_type_violation import (
     ModelAnyTypeViolation,
 )
@@ -1018,7 +1018,7 @@ class TestModelAnyTypeValidationResultFactoryMethod:
                 violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
                 code_snippet="def test(data: Any)",
                 suggestion="Replace Any with specific type",
-                severity="error",
+                severity=EnumValidationSeverity.ERROR,
                 context_name="test",
             ),
             ModelAnyTypeViolation(
@@ -1028,7 +1028,7 @@ class TestModelAnyTypeValidationResultFactoryMethod:
                 violation_type=EnumAnyTypeViolation.RETURN_TYPE,
                 code_snippet="def test() -> Any:",
                 suggestion="Replace Any with specific type",
-                severity="error",
+                severity=EnumValidationSeverity.ERROR,
                 context_name="test",
             ),
         ]
@@ -1051,7 +1051,7 @@ class TestModelAnyTypeValidationResultFactoryMethod:
                 violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
                 code_snippet="def test(data: Any)",
                 suggestion="Replace Any with specific type",
-                severity="warning",
+                severity=EnumValidationSeverity.WARNING,
                 context_name="test",
             )
         ]
@@ -1083,7 +1083,7 @@ class TestModelAnyTypeValidationResultFormatting:
                 violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
                 code_snippet="def test(data: Any)",
                 suggestion="Replace Any with specific type",
-                severity="error",
+                severity=EnumValidationSeverity.ERROR,
                 context_name="test",
             )
         ]
@@ -1116,7 +1116,7 @@ class TestModelAnyTypeValidationResultFormatting:
                 violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
                 code_snippet="def test(data: Any)",
                 suggestion="Replace Any with specific type",
-                severity="error",
+                severity=EnumValidationSeverity.ERROR,
                 context_name="test",
             )
         ]
@@ -1370,7 +1370,7 @@ class TestModelAnyTypeViolation:
             violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
             code_snippet="def test(data: Any)",
             suggestion="Replace Any",
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
 
         assert violation.is_blocking() is True
@@ -1384,7 +1384,7 @@ class TestModelAnyTypeViolation:
             violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
             code_snippet="def test(data: Any)",
             suggestion="Replace Any",
-            severity="warning",
+            severity=EnumValidationSeverity.WARNING,
         )
 
         assert violation.is_blocking() is False
@@ -1398,7 +1398,7 @@ class TestModelAnyTypeViolation:
             violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
             code_snippet="def test(data: Any)",
             suggestion="Replace Any",
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
         )
         output = violation.format_for_ci()
 
@@ -1417,7 +1417,7 @@ class TestModelAnyTypeViolation:
             violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
             code_snippet="def test(data: Any)",
             suggestion="Replace Any",
-            severity="warning",
+            severity=EnumValidationSeverity.WARNING,
         )
         output = violation.format_for_ci()
 
@@ -1432,7 +1432,7 @@ class TestModelAnyTypeViolation:
             violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
             code_snippet="def test(data: Any)",
             suggestion="Replace Any with specific type",
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
             context_name="test",
         )
         output = violation.format_human_readable()
@@ -1452,7 +1452,7 @@ class TestModelAnyTypeViolation:
             violation_type=EnumAnyTypeViolation.FUNCTION_PARAMETER,
             code_snippet="def test(data: Any)",
             suggestion="Replace Any",
-            severity="error",
+            severity=EnumValidationSeverity.ERROR,
             context_name="",
         )
         output = violation.format_human_readable()

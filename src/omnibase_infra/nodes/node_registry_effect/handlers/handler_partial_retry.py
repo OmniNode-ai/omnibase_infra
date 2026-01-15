@@ -38,9 +38,10 @@ Related Tickets:
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
+from omnibase_infra.enums import EnumBackendType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -81,7 +82,7 @@ class ProtocolPartialRetryRequest(Protocol):
     node_id: UUID
     node_type: EnumNodeKind
     node_version: str
-    target_backend: Literal["consul", "postgres"]
+    target_backend: EnumBackendType
     idempotency_key: str | None
     service_name: str | None
     tags: list[str]
@@ -179,11 +180,11 @@ class HandlerPartialRetry:
             handling in dual-backend registration scenarios.
         """
         start_time = time.perf_counter()
-        target_backend = request.target_backend.lower()
+        target_backend = request.target_backend
 
-        if target_backend == "consul":
+        if target_backend == EnumBackendType.CONSUL:
             return await self._retry_consul(request, correlation_id, start_time)
-        elif target_backend == "postgres":
+        elif target_backend == EnumBackendType.POSTGRES:
             return await self._retry_postgres(request, correlation_id, start_time)
         else:
             # Unknown backend - return error result
@@ -197,7 +198,9 @@ class HandlerPartialRetry:
                 error=error_msg,
                 error_code="INVALID_TARGET_BACKEND",
                 duration_ms=duration_ms,
-                backend_id=target_backend,
+                backend_id=target_backend.value
+                if isinstance(target_backend, EnumBackendType)
+                else str(target_backend),
                 correlation_id=correlation_id,
             )
 

@@ -48,7 +48,7 @@ import ast
 import logging
 from pathlib import Path
 
-from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
+from omnibase_infra.enums import EnumAnyTypeViolation, EnumValidationSeverity
 from omnibase_infra.models.validation.model_any_type_validation_result import (
     ModelAnyTypeValidationResult,
 )
@@ -506,7 +506,7 @@ class AnyTypeDetector(ast.NodeVisitor):
                 violation_type=violation_type,
                 code_snippet=snippet,
                 suggestion=suggestion,
-                severity="error",
+                severity=EnumValidationSeverity.ERROR,
                 context_name=context_name,
             )
         )
@@ -795,7 +795,7 @@ def validate_any_types_in_file(filepath: Path) -> list[ModelAnyTypeViolation]:
                 violation_type=EnumAnyTypeViolation.SYNTAX_ERROR,
                 code_snippet=f"Syntax error: {e.msg}",
                 suggestion=EnumAnyTypeViolation.SYNTAX_ERROR.suggestion,
-                severity="error",
+                severity=EnumValidationSeverity.ERROR,
                 context_name="",
             )
         ]
