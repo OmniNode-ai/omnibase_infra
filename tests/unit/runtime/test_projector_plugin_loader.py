@@ -849,6 +849,7 @@ class TestProjectorPluginLoaderModes:
         """Strict mode should fail fast on first error."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
+        from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -862,9 +863,10 @@ class TestProjectorPluginLoaderModes:
         )
         (tmp_path / "aaa_invalid_projector.yaml").write_text(MALFORMED_YAML_CONTENT)
 
+        config = ModelProjectorPluginLoaderConfig(graceful_mode=False)  # Strict mode
         loader = ProjectorPluginLoader(
+            config=config,
             schema_manager=mock_schema_manager,
-            graceful_mode=False,  # Strict mode
         )
 
         with pytest.raises(ModelOnexError):

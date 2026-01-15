@@ -376,6 +376,11 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             now: Optional override for current time. If None, uses actual
                 current time (datetime.now(timezone.utc)).
 
+        Raises:
+            InfraUnavailableError: When the circuit breaker is open.
+            InfraTimeoutError: When tick emission to Kafka times out.
+            InfraConnectionError: When tick emission fails due to connection issues.
+
         Concurrency Safety:
             This method is safe for concurrent coroutine calls. State modifications
             are protected by `_state_lock` (asyncio.Lock).

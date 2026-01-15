@@ -475,7 +475,8 @@ class MixinProjectorSqlOperations:
             False only if the upsert produced no rows (edge case).
 
         Raises:
-            ValueError: If values dict is empty or missing required conflict columns.
+            ProtocolConfigurationError: If values dict is empty or missing required
+                conflict columns.
 
         Note:
             The values dict MUST include all conflict columns. This method
@@ -642,7 +643,7 @@ class MixinProjectorSqlOperations:
             False if no row was found matching the aggregate_id.
 
         Raises:
-            ValueError: If updates dict is empty.
+            ProtocolConfigurationError: If updates dict is empty.
 
         Note:
             This method does NOT check whether column names exist in the contract

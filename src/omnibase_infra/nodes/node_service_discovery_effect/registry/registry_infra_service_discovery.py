@@ -160,6 +160,9 @@ class RegistryInfraServiceDiscovery:
         if not isinstance(handler, ProtocolServiceDiscoveryHandler):
             context = ModelInfraErrorContext(
                 operation="register_handler",
+                target_name="ProtocolServiceDiscoveryHandler",
+                # NOTE: transport_type intentionally omitted - this validation
+                # applies to multi-backend handlers (Consul, K8s, Etcd, etc.)
             )
             raise ProtocolConfigurationError(
                 f"Handler must implement ProtocolServiceDiscoveryHandler, "
