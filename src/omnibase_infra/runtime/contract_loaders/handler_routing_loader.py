@@ -141,7 +141,7 @@ def _load_and_validate_contract_yaml(
         - Once available, this should be refactored for consistency
         - See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
 
-        TODO: Refactor to use RegistryFileBased once available in omnibase_core.
+        TODO [OMN-1352]: Refactor to use RegistryFileBased once available in omnibase_core.
         This will provide consistent file access patterns across all contract loaders.
 
     Security Note:

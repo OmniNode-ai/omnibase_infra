@@ -468,7 +468,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
             #   - Passing None would override handler defaults or cause TypeErrors
             #
             # Summary:
-            #   projection_reader: Required by all handlers -> always pass
+            #   projection_reader: Always pass (even if None) -> handlers validate and fail-fast
             #   projector: Optional -> pass only if provided
             #   consul_handler: Optional -> pass only if provided
             filtered_deps = {

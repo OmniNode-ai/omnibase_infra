@@ -450,7 +450,7 @@ class HandlerContractSource(ProtocolContractSource):
             yaml.YAMLError: If YAML parsing fails.
             ValidationError: If contract validation fails.
         """
-        # TODO(OMN-1097): Replace direct file I/O with FileRegistry abstraction
+        # TODO [OMN-1352]: Replace direct file I/O with FileRegistry abstraction
         #
         # Why direct file operations are used here:
         #   RegistryFileBased (or FileRegistry) does not yet exist in omnibase_core.
