@@ -654,6 +654,7 @@ class MessageDispatchEngine:
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="register_dispatcher",
+                    correlation_id=uuid4(),
                 )
                 raise ProtocolConfigurationError(
                     f"node_kind must be EnumNodeKind or None, got {type(node_kind).__name__}",

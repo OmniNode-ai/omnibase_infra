@@ -13,6 +13,7 @@ Related Tickets:
 from __future__ import annotations
 
 import re
+from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -73,6 +74,7 @@ def validate_identifier(name: str, context_name: str = "identifier") -> str:
         error_context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="validate_identifier",
+            correlation_id=uuid4(),
         )
         raise ProtocolConfigurationError(
             f"Invalid {context_name} '{name}': must match pattern "

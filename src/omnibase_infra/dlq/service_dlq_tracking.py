@@ -299,6 +299,7 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
                     transport_type=EnumInfraTransportType.DATABASE,
                     operation="_ensure_table_exists",
                     target_name="dlq_tracking_service",
+                    correlation_id=uuid4(),
                 ),
             )
 

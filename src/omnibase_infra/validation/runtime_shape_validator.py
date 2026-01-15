@@ -154,7 +154,7 @@ import functools
 import inspect
 from collections.abc import Callable
 from typing import TypeVar, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
@@ -335,6 +335,7 @@ def _to_node_output_type(
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="to_node_output_type",
+            correlation_id=uuid4(),
         )
         raise ProtocolConfigurationError(
             f"Cannot convert {category} to EnumNodeOutputType",
@@ -346,6 +347,7 @@ def _to_node_output_type(
     context = ModelInfraErrorContext(
         transport_type=EnumInfraTransportType.RUNTIME,
         operation="to_node_output_type",
+        correlation_id=uuid4(),
     )
     raise ProtocolConfigurationError(
         f"Expected EnumMessageCategory or EnumNodeOutputType, got {type(category)}",

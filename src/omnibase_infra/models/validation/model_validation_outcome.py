@@ -21,6 +21,8 @@ Note:
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -154,6 +156,7 @@ class ModelValidationOutcome(BaseModel):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="failure",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "error_message must be non-empty for failure outcomes", context=context

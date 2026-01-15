@@ -43,7 +43,7 @@ import threading
 import warnings
 from collections.abc import Callable
 from typing import ClassVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict
 
@@ -107,6 +107,7 @@ class RegistryIntent:
                     context = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.RUNTIME,
                         operation="register_intent",
+                        correlation_id=uuid4(),
                     )
                     raise ProtocolConfigurationError(
                         f"Intent kind '{kind}' already registered to {cls._types[kind].__name__}. "

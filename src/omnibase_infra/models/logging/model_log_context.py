@@ -84,6 +84,8 @@ See Also:
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -348,6 +350,7 @@ class ModelLogContext(BaseModel):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="with_duration_ms",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "duration_ms must be >= 0", context=context
@@ -379,6 +382,7 @@ class ModelLogContext(BaseModel):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="with_retry_count",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "retry_count must be >= 0", context=context
@@ -604,6 +608,7 @@ class ModelLogContext(BaseModel):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="for_dispatch",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "duration_ms must be >= 0 when set", context=context
@@ -669,6 +674,7 @@ class ModelLogContext(BaseModel):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="for_connection",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "retry_count must be >= 0 when set", context=context
@@ -731,6 +737,7 @@ class ModelLogContext(BaseModel):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="for_error",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "retry_count must be >= 0 when set", context=context

@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 
@@ -231,6 +232,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="create_registry",
                 target_name="RegistryInfraNodeRegistrationOrchestrator",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "Heartbeat handler requires projector but none was provided. "
@@ -271,6 +273,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
                     target_name="RegistryInfraNodeRegistrationOrchestrator",
+                    correlation_id=uuid4(),
                 )
                 handler_name = type(handler).__name__
                 raise ProtocolConfigurationError(
@@ -297,6 +300,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
                     target_name="RegistryInfraNodeRegistrationOrchestrator",
+                    correlation_id=uuid4(),
                 )
                 raise ProtocolConfigurationError(
                     f"Handler HandlerNodeHeartbeat does not implement ProtocolMessageHandler. "

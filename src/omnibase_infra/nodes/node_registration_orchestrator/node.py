@@ -56,6 +56,7 @@ import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import yaml
 from omnibase_core.models.primitives.model_semver import ModelSemVer
@@ -155,6 +156,7 @@ def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
             transport_type=EnumInfraTransportType.DATABASE,
             operation="load_handler_routing_contract",
             target_name=str(contract_path),
+            correlation_id=uuid4(),
         )
         logger.exception(
             "contract.yaml not found at %s - handler routing cannot be loaded",
@@ -169,6 +171,7 @@ def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
             transport_type=EnumInfraTransportType.DATABASE,
             operation="parse_handler_routing_contract",
             target_name=str(contract_path),
+            correlation_id=uuid4(),
         )
         # Sanitize error message - don't include raw YAML error which may contain file contents
         error_type = type(e).__name__
@@ -187,6 +190,7 @@ def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
             transport_type=EnumInfraTransportType.DATABASE,
             operation="validate_handler_routing_contract",
             target_name=str(contract_path),
+            correlation_id=uuid4(),
         )
         msg = f"contract.yaml at {contract_path} is empty"
         logger.error(msg)
@@ -198,6 +202,7 @@ def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
             transport_type=EnumInfraTransportType.DATABASE,
             operation="validate_handler_routing_contract",
             target_name=str(contract_path),
+            correlation_id=uuid4(),
         )
         msg = f"handler_routing section not found in contract.yaml at {contract_path}"
         logger.error(msg)

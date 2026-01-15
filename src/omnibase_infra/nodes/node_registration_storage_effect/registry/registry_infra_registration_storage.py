@@ -24,6 +24,7 @@ from __future__ import annotations
 __all__ = ["RegistryInfraRegistrationStorage"]
 
 from typing import TYPE_CHECKING, cast
+from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -135,6 +136,7 @@ class RegistryInfraRegistrationStorage:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="register_handler",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"Handler must implement ProtocolRegistrationStorageHandler, "

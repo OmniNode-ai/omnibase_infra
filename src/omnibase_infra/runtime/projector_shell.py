@@ -1042,6 +1042,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="execute_projection",
+                target_name=f"projector.{self.projector_id}",
                 correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(

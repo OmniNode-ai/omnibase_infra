@@ -13,6 +13,7 @@ we eliminate the 3-way union while preserving all functionality.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, overload
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -136,6 +137,7 @@ class ModelDispatchOutcome(BaseModel):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="from_legacy_output",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"Expected str, list[str], None, or ModelDispatchResult, "

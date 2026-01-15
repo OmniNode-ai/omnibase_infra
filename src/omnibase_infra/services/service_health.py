@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Literal
+from uuid import uuid4
 
 from aiohttp import web
 
@@ -258,6 +259,7 @@ class ServiceHealth:
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize_health_server",
                 target_name="ServiceHealth",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "ServiceHealth requires either 'container' or 'runtime' to be provided. "
@@ -366,6 +368,7 @@ class ServiceHealth:
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="get_runtime",
                 target_name="ServiceHealth.runtime",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "RuntimeHostProcess not available. "
@@ -813,6 +816,7 @@ class ServiceHealth:
                     transport_type=EnumInfraTransportType.HTTP,
                     operation="validate_health_check_response",
                     target_name="RuntimeHostProcess.health_check",
+                    correlation_id=uuid4(),
                 )
                 raise ProtocolConfigurationError(
                     f"health_check() must return dict, got {type(health_details).__name__}",

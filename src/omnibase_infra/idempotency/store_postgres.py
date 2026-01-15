@@ -324,6 +324,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                     transport_type=EnumInfraTransportType.DATABASE,
                     operation="_ensure_table_exists",
                     target_name="postgres_idempotency_store",
+                    correlation_id=uuid4(),
                 ),
             )
 

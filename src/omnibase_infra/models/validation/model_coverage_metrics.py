@@ -14,6 +14,7 @@ and IDE support.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -211,6 +212,7 @@ class ModelCoverageMetrics(BaseModel):
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="from_legacy_dict",
+            correlation_id=uuid4(),
         )
 
         if not isinstance(total_types, int):

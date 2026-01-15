@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
@@ -272,6 +272,7 @@ class ModelRegistrationSnapshot(BaseModel):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="is_newer_than",
+                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"Cannot compare snapshots for different entities: "
