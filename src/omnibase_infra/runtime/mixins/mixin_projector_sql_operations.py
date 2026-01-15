@@ -545,6 +545,10 @@ class MixinProjectorSqlOperations:
             """  # noqa: S608
         else:
             # Edge case: only conflict columns provided - DO NOTHING on conflict
+            # NOTE: RETURNING with DO NOTHING returns NO ROWS when a conflict occurs
+            # (i.e., row already exists). This is expected PostgreSQL behavior.
+            # We handle this at the call site by returning True when result is None,
+            # since for upsert semantics "row exists" is success.
             sql = f"""
                 INSERT INTO {table_quoted} ({column_list})
                 VALUES ({param_list})

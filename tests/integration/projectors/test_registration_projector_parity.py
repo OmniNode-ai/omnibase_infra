@@ -1218,6 +1218,82 @@ class TestPartialUpdateParity:
         assert row1["ack_timeout_emitted_at"] == row2["ack_timeout_emitted_at"]
 
 
+class TestProjectorShellSmoke:
+    """Smoke tests verifying ProjectorShell works with the registration contract.
+
+    These tests verify the contract-driven projector can be loaded and performs
+    basic operations. They do NOT require the legacy ProjectorRegistration class
+    and should always run regardless of legacy availability.
+
+    Related Tickets:
+        - OMN-1170: Contract-driven projector verification
+    """
+
+    async def test_projector_shell_loads_from_contract(
+        self,
+        projector: ProjectorShell,
+    ) -> None:
+        """ProjectorShell loads successfully from registration contract.
+
+        Given: Registration projector contract exists
+        When: ProjectorPluginLoader loads the contract
+        Then: ProjectorShell instance is created with correct configuration
+        """
+        # Verify projector was loaded (fixture does the loading)
+        assert projector is not None
+        # Verify it has the expected methods
+        assert hasattr(projector, "get_state")
+        assert hasattr(projector, "partial_update")
+
+    async def test_get_state_returns_none_for_nonexistent(
+        self,
+        projector: ProjectorShell,
+    ) -> None:
+        """get_state() returns None for non-existent entity.
+
+        Given: Empty projection table
+        When: get_state() called for non-existent entity
+        Then: Returns None (not an error)
+
+        This verifies the declarative projector handles missing entities
+        gracefully without requiring comparison to legacy implementation.
+        """
+        correlation_id = uuid4()
+        non_existent_id = uuid4()
+
+        state = await projector.get_state(
+            aggregate_id=non_existent_id,
+            correlation_id=correlation_id,
+        )
+
+        assert state is None
+
+    async def test_partial_update_returns_false_for_nonexistent(
+        self,
+        projector: ProjectorShell,
+    ) -> None:
+        """partial_update() returns False for non-existent entity.
+
+        Given: Empty projection table
+        When: partial_update() called for non-existent entity
+        Then: Returns False (row not found, no update performed)
+        """
+        correlation_id = uuid4()
+        non_existent_id = uuid4()
+        now = datetime.now(UTC)
+
+        result = await projector.partial_update(
+            aggregate_id=non_existent_id,
+            updates={
+                "last_heartbeat_at": now,
+                "updated_at": now,
+            },
+            correlation_id=correlation_id,
+        )
+
+        assert result is False
+
+
 class TestContractMatchesSchema:
     """Tests verifying the YAML contract matches the SQL schema."""
 
@@ -1295,6 +1371,7 @@ __all__ = [
     "TestIdempotencyMatchesLegacy",
     "TestPartialUpdateParity",
     "TestPersistOutputMatchesLegacy",
+    "TestProjectorShellSmoke",
     "TestUpdateAckTimeoutMarkerMatchesLegacy",
     "TestUpdateHeartbeatMatchesLegacy",
     "TestUpdateLivenessTimeoutMarkerMatchesLegacy",

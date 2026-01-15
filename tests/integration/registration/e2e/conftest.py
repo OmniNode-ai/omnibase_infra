@@ -706,21 +706,11 @@ async def real_projector(
         - OMN-1169: ProjectorShell for contract-driven projections
         - OMN-1168: ProjectorPluginLoader contract discovery
     """
-    from pathlib import Path
-
+    from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
     from omnibase_infra.runtime import ProjectorPluginLoader, ProjectorShell
 
-    # Path to registration projector contract
-    contract_path = (
-        Path(__file__).parent.parent.parent.parent.parent
-        / "src"
-        / "omnibase_infra"
-        / "projectors"
-        / "contracts"
-        / "registration_projector.yaml"
-    )
-
     loader = ProjectorPluginLoader(pool=postgres_pool)
+    contract_path = REGISTRATION_PROJECTOR_CONTRACT
     projector = await loader.load_from_contract(contract_path)
 
     # Type narrowing - loader with pool returns ProjectorShell, not placeholder

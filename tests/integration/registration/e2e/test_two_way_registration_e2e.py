@@ -54,7 +54,6 @@ from omnibase_infra.models.discovery import (
     DEFAULT_INTROSPECTION_TOPIC,
     DEFAULT_REQUEST_INTROSPECTION_TOPIC,
 )
-from omnibase_infra.models.projection import ModelSequenceInfo
 from omnibase_infra.models.registration import (
     ModelNodeHeartbeatEvent,
     ModelNodeIntrospectionEvent,
@@ -1678,8 +1677,7 @@ class TestSuite5RegistryRecovery:
             - New orchestrator can query existing registration
             - Registration state is preserved across restart
         """
-        from pathlib import Path
-
+        from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
         from omnibase_infra.runtime import ProjectorPluginLoader, ProjectorShell
         from omnibase_infra.runtime.container_wiring import (
             get_projection_reader_from_container,
@@ -1688,16 +1686,9 @@ class TestSuite5RegistryRecovery:
         # Step 1: Register a node using the first orchestrator
         projection_reader = await get_projection_reader_from_container(wired_container)
 
-        # Load ProjectorShell from contract (same pattern as fixture)
-        contract_path = (
-            Path(__file__).parent.parent.parent.parent.parent
-            / "src"
-            / "omnibase_infra"
-            / "projectors"
-            / "contracts"
-            / "registration_projector.yaml"
-        )
+        # Load ProjectorShell from contract
         loader = ProjectorPluginLoader(pool=postgres_pool)
+        contract_path = REGISTRATION_PROJECTOR_CONTRACT
         projector_instance = await loader.load_from_contract(contract_path)
 
         # Type narrowing - loader with pool returns ProjectorShell, not placeholder
@@ -2362,22 +2353,14 @@ class TestSuite7GracefulDegradation:
         Note: This test directly tests the projection persistence path,
         bypassing Consul to simulate unavailability.
         """
-        from pathlib import Path
-
+        from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
         from omnibase_infra.runtime import ProjectorPluginLoader, ProjectorShell
 
         now = datetime.now(UTC)
 
-        # Load ProjectorShell from contract (same pattern as fixture)
-        contract_path = (
-            Path(__file__).parent.parent.parent.parent.parent
-            / "src"
-            / "omnibase_infra"
-            / "projectors"
-            / "contracts"
-            / "registration_projector.yaml"
-        )
+        # Load ProjectorShell from contract
         loader = ProjectorPluginLoader(pool=postgres_pool)
+        contract_path = REGISTRATION_PROJECTOR_CONTRACT
         projector_instance = await loader.load_from_contract(contract_path)
 
         # Type narrowing - loader with pool returns ProjectorShell, not placeholder

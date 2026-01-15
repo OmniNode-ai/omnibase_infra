@@ -467,8 +467,13 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        # primary_key is a str field in omnibase_core.ModelProjectorSchema
-        pk_quoted = quote_identifier(schema.primary_key)
+        # primary_key can be str | list[str] - normalize to first column for single-value queries
+        pk_column = (
+            schema.primary_key[0]
+            if isinstance(schema.primary_key, list)
+            else schema.primary_key
+        )
+        pk_quoted = quote_identifier(pk_column)
 
         # Build SELECT query - table/column names from trusted contract
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
@@ -570,8 +575,13 @@ class ProjectorShell(MixinProjectorSqlOperations):
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        # primary_key is a str field in omnibase_core.ModelProjectorSchema
-        pk_quoted = quote_identifier(schema.primary_key)
+        # primary_key can be str | list[str] - normalize to first column for single-value queries
+        pk_column = (
+            schema.primary_key[0]
+            if isinstance(schema.primary_key, list)
+            else schema.primary_key
+        )
+        pk_quoted = quote_identifier(pk_column)
 
         # Build SELECT query with IN clause for bulk fetch
         # S608: Safe - identifiers quoted via quote_identifier(), not user input
@@ -587,7 +597,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
             result: dict[UUID, dict[str, object]] = {}
             for row in rows:
                 row_dict: dict[str, object] = dict(row)
-                aggregate_id = row_dict.get(schema.primary_key)
+                aggregate_id = row_dict.get(pk_column)
                 if isinstance(aggregate_id, UUID):
                     result[aggregate_id] = row_dict
 

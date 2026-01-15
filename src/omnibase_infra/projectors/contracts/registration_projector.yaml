@@ -85,6 +85,13 @@ projection_schema:
     # ==========================================================================
     # CAPABILITY FIELDS (OMN-1134 - GIN-Indexed Discovery Queries)
     # Denormalized from capabilities for fast array queries
+    #
+    # NOTE ON ARRAY DEFAULTS: The "ARRAY[]::TEXT[]" defaults below are SQL
+    # expressions used by the database schema. For ProjectorShell.project(),
+    # these defaults are NOT applied - the SQL schema's DEFAULT clause handles
+    # empty arrays. For explicit upsert_partial() calls, pass [] (empty Python
+    # list) to insert empty arrays, as asyncpg serializes lists to PostgreSQL
+    # arrays correctly.
     # ==========================================================================
     - name: contract_type
       type: TEXT
