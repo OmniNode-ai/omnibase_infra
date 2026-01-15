@@ -362,7 +362,8 @@ class ServiceCorpusCapture:
         Returns:
             The active corpus, or None if no corpus is active.
         """
-        return self._corpus
+        with self._sync_lock:
+            return self._corpus
 
     def capture(self, manifest: ModelExecutionManifest) -> ModelCaptureResult:
         """
