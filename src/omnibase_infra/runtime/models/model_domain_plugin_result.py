@@ -91,6 +91,32 @@ class ModelDomainPluginResult:
         default_factory=list
     )
 
+    def get_error_message_or_default(self, default: str = "unknown") -> str:
+        """Return error_message if set, otherwise the default value.
+
+        This helper simplifies error handling in plugin activation code,
+        avoiding verbose None checks when accessing error_message.
+
+        Args:
+            default: Value to return if error_message is None or empty.
+
+        Returns:
+            The error_message if it's a non-empty string, otherwise default.
+
+        Example:
+            >>> result = ModelDomainPluginResult.failed(
+            ...     plugin_id="test",
+            ...     error_message="Connection refused",
+            ... )
+            >>> result.get_error_message_or_default()
+            'Connection refused'
+            >>>
+            >>> success = ModelDomainPluginResult.succeeded(plugin_id="test")
+            >>> success.get_error_message_or_default("no error")
+            'no error'
+        """
+        return self.error_message if self.error_message else default
+
     def __bool__(self) -> bool:
         """Return True if the operation succeeded.
 

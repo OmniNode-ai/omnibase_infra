@@ -856,6 +856,7 @@ async def bootstrap() -> int:
                     "Received %s, initiating graceful shutdown... (correlation_id=%s)",
                     sig.name,
                     correlation_id,
+                    extra={"correlation_id": correlation_id, "signal": sig.name},
                 )
                 loop.call_soon_threadsafe(shutdown_event.set)
 

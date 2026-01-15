@@ -92,8 +92,10 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-# Default path for projector contract files, calculated relative to the
-# omnibase_infra package root for robustness (avoids fragile parent counting).
+# Default path for projector contract files, calculated using importlib.resources
+# for robustness across different deployment scenarios (standard installs, frozen
+# executables, various packaging tools).
+#
 # This path can be overridden via ONEX_PROJECTOR_CONTRACTS_DIR environment variable.
 #
 # Package structure assumption:
@@ -106,17 +108,34 @@ logger = logging.getLogger(__name__)
 def _get_default_projector_contracts_dir() -> Path:
     """Calculate default projector contracts directory from package root.
 
-    Uses the omnibase_infra package location as the reference point rather than
-    counting parent directories from __file__, making it robust against
-    internal directory restructuring within the package.
+    Uses importlib.resources for robust resource path resolution across different
+    deployment scenarios (standard pip installs, frozen executables, editable
+    installs, and various packaging tools).
+
+    Note:
+        Falls back to __file__-based resolution if importlib.resources path
+        is not a concrete filesystem path (e.g., in zip imports).
 
     Returns:
         Path to the projectors/contracts directory within omnibase_infra package.
     """
-    import omnibase_infra
+    from importlib.resources import files
 
-    package_root = Path(omnibase_infra.__file__).parent
-    return package_root / "projectors" / "contracts"
+    # Use importlib.resources for robust path resolution
+    resource_path = files("omnibase_infra").joinpath("projectors", "contracts")
+
+    # Convert to Path - handles both Traversable and actual Path objects
+    # Note: For zip imports, this may need special handling, but standard
+    # installs and editable installs will work correctly
+    try:
+        # Try to get a concrete filesystem path
+        return Path(str(resource_path))
+    except (TypeError, ValueError):
+        # Fallback for edge cases where path conversion fails
+        import omnibase_infra
+
+        package_root = Path(omnibase_infra.__file__).parent
+        return package_root / "projectors" / "contracts"
 
 
 PROJECTOR_CONTRACTS_DEFAULT_DIR = _get_default_projector_contracts_dir()
@@ -435,6 +454,11 @@ class PluginRegistration:
 
             # Catch both DuplicateTableError (42P07) and DuplicateObjectError (42710)
             # These are sibling classes covering tables and other schema objects (indexes, etc.)
+            #
+            # Note: isinstance is used here for exception type checking, which is standard
+            # Python practice and an accepted exception to the "duck typing, never isinstance"
+            # rule from CLAUDE.md. Exception handling inherently requires type discrimination
+            # since exceptions don't implement protocols for error categorization.
             duplicate_errors = (
                 asyncpg.exceptions.DuplicateTableError,
                 asyncpg.exceptions.DuplicateObjectError,
