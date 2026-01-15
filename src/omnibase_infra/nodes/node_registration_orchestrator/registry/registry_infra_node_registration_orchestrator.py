@@ -52,9 +52,12 @@ Related Tickets:
 
 from __future__ import annotations
 
+import importlib
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -106,18 +109,150 @@ def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:
     return (len(missing_members) == 0, missing_members)
 
 
+def _load_handler_class(class_name: str, module_path: str) -> type:
+    """Dynamically load a handler class from a module.
+
+    Args:
+        class_name: The name of the handler class to load.
+        module_path: The fully qualified module path.
+
+    Returns:
+        The handler class type.
+
+    Raises:
+        ProtocolConfigurationError: If the module or class cannot be loaded.
+    """
+    try:
+        module = importlib.import_module(module_path)
+    except ModuleNotFoundError as e:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="load_handler_class",
+            target_name=f"{module_path}.{class_name}",
+        )
+        raise ProtocolConfigurationError(
+            f"Handler module not found: {module_path}. Error: {e}",
+            context=ctx,
+        ) from e
+    except ImportError as e:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="load_handler_class",
+            target_name=f"{module_path}.{class_name}",
+        )
+        raise ProtocolConfigurationError(
+            f"Failed to import handler module: {module_path}. Error: {e}",
+            context=ctx,
+        ) from e
+
+    if not hasattr(module, class_name):
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="load_handler_class",
+            target_name=f"{module_path}.{class_name}",
+        )
+        raise ProtocolConfigurationError(
+            f"Handler class {class_name} not found in module {module_path}",
+            context=ctx,
+        )
+
+    handler_class: type = getattr(module, class_name)
+    return handler_class
+
+
+def _load_handler_routing_from_contract(
+    contract_path: Path,
+) -> list[dict[str, str]]:
+    """Load handler routing configuration from contract.yaml.
+
+    Extracts handler class and module information from the handler_routing
+    section of contract.yaml.
+
+    Args:
+        contract_path: Path to the contract.yaml file.
+
+    Returns:
+        List of handler configurations, each containing:
+        - handler_class: The handler class name
+        - handler_module: The fully qualified module path
+
+    Raises:
+        ProtocolConfigurationError: If the contract file cannot be loaded.
+    """
+    try:
+        with contract_path.open("r", encoding="utf-8") as f:
+            contract = yaml.safe_load(f)
+    except FileNotFoundError as e:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="load_handler_routing_from_contract",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"Contract file not found: {contract_path}",
+            context=ctx,
+        ) from e
+    except yaml.YAMLError as e:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="load_handler_routing_from_contract",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid YAML in contract file: {contract_path}",
+            context=ctx,
+        ) from e
+
+    if contract is None:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="load_handler_routing_from_contract",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"Contract file is empty: {contract_path}",
+            context=ctx,
+        )
+
+    handler_routing = contract.get("handler_routing")
+    if handler_routing is None:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="load_handler_routing_from_contract",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"handler_routing section not found in contract: {contract_path}",
+            context=ctx,
+        )
+
+    handlers_config = handler_routing.get("handlers", [])
+    result: list[dict[str, str]] = []
+
+    for handler_entry in handlers_config:
+        handler_info = handler_entry.get("handler", {})
+        handler_class = handler_info.get("name")
+        handler_module = handler_info.get("module")
+
+        if handler_class and handler_module:
+            result.append(
+                {
+                    "handler_class": handler_class,
+                    "handler_module": handler_module,
+                }
+            )
+        else:
+            logger.warning(
+                "Skipping handler entry with missing name or module in contract.yaml"
+            )
+
+    return result
+
+
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
-
-
-# TODO(OMN-1316): Tech debt - subcontract should be loaded from contract.yaml
-# instead of being constructed programmatically. The _create_handler_routing_subcontract()
-# function in node.py already loads handler routing from contract.yaml. Consider:
-# 1. Using that function here instead of duplicating handler registration
-# 2. Or making the registry reference the subcontract for consistency
-# See: _create_handler_routing_subcontract() in node.py for contract-driven approach.
 
 
 class RegistryInfraNodeRegistrationOrchestrator:
@@ -160,6 +295,11 @@ class RegistryInfraNodeRegistrationOrchestrator:
         This is the preferred method for creating handler registries. It returns
         a thread-safe, frozen registry that can be used by the orchestrator.
 
+        Contract-Driven Loading:
+            Handlers are loaded dynamically from contract.yaml using the Handler
+            Plugin Loader pattern. The contract.yaml handler_routing section defines
+            handler classes and modules that are imported at runtime.
+
         Handler Registration:
             The contract.yaml defines 4 handlers:
             - ModelNodeIntrospectionEvent -> HandlerNodeIntrospected (always registered)
@@ -193,6 +333,8 @@ class RegistryInfraNodeRegistrationOrchestrator:
         Raises:
             ProtocolConfigurationError: If projector is None and
                 require_heartbeat_handler is True (default).
+            ProtocolConfigurationError: If contract.yaml is missing or invalid.
+            ProtocolConfigurationError: If a handler class cannot be loaded.
 
         Example:
             ```python
@@ -218,13 +360,6 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 print(f"{handler.handler_id}: {handler.message_types}")
             ```
         """
-        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-            HandlerNodeHeartbeat,
-            HandlerNodeIntrospected,
-            HandlerNodeRegistrationAcked,
-            HandlerRuntimeTick,
-        )
-
         # Fail-fast: contract.yaml defines heartbeat routing which requires projector
         if projector is None and require_heartbeat_handler:
             ctx = ModelInfraErrorContext(
@@ -241,79 +376,111 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 context=ctx,
             )
 
+        # Load handler routing configuration from contract.yaml
+        contract_path = Path(__file__).parent.parent / "contract.yaml"
+        handler_configs = _load_handler_routing_from_contract(contract_path)
+
+        # Map of handler dependencies by handler class name
+        # Each handler class has specific dependencies based on its constructor
+        handler_dependencies: dict[str, dict[str, object]] = {
+            "HandlerNodeIntrospected": {
+                "projection_reader": projection_reader,
+                "projector": projector,
+                "consul_handler": consul_handler,
+            },
+            "HandlerRuntimeTick": {
+                "projection_reader": projection_reader,
+            },
+            "HandlerNodeRegistrationAcked": {
+                "projection_reader": projection_reader,
+            },
+            "HandlerNodeHeartbeat": {
+                "projection_reader": projection_reader,
+                "projector": projector,
+            },
+        }
+
         registry = ServiceHandlerRegistry()
 
-        # Create handlers with dependencies
-        handler_introspected = HandlerNodeIntrospected(
-            projection_reader=projection_reader,
-            projector=projector,
-            consul_handler=consul_handler,
-        )
-        handler_runtime_tick = HandlerRuntimeTick(
-            projection_reader=projection_reader,
-        )
-        handler_registration_acked = HandlerNodeRegistrationAcked(
-            projection_reader=projection_reader,
-        )
+        # Load and instantiate handlers from contract configuration
+        for handler_config in handler_configs:
+            handler_class_name = handler_config["handler_class"]
+            handler_module = handler_config["handler_module"]
 
-        # Validate and register handlers (duck typing verification for ProtocolMessageHandler)
-        # Handlers must implement: handler_id, category, message_types, node_kind, handle()
-        handlers_to_register = [
-            handler_introspected,
-            handler_runtime_tick,
-            handler_registration_acked,
-        ]
+            # Special handling for HandlerNodeHeartbeat - requires projector
+            if handler_class_name == "HandlerNodeHeartbeat":
+                if projector is None:
+                    # Skip heartbeat handler if no projector (require_heartbeat_handler=False)
+                    logger.warning(
+                        "HandlerNodeHeartbeat NOT registered: require_heartbeat_handler=False. "
+                        "This creates a contract.yaml mismatch (4 handlers defined, only 3 registered). "
+                        "Heartbeat events (ModelNodeHeartbeatEvent) will NOT be handled. "
+                        "This configuration is intended for testing only."
+                    )
+                    continue
 
-        for handler in handlers_to_register:
-            is_valid, missing = _validate_handler_protocol(handler)
-            if not is_valid:
-                ctx = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.RUNTIME,
-                    operation="create_registry",
-                    target_name="RegistryInfraNodeRegistrationOrchestrator",
-                )
-                handler_name = type(handler).__name__
-                raise ProtocolConfigurationError(
-                    f"Handler {handler_name} does not implement ProtocolMessageHandler. "
-                    f"Missing required members: {', '.join(missing)}. "
-                    f"Handlers must have: handler_id, category, message_types, node_kind properties "
-                    f"and handle(envelope) method.",
-                    context=ctx,
-                )
-            registry.register_handler(handler)
+            # Load handler class dynamically
+            handler_cls = _load_handler_class(handler_class_name, handler_module)
 
-        # Heartbeat handler requires projector for persistence.
-        # At this point, if projector is None, require_heartbeat_handler must be False
-        # (otherwise we would have raised ProtocolConfigurationError above).
-        if projector is not None:
-            handler_heartbeat = HandlerNodeHeartbeat(
-                projection_reader=projection_reader,
-                projector=projector,
-            )
-            # Validate heartbeat handler before registration
-            is_valid, missing = _validate_handler_protocol(handler_heartbeat)
-            if not is_valid:
+            # Get dependencies for this handler
+            deps = handler_dependencies.get(handler_class_name, {})
+            if not deps:
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="create_registry",
                     target_name="RegistryInfraNodeRegistrationOrchestrator",
                 )
                 raise ProtocolConfigurationError(
-                    f"Handler HandlerNodeHeartbeat does not implement ProtocolMessageHandler. "
+                    f"No dependency configuration found for handler {handler_class_name}. "
+                    "Update handler_dependencies map with required constructor arguments.",
+                    context=ctx,
+                )
+
+            # Filter out None values for optional dependencies
+            # Note: projection_reader is always required, but projector and consul_handler
+            # may be None (optional for some handlers)
+            filtered_deps = {
+                k: v
+                for k, v in deps.items()
+                if v is not None or k == "projection_reader"
+            }
+
+            # Instantiate handler with dependencies
+            try:
+                handler_instance = handler_cls(**filtered_deps)
+            except TypeError as e:
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="create_registry",
+                    target_name=handler_class_name,
+                )
+                raise ProtocolConfigurationError(
+                    f"Failed to instantiate handler {handler_class_name}: {e}. "
+                    "Check that handler_dependencies map matches handler constructor.",
+                    context=ctx,
+                ) from e
+
+            # Validate handler implements ProtocolMessageHandler
+            is_valid, missing = _validate_handler_protocol(handler_instance)
+            if not is_valid:
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="create_registry",
+                    target_name="RegistryInfraNodeRegistrationOrchestrator",
+                )
+                raise ProtocolConfigurationError(
+                    f"Handler {handler_class_name} does not implement ProtocolMessageHandler. "
                     f"Missing required members: {', '.join(missing)}. "
                     f"Handlers must have: handler_id, category, message_types, node_kind properties "
                     f"and handle(envelope) method.",
                     context=ctx,
                 )
-            registry.register_handler(handler_heartbeat)
-        else:
-            # This branch only executes when require_heartbeat_handler=False
-            # (explicit opt-in for testing without heartbeat support)
-            logger.warning(
-                "HandlerNodeHeartbeat NOT registered: require_heartbeat_handler=False. "
-                "This creates a contract.yaml mismatch (4 handlers defined, only 3 registered). "
-                "Heartbeat events (ModelNodeHeartbeatEvent) will NOT be handled. "
-                "This configuration is intended for testing only."
+
+            # Register handler
+            registry.register_handler(handler_instance)
+            logger.debug(
+                "Registered handler from contract: %s",
+                handler_class_name,
             )
 
         # Freeze registry to make it thread-safe
