@@ -266,10 +266,13 @@ class PluginRegistration:
 
         correlation_id = config.correlation_id
 
-        # Determine projector contracts directory
-        # Use the same path resolution as kernel.py
-        projector_contracts_dir = (
-            Path(__file__).parent.parent.parent / "projectors" / "contracts"
+        # Configurable projector contracts directory (supports different deployment layouts)
+        # Environment variable allows overriding the default path when package structure differs
+        projector_contracts_dir = Path(
+            os.getenv(
+                "ONEX_PROJECTOR_CONTRACTS_DIR",
+                str(Path(__file__).parent.parent.parent / "projectors" / "contracts"),
+            )
         )
 
         if not projector_contracts_dir.exists():
@@ -387,13 +390,31 @@ class PluginRegistration:
                 correlation_id,
             )
         except Exception as schema_error:
-            # Log warning but continue - schema may already exist
-            logger.warning(
-                "Schema initialization encountered error: %s (correlation_id=%s)",
-                sanitize_error_message(schema_error),
-                correlation_id,
-                extra={"error_type": type(schema_error).__name__},
+            # Import asyncpg exceptions at runtime to check for duplicate object errors
+            # PostgreSQL error codes: 42P07 = duplicate_table, 42710 = duplicate_object
+            import asyncpg.exceptions
+
+            # Catch both DuplicateTableError (42P07) and DuplicateObjectError (42710)
+            # These are sibling classes covering tables and other schema objects (indexes, etc.)
+            duplicate_errors = (
+                asyncpg.exceptions.DuplicateTableError,
+                asyncpg.exceptions.DuplicateObjectError,
             )
+            if isinstance(schema_error, duplicate_errors):
+                # Expected for idempotent schema initialization - log at DEBUG
+                logger.debug(
+                    "Schema already initialized (idempotent, correlation_id=%s)",
+                    correlation_id,
+                    extra={"error_type": type(schema_error).__name__},
+                )
+            else:
+                # Unexpected error - log at WARNING
+                logger.warning(
+                    "Schema initialization encountered error: %s (correlation_id=%s)",
+                    sanitize_error_message(schema_error),
+                    correlation_id,
+                    extra={"error_type": type(schema_error).__name__},
+                )
 
     async def _initialize_consul_handler(self, config: ModelDomainPluginConfig) -> None:
         """Initialize Consul handler if configured."""
@@ -497,15 +518,12 @@ class PluginRegistration:
                 extra={"services": registration_summary["services"]},
             )
 
-            # Use constructor directly for results with services_registered
-            # Type narrowing: .get() returns list[str] | str, but "services" is always list[str]
-            services_value = registration_summary.get("services", [])
-            services_list = services_value if isinstance(services_value, list) else []
+            # WiringResult TypedDict provides precise typing - direct key access is safe
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,
                 success=True,
                 message="Registration handlers wired",
-                services_registered=services_list,
+                services_registered=registration_summary["services"],
                 duration_seconds=duration,
             )
 

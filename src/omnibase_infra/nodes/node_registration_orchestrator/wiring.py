@@ -41,7 +41,19 @@ Related:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypedDict, cast
+
+
+class WiringResult(TypedDict):
+    """Result of wire_registration_handlers operation.
+
+    This TypedDict provides precise typing for the return value,
+    eliminating the need for type narrowing in callers.
+    """
+
+    services: list[str]
+    status: str
+
 
 if TYPE_CHECKING:
     import asyncpg
@@ -346,7 +358,7 @@ async def wire_registration_handlers(
     liveness_interval_seconds: int | None = None,
     projector: ProjectorShell | None = None,
     consul_handler: HandlerConsul | None = None,
-) -> dict[str, list[str] | str]:
+) -> WiringResult:
     """Register registration orchestrator handlers with the container.
 
     Registers ProjectionReaderRegistration and the three registration handlers:
@@ -365,7 +377,9 @@ async def wire_registration_handlers(
         consul_handler: Optional HandlerConsul for dual registration with Consul.
 
     Returns:
-        Summary dict with services list and status.
+        WiringResult TypedDict with:
+            - services: List of registered service names
+            - status: Always "success" (errors raise exceptions)
 
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
@@ -595,6 +609,7 @@ __all__: list[str] = [
     "wire_registration_dispatchers",
     # Handler wiring (OMN-1346)
     "wire_registration_handlers",
+    "WiringResult",
     # Handler getters (OMN-1346)
     "get_projection_reader_from_container",
     "get_handler_node_introspected_from_container",

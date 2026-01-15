@@ -1039,7 +1039,18 @@ async def bootstrap() -> int:
             )
         runtime = None  # Mark as stopped to prevent double-stop in finally
 
-        # Shutdown plugins (close pools, connections, etc.)
+        # Plugin Shutdown Order and Constraints
+        # =====================================
+        # Plugins are shut down in REVERSE order (LIFO - Last In, First Out).
+        # This ensures that plugins activated later (which may depend on earlier
+        # plugins) are shut down first.
+        #
+        # CONSTRAINT: Plugins must be self-contained during shutdown.
+        # - Plugins MUST NOT depend on resources from other plugins during shutdown
+        # - Each plugin should only clean up its own resources (pools, connections, etc.)
+        # - If a plugin needs to release shared resources, it must handle graceful
+        #   degradation in case those resources are already released by another plugin
+        # - Shutdown errors are logged but do not block other plugins from shutting down
         for plugin in reversed(activated_plugins):
             try:
                 shutdown_result = await plugin.shutdown(plugin_config)
