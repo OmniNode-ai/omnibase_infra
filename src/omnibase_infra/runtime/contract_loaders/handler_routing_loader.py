@@ -115,6 +115,7 @@ def _check_file_size(contract_path: Path, operation: str) -> None:
         raise ProtocolConfigurationError(
             f"Contract file exceeds maximum size: {file_size} bytes > "
             f"{MAX_CONTRACT_FILE_SIZE_BYTES} bytes. "
+            f"Reduce the contract.yaml file size or split into multiple contracts. "
             f"Error code: FILE_SIZE_EXCEEDED (HANDLER_LOADER_050)",
             context=ctx,
         )
@@ -140,9 +141,13 @@ def _load_and_validate_contract_yaml(
         - Once available, this should be refactored for consistency
         - See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
 
+        TODO: Refactor to use RegistryFileBased once available in omnibase_core.
+        This will provide consistent file access patterns across all contract loaders.
+
     Security Note:
-        File size is checked BEFORE YAML parsing (line ~152) to prevent memory
-        exhaustion attacks via oversized files. This ordering is critical.
+        File size is checked BEFORE YAML parsing (line 164) to prevent memory
+        exhaustion attacks via oversized files. This ordering is critical -
+        _check_file_size() MUST be called before yaml.safe_load().
 
     Args:
         contract_path: Path to the contract.yaml file to load.
@@ -353,7 +358,9 @@ def load_handler_routing_subcontract(contract_path: Path) -> ModelRoutingSubcont
         contract_path,
     )
 
-    # Validate routing_strategy before constructing the model
+    # IMPORTANT: Validate routing_strategy BEFORE constructing ModelRoutingSubcontract.
+    # This ensures invalid strategy values are caught and corrected (with warning)
+    # before the model is instantiated, preventing invalid state in the model.
     routing_strategy = handler_routing.get("routing_strategy", "payload_type_match")
     if routing_strategy not in VALID_ROUTING_STRATEGIES:
         logger.warning(
@@ -365,6 +372,7 @@ def load_handler_routing_subcontract(contract_path: Path) -> ModelRoutingSubcont
         )
         routing_strategy = "payload_type_match"
 
+    # Now construct the model with validated routing_strategy
     return ModelRoutingSubcontract(
         version=ModelSemVer(major=1, minor=0, patch=0),
         routing_strategy=routing_strategy,

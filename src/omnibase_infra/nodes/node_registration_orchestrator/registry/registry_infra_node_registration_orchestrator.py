@@ -26,11 +26,38 @@ Handler Dependencies:
     - ProjectorShell: For projection persistence
     - HandlerConsul: For Consul service registration (dual registration)
 
-Maintenance Note:
+Handler Dependency Map - Design Trade-off:
+    The ``handler_dependencies`` dict in ``create_registry()`` requires manual
+    updates when adding handlers to contract.yaml. This is an INTENTIONAL design
+    trade-off that prioritizes type safety, testability, and security over
+    convenience.
+
+    **Why NOT Auto-Discovery:**
+
+    1. **Type Safety**: Explicit dependency declarations are validated at startup.
+       Auto-discovery via reflection (e.g., inspect.signature()) would defer
+       errors to runtime when handlers are instantiated.
+
+    2. **Testability**: Explicit dependencies can be easily mocked in tests.
+       The dependency map serves as documentation of what each handler needs,
+       making test setup straightforward.
+
+    3. **Security**: No reflection-based injection means no attack surface for
+       dependency injection exploits. We know exactly what gets passed to each
+       handler constructor.
+
+    4. **Clarity**: The dependency map is a clear, auditable record of handler
+       wiring. New developers can see at a glance what each handler receives.
+
+    **Maintenance Requirement:**
+
     When adding a new handler to contract.yaml, you MUST also update the
-    ``handler_dependencies`` dict in ``create_registry()`` with the handler's
-    constructor arguments. Failure to do so will raise ProtocolConfigurationError
-    at runtime with the message: "No dependency configuration found for handler..."
+    ``handler_dependencies`` dict with the handler's constructor arguments.
+    Failure to do so raises ProtocolConfigurationError at startup with a clear
+    message explaining how to fix it.
+
+    This fail-fast behavior catches configuration errors immediately rather than
+    at runtime when the handler is first invoked.
 
 Usage:
     ```python
@@ -157,7 +184,8 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
         raise ProtocolConfigurationError(
             f"Handler module namespace not allowed: {module_path}. "
             f"Allowed namespaces: {', '.join(ALLOWED_NAMESPACES)}. "
-            "Error code: NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)",
+            f"Use a handler module from an allowed namespace or update ALLOWED_NAMESPACES. "
+            f"Error code: NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)",
             context=ctx,
         )
 
@@ -328,7 +356,8 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 "The contract.yaml defines ModelNodeHeartbeatEvent routing which "
                 "requires a ProjectorShell instance to persist heartbeat updates. "
                 "Either provide a projector or set require_heartbeat_handler=False "
-                "to explicitly disable heartbeat support (testing only).",
+                "to explicitly disable heartbeat support (testing only). "
+                "Error code: PROJECTOR_REQUIRED (HANDLER_LOADER_060)",
                 context=ctx,
             )
 
@@ -337,13 +366,26 @@ class RegistryInfraNodeRegistrationOrchestrator:
         contract_path = Path(__file__).parent.parent / "contract.yaml"
         handler_configs = load_handler_class_info_from_contract(contract_path)
 
-        # Map of handler dependencies by handler class name.
-        # Each handler class has specific dependencies based on its constructor.
+        # =====================================================================
+        # HANDLER DEPENDENCY MAP - Explicit Wiring (Intentional Design)
+        # =====================================================================
         #
-        # MAINTENANCE: When adding a new handler to contract.yaml, you MUST add
-        # a corresponding entry here with the handler's constructor arguments.
-        # The keys match handler class names from contract.yaml handler_routing.handlers[].handler.name.
-        # See module docstring "Maintenance Note" for details.
+        # This map explicitly declares constructor arguments for each handler.
+        # This is an INTENTIONAL design trade-off over auto-discovery.
+        #
+        # WHY EXPLICIT OVER AUTO-DISCOVERY:
+        #   - Type Safety: Validated at startup, not at runtime invocation
+        #   - Testability: Dependencies are easily mocked without reflection
+        #   - Security: No reflection-based injection attack surface
+        #   - Auditability: Clear record of what each handler receives
+        #
+        # MAINTENANCE REQUIREMENT:
+        #   When adding a handler to contract.yaml, add an entry here.
+        #   Keys must match handler_routing.handlers[].handler.name in contract.yaml.
+        #   Missing entries cause ProtocolConfigurationError at startup (fail-fast).
+        #
+        # See module docstring "Handler Dependency Map - Design Trade-off" for details.
+        # =====================================================================
         handler_dependencies: dict[str, dict[str, object]] = {
             "HandlerNodeIntrospected": {
                 "projection_reader": projection_reader,
@@ -384,7 +426,8 @@ class RegistryInfraNodeRegistrationOrchestrator:
             # Load handler class dynamically
             handler_cls = _load_handler_class(handler_class_name, handler_module)
 
-            # Get dependencies for this handler
+            # Get dependencies for this handler from the explicit dependency map.
+            # Missing entries indicate a contract.yaml/registry mismatch that must be fixed.
             deps = handler_dependencies.get(handler_class_name, {})
             if not deps:
                 ctx = ModelInfraErrorContext(
@@ -393,8 +436,17 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     target_name="RegistryInfraNodeRegistrationOrchestrator",
                 )
                 raise ProtocolConfigurationError(
-                    f"No dependency configuration found for handler {handler_class_name}. "
-                    "Update handler_dependencies map with required constructor arguments.",
+                    f"No dependency configuration found for handler '{handler_class_name}'. "
+                    f"This handler is defined in contract.yaml but missing from the "
+                    f"handler_dependencies map in create_registry(). "
+                    f"\n\nTo fix: Add an entry to handler_dependencies:\n"
+                    f"    '{handler_class_name}': {{\n"
+                    f"        'projection_reader': projection_reader,\n"
+                    f"        # Add other constructor args as needed\n"
+                    f"    }},\n\n"
+                    f"This explicit wiring is intentional for type safety and testability. "
+                    f"See module docstring 'Handler Dependency Map - Design Trade-off'. "
+                    f"Error code: MISSING_DEPENDENCY_CONFIG (HANDLER_LOADER_061)",
                     context=ctx,
                 )
 
@@ -436,7 +488,8 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 )
                 raise ProtocolConfigurationError(
                     f"Failed to instantiate handler {handler_class_name}: {e}. "
-                    "Check that handler_dependencies map matches handler constructor.",
+                    f"Check that handler_dependencies map matches handler constructor. "
+                    f"Error code: HANDLER_INSTANTIATION_FAILED (HANDLER_LOADER_062)",
                     context=ctx,
                 ) from e
 

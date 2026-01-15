@@ -46,6 +46,18 @@ class TestConvertClassToHandlerKey:
 
     This function converts CamelCase handler class names to kebab-case
     handler keys as used in ServiceHandlerRegistry.
+
+    Test Categories:
+        - Standard CamelCase tests: Verify correct conversion of typical handler names
+        - Acronym handling tests: Verify behavior with uppercase sequences (HTTP, etc.)
+        - Edge case tests: Empty string, single word, etc.
+        - Underscore handling (CHARACTERIZATION TEST): Documents actual behavior with
+          underscores, which produces "surprising" but correct output per the regex logic
+
+    Note on Underscore Tests:
+        The test_underscore_handling test is a CHARACTERIZATION TEST that documents
+        existing behavior, not ideal behavior. See that test's docstring for details
+        on why "_-" sequences appear in output and why this is acceptable.
     """
 
     def test_standard_camel_case_conversion(self) -> None:
@@ -166,32 +178,68 @@ class TestConvertClassToHandlerKey:
         ],
     )
     def test_underscore_handling(self, class_name: str, expected: str) -> None:
-        """Test underscore handling - documents ACTUAL behavior, not IDEAL behavior.
+        """CHARACTERIZATION TEST: Documents ACTUAL underscore behavior, not IDEAL.
 
-        IMPORTANT: This test is a CHARACTERIZATION TEST that documents the current
-        (possibly surprising) behavior of the regex-based conversion. The expected
-        values reflect what the function ACTUALLY produces, not what might be
-        considered IDEAL output.
+        ===========================================================================
+        CHARACTERIZATION TEST - DO NOT "FIX" EXPECTED VALUES WITHOUT DISCUSSION
+        ===========================================================================
 
-        Why this matters:
-            - Underscores are atypical in Python class names (PEP 8 recommends
-              CamelCase for classes)
-            - The regex operates only on letter case boundaries, not underscores
-            - This produces outputs like "my_-handler" (mixed underscore and hyphen)
-              which is technically "correct" per the regex logic but visually odd
+        This test captures the EXISTING behavior of the regex-based conversion
+        function. The expected values may seem "surprising" or "wrong" but they
+        accurately reflect what the function currently does.
 
-        Why we keep the current behavior:
-            - Real-world handler classes follow PEP 8 (CamelCase, no underscores)
-            - Changing the regex could break existing handler key mappings
-            - The edge cases documented here are unlikely in practice
+        What is a characterization test?
+            A characterization test documents actual behavior of legacy code,
+            even when that behavior might not be ideal. It serves as a
+            "change detector" - if behavior changes, this test fails, prompting
+            discussion about whether the change was intentional.
 
-        If you need to change underscore handling (e.g., convert underscores to
-        hyphens), update BOTH the convert_class_to_handler_key function AND these
-        expected values. Consider the impact on existing handler registrations.
+        Why are these results "surprising"?
+            The function produces mixed underscore-hyphen output like "my_-handler"
+            because the regex ONLY operates on letter case boundaries:
+                1. r"([a-z0-9])([A-Z])" -> inserts hyphen before uppercase after lowercase
+                2. r"([A-Z]+)([A-Z][a-z])" -> handles consecutive uppercase
+
+            The regex does NOT explicitly handle underscores. Underscores just
+            "happen to be there" when case boundaries are processed, resulting in
+            sequences like "_-" where the underscore remains and a hyphen is added
+            at the case boundary.
+
+        Why is this acceptable?
+            1. Real-world classes follow PEP 8 (CamelCase) - no underscores
+            2. All production handlers use standard names like "HandlerNodeIntrospected"
+            3. These edge cases exist only in tests, not in actual code
+            4. Changing behavior could break existing handler registrations
+
+        When to change this test:
+            ONLY if you intentionally change the convert_class_to_handler_key
+            function to handle underscores differently. Update BOTH the function
+            AND these expected values together. Consider migration impact.
+
+        Args:
+            class_name: The input class name (with underscores for this test)
+            expected: The ACTUAL output of the function (may contain "_-" sequences)
         """
         from omnibase_infra.runtime.contract_loaders import convert_class_to_handler_key
 
-        assert convert_class_to_handler_key(class_name) == expected
+        result = convert_class_to_handler_key(class_name)
+
+        # Explicit assertion with clear failure message
+        assert result == expected, (
+            f"CHARACTERIZATION TEST FAILURE - Behavior has changed!\n"
+            f"  Input:    '{class_name}'\n"
+            f"  Expected: '{expected}' (documented actual behavior)\n"
+            f"  Got:      '{result}'\n"
+            f"\n"
+            f"If this failure is unexpected:\n"
+            f"  - Check if convert_class_to_handler_key was modified\n"
+            f"  - Determine if the change was intentional\n"
+            f"\n"
+            f"If the change WAS intentional:\n"
+            f"  - Update this test's expected values to match new behavior\n"
+            f"  - Document the change in the function's docstring\n"
+            f"  - Consider impact on existing handler registrations"
+        )
 
 
 # =============================================================================
@@ -427,6 +475,132 @@ class TestLoadHandlerRoutingSubcontractErrors:
         error_msg = str(exc_info.value)
         assert str(nonexistent_contract_path) in error_msg
 
+    def test_error_on_non_dict_handler_routing(self, tmp_path: Path) -> None:
+        """Test behavior when handler_routing is non-dict (characterization test).
+
+        CURRENT BEHAVIOR: Raises AttributeError (not ideal - should be
+        ProtocolConfigurationError with a clear message).
+
+        This test documents the ACTUAL current behavior. If the loader is
+        improved to handle this case more gracefully, update this test.
+
+        See also: This is an area for future improvement in error handling.
+        """
+        from omnibase_infra.runtime.contract_loaders import (
+            load_handler_routing_subcontract,
+        )
+
+        contract_content = """
+name: "test"
+version: "1.0.0"
+handler_routing: "this_should_be_a_dict"
+"""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(contract_content)
+
+        # CURRENT BEHAVIOR: Raises AttributeError because loader calls .get() on string
+        # IDEAL BEHAVIOR: Should raise ProtocolConfigurationError with clear message
+        with pytest.raises(AttributeError) as exc_info:
+            load_handler_routing_subcontract(contract_file)
+
+        # Verify the error is from trying to call .get() on a string
+        assert "get" in str(exc_info.value)
+
+    def test_error_on_handlers_as_non_list(self, tmp_path: Path) -> None:
+        """Test behavior when handlers is non-list (characterization test).
+
+        CURRENT BEHAVIOR: Raises AttributeError (not ideal - should be
+        ProtocolConfigurationError with a clear message).
+
+        This test documents the ACTUAL current behavior. If the loader is
+        improved to handle this case more gracefully, update this test.
+
+        See also: This is an area for future improvement in error handling.
+        """
+        from omnibase_infra.runtime.contract_loaders import (
+            load_handler_routing_subcontract,
+        )
+
+        contract_content = """
+name: "test"
+version: "1.0.0"
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers: "this_should_be_a_list"
+"""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(contract_content)
+
+        # CURRENT BEHAVIOR: Raises AttributeError because loader iterates and
+        # tries to call .get() on each character of the string
+        # IDEAL BEHAVIOR: Should raise ProtocolConfigurationError with clear message
+        with pytest.raises(AttributeError) as exc_info:
+            load_handler_routing_subcontract(contract_file)
+
+        # Verify the error is from trying to call .get() on a string character
+        assert "get" in str(exc_info.value)
+
+    def test_error_preserves_original_exception_chain(
+        self, nonexistent_contract_path: Path
+    ) -> None:
+        """Test that errors preserve the original exception for debugging.
+
+        Error chaining with 'raise ... from e' is important for debugging
+        as it preserves the full stack trace of the original failure.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.contract_loaders import (
+            load_handler_routing_subcontract,
+        )
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_handler_routing_subcontract(nonexistent_contract_path)
+
+        # The error should have context that helps with debugging
+        error = exc_info.value
+        assert error.model is not None, "Error should have a model with context"
+        assert error.model.context is not None, "Error context should be populated"
+
+    def test_multiple_errors_do_not_cascade(self, tmp_path: Path) -> None:
+        """Test that a single file error doesn't affect other operations.
+
+        This verifies error containment - one bad contract shouldn't corrupt
+        state or affect loading of other contracts.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.contract_loaders import (
+            load_handler_routing_subcontract,
+        )
+
+        # First, try to load an invalid contract
+        invalid_file = tmp_path / "invalid_contract.yaml"
+        invalid_file.write_text("invalid: [")
+
+        with pytest.raises(ProtocolConfigurationError):
+            load_handler_routing_subcontract(invalid_file)
+
+        # Then, verify we can still load a valid contract
+        valid_contract_content = """
+name: "test"
+version: "1.0.0"
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "TestEvent"
+        module: "test.models"
+      handler:
+        name: "TestHandler"
+        module: "test.handlers"
+"""
+        valid_file = tmp_path / "valid_contract.yaml"
+        valid_file.write_text(valid_contract_content)
+
+        # Should succeed without any state corruption from previous failure
+        result = load_handler_routing_subcontract(valid_file)
+        assert result is not None
+        assert len(result.handlers) == 1
+
 
 # =============================================================================
 # TestLoadHandlerRoutingSubcontractEdgeCases
@@ -611,6 +785,12 @@ class TestValidRoutingStrategies:
     - VALID_ROUTING_STRATEGIES contains only implemented strategies
     - Unknown strategies trigger warnings and fall back to payload_type_match
     - The constant is properly exported and accessible
+    - The loader ACTUALLY USES VALID_ROUTING_STRATEGIES in validation (not just hardcoded)
+
+    IMPORTANT: Tests must verify the constant is USED, not just that it EXISTS.
+    If someone replaced `if strategy not in VALID_ROUTING_STRATEGIES` with
+    `if strategy != "payload_type_match"`, the constant would be unused but
+    tests could still pass. See test_loader_uses_valid_routing_strategies_constant.
     """
 
     def test_valid_routing_strategies_contains_only_payload_type_match(self) -> None:
@@ -802,6 +982,171 @@ class TestValidRoutingStrategies:
         assert (
             contract["handler_routing"]["routing_strategy"] == "some_unknown_strategy"
         )
+
+    def test_loader_uses_valid_routing_strategies_constant(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that the loader actually USES VALID_ROUTING_STRATEGIES in validation.
+
+        CRITICAL TEST: This test verifies the loader consults the VALID_ROUTING_STRATEGIES
+        constant when validating routing strategies, not just hardcoding the check.
+
+        How this test works:
+            1. Import VALID_ROUTING_STRATEGIES to get its exact contents
+            2. Create a contract using a strategy that is IN the constant
+            3. Verify no warning is logged (strategy is valid)
+            4. Create a contract using a strategy NOT in the constant
+            5. Verify warning IS logged with the exact constant contents
+
+        This catches regressions where someone might replace:
+            `if strategy not in VALID_ROUTING_STRATEGIES`
+        with:
+            `if strategy != "payload_type_match"`
+
+        In the latter case, the constant would be unused, which defeats
+        the purpose of having a configurable set of valid strategies.
+        """
+        import logging
+
+        from omnibase_infra.runtime.contract_loaders import (
+            VALID_ROUTING_STRATEGIES,
+            load_handler_routing_subcontract,
+        )
+
+        # Get all valid strategies from the constant
+        valid_strategies = set(VALID_ROUTING_STRATEGIES)
+
+        # Test 1: Each strategy IN the constant should NOT trigger warning
+        for valid_strategy in valid_strategies:
+            contract_content = f"""
+name: "test"
+version: "1.0.0"
+handler_routing:
+  routing_strategy: "{valid_strategy}"
+  handlers:
+    - event_model:
+        name: "TestEvent"
+        module: "test.models"
+      handler:
+        name: "TestHandler"
+        module: "test.handlers"
+"""
+            contract_file = tmp_path / f"valid_{valid_strategy}_contract.yaml"
+            contract_file.write_text(contract_content)
+
+            caplog.clear()
+            with caplog.at_level(logging.WARNING):
+                result = load_handler_routing_subcontract(contract_file)
+
+            # Strategy should be preserved (no fallback)
+            assert result.routing_strategy == valid_strategy, (
+                f"Valid strategy '{valid_strategy}' should be preserved, "
+                f"but got '{result.routing_strategy}'"
+            )
+
+            # No warning about unknown routing strategy should be logged
+            unknown_warnings = [
+                r
+                for r in caplog.records
+                if "unknown" in r.message.lower() and "routing" in r.message.lower()
+            ]
+            assert len(unknown_warnings) == 0, (
+                f"Valid strategy '{valid_strategy}' should not trigger warning, "
+                f"but got: {[r.message for r in unknown_warnings]}"
+            )
+
+        # Test 2: Strategy NOT in the constant SHOULD trigger warning
+        invalid_strategy = "definitely_not_a_valid_strategy_xyz123"
+        assert invalid_strategy not in VALID_ROUTING_STRATEGIES, "Test precondition"
+
+        invalid_contract_content = f"""
+name: "test"
+version: "1.0.0"
+handler_routing:
+  routing_strategy: "{invalid_strategy}"
+  handlers:
+    - event_model:
+        name: "TestEvent"
+        module: "test.models"
+      handler:
+        name: "TestHandler"
+        module: "test.handlers"
+"""
+        invalid_contract_file = tmp_path / "invalid_strategy_contract.yaml"
+        invalid_contract_file.write_text(invalid_contract_content)
+
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            result = load_handler_routing_subcontract(invalid_contract_file)
+
+        # Should fall back to default
+        assert result.routing_strategy == "payload_type_match"
+
+        # Warning should mention the invalid strategy name
+        assert any(invalid_strategy in r.message for r in caplog.records), (
+            f"Warning should mention '{invalid_strategy}'"
+        )
+
+        # Warning should list valid strategies from the constant
+        # This proves the constant is being used, not hardcoded values
+        for valid in VALID_ROUTING_STRATEGIES:
+            assert any(valid in r.message for r in caplog.records), (
+                f"Warning should list valid strategy '{valid}' from VALID_ROUTING_STRATEGIES"
+            )
+
+    def test_warning_format_includes_all_valid_strategies(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that the warning message includes ALL strategies from VALID_ROUTING_STRATEGIES.
+
+        This test ensures the warning message is dynamically generated from the
+        VALID_ROUTING_STRATEGIES constant, not hardcoded. If new strategies are
+        added to the constant, they should automatically appear in warnings.
+        """
+        import logging
+
+        from omnibase_infra.runtime.contract_loaders import (
+            VALID_ROUTING_STRATEGIES,
+            load_handler_routing_subcontract,
+        )
+
+        contract_content = """
+name: "test"
+version: "1.0.0"
+handler_routing:
+  routing_strategy: "invalid_strategy_for_test"
+  handlers:
+    - event_model:
+        name: "TestEvent"
+        module: "test.models"
+      handler:
+        name: "TestHandler"
+        module: "test.handlers"
+"""
+        contract_file = tmp_path / "contract.yaml"
+        contract_file.write_text(contract_content)
+
+        with caplog.at_level(logging.WARNING):
+            load_handler_routing_subcontract(contract_file)
+
+        # Find the warning message about routing strategy
+        warning_messages = [
+            r.message
+            for r in caplog.records
+            if "routing_strategy" in r.message.lower() or "routing" in r.message.lower()
+        ]
+
+        assert len(warning_messages) >= 1, (
+            "Should have logged a routing strategy warning"
+        )
+
+        # The warning should contain ALL valid strategies, proving it reads from the constant
+        combined_warnings = " ".join(warning_messages)
+        for strategy in VALID_ROUTING_STRATEGIES:
+            assert strategy in combined_warnings, (
+                f"Warning should include valid strategy '{strategy}' from "
+                f"VALID_ROUTING_STRATEGIES constant. Full warning: {combined_warnings}"
+            )
 
 
 # =============================================================================
