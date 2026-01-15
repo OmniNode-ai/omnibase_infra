@@ -46,7 +46,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 from omnibase_infra.event_bus.models import (
@@ -61,6 +61,39 @@ if TYPE_CHECKING:
     from aiokafka import AIOKafkaProducer
 
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+
+
+@runtime_checkable
+class ProtocolKafkaDlqHost(Protocol):
+    """Protocol defining methods required by MixinKafkaDlq from its host class.
+
+    This protocol exists to satisfy mypy type checking for mixin classes that
+    call methods defined on the parent class (EventBusKafka). It also includes
+    attributes defined by the mixin itself that are accessed via self.
+    """
+
+    # Attributes from parent class (EventBusKafka)
+    _config: ModelKafkaEventBusConfig
+    _environment: str
+    _group: str
+    _producer: AIOKafkaProducer | None
+    _producer_lock: asyncio.Lock
+    _timeout_seconds: int
+
+    # Attributes defined by the mixin itself
+    _dlq_metrics: ModelDlqMetrics
+    _dlq_metrics_lock: asyncio.Lock
+
+    def _model_headers_to_kafka(
+        self, headers: ModelEventHeaders
+    ) -> list[tuple[str, bytes]]:
+        """Convert ModelEventHeaders to Kafka header format."""
+        ...
+
+    async def _invoke_dlq_callbacks(self, event: ModelDlqEvent) -> None:
+        """Invoke registered DLQ callbacks."""
+        ...
+
 
 # Type alias for DLQ callback functions
 DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]
@@ -173,7 +206,7 @@ class MixinKafkaDlq:
         return unregister
 
     async def _publish_to_dlq(
-        self,
+        self: ProtocolKafkaDlqHost,
         original_topic: str,
         failed_message: ModelEventMessage,
         error: Exception,
@@ -407,7 +440,7 @@ class MixinKafkaDlq:
                 )
 
     async def _publish_raw_to_dlq(
-        self,
+        self: ProtocolKafkaDlqHost,
         original_topic: str,
         raw_msg: object,
         error: Exception,

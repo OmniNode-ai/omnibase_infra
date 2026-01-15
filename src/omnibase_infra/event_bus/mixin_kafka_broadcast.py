@@ -35,10 +35,33 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Protocol, runtime_checkable
 
 from omnibase_infra.event_bus.models import ModelEventHeaders
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ProtocolKafkaBroadcastHost(Protocol):
+    """Protocol defining methods required by MixinKafkaBroadcast from its host class.
+
+    This protocol exists to satisfy mypy type checking for mixin classes that
+    call methods defined on the parent class (EventBusKafka).
+    """
+
+    _environment: str
+    _group: str
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: ModelEventHeaders | None = None,
+    ) -> None:
+        """Publish message to topic."""
+        ...
 
 
 class MixinKafkaBroadcast:
@@ -65,7 +88,7 @@ class MixinKafkaBroadcast:
     _group: str
 
     async def broadcast_to_environment(
-        self,
+        self: ProtocolKafkaBroadcastHost,
         command: str,
         payload: dict[str, object],
         target_environment: str | None = None,
@@ -94,7 +117,7 @@ class MixinKafkaBroadcast:
         await self.publish(topic, None, value, headers)
 
     async def send_to_group(
-        self,
+        self: ProtocolKafkaBroadcastHost,
         command: str,
         payload: dict[str, object],
         target_group: str,
@@ -122,7 +145,7 @@ class MixinKafkaBroadcast:
         await self.publish(topic, None, value, headers)
 
     async def publish_envelope(
-        self,
+        self: ProtocolKafkaBroadcastHost,
         envelope: object,
         topic: str,
     ) -> None:
