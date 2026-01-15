@@ -48,6 +48,7 @@ class ModelFieldChange(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     from_value: JsonType = Field(

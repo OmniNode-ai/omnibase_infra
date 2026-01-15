@@ -42,6 +42,7 @@ class ModelSubjectRef(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     subject_type: str = Field(

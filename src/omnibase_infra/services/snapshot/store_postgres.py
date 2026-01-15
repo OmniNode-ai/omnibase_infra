@@ -34,7 +34,9 @@ Table Schema:
 
         CREATE INDEX IF NOT EXISTS idx_snapshots_subject
             ON snapshots (subject_type, subject_id, sequence_number DESC);
-        CREATE INDEX IF NOT EXISTS idx_snapshots_content_hash
+
+        -- UNIQUE partial index enables atomic ON CONFLICT upserts
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_content_hash
             ON snapshots (content_hash) WHERE content_hash IS NOT NULL;
 
 Connection Pooling:
@@ -75,7 +77,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -149,11 +151,15 @@ class StoreSnapshotPostgres:
         duplicate. This enables safe retries without data duplication.
 
         Race Condition Handling:
-            This method uses a CTE (Common Table Expression) pattern to
-            atomically check for existing content_hash and conditionally
-            insert. If a concurrent process inserts a row with the same
-            sequence_number (causing UniqueViolationError), the method
-            re-checks for content_hash match to preserve idempotency.
+            This method uses INSERT ON CONFLICT with a unique partial index
+            on content_hash to achieve atomic idempotency. The database-level
+            unique constraint eliminates TOCTOU race conditions that would
+            occur with separate SELECT-then-INSERT patterns.
+
+            Conflict scenarios:
+            - Same content_hash (any sequence): Returns existing ID via ON CONFLICT
+            - Same sequence, different content_hash: Raises UniqueViolationError
+            - No conflicts: Normal insert
 
         Args:
             snapshot: The snapshot to persist.
@@ -164,6 +170,10 @@ class StoreSnapshotPostgres:
         Raises:
             InfraConnectionError: If database connection fails or
                 query execution fails.
+
+        Note:
+            Requires ensure_schema() to have created the unique partial index
+            on content_hash. See ensure_schema() for details.
         """
         # Serialize data to JSON for JSONB storage (done outside try for clarity)
         data_json = json.dumps(snapshot.data, sort_keys=True)
@@ -171,33 +181,24 @@ class StoreSnapshotPostgres:
         try:
             async with self._pool.acquire() as conn:
                 if snapshot.content_hash:
-                    # Use CTE for atomic check-and-insert to minimize race window.
-                    # This pattern:
-                    # 1. Checks for existing content_hash in 'existing' CTE
-                    # 2. Conditionally inserts only if no existing row found
-                    # 3. Uses ON CONFLICT DO NOTHING for sequence constraint races
-                    # 4. Returns existing ID or newly inserted ID
+                    # Atomic upsert using ON CONFLICT on the unique content_hash index.
+                    # This eliminates the TOCTOU race condition by letting the database
+                    # handle the check-and-insert atomically:
+                    # - If content_hash exists: DO UPDATE (no-op) returns existing row
+                    # - If content_hash is new: INSERT returns new row
+                    # - If sequence conflicts: Raises UniqueViolationError (handled below)
+                    #
+                    # The DO UPDATE SET id = snapshots.id is a no-op that enables
+                    # RETURNING to return the existing row's id.
                     result = await conn.fetchval(
                         """
-                        WITH existing AS (
-                            SELECT id FROM snapshots
-                            WHERE content_hash = $7
-                            LIMIT 1
-                        ), inserted AS (
-                            INSERT INTO snapshots (
-                                id, subject_type, subject_id, data, sequence_number,
-                                version, content_hash, created_at, parent_id
-                            )
-                            SELECT $1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9
-                            WHERE NOT EXISTS (SELECT 1 FROM existing)
-                            ON CONFLICT (subject_type, subject_id, sequence_number)
-                                DO NOTHING
-                            RETURNING id
-                        )
-                        SELECT COALESCE(
-                            (SELECT id FROM existing),
-                            (SELECT id FROM inserted)
-                        )
+                        INSERT INTO snapshots (
+                            id, subject_type, subject_id, data, sequence_number,
+                            version, content_hash, created_at, parent_id
+                        ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+                        ON CONFLICT (content_hash) WHERE content_hash IS NOT NULL
+                            DO UPDATE SET id = snapshots.id
+                        RETURNING id
                         """,
                         snapshot.id,
                         snapshot.subject.subject_type,
@@ -232,37 +233,14 @@ class StoreSnapshotPostgres:
                             )
                         return result_id
 
-                    # If result is None, ON CONFLICT DO NOTHING triggered due to
-                    # sequence conflict. Re-check content_hash for race condition
-                    # where another process inserted same content concurrently.
-                    existing = await conn.fetchval(
-                        "SELECT id FROM snapshots WHERE content_hash = $1",
-                        snapshot.content_hash,
-                    )
-                    if existing:
-                        existing_id = UUID(str(existing))
-                        logger.debug(
-                            "Concurrent duplicate detected after sequence conflict, "
-                            "returning existing ID",
-                            extra={
-                                "existing_id": str(existing_id),
-                                "content_hash": snapshot.content_hash[:16] + "...",
-                            },
-                        )
-                        return existing_id
-
-                    # Sequence conflict with different content - this is a real
-                    # conflict that the caller should handle
+                    # Result should never be None with DO UPDATE, but handle defensively
                     context = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.DATABASE,
                         operation="save_snapshot",
                         target_name="snapshots",
                     )
                     raise InfraConnectionError(
-                        f"Sequence conflict: sequence_number {snapshot.sequence_number} "
-                        f"already exists for subject "
-                        f"({snapshot.subject.subject_type}, {snapshot.subject.subject_id}) "
-                        f"with different content",
+                        "Unexpected NULL result from upsert",
                         context=context,
                     )
 
@@ -312,10 +290,12 @@ class StoreSnapshotPostgres:
                     context=context,
                 )
 
-        except asyncpg.exceptions.UniqueViolationError:
-            # Race condition: constraint violation despite ON CONFLICT
-            # (can happen with concurrent transactions in edge cases).
-            # Re-check content_hash to preserve idempotency.
+        except asyncpg.exceptions.UniqueViolationError as e:
+            # UniqueViolationError occurs when:
+            # 1. Sequence constraint violated (same subject + sequence, different content)
+            # 2. Rare race on content_hash unique index (concurrent identical inserts)
+            #
+            # For case 2, check if content_hash exists and return it for idempotency.
             if snapshot.content_hash:
                 try:
                     async with self._pool.acquire() as conn:
@@ -337,7 +317,7 @@ class StoreSnapshotPostgres:
                 except Exception:
                     pass  # Fall through to re-raise original error
 
-            # Re-raise as InfraConnectionError
+            # Sequence conflict with different content - this is a real conflict
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="save_snapshot",
@@ -345,9 +325,10 @@ class StoreSnapshotPostgres:
             )
             raise InfraConnectionError(
                 f"Unique constraint violation during save for subject "
-                f"({snapshot.subject.subject_type}, {snapshot.subject.subject_id})",
+                f"({snapshot.subject.subject_type}, {snapshot.subject.subject_id}): "
+                f"{e.constraint_name or 'unknown constraint'}",
                 context=context,
-            )
+            ) from e
 
         except InfraConnectionError:
             # Re-raise our own errors without wrapping
@@ -402,18 +383,46 @@ class StoreSnapshotPostgres:
     ) -> ModelSnapshot | None:
         """Load the most recent snapshot by sequence_number.
 
-        Retrieves the snapshot with the highest sequence_number for
-        the given subject. If no subject is provided, returns the
-        globally most recent snapshot.
+        Retrieves the snapshot with the highest sequence_number,
+        optionally filtered by subject. "Most recent" is determined
+        by sequence_number (not created_at) for consistent ordering.
 
         Args:
             subject: Optional filter by subject reference.
 
+                - If provided: Returns the latest snapshot for that specific
+                  subject (highest sequence_number within that subject).
+                - If None: Returns the globally latest snapshot across ALL
+                  subjects (highest sequence_number in the entire store).
+
         Returns:
-            The most recent snapshot matching criteria, or None.
+            The most recent snapshot matching criteria, or None if no
+            snapshots exist.
 
         Raises:
             InfraConnectionError: If database connection fails.
+
+        Note:
+            When ``subject=None``, "globally latest" means the snapshot with
+            the highest sequence_number across all subjects. Since sequence
+            numbers are per-subject (each subject starts at 1), this may NOT
+            correspond to the most recently created snapshot by wall-clock
+            time. Use ``query(after=timestamp)`` if you need time-based
+            ordering across subjects.
+
+        Examples:
+            >>> # Get latest for a specific subject
+            >>> subject = ModelSubjectRef(
+            ...     subject_type="node_registration",
+            ...     subject_id=node_uuid,
+            ... )
+            >>> latest = await store.load_latest(subject=subject)
+            >>> # Returns snapshot with highest sequence_number for this subject
+
+            >>> # Get globally latest across ALL subjects
+            >>> global_latest = await store.load_latest(subject=None)
+            >>> # Returns snapshot with highest sequence_number in entire store
+            >>> # Note: This is NOT necessarily the most recent by created_at
         """
         try:
             async with self._pool.acquire() as conn:
@@ -591,6 +600,156 @@ class StoreSnapshotPostgres:
                 context=context,
             ) from e
 
+    async def cleanup_expired(
+        self,
+        *,
+        max_age_seconds: int | None = None,
+        keep_latest_n: int | None = None,
+        subject: ModelSubjectRef | None = None,
+    ) -> int:
+        """Remove expired snapshots based on retention policy.
+
+        Supports multiple retention strategies:
+        - Time-based: Delete snapshots older than max_age_seconds
+        - Count-based: Keep only the N most recent per subject
+        - Subject-scoped: Apply policy only to a specific subject
+
+        When both max_age_seconds and keep_latest_n are provided, snapshots
+        must satisfy BOTH conditions to be deleted (i.e., be older than
+        max_age AND not in the latest N).
+
+        Args:
+            max_age_seconds: Delete snapshots older than this many seconds.
+            keep_latest_n: Always retain the N most recent per subject.
+            subject: If provided, apply cleanup only to this subject.
+
+        Returns:
+            Number of snapshots deleted.
+
+        Raises:
+            ValueError: If keep_latest_n is provided but < 1.
+            InfraConnectionError: If database connection fails.
+
+        Note:
+            For keep_latest_n, this uses a window function to identify
+            snapshots outside the retention window per subject. This is
+            efficient for moderate numbers of subjects but may require
+            batching for very large datasets.
+        """
+        if keep_latest_n is not None and keep_latest_n < 1:
+            msg = "keep_latest_n must be >= 1"
+            raise ValueError(msg)
+
+        # If neither policy is specified, no-op
+        if max_age_seconds is None and keep_latest_n is None:
+            return 0
+
+        try:
+            async with self._pool.acquire() as conn:
+                # Build conditions for deletion
+                conditions: list[str] = []
+                params: list[object] = []
+
+                # Subject filter (applies to all strategies)
+                if subject is not None:
+                    conditions.append(f"subject_type = ${len(params) + 1}")
+                    params.append(subject.subject_type)
+                    conditions.append(f"subject_id = ${len(params) + 1}")
+                    params.append(subject.subject_id)
+
+                subject_filter = " AND ".join(conditions) if conditions else "TRUE"
+
+                # Strategy 1: Age-based only (simpler query)
+                if max_age_seconds is not None and keep_latest_n is None:
+                    cutoff_time = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
+                    params.append(cutoff_time)
+
+                    # S608: Safe - subject_filter contains only parameterized placeholders
+                    delete_query = f"""
+                        DELETE FROM snapshots
+                        WHERE {subject_filter}
+                        AND created_at < ${len(params)}
+                    """  # noqa: S608
+
+                    result = await conn.execute(delete_query, *params)
+                    # asyncpg returns "DELETE N"
+                    deleted_str = str(result).replace("DELETE ", "")
+                    return int(deleted_str) if deleted_str.isdigit() else 0
+
+                # Strategy 2: Keep latest N only
+                if keep_latest_n is not None and max_age_seconds is None:
+                    params.append(keep_latest_n)
+
+                    # Use window function to rank snapshots per subject
+                    # S608: Safe - subject_filter contains only parameterized placeholders
+                    delete_query = f"""
+                        DELETE FROM snapshots
+                        WHERE id IN (
+                            SELECT id FROM (
+                                SELECT id,
+                                    ROW_NUMBER() OVER (
+                                        PARTITION BY subject_type, subject_id
+                                        ORDER BY sequence_number DESC
+                                    ) as rn
+                                FROM snapshots
+                                WHERE {subject_filter}
+                            ) ranked
+                            WHERE rn > ${len(params)}
+                        )
+                    """  # noqa: S608
+
+                    result = await conn.execute(delete_query, *params)
+                    deleted_str = str(result).replace("DELETE ", "")
+                    return int(deleted_str) if deleted_str.isdigit() else 0
+
+                # Strategy 3: Combined (both age and count)
+                # Delete if: older than max_age AND NOT in latest N
+                cutoff_time = datetime.now(UTC) - timedelta(
+                    seconds=max_age_seconds  # type: ignore[arg-type]
+                )
+                params.append(cutoff_time)
+                cutoff_param_idx = len(params)
+
+                params.append(keep_latest_n)
+                keep_n_param_idx = len(params)
+
+                # S608: Safe - subject_filter contains only parameterized placeholders
+                delete_query = f"""
+                    DELETE FROM snapshots
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT id,
+                                created_at,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY subject_type, subject_id
+                                    ORDER BY sequence_number DESC
+                                ) as rn
+                            FROM snapshots
+                            WHERE {subject_filter}
+                        ) ranked
+                        WHERE rn > ${keep_n_param_idx}
+                        AND created_at < ${cutoff_param_idx}
+                    )
+                """  # noqa: S608
+
+                result = await conn.execute(delete_query, *params)
+                deleted_str = str(result).replace("DELETE ", "")
+                return int(deleted_str) if deleted_str.isdigit() else 0
+
+        except ValueError:
+            # Re-raise validation errors
+            raise
+        except Exception as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="cleanup_expired",
+                target_name="snapshots",
+            )
+            raise InfraConnectionError(
+                f"Failed to cleanup expired snapshots: {type(e).__name__}",
+                context=context,
+            ) from e
+
     def _row_to_model(self, row: asyncpg.Record) -> ModelSnapshot:
         """Convert a database row to a ModelSnapshot.
 
@@ -625,6 +784,17 @@ class StoreSnapshotPostgres:
         This method is idempotent and safe to call on every startup.
         Uses IF NOT EXISTS clauses to avoid errors on existing objects.
 
+        Schema Design:
+            The content_hash column has a UNIQUE partial index to enable
+            atomic idempotency checks via INSERT ON CONFLICT. This eliminates
+            TOCTOU race conditions that would occur with separate SELECT-then-
+            INSERT patterns.
+
+            Constraints:
+            - Primary key on id (UUID)
+            - Unique constraint on (subject_type, subject_id, sequence_number)
+            - Unique partial index on content_hash WHERE content_hash IS NOT NULL
+
         Raises:
             InfraConnectionError: If schema creation fails.
 
@@ -632,6 +802,11 @@ class StoreSnapshotPostgres:
             This method uses multi-statement execution via transaction.
             Each statement is executed separately to work within asyncpg's
             single-statement limitation.
+
+        Migration Note:
+            If upgrading from a schema with non-unique idx_snapshots_content_hash,
+            the old index will be dropped and replaced with a unique index.
+            Ensure no duplicate content_hash values exist before migration.
         """
         try:
             async with self._pool.acquire() as conn:
@@ -659,9 +834,18 @@ class StoreSnapshotPostgres:
                         ON snapshots (subject_type, subject_id, sequence_number DESC)
                 """)
 
-                # Create content hash index (partial - only non-null)
+                # Drop old non-unique content_hash index if it exists (for migration).
+                # This is safe because CREATE UNIQUE INDEX IF NOT EXISTS will fail
+                # if a non-unique index with the same name exists.
                 await conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_snapshots_content_hash
+                    DROP INDEX IF EXISTS idx_snapshots_content_hash
+                """)
+
+                # Create UNIQUE partial index on content_hash.
+                # This enables atomic ON CONFLICT upserts and prevents duplicate
+                # content_hash entries, eliminating TOCTOU race conditions.
+                await conn.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_content_hash
                         ON snapshots (content_hash) WHERE content_hash IS NOT NULL
                 """)
 

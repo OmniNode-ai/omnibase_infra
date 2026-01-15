@@ -66,6 +66,7 @@ class ModelSnapshotDiff(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     base_id: UUID = Field(

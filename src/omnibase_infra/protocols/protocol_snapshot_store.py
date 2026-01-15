@@ -179,7 +179,7 @@ class ProtocolSnapshotStore(Protocol):
                 ),
                 data=state_dict,
                 sequence_number=42,
-                content_hash="sha256:abc123...",
+                # content_hash is computed automatically from data
             )
             saved_id = await store.save(snapshot)
             ```
@@ -225,8 +225,12 @@ class ProtocolSnapshotStore(Protocol):
         This ensures consistent ordering even with clock skew.
 
         Args:
-            subject: Optional filter by subject reference. If None,
-                returns the globally most recent snapshot.
+            subject: Optional filter by subject reference.
+
+                - If provided: Returns the latest snapshot for that specific
+                  subject (highest sequence_number within that subject).
+                - If None: Returns the globally latest snapshot across ALL
+                  subjects (highest sequence_number in the entire store).
 
         Returns:
             The most recent snapshot matching criteria, or None if no
@@ -236,7 +240,15 @@ class ProtocolSnapshotStore(Protocol):
             InfraConnectionError: If storage is unavailable
             InfraTimeoutError: If operation times out
 
-        Example:
+        Note:
+            When ``subject=None``, "globally latest" means the snapshot with
+            the highest sequence_number across all subjects. Since sequence
+            numbers are per-subject (each subject starts at 1), this may NOT
+            correspond to the most recently created snapshot by wall-clock
+            time. Use ``query(after=timestamp)`` if you need time-based
+            ordering across subjects.
+
+        Examples:
             ```python
             # Get latest snapshot for a specific node
             subject = ModelSubjectRef(
@@ -244,9 +256,18 @@ class ProtocolSnapshotStore(Protocol):
                 subject_id=node_id,  # UUID type
             )
             latest = await store.load_latest(subject=subject)
+            # Returns snapshot with highest sequence_number for this subject
 
-            # Get globally latest snapshot
-            global_latest = await store.load_latest()
+            # Get globally latest snapshot across ALL subjects
+            global_latest = await store.load_latest(subject=None)
+            # Returns snapshot with highest sequence_number in entire store
+            # Note: This is NOT necessarily the most recent by created_at
+
+            # Alternative: Get most recent by wall-clock time
+            from datetime import datetime, timedelta, UTC
+            one_second_ago = datetime.now(UTC) - timedelta(seconds=1)
+            recent = await store.query(after=one_second_ago, limit=1)
+            time_based_latest = recent[0] if recent else None
             ```
 
         Implementation Notes:
@@ -365,5 +386,78 @@ class ProtocolSnapshotStore(Protocol):
             - Must be atomic (no gaps, no duplicates)
             - Use database sequences or SELECT MAX + 1 with locking
             - Consider high-concurrency scenarios
+        """
+        ...
+
+    async def cleanup_expired(
+        self,
+        *,
+        max_age_seconds: int | None = None,
+        keep_latest_n: int | None = None,
+        subject: ModelSubjectRef | None = None,
+    ) -> int:
+        """Remove expired snapshots based on retention policy.
+
+        Supports multiple retention strategies that can be combined:
+        - Time-based: Delete snapshots older than max_age_seconds
+        - Count-based: Keep only the N most recent per subject
+        - Subject-scoped: Apply policy only to a specific subject
+
+        When both max_age_seconds and keep_latest_n are provided, snapshots
+        must satisfy BOTH conditions to be deleted (i.e., be older than
+        max_age AND not in the latest N).
+
+        Args:
+            max_age_seconds: Delete snapshots with created_at older than
+                this many seconds ago. If None, no age-based filtering.
+            keep_latest_n: Always retain the N most recent snapshots per
+                subject (by sequence_number). If None, no count-based
+                retention. Must be >= 1 if provided.
+            subject: If provided, apply cleanup only to this subject.
+                If None, apply cleanup globally across all subjects.
+
+        Returns:
+            Number of snapshots deleted.
+
+        Raises:
+            InfraConnectionError: If storage is unavailable
+            InfraTimeoutError: If operation times out
+            ValueError: If keep_latest_n is provided but < 1
+
+        Example:
+            ```python
+            # Delete snapshots older than 30 days
+            deleted = await store.cleanup_expired(
+                max_age_seconds=30 * 24 * 60 * 60,
+            )
+
+            # Keep only last 10 snapshots per subject
+            deleted = await store.cleanup_expired(
+                keep_latest_n=10,
+            )
+
+            # Combined: Delete if older than 7 days AND not in latest 5
+            deleted = await store.cleanup_expired(
+                max_age_seconds=7 * 24 * 60 * 60,
+                keep_latest_n=5,
+            )
+
+            # Cleanup only for a specific subject
+            subject = ModelSubjectRef(
+                subject_type="agent",
+                subject_id=agent_id,
+            )
+            deleted = await store.cleanup_expired(
+                max_age_seconds=60 * 60,  # 1 hour
+                subject=subject,
+            )
+            ```
+
+        Implementation Notes:
+            - At least one of max_age_seconds or keep_latest_n should be provided
+            - If neither is provided, return 0 (no-op)
+            - For keep_latest_n, order by sequence_number (not created_at)
+            - Use batch deletes for efficiency in large datasets
+            - Consider adding index on created_at for time-based queries
         """
         ...

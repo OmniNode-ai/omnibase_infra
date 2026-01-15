@@ -164,6 +164,93 @@ class TestStoreSnapshotInMemoryLoadLatest:
         assert latest is not None
         assert latest.sequence_number == 100
 
+    @pytest.mark.asyncio
+    async def test_load_latest_global_returns_truly_latest_across_subjects(
+        self, store: StoreSnapshotInMemory
+    ) -> None:
+        """load_latest(subject=None) returns the snapshot with highest sequence_number globally.
+
+        This test verifies that when multiple subjects have snapshots with different
+        sequence numbers, the global latest returns the one with the highest
+        sequence_number regardless of which subject it belongs to.
+        """
+        subj_a = ModelSubjectRef(subject_type="agent", subject_id=uuid4())
+        subj_b = ModelSubjectRef(subject_type="workflow", subject_id=uuid4())
+        subj_c = ModelSubjectRef(subject_type="node", subject_id=uuid4())
+
+        # Create snapshots with interleaved sequence numbers across subjects
+        snap_a1 = ModelSnapshot(subject=subj_a, data={"s": "a1"}, sequence_number=10)
+        snap_b1 = ModelSnapshot(subject=subj_b, data={"s": "b1"}, sequence_number=50)
+        snap_a2 = ModelSnapshot(subject=subj_a, data={"s": "a2"}, sequence_number=30)
+        snap_c1 = ModelSnapshot(subject=subj_c, data={"s": "c1"}, sequence_number=25)
+        snap_b2 = ModelSnapshot(subject=subj_b, data={"s": "b2"}, sequence_number=15)
+
+        # Save in non-sequential order to ensure implementation doesn't rely on save order
+        await store.save(snap_a1)
+        await store.save(snap_b2)
+        await store.save(snap_c1)
+        await store.save(snap_a2)
+        await store.save(snap_b1)
+
+        # Verify: snap_b1 has the highest sequence_number (50)
+        global_latest = await store.load_latest(subject=None)
+
+        assert global_latest is not None
+        # Verify exact snapshot ID (strongest assertion)
+        assert global_latest.id == snap_b1.id
+        # Verify sequence_number is truly the highest
+        assert global_latest.sequence_number == 50
+        assert global_latest.sequence_number > snap_a1.sequence_number
+        assert global_latest.sequence_number > snap_a2.sequence_number
+        assert global_latest.sequence_number > snap_b2.sequence_number
+        assert global_latest.sequence_number > snap_c1.sequence_number
+        # Verify it's from the expected subject
+        assert global_latest.subject.subject_type == "workflow"
+        assert global_latest.data["s"] == "b1"
+
+    @pytest.mark.asyncio
+    async def test_load_latest_global_with_equal_sequence_numbers(
+        self, store: StoreSnapshotInMemory
+    ) -> None:
+        """load_latest(subject=None) handles equal sequence numbers deterministically.
+
+        When multiple snapshots have the same sequence_number, the implementation
+        should return a consistent result (max() returns the first maximum by default).
+        """
+        subj_a = ModelSubjectRef(subject_type="a", subject_id=uuid4())
+        subj_b = ModelSubjectRef(subject_type="b", subject_id=uuid4())
+
+        # Both have same sequence number
+        snap_a = ModelSnapshot(subject=subj_a, data={"s": "a"}, sequence_number=100)
+        snap_b = ModelSnapshot(subject=subj_b, data={"s": "b"}, sequence_number=100)
+
+        await store.save(snap_a)
+        await store.save(snap_b)
+
+        global_latest = await store.load_latest(subject=None)
+
+        assert global_latest is not None
+        assert global_latest.sequence_number == 100
+        # Should be one of the two - verify it's actually in our set
+        assert global_latest.id in {snap_a.id, snap_b.id}
+
+    @pytest.mark.asyncio
+    async def test_load_latest_global_single_snapshot(
+        self, store: StoreSnapshotInMemory
+    ) -> None:
+        """load_latest(subject=None) works correctly with a single snapshot."""
+        subj = ModelSubjectRef(subject_type="singleton", subject_id=uuid4())
+        only_snap = ModelSnapshot(subject=subj, data={"only": True}, sequence_number=1)
+
+        await store.save(only_snap)
+
+        global_latest = await store.load_latest(subject=None)
+
+        assert global_latest is not None
+        assert global_latest.id == only_snap.id
+        assert global_latest.sequence_number == 1
+        assert global_latest.data["only"] is True
+
 
 class TestStoreSnapshotInMemoryQuery:
     """Tests for query() method."""
@@ -303,6 +390,211 @@ class TestStoreSnapshotInMemorySequenceNumber:
         assert seq1_a == 1
         assert seq1_b == 1
         assert seq2_a == 2
+
+
+class TestStoreSnapshotInMemoryCleanupExpired:
+    """Tests for cleanup_expired() method."""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_no_op_when_no_policy(
+        self, store: StoreSnapshotInMemory, subject: ModelSubjectRef
+    ) -> None:
+        """cleanup_expired() returns 0 when no policy is specified."""
+        for i in range(1, 6):
+            snap = ModelSnapshot(subject=subject, data={"n": i}, sequence_number=i)
+            await store.save(snap)
+
+        deleted = await store.cleanup_expired()
+        assert deleted == 0
+        assert store.count() == 5
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_keep_latest_n(
+        self, store: StoreSnapshotInMemory, subject: ModelSubjectRef
+    ) -> None:
+        """cleanup_expired() keeps only latest N snapshots per subject."""
+        for i in range(1, 11):
+            snap = ModelSnapshot(subject=subject, data={"n": i}, sequence_number=i)
+            await store.save(snap)
+
+        assert store.count() == 10
+
+        deleted = await store.cleanup_expired(keep_latest_n=3)
+        assert deleted == 7
+        assert store.count() == 3
+
+        # Verify the 3 kept are the latest (highest sequence numbers)
+        latest = await store.load_latest(subject=subject)
+        assert latest is not None
+        assert latest.sequence_number == 10
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_keep_latest_n_multiple_subjects(
+        self, store: StoreSnapshotInMemory
+    ) -> None:
+        """cleanup_expired() applies keep_latest_n per subject."""
+        subj1 = ModelSubjectRef(subject_type="a", subject_id=uuid4())
+        subj2 = ModelSubjectRef(subject_type="b", subject_id=uuid4())
+
+        # Create 5 snapshots for each subject with distinct data to avoid
+        # content_hash idempotency collisions
+        for i in range(1, 6):
+            await store.save(
+                ModelSnapshot(
+                    subject=subj1,
+                    data={"subject": "a", "n": i},
+                    sequence_number=i,
+                )
+            )
+            await store.save(
+                ModelSnapshot(
+                    subject=subj2,
+                    data={"subject": "b", "n": i},
+                    sequence_number=i,
+                )
+            )
+
+        assert store.count() == 10
+
+        # Keep latest 2 per subject
+        deleted = await store.cleanup_expired(keep_latest_n=2)
+        assert deleted == 6
+        assert store.count() == 4
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_max_age_seconds(
+        self, store: StoreSnapshotInMemory, subject: ModelSubjectRef
+    ) -> None:
+        """cleanup_expired() deletes snapshots older than max_age_seconds."""
+        # Create old snapshots
+        old_time = datetime.now(UTC) - timedelta(hours=2)
+        for i in range(1, 4):
+            snap = ModelSnapshot(
+                subject=subject,
+                data={"n": i},
+                sequence_number=i,
+                created_at=old_time,
+            )
+            await store.save(snap)
+
+        # Create recent snapshot
+        recent_snap = ModelSnapshot(subject=subject, data={"n": 4}, sequence_number=4)
+        await store.save(recent_snap)
+
+        assert store.count() == 4
+
+        # Delete snapshots older than 1 hour
+        deleted = await store.cleanup_expired(max_age_seconds=3600)
+        assert deleted == 3
+        assert store.count() == 1
+
+        # Verify the recent one is kept
+        remaining = await store.load_latest(subject=subject)
+        assert remaining is not None
+        assert remaining.sequence_number == 4
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_combined_policies(
+        self, store: StoreSnapshotInMemory, subject: ModelSubjectRef
+    ) -> None:
+        """cleanup_expired() with both policies only deletes if both match."""
+        old_time = datetime.now(UTC) - timedelta(hours=2)
+
+        # Create 5 old snapshots
+        for i in range(1, 6):
+            snap = ModelSnapshot(
+                subject=subject,
+                data={"n": i},
+                sequence_number=i,
+                created_at=old_time,
+            )
+            await store.save(snap)
+
+        # Create 3 recent snapshots
+        for i in range(6, 9):
+            snap = ModelSnapshot(subject=subject, data={"n": i}, sequence_number=i)
+            await store.save(snap)
+
+        assert store.count() == 8
+
+        # Combined: keep latest 3 AND delete only if older than 1 hour
+        # This means snapshots 6, 7, 8 are kept (in latest 3)
+        # Snapshots 1, 2, 3, 4, 5 are outside latest 3 AND old -> deleted
+        deleted = await store.cleanup_expired(max_age_seconds=3600, keep_latest_n=3)
+        assert deleted == 5
+        assert store.count() == 3
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_subject_scoped(
+        self, store: StoreSnapshotInMemory
+    ) -> None:
+        """cleanup_expired() with subject only affects that subject."""
+        subj1 = ModelSubjectRef(subject_type="a", subject_id=uuid4())
+        subj2 = ModelSubjectRef(subject_type="b", subject_id=uuid4())
+
+        # Create snapshots with distinct data to avoid content_hash collisions
+        for i in range(1, 6):
+            await store.save(
+                ModelSnapshot(
+                    subject=subj1,
+                    data={"subject": "a", "n": i},
+                    sequence_number=i,
+                )
+            )
+            await store.save(
+                ModelSnapshot(
+                    subject=subj2,
+                    data={"subject": "b", "n": i},
+                    sequence_number=i,
+                )
+            )
+
+        assert store.count() == 10
+
+        # Only cleanup subj1, keep latest 2
+        deleted = await store.cleanup_expired(keep_latest_n=2, subject=subj1)
+        assert deleted == 3
+
+        # subj1 should have 2, subj2 should have 5
+        subj1_snaps = await store.query(subject=subj1)
+        subj2_snaps = await store.query(subject=subj2)
+        assert len(subj1_snaps) == 2
+        assert len(subj2_snaps) == 5
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_invalid_keep_latest_n(
+        self, store: StoreSnapshotInMemory
+    ) -> None:
+        """cleanup_expired() raises ValueError for keep_latest_n < 1."""
+        with pytest.raises(ValueError, match="keep_latest_n must be >= 1"):
+            await store.cleanup_expired(keep_latest_n=0)
+
+        with pytest.raises(ValueError, match="keep_latest_n must be >= 1"):
+            await store.cleanup_expired(keep_latest_n=-1)
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_empty_store(
+        self, store: StoreSnapshotInMemory
+    ) -> None:
+        """cleanup_expired() returns 0 on empty store."""
+        deleted = await store.cleanup_expired(keep_latest_n=5)
+        assert deleted == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_keep_all_when_count_below_n(
+        self, store: StoreSnapshotInMemory, subject: ModelSubjectRef
+    ) -> None:
+        """cleanup_expired() keeps all when count is below keep_latest_n."""
+        for i in range(1, 4):
+            snap = ModelSnapshot(subject=subject, data={"n": i}, sequence_number=i)
+            await store.save(snap)
+
+        assert store.count() == 3
+
+        # Keep latest 10, but only have 3
+        deleted = await store.cleanup_expired(keep_latest_n=10)
+        assert deleted == 0
+        assert store.count() == 3
 
 
 class TestStoreSnapshotInMemoryTestHelpers:

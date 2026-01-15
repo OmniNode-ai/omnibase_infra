@@ -28,6 +28,7 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
+import builtins
 from datetime import datetime
 from uuid import UUID
 
@@ -223,18 +224,31 @@ class ServiceSnapshot:
         sequence_number, not created_at timestamp.
 
         Args:
-            subject: Optional filter by subject reference. If None,
-                returns the globally most recent snapshot.
+            subject: Optional filter by subject reference.
+
+                - If provided: Returns the latest snapshot for that specific
+                  subject (highest sequence_number within that subject).
+                - If None: Returns the globally latest snapshot across ALL
+                  subjects (highest sequence_number in the entire store).
 
         Returns:
-            The most recent snapshot matching criteria, or None if
-            no snapshots exist.
+            The most recent snapshot matching criteria, or None if no
+            snapshots exist.
 
         Raises:
             InfraConnectionError: If the store is unavailable.
             InfraTimeoutError: If the operation times out.
 
-        Example:
+        Note:
+            When ``subject=None``, "globally latest" means the snapshot with
+            the highest sequence_number across all subjects. Since sequence
+            numbers are per-subject (each subject starts at 1), this may NOT
+            correspond to the most recently created snapshot by wall-clock
+            time. Use ``list(after=timestamp)`` if you need time-based
+            ordering across subjects.
+
+        Examples:
+            >>> # Get latest for a specific subject
             >>> subject = ModelSubjectRef(
             ...     subject_type="node",
             ...     subject_id="node-xyz",
@@ -242,6 +256,17 @@ class ServiceSnapshot:
             >>> latest = await service.get_latest(subject=subject)
             >>> if latest:
             ...     print(f"Sequence: {latest.sequence_number}")
+
+            >>> # Get globally latest across ALL subjects
+            >>> global_latest = await service.get_latest(subject=None)
+            >>> # Returns snapshot with highest sequence_number in store
+            >>> # Note: This is NOT necessarily the most recent by created_at
+
+            >>> # Alternative: Get most recent by wall-clock time
+            >>> from datetime import datetime, timedelta, UTC
+            >>> one_second_ago = datetime.now(UTC) - timedelta(seconds=1)
+            >>> recent = await service.list(after=one_second_ago, limit=1)
+            >>> time_based_latest = recent[0] if recent else None
         """
         return await self._store.load_latest(subject)
 
@@ -278,6 +303,120 @@ class ServiceSnapshot:
         """
         return await self._store.query(subject=subject, limit=limit, after=after)
 
+    async def get_many(
+        self,
+        snapshot_ids: builtins.list[UUID],
+        *,
+        skip_missing: bool = False,
+    ) -> builtins.list[ModelSnapshot]:
+        """Load multiple snapshots in parallel.
+
+        Fetches multiple snapshots concurrently using asyncio.gather() for
+        improved performance when loading batches of snapshots.
+
+        Args:
+            snapshot_ids: List of snapshot UUIDs to load.
+            skip_missing: If True, missing snapshots are silently skipped.
+                If False (default), raises SnapshotNotFoundError for any
+                missing snapshot.
+
+        Returns:
+            List of snapshots in the same order as snapshot_ids (when
+            skip_missing=False). When skip_missing=True, the returned
+            list may be shorter and only contains found snapshots.
+
+        Raises:
+            SnapshotNotFoundError: If any snapshot is not found and
+                skip_missing is False.
+            InfraConnectionError: If the store is unavailable.
+            InfraTimeoutError: If the operation times out.
+
+        Example:
+            >>> # Load multiple snapshots at once
+            >>> snapshots = await service.get_many([id1, id2, id3])
+            >>> assert len(snapshots) == 3
+            >>>
+            >>> # Skip missing snapshots
+            >>> snapshots = await service.get_many(
+            ...     [id1, unknown_id, id3],
+            ...     skip_missing=True,
+            ... )
+            >>> # Returns only found snapshots
+        """
+        if not snapshot_ids:
+            return []
+
+        # Execute all loads in parallel
+        tasks = [self._store.load(sid) for sid in snapshot_ids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        snapshots: builtins.list[ModelSnapshot] = []
+        for snapshot_id, result in zip(snapshot_ids, results, strict=True):  # type: ignore[arg-type]
+            if isinstance(result, Exception):
+                # Re-raise infrastructure errors
+                raise result
+
+            if result is None:
+                if not skip_missing:
+                    raise SnapshotNotFoundError(
+                        f"Snapshot not found: {snapshot_id}",
+                        snapshot_id=snapshot_id,
+                    )
+                # skip_missing=True: silently skip
+                continue
+
+            snapshots.append(result)  # type: ignore[arg-type]
+
+        return snapshots
+
+    async def get_latest_many(
+        self,
+        subjects: builtins.list[ModelSubjectRef],
+    ) -> builtins.list[ModelSnapshot | None]:
+        """Load the latest snapshot for multiple subjects in parallel.
+
+        Fetches the latest snapshot for each subject concurrently using
+        asyncio.gather() for improved performance when querying multiple
+        subjects.
+
+        Args:
+            subjects: List of subject references to load latest snapshots for.
+
+        Returns:
+            List of snapshots (or None) in the same order as the input
+            subjects. Each entry is the latest snapshot for that subject,
+            or None if no snapshots exist for that subject.
+
+        Raises:
+            InfraConnectionError: If the store is unavailable.
+            InfraTimeoutError: If the operation times out.
+
+        Example:
+            >>> subjects = [
+            ...     ModelSubjectRef(subject_type="agent", subject_id=agent_id),
+            ...     ModelSubjectRef(subject_type="workflow", subject_id=workflow_id),
+            ... ]
+            >>> snapshots = await service.get_latest_many(subjects)
+            >>> for subject, snapshot in zip(subjects, snapshots):
+            ...     if snapshot:
+            ...         print(f"{subject.subject_id}: seq={snapshot.sequence_number}")
+        """
+        if not subjects:
+            return []
+
+        # Execute all loads in parallel
+        tasks = [self._store.load_latest(subject) for subject in subjects]  # type: ignore[arg-type]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        snapshots: builtins.list[ModelSnapshot | None] = []
+        for result in results:
+            if isinstance(result, Exception):
+                # Re-raise infrastructure errors
+                raise result
+            snapshots.append(result)  # type: ignore[arg-type]
+
+        return snapshots
+
     async def diff(
         self,
         base_id: UUID,
@@ -288,6 +427,8 @@ class ServiceSnapshot:
         Performs a shallow structural comparison between the base and
         target snapshots, identifying keys that were added, removed,
         or changed.
+
+        Both snapshots are loaded in parallel for better performance.
 
         Args:
             base_id: UUID of the base (original) snapshot.
@@ -308,8 +449,10 @@ class ServiceSnapshot:
             >>> for key, change in diff.changed.items():
             ...     print(f"{key}: {change.from_value} -> {change.to_value}")
         """
-        base = await self._store.load(base_id)
-        target = await self._store.load(target_id)
+        # Load both snapshots in parallel for better performance
+        base_task = self._store.load(base_id)
+        target_task = self._store.load(target_id)
+        base, target = await asyncio.gather(base_task, target_task)
 
         if base is None:
             raise SnapshotNotFoundError(
@@ -407,6 +550,106 @@ class ServiceSnapshot:
             ...     print("Snapshot not found")
         """
         return await self._store.delete(snapshot_id)
+
+    async def cleanup_expired(
+        self,
+        *,
+        max_age_seconds: int | None = None,
+        keep_latest_n: int | None = None,
+        subject: ModelSubjectRef | None = None,
+    ) -> int:
+        """Remove expired snapshots based on retention policy.
+
+        Provides a high-level interface for snapshot cleanup with multiple
+        retention strategies that can be combined:
+
+        - **Time-based** (max_age_seconds): Delete snapshots older than
+          the specified age. Useful for compliance or storage cost control.
+        - **Count-based** (keep_latest_n): Retain only the N most recent
+          snapshots per subject. Useful for audit trail limits.
+        - **Subject-scoped** (subject): Apply cleanup only to a specific
+          subject. Useful for per-entity retention policies.
+
+        When both max_age_seconds and keep_latest_n are provided, snapshots
+        must satisfy BOTH conditions to be deleted. This means:
+        - Snapshots in the latest N per subject are ALWAYS retained
+        - Snapshots outside the latest N are deleted ONLY if also older
+          than max_age_seconds
+
+        This dual-policy approach provides a safety net: even if you
+        configure aggressive age-based cleanup, you'll always retain
+        recent history for each subject.
+
+        Args:
+            max_age_seconds: Delete snapshots with created_at older than
+                this many seconds ago. If None, no age-based filtering.
+            keep_latest_n: Always retain the N most recent snapshots per
+                subject (by sequence_number). If None, no count-based
+                retention. Must be >= 1 if provided.
+            subject: If provided, apply cleanup only to this subject.
+                If None, apply cleanup globally across all subjects.
+
+        Returns:
+            Number of snapshots deleted.
+
+        Raises:
+            ValueError: If keep_latest_n is provided but < 1.
+            InfraConnectionError: If the store is unavailable.
+            InfraTimeoutError: If the operation times out.
+
+        Example:
+            >>> from datetime import timedelta
+            >>> from omnibase_infra.models.snapshot import ModelSubjectRef
+            >>>
+            >>> # Delete snapshots older than 30 days
+            >>> deleted = await service.cleanup_expired(
+            ...     max_age_seconds=30 * 24 * 60 * 60,
+            ... )
+            >>> print(f"Deleted {deleted} old snapshots")
+            >>>
+            >>> # Keep only last 10 snapshots per subject
+            >>> deleted = await service.cleanup_expired(
+            ...     keep_latest_n=10,
+            ... )
+            >>> print(f"Trimmed {deleted} excess snapshots")
+            >>>
+            >>> # Combined: Delete if older than 7 days AND not in latest 5
+            >>> deleted = await service.cleanup_expired(
+            ...     max_age_seconds=7 * 24 * 60 * 60,
+            ...     keep_latest_n=5,
+            ... )
+            >>>
+            >>> # Cleanup only for a specific subject
+            >>> subject = ModelSubjectRef(
+            ...     subject_type="workflow",
+            ...     subject_id=workflow_id,
+            ... )
+            >>> deleted = await service.cleanup_expired(
+            ...     max_age_seconds=60 * 60,  # 1 hour
+            ...     subject=subject,
+            ... )
+
+        Scheduling Recommendations:
+            This method is typically called from a scheduled task or cron job:
+
+            - **Daily cleanup**: Run once per day with conservative settings
+              (e.g., max_age_seconds=30 days, keep_latest_n=100)
+            - **Aggressive cleanup**: For high-volume systems, run hourly
+              with tighter limits (e.g., max_age_seconds=7 days, keep_latest_n=10)
+            - **Per-subject cleanup**: Call during subject lifecycle events
+              (e.g., when a workflow completes, clean up its old snapshots)
+
+        Performance Notes:
+            For very large datasets, consider:
+            - Running cleanup during low-traffic periods
+            - Using subject-scoped cleanup in batches
+            - Adding an index on created_at if using time-based cleanup frequently
+        """
+        return await self._store.cleanup_expired(
+            max_age_seconds=max_age_seconds,
+            keep_latest_n=keep_latest_n,
+            subject=subject,
+        )
 
 
 __all__: list[str] = ["SnapshotNotFoundError", "ServiceSnapshot"]

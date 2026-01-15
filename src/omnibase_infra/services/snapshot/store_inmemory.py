@@ -42,7 +42,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
@@ -186,12 +186,24 @@ class StoreSnapshotInMemory:
         This ensures consistent ordering even with clock skew.
 
         Args:
-            subject: Optional filter by subject reference. If None,
-                returns the globally most recent snapshot.
+            subject: Optional filter by subject reference.
+
+                - If provided: Returns the latest snapshot for that specific
+                  subject (highest sequence_number within that subject).
+                - If None: Returns the globally latest snapshot across ALL
+                  subjects (highest sequence_number in the entire store).
 
         Returns:
             The most recent snapshot matching criteria, or None if no
             snapshots exist.
+
+        Note:
+            When ``subject=None``, "globally latest" means the snapshot with
+            the highest sequence_number across all subjects. Since sequence
+            numbers are per-subject (each subject starts at 1), this may NOT
+            correspond to the most recently created snapshot by wall-clock
+            time. Use ``query(after=timestamp)`` if you need time-based
+            ordering across subjects.
 
         Example:
             >>> import asyncio
@@ -202,16 +214,20 @@ class StoreSnapshotInMemory:
             ...     store = StoreSnapshotInMemory()
             ...     subject = ModelSubjectRef(subject_type="test", subject_id=uuid4())
             ...
-            ...     # Save multiple snapshots
+            ...     # Save multiple snapshots for the subject
             ...     snap1 = ModelSnapshot(subject=subject, data={"v": 1}, sequence_number=1)
             ...     snap2 = ModelSnapshot(subject=subject, data={"v": 2}, sequence_number=2)
             ...     await store.save(snap1)
             ...     await store.save(snap2)
             ...
-            ...     # Get latest
+            ...     # Get latest for specific subject
             ...     latest = await store.load_latest(subject=subject)
             ...     assert latest is not None
             ...     assert latest.sequence_number == 2
+            ...
+            ...     # Get globally latest across ALL subjects
+            ...     global_latest = await store.load_latest(subject=None)
+            ...     # Returns snapshot with highest sequence_number in store
             >>>
             >>> asyncio.run(test_load_latest())
         """
@@ -356,6 +372,121 @@ class StoreSnapshotInMemory:
             seq = self._sequences.get(key, 0) + 1
             self._sequences[key] = seq
             return seq
+
+    async def cleanup_expired(
+        self,
+        *,
+        max_age_seconds: int | None = None,
+        keep_latest_n: int | None = None,
+        subject: ModelSubjectRef | None = None,
+    ) -> int:
+        """Remove expired snapshots based on retention policy.
+
+        Supports multiple retention strategies:
+        - Time-based: Delete snapshots older than max_age_seconds
+        - Count-based: Keep only the N most recent per subject
+        - Subject-scoped: Apply policy only to a specific subject
+
+        When both max_age_seconds and keep_latest_n are provided, snapshots
+        must satisfy BOTH conditions to be deleted.
+
+        Args:
+            max_age_seconds: Delete snapshots older than this many seconds.
+            keep_latest_n: Always retain the N most recent per subject.
+            subject: If provided, apply cleanup only to this subject.
+
+        Returns:
+            Number of snapshots deleted.
+
+        Raises:
+            ValueError: If keep_latest_n is provided but < 1.
+
+        Example:
+            >>> import asyncio
+            >>> from uuid import uuid4
+            >>> from datetime import UTC, datetime, timedelta
+            >>> from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
+            >>>
+            >>> async def test_cleanup():
+            ...     store = StoreSnapshotInMemory()
+            ...     subject = ModelSubjectRef(subject_type="test", subject_id=uuid4())
+            ...
+            ...     # Create old snapshots
+            ...     for i in range(10):
+            ...         snap = ModelSnapshot(subject=subject, data={"i": i}, sequence_number=i+1)
+            ...         await store.save(snap)
+            ...
+            ...     # Keep only last 5
+            ...     deleted = await store.cleanup_expired(keep_latest_n=5)
+            ...     assert deleted == 5
+            ...     assert store.count() == 5
+            >>>
+            >>> asyncio.run(test_cleanup())
+        """
+        if keep_latest_n is not None and keep_latest_n < 1:
+            msg = "keep_latest_n must be >= 1"
+            raise ValueError(msg)
+
+        # If neither policy is specified, no-op
+        if max_age_seconds is None and keep_latest_n is None:
+            return 0
+
+        async with self._lock:
+            # Calculate cutoff time for age-based filtering
+            cutoff_time: datetime | None = None
+            if max_age_seconds is not None:
+                cutoff_time = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
+
+            # Group snapshots by subject for keep_latest_n logic
+            snapshots_by_subject: dict[str, list[ModelSnapshot]] = {}
+            for snapshot in self._snapshots.values():
+                subject_key = snapshot.subject.to_key()
+                # Filter by subject if specified
+                if subject is not None and subject_key != subject.to_key():
+                    continue
+                if subject_key not in snapshots_by_subject:
+                    snapshots_by_subject[subject_key] = []
+                snapshots_by_subject[subject_key].append(snapshot)
+
+            # Identify snapshots to delete
+            ids_to_delete: set[UUID] = set()
+
+            for subject_key, snapshots in snapshots_by_subject.items():
+                # Sort by sequence_number descending (newest first)
+                sorted_snapshots = sorted(
+                    snapshots,
+                    key=lambda s: s.sequence_number,
+                    reverse=True,
+                )
+
+                for i, snapshot in enumerate(sorted_snapshots):
+                    should_delete = False
+
+                    # Check age-based policy
+                    if cutoff_time is not None and snapshot.created_at < cutoff_time:
+                        should_delete = True
+
+                    # Check count-based policy (skip if in latest N)
+                    if keep_latest_n is not None and i < keep_latest_n:
+                        # Always keep the latest N, even if old
+                        should_delete = False
+                    elif keep_latest_n is not None and i >= keep_latest_n:
+                        # If using keep_latest_n without max_age, delete excess
+                        if max_age_seconds is None:
+                            should_delete = True
+                        # Otherwise, should_delete is already set by age check
+
+                    if should_delete:
+                        ids_to_delete.add(snapshot.id)
+
+            # Perform deletion
+            deleted_count = 0
+            for snapshot_id in ids_to_delete:
+                if snapshot_id in self._snapshots:
+                    del self._snapshots[snapshot_id]
+                    deleted_count += 1
+
+            return deleted_count
 
     # Test helpers
 
