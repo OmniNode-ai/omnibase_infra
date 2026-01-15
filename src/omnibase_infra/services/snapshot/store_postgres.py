@@ -551,7 +551,7 @@ class StoreSnapshotPostgres:
                             ) as rn
                         FROM snapshots
                         WHERE (subject_type, subject_id) IN (
-                            SELECT UNNEST($1::text[]), UNNEST($2::uuid[])
+                            SELECT * FROM UNNEST($1::text[], $2::uuid[])
                         )
                     )
                     SELECT * FROM ranked WHERE rn = 1

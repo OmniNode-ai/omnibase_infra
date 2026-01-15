@@ -64,6 +64,7 @@ class StoreSnapshotInMemory:
     Attributes:
         _snapshots: Dictionary mapping snapshot IDs to snapshots.
         _sequences: Dictionary mapping subject keys to sequence counters.
+        _hash_index: Dictionary mapping content_hash to snapshot ID for O(1) dedup lookup.
         _lock: asyncio.Lock for coroutine-safe operations.
 
     Example:
@@ -99,6 +100,9 @@ class StoreSnapshotInMemory:
         """Initialize empty in-memory store."""
         self._snapshots: dict[UUID, ModelSnapshot] = {}
         self._sequences: dict[str, int] = {}  # subject_key -> sequence
+        self._hash_index: dict[
+            str, UUID
+        ] = {}  # content_hash -> snapshot_id (O(1) dedup)
         self._lock = asyncio.Lock()
 
     async def save(self, snapshot: ModelSnapshot) -> UUID:
@@ -138,12 +142,13 @@ class StoreSnapshotInMemory:
             >>> asyncio.run(test_idempotency())
         """
         async with self._lock:
-            # Check for duplicate via content_hash
-            if snapshot.content_hash:
-                for existing in self._snapshots.values():
-                    if existing.content_hash == snapshot.content_hash:
-                        return existing.id
+            # O(1) duplicate check via hash index
+            if snapshot.content_hash and snapshot.content_hash in self._hash_index:
+                return self._hash_index[snapshot.content_hash]
+
             self._snapshots[snapshot.id] = snapshot
+            if snapshot.content_hash:
+                self._hash_index[snapshot.content_hash] = snapshot.id
             return snapshot.id
 
     async def load(self, snapshot_id: UUID) -> ModelSnapshot | None:
@@ -425,6 +430,10 @@ class StoreSnapshotInMemory:
         """
         async with self._lock:
             if snapshot_id in self._snapshots:
+                snapshot = self._snapshots[snapshot_id]
+                # Remove from hash index if content_hash exists
+                if snapshot.content_hash and snapshot.content_hash in self._hash_index:
+                    del self._hash_index[snapshot.content_hash]
                 del self._snapshots[snapshot_id]
                 return True
             return False
@@ -579,6 +588,13 @@ class StoreSnapshotInMemory:
             deleted_count = 0
             for snapshot_id in ids_to_delete:
                 if snapshot_id in self._snapshots:
+                    snapshot = self._snapshots[snapshot_id]
+                    # Remove from hash index if content_hash exists
+                    if (
+                        snapshot.content_hash
+                        and snapshot.content_hash in self._hash_index
+                    ):
+                        del self._hash_index[snapshot.content_hash]
                     del self._snapshots[snapshot_id]
                     deleted_count += 1
 
@@ -600,6 +616,7 @@ class StoreSnapshotInMemory:
         """
         self._snapshots.clear()
         self._sequences.clear()
+        self._hash_index.clear()
 
     def count(self) -> int:
         """Get total snapshot count.

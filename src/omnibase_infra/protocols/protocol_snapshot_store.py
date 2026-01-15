@@ -524,7 +524,7 @@ class ProtocolSnapshotStore(Protocol):
         Raises:
             InfraConnectionError: If storage is unavailable
             InfraTimeoutError: If operation times out
-            ValueError: If keep_latest_n is provided but < 1
+            ProtocolConfigurationError: If keep_latest_n is provided but < 1
 
         Example:
             ```python
