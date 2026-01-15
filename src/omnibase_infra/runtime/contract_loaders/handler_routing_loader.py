@@ -73,6 +73,15 @@ from omnibase_infra.models.routing import (
 
 logger = logging.getLogger(__name__)
 
+# Valid routing strategies for handler routing contracts
+VALID_ROUTING_STRATEGIES: frozenset[str] = frozenset(
+    {
+        "payload_type_match",  # Match by payload type (default)
+        "first_match",  # Use first matching handler
+        "all_match",  # Execute all matching handlers
+    }
+)
+
 
 def convert_class_to_handler_key(class_name: str) -> str:
     """Convert handler class name to handler_key format (kebab-case).
@@ -141,7 +150,7 @@ def load_handler_routing_subcontract(contract_path: Path) -> ModelRoutingSubcont
             contract = yaml.safe_load(f)
     except FileNotFoundError as e:
         ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
+            transport_type=EnumInfraTransportType.FILESYSTEM,
             operation="load_handler_routing_contract",
             target_name=str(contract_path),
         )
@@ -150,12 +159,13 @@ def load_handler_routing_subcontract(contract_path: Path) -> ModelRoutingSubcont
             contract_path,
         )
         raise ProtocolConfigurationError(
-            f"contract.yaml not found at {contract_path} - handler routing cannot be loaded",
+            f"Contract file not found: {contract_path}. "
+            f"Ensure the contract.yaml exists in the orchestrator directory.",
             context=ctx,
         ) from e
     except yaml.YAMLError as e:
         ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
+            transport_type=EnumInfraTransportType.FILESYSTEM,
             operation="parse_handler_routing_contract",
             target_name=str(contract_path),
         )
@@ -173,22 +183,28 @@ def load_handler_routing_subcontract(contract_path: Path) -> ModelRoutingSubcont
 
     if contract is None:
         ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
+            transport_type=EnumInfraTransportType.FILESYSTEM,
             operation="validate_handler_routing_contract",
             target_name=str(contract_path),
         )
-        msg = f"contract.yaml at {contract_path} is empty"
+        msg = (
+            f"Contract file is empty: {contract_path}. "
+            f"The contract.yaml must contain valid YAML with a 'handler_routing' section."
+        )
         logger.error(msg)
         raise ProtocolConfigurationError(msg, context=ctx)
 
     handler_routing = contract.get("handler_routing")
     if handler_routing is None:
         ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
+            transport_type=EnumInfraTransportType.FILESYSTEM,
             operation="validate_handler_routing_contract",
             target_name=str(contract_path),
         )
-        msg = f"handler_routing section not found in contract.yaml at {contract_path}"
+        msg = (
+            f"Missing 'handler_routing' section in contract: {contract_path}. "
+            f"Add a handler_routing section with routing_strategy and handlers."
+        )
         logger.error(msg)
         raise ProtocolConfigurationError(msg, context=ctx)
 
@@ -231,15 +247,160 @@ def load_handler_routing_subcontract(contract_path: Path) -> ModelRoutingSubcont
         contract_path,
     )
 
+    # Validate routing_strategy before constructing the model
+    routing_strategy = handler_routing.get("routing_strategy", "payload_type_match")
+    if routing_strategy not in VALID_ROUTING_STRATEGIES:
+        logger.warning(
+            "Unknown routing_strategy '%s' in contract at %s. "
+            "Valid values: %s. Using 'payload_type_match' as default.",
+            routing_strategy,
+            contract_path,
+            ", ".join(sorted(VALID_ROUTING_STRATEGIES)),
+        )
+        routing_strategy = "payload_type_match"
+
     return ModelRoutingSubcontract(
         version=ModelSemVer(major=1, minor=0, patch=0),
-        routing_strategy=handler_routing.get("routing_strategy", "payload_type_match"),
+        routing_strategy=routing_strategy,
         handlers=entries,
         default_handler=None,
     )
 
 
+def load_handler_class_info_from_contract(
+    contract_path: Path,
+) -> list[dict[str, str]]:
+    """Load handler class and module information from contract.yaml.
+
+    Extracts handler class and module information from the handler_routing
+    section of contract.yaml. This is used by registries that need to
+    dynamically load and instantiate handler classes.
+
+    This function consolidates YAML loading logic that would otherwise be
+    duplicated in registry modules (see OMN-1316).
+
+    Args:
+        contract_path: Path to the contract.yaml file.
+
+    Returns:
+        List of handler configurations, each containing:
+        - handler_class: The handler class name (e.g., "HandlerNodeIntrospected")
+        - handler_module: The fully qualified module path
+
+    Raises:
+        ProtocolConfigurationError: If the contract file cannot be loaded,
+            contains invalid YAML, is empty, or handler_routing section is missing.
+
+    Example:
+        ```python
+        from pathlib import Path
+        from omnibase_infra.runtime.contract_loaders import (
+            load_handler_class_info_from_contract,
+        )
+
+        contract_path = Path(__file__).parent / "contract.yaml"
+        handler_infos = load_handler_class_info_from_contract(contract_path)
+
+        for info in handler_infos:
+            handler_cls = importlib.import_module(info["handler_module"])
+            handler = getattr(handler_cls, info["handler_class"])
+        ```
+    """
+    try:
+        with contract_path.open("r", encoding="utf-8") as f:
+            contract = yaml.safe_load(f)
+    except FileNotFoundError as e:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation="load_handler_class_info_from_contract",
+            target_name=str(contract_path),
+        )
+        logger.exception(
+            "contract.yaml not found at %s - handler class info cannot be loaded",
+            contract_path,
+        )
+        raise ProtocolConfigurationError(
+            f"Contract file not found: {contract_path}. "
+            f"Ensure the contract.yaml exists in the orchestrator directory.",
+            context=ctx,
+        ) from e
+    except yaml.YAMLError as e:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation="load_handler_class_info_from_contract",
+            target_name=str(contract_path),
+        )
+        error_type = type(e).__name__
+        logger.exception(
+            "Invalid YAML syntax in contract.yaml at %s: %s",
+            contract_path,
+            error_type,
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid YAML syntax in contract.yaml at {contract_path}: {error_type}",
+            context=ctx,
+        ) from e
+
+    if contract is None:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation="load_handler_class_info_from_contract",
+            target_name=str(contract_path),
+        )
+        msg = (
+            f"Contract file is empty: {contract_path}. "
+            f"The contract.yaml must contain valid YAML with a 'handler_routing' section."
+        )
+        logger.error(msg)
+        raise ProtocolConfigurationError(msg, context=ctx)
+
+    handler_routing = contract.get("handler_routing")
+    if handler_routing is None:
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation="load_handler_class_info_from_contract",
+            target_name=str(contract_path),
+        )
+        msg = (
+            f"Missing 'handler_routing' section in contract: {contract_path}. "
+            f"Add a handler_routing section with routing_strategy and handlers."
+        )
+        logger.error(msg)
+        raise ProtocolConfigurationError(msg, context=ctx)
+
+    handlers_config = handler_routing.get("handlers", [])
+    result: list[dict[str, str]] = []
+
+    for handler_entry in handlers_config:
+        handler_info = handler_entry.get("handler", {})
+        handler_class = handler_info.get("name")
+        handler_module = handler_info.get("module")
+
+        if handler_class and handler_module:
+            result.append(
+                {
+                    "handler_class": handler_class,
+                    "handler_module": handler_module,
+                }
+            )
+        else:
+            logger.warning(
+                "Skipping handler entry with missing name or module in contract.yaml at %s",
+                contract_path,
+            )
+
+    logger.debug(
+        "Loaded %d handler class info entries from contract.yaml at %s",
+        len(result),
+        contract_path,
+    )
+
+    return result
+
+
 __all__ = [
+    "VALID_ROUTING_STRATEGIES",
     "convert_class_to_handler_key",
+    "load_handler_class_info_from_contract",
     "load_handler_routing_subcontract",
 ]

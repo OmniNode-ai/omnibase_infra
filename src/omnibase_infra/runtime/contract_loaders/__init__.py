@@ -26,11 +26,15 @@ Usage:
 """
 
 from omnibase_infra.runtime.contract_loaders.handler_routing_loader import (
+    VALID_ROUTING_STRATEGIES,
     convert_class_to_handler_key,
+    load_handler_class_info_from_contract,
     load_handler_routing_subcontract,
 )
 
 __all__ = [
+    "VALID_ROUTING_STRATEGIES",
     "convert_class_to_handler_key",
+    "load_handler_class_info_from_contract",
     "load_handler_routing_subcontract",
 ]

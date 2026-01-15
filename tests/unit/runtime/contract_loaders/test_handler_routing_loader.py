@@ -129,13 +129,27 @@ class TestConvertClassToHandlerKey:
 
         assert convert_class_to_handler_key("") == ""
 
-    def test_underscore_preserved(self) -> None:
-        """Test that underscores are preserved (not converted)."""
+    def test_underscore_handling(self) -> None:
+        """Test that underscores in class names are handled consistently.
+
+        Underscores are atypical in Python class names but may occur.
+        The regex-based conversion preserves underscores since it only
+        operates on letter case boundaries (CamelCase -> kebab-case),
+        not on underscore characters.
+        """
         from omnibase_infra.runtime.contract_loaders import convert_class_to_handler_key
 
-        # Underscores are not typical in class names but should be preserved
         result = convert_class_to_handler_key("My_Handler")
-        assert "_" in result or "-" in result  # Implementation dependent
+
+        # Verify underscore is preserved (not stripped or converted to hyphen)
+        assert "_" in result, f"Underscore should be preserved in '{result}'"
+
+        # Verify result is lowercase (all outputs should be lowercase)
+        assert result == result.lower(), f"Result should be lowercase: '{result}'"
+
+        # Verify exact output: underscore preserved, hyphen added at _H boundary
+        # "My_Handler" -> "My_-Handler" (regex 1) -> "my_-handler" (lowercase)
+        assert result == "my_-handler", f"Expected 'my_-handler', got '{result}'"
 
 
 # =============================================================================

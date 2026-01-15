@@ -57,13 +57,24 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.runtime.contract_loaders import (
+    load_handler_class_info_from_contract,
+)
 
 logger = logging.getLogger(__name__)
+
+# Security: Namespace allowlist for dynamic handler imports
+# Per CLAUDE.md Handler Plugin Loader security patterns, only trusted namespaces
+# are allowed for dynamic imports to prevent arbitrary code execution.
+# Error code: NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)
+ALLOWED_NAMESPACES: tuple[str, ...] = (
+    "omnibase_infra.",
+    "omnibase_core.",
+)
 
 
 def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:
@@ -112,6 +123,11 @@ def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:
 def _load_handler_class(class_name: str, module_path: str) -> type:
     """Dynamically load a handler class from a module.
 
+    Security: This function validates the module_path against ALLOWED_NAMESPACES
+    before importing. Per CLAUDE.md Handler Plugin Loader security patterns,
+    dynamic imports are restricted to trusted namespaces to prevent arbitrary
+    code execution via malicious contract.yaml configurations.
+
     Args:
         class_name: The name of the handler class to load.
         module_path: The fully qualified module path.
@@ -120,8 +136,25 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
         The handler class type.
 
     Raises:
+        ProtocolConfigurationError: If the module namespace is not allowed
+            (NAMESPACE_NOT_ALLOWED / HANDLER_LOADER_013).
         ProtocolConfigurationError: If the module or class cannot be loaded.
     """
+    # Security: Validate namespace before import
+    # Error code: NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)
+    if not any(module_path.startswith(ns) for ns in ALLOWED_NAMESPACES):
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="load_handler_class",
+            target_name=f"{module_path}.{class_name}",
+        )
+        raise ProtocolConfigurationError(
+            f"Handler module namespace not allowed: {module_path}. "
+            f"Allowed namespaces: {', '.join(ALLOWED_NAMESPACES)}. "
+            "Error code: NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)",
+            context=ctx,
+        )
+
     try:
         module = importlib.import_module(module_path)
     except ModuleNotFoundError as e:
@@ -158,95 +191,6 @@ def _load_handler_class(class_name: str, module_path: str) -> type:
 
     handler_class: type = getattr(module, class_name)
     return handler_class
-
-
-def _load_handler_routing_from_contract(
-    contract_path: Path,
-) -> list[dict[str, str]]:
-    """Load handler routing configuration from contract.yaml.
-
-    Extracts handler class and module information from the handler_routing
-    section of contract.yaml.
-
-    Args:
-        contract_path: Path to the contract.yaml file.
-
-    Returns:
-        List of handler configurations, each containing:
-        - handler_class: The handler class name
-        - handler_module: The fully qualified module path
-
-    Raises:
-        ProtocolConfigurationError: If the contract file cannot be loaded.
-    """
-    try:
-        with contract_path.open("r", encoding="utf-8") as f:
-            contract = yaml.safe_load(f)
-    except FileNotFoundError as e:
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.RUNTIME,
-            operation="load_handler_routing_from_contract",
-            target_name=str(contract_path),
-        )
-        raise ProtocolConfigurationError(
-            f"Contract file not found: {contract_path}",
-            context=ctx,
-        ) from e
-    except yaml.YAMLError as e:
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.RUNTIME,
-            operation="load_handler_routing_from_contract",
-            target_name=str(contract_path),
-        )
-        raise ProtocolConfigurationError(
-            f"Invalid YAML in contract file: {contract_path}",
-            context=ctx,
-        ) from e
-
-    if contract is None:
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.RUNTIME,
-            operation="load_handler_routing_from_contract",
-            target_name=str(contract_path),
-        )
-        raise ProtocolConfigurationError(
-            f"Contract file is empty: {contract_path}",
-            context=ctx,
-        )
-
-    handler_routing = contract.get("handler_routing")
-    if handler_routing is None:
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.RUNTIME,
-            operation="load_handler_routing_from_contract",
-            target_name=str(contract_path),
-        )
-        raise ProtocolConfigurationError(
-            f"handler_routing section not found in contract: {contract_path}",
-            context=ctx,
-        )
-
-    handlers_config = handler_routing.get("handlers", [])
-    result: list[dict[str, str]] = []
-
-    for handler_entry in handlers_config:
-        handler_info = handler_entry.get("handler", {})
-        handler_class = handler_info.get("name")
-        handler_module = handler_info.get("module")
-
-        if handler_class and handler_module:
-            result.append(
-                {
-                    "handler_class": handler_class,
-                    "handler_module": handler_module,
-                }
-            )
-        else:
-            logger.warning(
-                "Skipping handler entry with missing name or module in contract.yaml"
-            )
-
-    return result
 
 
 if TYPE_CHECKING:
@@ -377,8 +321,9 @@ class RegistryInfraNodeRegistrationOrchestrator:
             )
 
         # Load handler routing configuration from contract.yaml
+        # Uses shared loader from omnibase_infra.runtime.contract_loaders (OMN-1316)
         contract_path = Path(__file__).parent.parent / "contract.yaml"
-        handler_configs = _load_handler_routing_from_contract(contract_path)
+        handler_configs = load_handler_class_info_from_contract(contract_path)
 
         # Map of handler dependencies by handler class name
         # Each handler class has specific dependencies based on its constructor
@@ -436,9 +381,15 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     context=ctx,
                 )
 
-            # Filter out None values for optional dependencies
-            # Note: projection_reader is always required, but projector and consul_handler
-            # may be None (optional for some handlers)
+            # Filter dependencies for handler instantiation.
+            # Logic:
+            # - projection_reader: ALWAYS included (required by all handlers, even if
+            #   None triggers validation). We keep it to ensure handlers receive it
+            #   and can perform their own validation if needed.
+            # - projector: Only included if provided (optional for handlers that
+            #   don't persist state changes).
+            # - consul_handler: Only included if provided (optional for handlers
+            #   that don't interact with service discovery).
             filtered_deps = {
                 k: v
                 for k, v in deps.items()
