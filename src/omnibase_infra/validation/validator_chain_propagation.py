@@ -90,7 +90,7 @@ Performance Considerations:
     consider batching validations rather than adding caching.
 
 Usage:
-    >>> from omnibase_infra.validation.chain_propagation_validator import (
+    >>> from omnibase_infra.validation.validator_chain_propagation import (
     ...     ChainPropagationValidator,
     ...     validate_message_chain,
     ...     enforce_chain_propagation,

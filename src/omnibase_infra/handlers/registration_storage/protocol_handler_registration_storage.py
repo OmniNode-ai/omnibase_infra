@@ -13,8 +13,8 @@ Concurrency Safety:
 
 Related:
     - NodeRegistrationStorageEffect: Effect node that uses this protocol
-    - PostgresRegistrationStorageHandler: PostgreSQL implementation
-    - MockRegistrationStorageHandler: In-memory mock for testing
+    - HandlerRegistrationStoragePostgres: PostgreSQL implementation
+    - HandlerRegistrationStorageMock: In-memory mock for testing
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
 
 
 @runtime_checkable
-class ProtocolRegistrationStorageHandler(Protocol):
+class ProtocolHandlerRegistrationStorage(Protocol):
     """Protocol for registration storage handler implementations.
 
     Defines the interface that all registration storage handlers must implement.
@@ -174,4 +174,4 @@ class ProtocolRegistrationStorageHandler(Protocol):
         ...
 
 
-__all__ = ["ProtocolRegistrationStorageHandler"]
+__all__ = ["ProtocolHandlerRegistrationStorage"]

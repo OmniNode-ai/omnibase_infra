@@ -6,8 +6,8 @@ This module provides pluggable handler implementations for registration
 storage operations, supporting the capability-oriented node architecture.
 
 Handlers:
-    - PostgresRegistrationStorageHandler: PostgreSQL-backed storage
-    - MockRegistrationStorageHandler: In-memory mock for testing
+    - HandlerRegistrationStoragePostgres: PostgreSQL-backed storage
+    - HandlerRegistrationStorageMock: In-memory mock for testing
 
 Models (from omnibase_infra.nodes.node_registration_storage_effect.models):
     - ModelRegistrationRecord: Registration record model
@@ -15,17 +15,17 @@ Models (from omnibase_infra.nodes.node_registration_storage_effect.models):
     - ModelStorageResult: Storage query result
 
 Protocols:
-    - ProtocolRegistrationStorageHandler: Handler protocol definition
+    - ProtocolHandlerRegistrationStorage: Handler protocol definition
 """
 
-from omnibase_infra.handlers.registration_storage.handler_mock_registration_storage import (
-    MockRegistrationStorageHandler,
+from omnibase_infra.handlers.registration_storage.handler_registration_storage_mock import (
+    HandlerRegistrationStorageMock,
 )
-from omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage import (
-    PostgresRegistrationStorageHandler,
+from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
+    HandlerRegistrationStoragePostgres,
 )
-from omnibase_infra.handlers.registration_storage.protocol_registration_storage_handler import (
-    ProtocolRegistrationStorageHandler,
+from omnibase_infra.handlers.registration_storage.protocol_handler_registration_storage import (
+    ProtocolHandlerRegistrationStorage,
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelRegistrationRecord,
@@ -34,10 +34,10 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
 )
 
 __all__: list[str] = [
-    "MockRegistrationStorageHandler",
+    "HandlerRegistrationStorageMock",
+    "HandlerRegistrationStoragePostgres",
     "ModelRegistrationRecord",
     "ModelStorageResult",
     "ModelUpsertResult",
-    "PostgresRegistrationStorageHandler",
-    "ProtocolRegistrationStorageHandler",
+    "ProtocolHandlerRegistrationStorage",
 ]

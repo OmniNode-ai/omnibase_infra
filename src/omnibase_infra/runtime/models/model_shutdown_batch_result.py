@@ -36,7 +36,7 @@ class ModelShutdownBatchResult(BaseModel):
         ...     succeeded_components=["ConsulAdapter", "VaultAdapter"],
         ...     failed_components=[
         ...         ModelFailedComponent(
-        ...             component_name="KafkaEventBus",
+        ...             component_name="EventBusKafka",
         ...             error_message="Connection timeout"
         ...         )
         ...     ]

@@ -4,15 +4,15 @@
 
 This module provides event bus implementations for the ONEX infrastructure.
 Two implementations are supported:
-- InMemoryEventBus: For unit testing and local development without external dependencies
-- KafkaEventBus: For production use with Kafka/Redpanda (see kafka_event_bus.py)
+- EventBusInmemory: For unit testing and local development without external dependencies
+- EventBusKafka: For production use with Kafka/Redpanda (see event_bus_kafka.py)
 
 Event bus selection is handled by kernel.py at bootstrap time based on:
-- KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses KafkaEventBus)
+- KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses EventBusKafka)
 - config.event_bus.type field in runtime_config.yaml
 
 Exports:
-    InMemoryEventBus: In-memory event bus for local testing and development
+    EventBusInmemory: In-memory event bus for local testing and development
     ModelEventHeaders: Event headers model for message metadata
     ModelEventMessage: Event message model wrapping topic, key, value, and headers
 
@@ -32,8 +32,8 @@ Topic Constants:
 
 from __future__ import annotations
 
-from omnibase_infra.event_bus.inmemory_event_bus import (
-    InMemoryEventBus,
+from omnibase_infra.event_bus.event_bus_inmemory import (
+    EventBusInmemory,
     ModelEventHeaders,
     ModelEventMessage,
 )
@@ -61,7 +61,7 @@ __all__: list[str] = [
     # Topic Constants
     "DLQ_TOPIC_VERSION",
     # Event Bus
-    "InMemoryEventBus",
+    "EventBusInmemory",
     "ModelEventHeaders",
     "ModelEventMessage",
     # Topic Functions

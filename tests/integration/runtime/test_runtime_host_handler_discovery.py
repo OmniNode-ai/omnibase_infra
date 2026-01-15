@@ -34,15 +34,15 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.handler_plugin_loader import HANDLER_CONTRACT_FILENAME
 from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
-    ProtocolBindingRegistry,
+    RegistryProtocolBinding,
     get_handler_registry,
 )
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
 # =============================================================================
 # Constants for Handler Contract Templates
@@ -84,13 +84,13 @@ handler_type: "effect"
 
 
 @pytest.fixture
-def isolated_handler_registry() -> ProtocolBindingRegistry:
+def isolated_handler_registry() -> RegistryProtocolBinding:
     """Create an isolated handler registry for testing.
 
     Returns:
-        Fresh ProtocolBindingRegistry instance that is not the singleton.
+        Fresh RegistryProtocolBinding instance that is not the singleton.
     """
-    return ProtocolBindingRegistry()
+    return RegistryProtocolBinding()
 
 
 @pytest.fixture
@@ -237,7 +237,7 @@ class TestRuntimeHostProcessWithContractPaths:
             Only HTTP handler is used because it can initialize without external
             services. Other handlers (DB, Consul, Vault) require running services.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -268,7 +268,7 @@ class TestRuntimeHostProcessWithContractPaths:
         1. When contract_paths is provided, wire_default_handlers is NOT called
         2. Only handlers from contracts are registered
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -299,7 +299,7 @@ class TestRuntimeHostProcessWithContractPaths:
         """
         handlers_dir1, handlers_dir2 = multiple_handler_contract_dirs
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -326,7 +326,7 @@ class TestRuntimeHostProcessWithContractPaths:
         Verifies that registered_handlers in health check reflects
         contract-discovered handlers.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -361,7 +361,7 @@ class TestRuntimeHostProcessFallback:
         1. Without contract_paths, wire_default_handlers is called
         2. Default handlers (HTTP, DB, etc.) are available
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -391,7 +391,7 @@ class TestRuntimeHostProcessFallback:
 
         Verifies that an empty list [] is treated the same as None.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -435,7 +435,7 @@ class TestRuntimeHostProcessGracefulDegradation:
         """
         import logging
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -502,7 +502,7 @@ class TestRuntimeHostProcessGracefulDegradation:
         # Non-existent path
         nonexistent_path = tmp_path / "does_not_exist"
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -535,7 +535,7 @@ class TestRuntimeHostProcessGracefulDegradation:
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -583,7 +583,7 @@ class TestRuntimeHostProcessLifecycle:
             handler discovery, not overall health status (which requires all
             handlers in the singleton registry to initialize successfully).
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -626,7 +626,7 @@ class TestRuntimeHostProcessLifecycle:
         Verifies that the process can be started again after being stopped,
         with handlers re-discovered from contracts.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -642,7 +642,7 @@ class TestRuntimeHostProcessLifecycle:
 
         # Note: After stop, we need a fresh event bus since the old one is closed
         # This simulates a full restart scenario
-        fresh_event_bus = InMemoryEventBus()
+        fresh_event_bus = EventBusInmemory()
         process2 = RuntimeHostProcess(
             event_bus=fresh_event_bus,
             input_topic="test.input",
@@ -667,7 +667,7 @@ class TestRuntimeHostProcessLifecycle:
         Verifies that calling start() on an already-started process
         is safe and has no adverse effects.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -703,7 +703,7 @@ class TestRuntimeHostProcessLifecycle:
         Verifies that calling stop() on an already-stopped process
         is safe and has no adverse effects.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
@@ -745,7 +745,7 @@ class TestRuntimeHostProcessDiscoveryLogging:
         """
         import logging
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",

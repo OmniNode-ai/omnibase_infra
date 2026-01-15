@@ -5,10 +5,10 @@
 This module exports protocols for the service discovery effect node:
 
 Protocols:
-    ProtocolServiceDiscoveryHandler: Protocol for pluggable service discovery
+    ProtocolHandlerServiceDiscovery: Protocol for pluggable service discovery
         backends (Consul, Kubernetes, Etcd).
 """
 
-from .protocol_service_discovery_handler import ProtocolServiceDiscoveryHandler
+from .protocol_handler_service_discovery import ProtocolHandlerServiceDiscovery
 
-__all__ = ["ProtocolServiceDiscoveryHandler"]
+__all__ = ["ProtocolHandlerServiceDiscovery"]

@@ -7,7 +7,7 @@ bootstrap that wires configuration into the existing RuntimeHostProcess.
 
 The kernel is responsible for:
     1. Loading runtime configuration from contracts or environment
-    2. Creating and starting the event bus (InMemoryEventBus or KafkaEventBus)
+    2. Creating and starting the event bus (EventBusInmemory or EventBusKafka)
     3. Building the dependency container (event_bus, config)
     4. Instantiating RuntimeHostProcess with contract-driven configuration
     5. Starting the HTTP health server for Docker/K8s probes
@@ -16,8 +16,8 @@ The kernel is responsible for:
 
 Event Bus Selection:
     The kernel supports two event bus implementations:
-    - InMemoryEventBus: For local development and testing (default)
-    - KafkaEventBus: For production use with Kafka/Redpanda
+    - EventBusInmemory: For local development and testing (default)
+    - EventBusKafka: For production use with Kafka/Redpanda
 
     Selection is determined by:
     - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses Kafka)
@@ -25,10 +25,10 @@ Event Bus Selection:
 
 Usage:
     # Run with default contracts directory (./contracts)
-    python -m omnibase_infra.runtime.kernel
+    python -m omnibase_infra.runtime.service_kernel
 
     # Run with custom contracts directory
-    ONEX_CONTRACTS_DIR=/path/to/contracts python -m omnibase_infra.runtime.kernel
+    ONEX_CONTRACTS_DIR=/path/to/contracts python -m omnibase_infra.runtime.service_kernel
 
     # Or via the installed entrypoint
     onex-runtime
@@ -71,21 +71,21 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     ServiceResolutionError,
 )
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.projectors import ProjectorRegistration
-from omnibase_infra.runtime.container_wiring import (
-    wire_infrastructure_services,
-    wire_registration_handlers,
-)
 from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
-from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
 from omnibase_infra.runtime.models import ModelRuntimeConfig
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.util_container_wiring import (
+    wire_infrastructure_services,
+    wire_registration_handlers,
+)
 
 # Circular Import Note (OMN-529):
 # ---------------------------------
@@ -106,7 +106,7 @@ from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 #     to prevent accidental circular imports from other modules
 #
 # See also: omnibase_infra/services/__init__.py "ServiceHealth Import Guide" section
-from omnibase_infra.runtime.validation import validate_runtime_config
+from omnibase_infra.runtime.util_validation import validate_runtime_config
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -347,9 +347,9 @@ async def bootstrap() -> int:
     Bootstrap Sequence:
         1. Determine contracts directory from ONEX_CONTRACTS_DIR environment variable
         2. Load and validate runtime configuration from contracts or environment
-        3. Create and initialize event bus (InMemoryEventBus or KafkaEventBus based on config)
+        3. Create and initialize event bus (EventBusInmemory or EventBusKafka based on config)
         4. Create ModelONEXContainer and wire infrastructure services (async)
-        5. Resolve ProtocolBindingRegistry from container (async)
+        5. Resolve RegistryProtocolBinding from container (async)
         6. Instantiate RuntimeHostProcess with validated configuration and pre-resolved registry
         7. Setup graceful shutdown signal handlers (SIGINT, SIGTERM)
         8. Start runtime and HTTP health server for Docker/Kubernetes health probes
@@ -441,35 +441,35 @@ async def bootstrap() -> int:
 
         # 3. Create event bus
         # Dispatch based on configuration or environment variable:
-        # - If KAFKA_BOOTSTRAP_SERVERS env var is set, use KafkaEventBus
-        # - If config.event_bus.type == "kafka", use KafkaEventBus
-        # - Otherwise, use InMemoryEventBus for local development/testing
+        # - If KAFKA_BOOTSTRAP_SERVERS env var is set, use EventBusKafka
+        # - If config.event_bus.type == "kafka", use EventBusKafka
+        # - Otherwise, use EventBusInmemory for local development/testing
         # Environment override takes precedence over config for environment field.
         environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
         kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
         use_kafka = kafka_bootstrap_servers or config.event_bus.type == "kafka"
 
         event_bus_start_time = time.time()
-        event_bus: InMemoryEventBus | KafkaEventBus
+        event_bus: EventBusInmemory | EventBusKafka
         event_bus_type: str
 
         if use_kafka:
-            # Use KafkaEventBus for production/integration testing
+            # Use EventBusKafka for production/integration testing
             kafka_config = ModelKafkaEventBusConfig(
                 bootstrap_servers=kafka_bootstrap_servers or "localhost:9092",
                 environment=environment,
                 group=config.consumer_group,
                 circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
             )
-            event_bus = KafkaEventBus(config=kafka_config)
+            event_bus = EventBusKafka(config=kafka_config)
             event_bus_type = "kafka"
 
-            # Start KafkaEventBus to connect to Kafka/Redpanda and enable consumers
+            # Start EventBusKafka to connect to Kafka/Redpanda and enable consumers
             # Without this, the event bus cannot publish or consume messages
             try:
                 await event_bus.start()
                 logger.debug(
-                    "KafkaEventBus started successfully (correlation_id=%s)",
+                    "EventBusKafka started successfully (correlation_id=%s)",
                     correlation_id,
                 )
             except Exception as e:
@@ -480,12 +480,12 @@ async def bootstrap() -> int:
                     target_name=kafka_bootstrap_servers or "localhost:9092",
                 )
                 raise RuntimeHostError(
-                    f"Failed to start KafkaEventBus: {sanitize_error_message(e)}",
+                    f"Failed to start EventBusKafka: {sanitize_error_message(e)}",
                     context=context,
                 ) from e
 
             logger.info(
-                "Using KafkaEventBus (correlation_id=%s)",
+                "Using EventBusKafka (correlation_id=%s)",
                 correlation_id,
                 extra={
                     "bootstrap_servers": kafka_bootstrap_servers or "localhost:9092",
@@ -494,8 +494,8 @@ async def bootstrap() -> int:
                 },
             )
         else:
-            # Use InMemoryEventBus for local development/testing
-            event_bus = InMemoryEventBus(
+            # Use EventBusInmemory for local development/testing
+            event_bus = EventBusInmemory(
                 environment=environment,
                 group=config.consumer_group,
             )
@@ -767,25 +767,25 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
-        # 5. Resolve ProtocolBindingRegistry from container or create new instance
+        # 5. Resolve RegistryProtocolBinding from container or create new instance
         # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
         # The handler registry is optional for basic runtime operation - core event
         # processing continues even without explicit handler bindings. However,
         # ProtocolConfigurationError should NOT be masked as it indicates invalid
         # configuration that would cause undefined behavior.
-        handler_registry: ProtocolBindingRegistry | None = None
+        handler_registry: RegistryProtocolBinding | None = None
 
         # Check if service_registry is available (may be None in omnibase_core 0.6.x)
         if container.service_registry is not None:
             try:
                 handler_registry = await container.service_registry.resolve_service(
-                    ProtocolBindingRegistry
+                    RegistryProtocolBinding
                 )
             except ServiceResolutionError as e:
                 # Service not registered - expected in minimal configurations.
                 # Create a new instance directly as fallback.
                 logger.warning(
-                    "DEGRADED_MODE: ProtocolBindingRegistry not registered in container, "
+                    "DEGRADED_MODE: RegistryProtocolBinding not registered in container, "
                     "creating new instance (correlation_id=%s): %s",
                     correlation_id,
                     e,
@@ -797,12 +797,12 @@ async def bootstrap() -> int:
                         "component": "handler_registry",
                     },
                 )
-                handler_registry = ProtocolBindingRegistry()
+                handler_registry = RegistryProtocolBinding()
             except (RuntimeError, AttributeError) as e:
                 # Unexpected resolution failure - container internals issue.
                 # Log with more diagnostic context but still allow degraded operation.
                 logger.warning(
-                    "DEGRADED_MODE: Unexpected error resolving ProtocolBindingRegistry, "
+                    "DEGRADED_MODE: Unexpected error resolving RegistryProtocolBinding, "
                     "creating new instance (correlation_id=%s): %s",
                     correlation_id,
                     e,
@@ -814,13 +814,13 @@ async def bootstrap() -> int:
                         "component": "handler_registry",
                     },
                 )
-                handler_registry = ProtocolBindingRegistry()
+                handler_registry = RegistryProtocolBinding()
             # NOTE: ProtocolConfigurationError is NOT caught here - configuration
             # errors should propagate and stop startup to prevent undefined behavior.
         else:
-            # ServiceRegistry not available, create a new ProtocolBindingRegistry directly
+            # ServiceRegistry not available, create a new RegistryProtocolBinding directly
             logger.warning(
-                "DEGRADED_MODE: ServiceRegistry not available, creating ProtocolBindingRegistry directly (correlation_id=%s)",
+                "DEGRADED_MODE: ServiceRegistry not available, creating RegistryProtocolBinding directly (correlation_id=%s)",
                 correlation_id,
                 extra={
                     "error_type": "NoneType",
@@ -830,7 +830,7 @@ async def bootstrap() -> int:
                     "component": "handler_registry",
                 },
             )
-            handler_registry = ProtocolBindingRegistry()
+            handler_registry = RegistryProtocolBinding()
 
         # 6. Create runtime host process with config and pre-resolved registry
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to
@@ -974,7 +974,7 @@ async def bootstrap() -> int:
         # The message handler is extracted to IntrospectionMessageHandler for
         # better testability and separation of concerns (PR #101 code quality).
         if introspection_dispatcher is not None and isinstance(
-            event_bus, KafkaEventBus
+            event_bus, EventBusKafka
         ):
             # Create extracted event router with proper dependency injection
             introspection_event_router = IntrospectionEventRouter(
@@ -1274,8 +1274,8 @@ def configure_logging() -> None:
             Default: INFO
 
     Log Format Example:
-        2025-01-15 10:30:45 [INFO] omnibase_infra.runtime.kernel: ONEX Kernel v0.1.0
-        2025-01-15 10:30:45 [DEBUG] omnibase_infra.runtime.kernel: Runtime config loaded
+        2025-01-15 10:30:45 [INFO] omnibase_infra.runtime.service_kernel: ONEX Kernel v0.1.0
+        2025-01-15 10:30:45 [DEBUG] omnibase_infra.runtime.service_kernel: Runtime config loaded
             (correlation_id=123e4567-e89b-12d3-a456-426614174000)
 
     Structured Logging Extras:
@@ -1327,12 +1327,12 @@ def main() -> None:
 
     This function is the target for:
         - The installed entrypoint: `onex-runtime`
-        - Direct module execution: `python -m omnibase_infra.runtime.kernel`
+        - Direct module execution: `python -m omnibase_infra.runtime.service_kernel`
         - Docker CMD/ENTRYPOINT in container deployments
 
     Example:
         >>> # From command line
-        >>> python -m omnibase_infra.runtime.kernel
+        >>> python -m omnibase_infra.runtime.service_kernel
         >>> # Or via installed entrypoint
         >>> onex-runtime
 

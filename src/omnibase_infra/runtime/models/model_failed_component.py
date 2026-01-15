@@ -20,11 +20,11 @@ class ModelFailedComponent(BaseModel):
 
     Example:
         >>> failed = ModelFailedComponent(
-        ...     component_name="KafkaEventBus",
+        ...     component_name="EventBusKafka",
         ...     error_message="Connection timeout during shutdown"
         ... )
         >>> print(failed.component_name)
-        KafkaEventBus
+        EventBusKafka
     """
 
     model_config = ConfigDict(

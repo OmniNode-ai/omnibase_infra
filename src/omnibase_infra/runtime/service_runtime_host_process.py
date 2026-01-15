@@ -3,7 +3,7 @@
 """Runtime Host Process implementation for ONEX Infrastructure.
 
 This module implements the RuntimeHostProcess class, which is responsible for:
-- Owning and managing an event bus instance (InMemoryEventBus or KafkaEventBus)
+- Owning and managing an event bus instance (EventBusInmemory or EventBusKafka)
 - Registering handlers via the wiring module
 - Subscribing to event bus topics and routing envelopes to handlers
 - Handling errors by producing success=False response envelopes
@@ -15,8 +15,8 @@ bridging event-driven message routing with protocol handlers.
 
 Event Bus Support:
     The RuntimeHostProcess supports two event bus implementations:
-    - InMemoryEventBus: For local development and testing
-    - KafkaEventBus: For production use with Kafka/Redpanda
+    - EventBusInmemory: For local development and testing
+    - EventBusKafka: For production use with Kafka/Redpanda
 
     The event bus can be injected via constructor or auto-created based on config.
 
@@ -60,16 +60,16 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     UnknownHandlerTypeError,
 )
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
     validate_envelope,
 )
-from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import ModelDuplicateResponse
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
-from omnibase_infra.runtime.wiring import wire_default_handlers
+from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
@@ -89,7 +89,7 @@ if TYPE_CHECKING:
 from omnibase_infra.models.types import JsonDict
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
-# Tests patch "omnibase_infra.runtime.runtime_host_process.wire_handlers"
+# Tests patch "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
 wire_handlers = wire_default_handlers
 
 logger = logging.getLogger(__name__)
@@ -129,21 +129,21 @@ class RuntimeHostProcess:
     """Runtime host process that owns event bus and coordinates handlers.
 
     The RuntimeHostProcess is the central coordinator for ONEX infrastructure
-    runtime. It owns an event bus instance (InMemoryEventBus or KafkaEventBus),
+    runtime. It owns an event bus instance (EventBusInmemory or EventBusKafka),
     registers handlers via the wiring module, and routes incoming envelopes to
     appropriate handlers.
 
     Container Integration:
         RuntimeHostProcess now accepts a ModelONEXContainer parameter for
         dependency injection. The container provides access to:
-        - ProtocolBindingRegistry: Handler registry for protocol routing
+        - RegistryProtocolBinding: Handler registry for protocol routing
 
         This follows ONEX container-based DI patterns for better testability
         and lifecycle management. The legacy singleton pattern is deprecated
         in favor of container resolution.
 
     Attributes:
-        event_bus: The owned event bus instance (InMemoryEventBus or KafkaEventBus)
+        event_bus: The owned event bus instance (EventBusInmemory or EventBusKafka)
         is_running: Whether the process is currently running
         input_topic: Topic to subscribe to for incoming envelopes
         output_topic: Topic to publish responses to
@@ -152,7 +152,7 @@ class RuntimeHostProcess:
     Example:
         ```python
         from omnibase_core.container import ModelONEXContainer
-        from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+        from omnibase_infra.runtime.util_container_wiring import wire_infrastructure_services
 
         # Container-based initialization (preferred)
         container = ModelONEXContainer()
@@ -176,11 +176,11 @@ class RuntimeHostProcess:
     def __init__(
         self,
         container: ModelONEXContainer | None = None,
-        event_bus: InMemoryEventBus | KafkaEventBus | None = None,
+        event_bus: EventBusInmemory | EventBusKafka | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
         config: dict[str, object] | None = None,
-        handler_registry: ProtocolBindingRegistry | None = None,
+        handler_registry: RegistryProtocolBinding | None = None,
         architecture_rules: tuple[ProtocolArchitectureRule, ...] | None = None,
         contract_paths: list[str] | None = None,
     ) -> None:
@@ -194,14 +194,14 @@ class RuntimeHostProcess:
 
                 Container Resolution (during async start()):
                     - If handler_registry is None and container is provided, resolves
-                      ProtocolBindingRegistry from container.service_registry
-                    - Event bus must be provided explicitly or defaults to InMemoryEventBus
+                      RegistryProtocolBinding from container.service_registry
+                    - Event bus must be provided explicitly or defaults to EventBusInmemory
                       (required immediately during __init__)
 
                 Usage:
                     ```python
                     from omnibase_core.container import ModelONEXContainer
-                    from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+                    from omnibase_infra.runtime.util_container_wiring import wire_infrastructure_services
 
                     container = ModelONEXContainer()
                     await wire_infrastructure_services(container)
@@ -209,8 +209,8 @@ class RuntimeHostProcess:
                     await process.start()
                     ```
 
-            event_bus: Optional event bus instance (InMemoryEventBus or KafkaEventBus).
-                       If None, creates InMemoryEventBus.
+            event_bus: Optional event bus instance (EventBusInmemory or EventBusKafka).
+                       If None, creates EventBusInmemory.
             input_topic: Topic to subscribe to for incoming envelopes.
             output_topic: Topic to publish responses to.
             config: Optional configuration dict that can override topics and group_id.
@@ -227,8 +227,8 @@ class RuntimeHostProcess:
                       messages to complete during graceful shutdown (default: 30.0
                       seconds, valid range: 1-300). Values outside this range are
                       clamped to the nearest bound with a warning logged.
-            handler_registry: Optional ProtocolBindingRegistry instance for handler lookup.
-                Type: ProtocolBindingRegistry | None
+            handler_registry: Optional RegistryProtocolBinding instance for handler lookup.
+                Type: RegistryProtocolBinding | None
 
                 Purpose:
                     Provides the registry that maps handler_type strings (e.g., "http", "db")
@@ -247,7 +247,7 @@ class RuntimeHostProcess:
                     ```python
                     container = ModelONEXContainer()
                     wire_infrastructure_services(container)
-                    registry = container.service_registry.resolve_service(ProtocolBindingRegistry)
+                    registry = container.service_registry.resolve_service(RegistryProtocolBinding)
                     process = RuntimeHostProcess(handler_registry=registry)
                     ```
 
@@ -327,7 +327,7 @@ class RuntimeHostProcess:
         # Store container reference for dependency resolution
         self._container: ModelONEXContainer | None = container
         # Handler registry (container-based DI or singleton fallback)
-        self._handler_registry: ProtocolBindingRegistry | None = handler_registry
+        self._handler_registry: RegistryProtocolBinding | None = handler_registry
 
         # Architecture rules for startup validation
         self._architecture_rules: tuple[ProtocolArchitectureRule, ...] = (
@@ -344,8 +344,8 @@ class RuntimeHostProcess:
         self._handler_discovery: ContractHandlerDiscovery | None = None
 
         # Create or use provided event bus
-        self._event_bus: InMemoryEventBus | KafkaEventBus = (
-            event_bus or InMemoryEventBus()
+        self._event_bus: EventBusInmemory | EventBusKafka = (
+            event_bus or EventBusInmemory()
         )
 
         # Extract configuration with defaults
@@ -515,7 +515,7 @@ class RuntimeHostProcess:
         return self._container
 
     @property
-    def event_bus(self) -> InMemoryEventBus | KafkaEventBus:
+    def event_bus(self) -> EventBusInmemory | EventBusKafka:
         """Return the owned event bus instance.
 
         Returns:
@@ -1186,12 +1186,12 @@ class RuntimeHostProcess:
             },
         )
 
-    async def _get_handler_registry(self) -> ProtocolBindingRegistry:
+    async def _get_handler_registry(self) -> RegistryProtocolBinding:
         """Get handler registry (pre-resolved, container, or singleton).
 
         Resolution order:
             1. If handler_registry was provided to __init__, uses it (cached)
-            2. If container was provided and has ProtocolBindingRegistry, resolves from container
+            2. If container was provided and has RegistryProtocolBinding, resolves from container
             3. Falls back to singleton via get_handler_registry()
 
         Caching Behavior:
@@ -1202,7 +1202,7 @@ class RuntimeHostProcess:
             resolution operations.
 
         Returns:
-            ProtocolBindingRegistry instance.
+            RegistryProtocolBinding instance.
         """
         if self._handler_registry is not None:
             # Use pre-resolved registry from constructor
@@ -1211,9 +1211,9 @@ class RuntimeHostProcess:
         # Try to resolve from container if provided
         if self._container is not None and self._container.service_registry is not None:
             try:
-                resolved_registry: ProtocolBindingRegistry = (
+                resolved_registry: RegistryProtocolBinding = (
                     await self._container.service_registry.resolve_service(
-                        ProtocolBindingRegistry
+                        RegistryProtocolBinding
                     )
                 )
                 # Cache the resolved registry for subsequent calls
@@ -1953,7 +1953,7 @@ class RuntimeHostProcess:
             if self._idempotency_config.store_type == "postgres":
                 from omnibase_infra.idempotency import (
                     ModelPostgresIdempotencyStoreConfig,
-                    PostgresIdempotencyStore,
+                    StoreIdempotencyPostgres,
                 )
 
                 # Get database config from container or config
@@ -1971,13 +1971,13 @@ class RuntimeHostProcess:
                     )
                     return
 
-                self._idempotency_store = PostgresIdempotencyStore(config=db_config)
+                self._idempotency_store = StoreIdempotencyPostgres(config=db_config)
                 await self._idempotency_store.initialize()
 
             elif self._idempotency_config.store_type == "memory":
-                from omnibase_infra.idempotency import InMemoryIdempotencyStore
+                from omnibase_infra.idempotency import StoreIdempotencyInmemory
 
-                self._idempotency_store = InMemoryIdempotencyStore()
+                self._idempotency_store = StoreIdempotencyInmemory()
 
             else:
                 logger.warning(

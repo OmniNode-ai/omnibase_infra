@@ -17,9 +17,9 @@ Features:
 
 Usage:
     ```python
-    from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
-    bus = InMemoryEventBus(environment="dev", group="test")
+    bus = EventBusInmemory(environment="dev", group="test")
     await bus.start()
 
     # Subscribe to a topic
@@ -61,7 +61,7 @@ from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 logger = logging.getLogger(__name__)
 
 
-class InMemoryEventBus:
+class EventBusInmemory:
     """In-memory event bus for local development and testing.
 
     Implements ProtocolEventBus interface using deque-based event history
@@ -84,7 +84,7 @@ class InMemoryEventBus:
 
     Example:
         ```python
-        bus = InMemoryEventBus(environment="dev", group="test")
+        bus = EventBusInmemory(environment="dev", group="test")
         await bus.start()
 
         # Subscribe
@@ -162,7 +162,7 @@ class InMemoryEventBus:
         self._max_consecutive_failures: int = circuit_breaker_threshold
 
     @property
-    def adapter(self) -> InMemoryEventBus:
+    def adapter(self) -> EventBusInmemory:
         """No adapter for in-memory - returns self.
 
         Returns:
@@ -198,7 +198,7 @@ class InMemoryEventBus:
             self._started = True
             self._shutdown = False
         logger.info(
-            "InMemoryEventBus started",
+            "EventBusInmemory started",
             extra={"environment": self._environment, "group": self._group},
         )
 
@@ -548,7 +548,7 @@ class InMemoryEventBus:
             self._started = False
             self._shutdown = True
         logger.info(
-            "InMemoryEventBus closed",
+            "EventBusInmemory closed",
             extra={"environment": self._environment, "group": self._group},
         )
 
@@ -709,4 +709,4 @@ class InMemoryEventBus:
             }
 
 
-__all__: list[str] = ["InMemoryEventBus"]
+__all__: list[str] = ["EventBusInmemory"]

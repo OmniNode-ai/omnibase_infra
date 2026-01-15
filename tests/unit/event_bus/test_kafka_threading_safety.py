@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Threading safety tests for KafkaEventBus race condition fixes.
+"""Threading safety tests for EventBusKafka race condition fixes.
 
 Test Isolation and Cleanup Patterns
 ====================================
@@ -36,7 +36,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 
@@ -46,12 +46,12 @@ class SimulatedProducerError(Exception):
 
 @pytest.mark.asyncio
 class TestKafkaEventBusThreadingSafety:
-    """Test suite for KafkaEventBus threading safety and race condition fixes."""
+    """Test suite for EventBusKafka threading safety and race condition fixes."""
 
     async def test_concurrent_publish_operations_thread_safe(self) -> None:
         """Test that concurrent publish operations don't cause race conditions."""
         # Create event bus with mocked producer
-        bus = KafkaEventBus.default()
+        bus = EventBusKafka.default()
 
         # Mock the producer
         mock_producer = AsyncMock()
@@ -91,7 +91,7 @@ class TestKafkaEventBusThreadingSafety:
 
     async def test_initialize_start_race_condition_fixed(self) -> None:
         """Test that initialize() doesn't race with start()."""
-        bus = KafkaEventBus.default()
+        bus = EventBusKafka.default()
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
@@ -128,7 +128,7 @@ class TestKafkaEventBusThreadingSafety:
 
     async def test_producer_access_during_retry_thread_safe(self) -> None:
         """Test that producer field access during retry is thread-safe."""
-        bus = KafkaEventBus.default()
+        bus = EventBusKafka.default()
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
@@ -176,7 +176,7 @@ class TestKafkaEventBusThreadingSafety:
         Note: This test verifies idempotent close behavior - calling close()
         multiple times concurrently should be safe and result in proper cleanup.
         """
-        bus = KafkaEventBus.default()
+        bus = EventBusKafka.default()
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
@@ -204,7 +204,7 @@ class TestKafkaEventBusThreadingSafety:
         system load. The test verifies thread-safe concurrent health checks
         during shutdown, not strict timing behavior.
         """
-        bus = KafkaEventBus.default()
+        bus = EventBusKafka.default()
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
@@ -245,7 +245,7 @@ class TestKafkaEventBusThreadingSafety:
             bootstrap_servers="localhost:9092",
             circuit_breaker_threshold=3,
         )
-        bus = KafkaEventBus(config=config)
+        bus = EventBusKafka(config=config)
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for HttpRestHandler using pytest-httpserver.
+"""Integration tests for HandlerHttpRest using pytest-httpserver.
 
 These tests verify HTTP handler behavior against a real local HTTP server,
 testing actual network communication without relying on external services.
@@ -34,7 +34,7 @@ pytest.importorskip("pytest_httpserver")
 from werkzeug import Response
 
 from omnibase_infra.errors import InfraTimeoutError, InfraUnavailableError
-from omnibase_infra.handlers import HttpRestHandler
+from omnibase_infra.handlers import HandlerHttpRest
 
 if TYPE_CHECKING:
     from pytest_httpserver import HTTPServer
@@ -62,7 +62,7 @@ class TestHttpGetSuccess:
         httpserver.expect_request("/api/resource").respond_with_json(expected_response)
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -129,7 +129,7 @@ class TestHttpGetWithHeaders:
         )
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -197,7 +197,7 @@ class TestHttpPostJson:
         )
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -263,7 +263,7 @@ class TestHttpPostWithHeaders:
         )
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -315,7 +315,7 @@ class TestHttpGet404:
         )
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -362,7 +362,7 @@ class TestHttpGet500:
         )
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -419,7 +419,7 @@ class TestHttpTimeout:
             # Note: timeout cannot be configured via initialize() in MVP
         }
 
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(short_timeout_config)
 
         try:
@@ -457,7 +457,7 @@ class TestHttpResponseSizeLimit:
         httpserver.expect_request("/api/large").respond_with_json(large_response_data)
 
         # Initialize handler with small response size limit
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(small_response_config)
 
         try:
@@ -492,7 +492,7 @@ class TestHttpResponseSizeLimit:
         httpserver.expect_request("/api/small").respond_with_json(small_response)
 
         # Initialize handler with small response size limit
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(small_response_config)
 
         try:
@@ -532,7 +532,7 @@ class TestHttpTextResponse:
         )
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -588,7 +588,7 @@ class TestHttpQueryParameters:
         httpserver.expect_request("/api/items").respond_with_handler(query_handler)
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -633,7 +633,7 @@ class TestHttpEmptyResponse:
         httpserver.expect_request("/api/ping").respond_with_data("", status=204)
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -673,7 +673,7 @@ class TestHttpPostEmptyBody:
         )
 
         # Initialize handler
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:
@@ -714,7 +714,7 @@ class TestHttpMultipleRequests:
         httpserver.expect_request("/api/third").respond_with_json({"order": 3})
 
         # Initialize handler once
-        handler = HttpRestHandler()
+        handler = HandlerHttpRest()
         await handler.initialize(http_handler_config)
 
         try:

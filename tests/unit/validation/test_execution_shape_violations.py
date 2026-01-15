@@ -838,7 +838,7 @@ class TestAllowedReturnTypesValidation:
 
     def test_canonical_rules_use_allowed_return_types(self) -> None:
         """Verify canonical execution shape rules properly use allowed_return_types."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -894,7 +894,7 @@ class TestEnumMappingLogic:
 
     def test_message_category_event_maps_correctly(self) -> None:
         """EnumMessageCategory.EVENT maps correctly to EnumNodeOutputType.EVENT."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -909,7 +909,7 @@ class TestEnumMappingLogic:
 
     def test_message_category_command_maps_correctly(self) -> None:
         """EnumMessageCategory.COMMAND maps correctly to EnumNodeOutputType.COMMAND."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -924,7 +924,7 @@ class TestEnumMappingLogic:
 
     def test_message_category_intent_maps_correctly(self) -> None:
         """EnumMessageCategory.INTENT maps correctly to EnumNodeOutputType.INTENT."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -939,7 +939,7 @@ class TestEnumMappingLogic:
 
     def test_node_output_type_works_directly(self) -> None:
         """EnumNodeOutputType values work directly without mapping."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -965,7 +965,7 @@ class TestEnumMappingLogic:
 
     def test_mixed_enum_types_in_validation(self) -> None:
         """Both enum types produce consistent validation results."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -994,7 +994,7 @@ class TestProjectionOnlyAllowedForReducer:
 
     def test_projection_allowed_for_reducer(self) -> None:
         """PROJECTION is allowed as output for REDUCER handlers."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1010,7 +1010,7 @@ class TestProjectionOnlyAllowedForReducer:
 
     def test_projection_not_allowed_for_effect(self) -> None:
         """PROJECTION is NOT allowed as output for EFFECT handlers."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1026,7 +1026,7 @@ class TestProjectionOnlyAllowedForReducer:
 
     def test_projection_not_allowed_for_orchestrator(self) -> None:
         """PROJECTION is NOT allowed as output for ORCHESTRATOR handlers."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1044,7 +1044,7 @@ class TestProjectionOnlyAllowedForReducer:
 
     def test_projection_allowed_for_compute(self) -> None:
         """PROJECTION is allowed as output for COMPUTE handlers (most permissive)."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1072,7 +1072,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_effect_can_return_event(self) -> None:
         """EFFECT handlers can return EVENT type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1088,7 +1088,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_effect_can_return_command(self) -> None:
         """EFFECT handlers can return COMMAND type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1104,7 +1104,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_effect_cannot_return_intent(self) -> None:
         """EFFECT handlers cannot return INTENT type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1121,7 +1121,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_effect_cannot_return_projection(self) -> None:
         """EFFECT handlers cannot return PROJECTION type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1137,7 +1137,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_reducer_can_return_projection(self) -> None:
         """REDUCER handlers can only return PROJECTION type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1153,7 +1153,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_reducer_cannot_return_event(self) -> None:
         """REDUCER handlers cannot return EVENT type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1169,7 +1169,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_reducer_cannot_return_command(self) -> None:
         """REDUCER handlers cannot return COMMAND type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1185,7 +1185,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_reducer_cannot_return_intent(self) -> None:
         """REDUCER handlers cannot return INTENT type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1201,7 +1201,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_orchestrator_can_return_event(self) -> None:
         """ORCHESTRATOR handlers can return EVENT type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1217,7 +1217,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_orchestrator_can_return_command(self) -> None:
         """ORCHESTRATOR handlers can return COMMAND type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1233,7 +1233,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_orchestrator_cannot_return_intent(self) -> None:
         """ORCHESTRATOR handlers cannot return INTENT type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1249,7 +1249,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_orchestrator_cannot_return_projection(self) -> None:
         """ORCHESTRATOR handlers cannot return PROJECTION type."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1265,7 +1265,7 @@ class TestNodeArchetypeOutputRestrictions:
 
     def test_compute_can_return_any_type(self) -> None:
         """COMPUTE handlers can return any output type (most permissive)."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1291,7 +1291,7 @@ class TestEnumMappingEdgeCases:
 
     def test_all_message_categories_have_output_type_mapping(self) -> None:
         """Every EnumMessageCategory value has a corresponding EnumNodeOutputType."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1311,7 +1311,7 @@ class TestEnumMappingEdgeCases:
 
     def test_all_node_output_types_handled(self) -> None:
         """Every EnumNodeOutputType value is properly handled."""
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             EXECUTION_SHAPE_RULES,
         )
 
@@ -1383,7 +1383,7 @@ class TestEnumMappingCompleteness:
         method which converts EnumMessageCategory values to EnumNodeOutputType for
         validation against execution shape rules.
         """
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
         )
 
@@ -1409,7 +1409,7 @@ class TestEnumMappingCompleteness:
 
         This ensures the mapping doesn't contain typos or invalid output types.
         """
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
         )
 
@@ -1425,7 +1425,7 @@ class TestEnumMappingCompleteness:
         EVENT, COMMAND, and INTENT should map to their EnumNodeOutputType
         counterparts with identical string values, ensuring semantic consistency.
         """
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
         )
 
@@ -1442,7 +1442,7 @@ class TestEnumMappingCompleteness:
         If an EnumMessageCategory value is ever removed, this test ensures
         the mapping is also cleaned up.
         """
-        from omnibase_infra.validation.execution_shape_validator import (
+        from omnibase_infra.validation.validator_execution_shape import (
             _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
         )
 

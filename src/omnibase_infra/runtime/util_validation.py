@@ -17,14 +17,14 @@ Pydantic models (ModelRuntimeConfig, etc.) remain the authoritative schema
 for type validation and defaults.
 
 Usage:
-    >>> from omnibase_infra.runtime.validation import validate_runtime_config
+    >>> from omnibase_infra.runtime.util_validation import validate_runtime_config
     >>> config = {"input_topic": "my-requests", "output_topic": "my-responses"}
     >>> errors = validate_runtime_config(config)
     >>> if errors:
     ...     print(f"Validation errors: {errors}")
 
     >>> # Or use load_and_validate_config for file-based loading
-    >>> from omnibase_infra.runtime.validation import load_and_validate_config
+    >>> from omnibase_infra.runtime.util_validation import load_and_validate_config
     >>> config = load_and_validate_config(Path("config.yaml"))
 """
 

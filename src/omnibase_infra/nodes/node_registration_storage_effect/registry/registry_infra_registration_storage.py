@@ -15,7 +15,7 @@ Architecture:
 
 Related:
     - NodeRegistrationStorageEffect: Effect node that uses these dependencies
-    - ProtocolRegistrationStorageHandler: Protocol for storage backends
+    - ProtocolHandlerRegistrationStorage: Protocol for storage backends
     - ModelONEXContainer: ONEX dependency injection container
 """
 
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
     from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
-        ProtocolRegistrationStorageHandler,
+        ProtocolHandlerRegistrationStorage,
     )
 
 
@@ -92,7 +92,7 @@ class RegistryInfraRegistrationStorage:
             container.service_registry[
                 RegistryInfraRegistrationStorage.PROTOCOL_KEY
             ] = {
-                "protocol": "ProtocolRegistrationStorageHandler",
+                "protocol": "ProtocolHandlerRegistrationStorage",
                 "module": "omnibase_infra.nodes.node_registration_storage_effect.protocols",
                 "description": "Protocol for registration storage backends",
                 "pluggable": True,
@@ -102,35 +102,35 @@ class RegistryInfraRegistrationStorage:
     @staticmethod
     def register_handler(
         container: ModelONEXContainer,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
     ) -> None:
         """Register a specific storage handler with the container.
 
         Binds a concrete handler implementation to the protocol key.
-        The handler must implement ProtocolRegistrationStorageHandler.
+        The handler must implement ProtocolHandlerRegistrationStorage.
 
         Args:
             container: ONEX dependency injection container.
             handler: Handler implementation to register.
 
         Raises:
-            TypeError: If handler does not implement ProtocolRegistrationStorageHandler.
+            TypeError: If handler does not implement ProtocolHandlerRegistrationStorage.
 
         Example:
             >>> from omnibase_infra.handlers.registration_storage import (
-            ...     HandlerPostgresRegistrationStorage,
+            ...     HandlerRegistrationStoragePostgres,
             ... )
-            >>> handler = HandlerPostgresRegistrationStorage(pool, config)
+            >>> handler = HandlerRegistrationStoragePostgres(pool, config)
             >>> RegistryInfraRegistrationStorage.register_handler(container, handler)
         """
         # Import at runtime for isinstance check (protocol is @runtime_checkable)
         from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
-            ProtocolRegistrationStorageHandler,
+            ProtocolHandlerRegistrationStorage,
         )
 
-        if not isinstance(handler, ProtocolRegistrationStorageHandler):
+        if not isinstance(handler, ProtocolHandlerRegistrationStorage):
             raise TypeError(
-                f"Handler must implement ProtocolRegistrationStorageHandler, "
+                f"Handler must implement ProtocolHandlerRegistrationStorage, "
                 f"got {type(handler).__name__}"
             )
 
@@ -155,7 +155,7 @@ class RegistryInfraRegistrationStorage:
     def get_handler(
         container: ModelONEXContainer,
         handler_type: str | None = None,
-    ) -> ProtocolRegistrationStorageHandler | None:
+    ) -> ProtocolHandlerRegistrationStorage | None:
         """Retrieve a registered storage handler from the container.
 
         Args:
@@ -182,4 +182,4 @@ class RegistryInfraRegistrationStorage:
             handler_key = RegistryInfraRegistrationStorage.PROTOCOL_KEY + ".default"
 
         result = container.service_registry.get(handler_key)
-        return cast("ProtocolRegistrationStorageHandler | None", result)
+        return cast("ProtocolHandlerRegistrationStorage | None", result)

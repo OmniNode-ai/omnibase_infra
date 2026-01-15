@@ -4,7 +4,7 @@
 
 This module provides functions to register infrastructure services
 with ModelONEXContainer from omnibase_core. It establishes container-based
-dependency injection for PolicyRegistry and other infrastructure components.
+dependency injection for RegistryPolicy and other infrastructure components.
 
 Design Principles:
 - Explicit registration: All services registered explicitly
@@ -13,15 +13,15 @@ Design Principles:
 - Testability: Easy to mock services via container
 
 Service Keys:
-- PolicyRegistry: Registered as interface=PolicyRegistry
-- ProtocolBindingRegistry: Registered as interface=ProtocolBindingRegistry
+- RegistryPolicy: Registered as interface=RegistryPolicy
+- RegistryProtocolBinding: Registered as interface=RegistryProtocolBinding
 - RegistryCompute: Registered as interface=RegistryCompute
 
 Example Usage:
     ```python
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
-    from omnibase_infra.runtime.policy_registry import PolicyRegistry
+    from omnibase_infra.runtime.util_container_wiring import wire_infrastructure_services
+    from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
     # Bootstrap container
     container = ModelONEXContainer()
@@ -31,7 +31,7 @@ Example Usage:
     print(f"Registered {len(summary['services'])} services")
 
     # Resolve services using type interface
-    policy_registry = await container.service_registry.resolve_service(PolicyRegistry)
+    policy_registry = await container.service_registry.resolve_service(RegistryPolicy)
 
     # Use the registry
     policy_registry.register_policy(
@@ -57,9 +57,9 @@ from typing import TYPE_CHECKING
 from omnibase_core.models.primitives import ModelSemVer
 
 from omnibase_infra.errors import ServiceRegistryUnavailableError
-from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.registry_compute import RegistryCompute
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
 if TYPE_CHECKING:
     import asyncpg
@@ -75,7 +75,9 @@ if TYPE_CHECKING:
         ProjectionReaderRegistration,
         ProjectorRegistration,
     )
-    from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+    from omnibase_infra.runtime.service_message_dispatch_engine import (
+        MessageDispatchEngine,
+    )
 
 # Default semantic version for infrastructure components (from omnibase_core)
 SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
@@ -101,7 +103,7 @@ def _validate_service_registry(
         ServiceRegistryUnavailableError: If service_registry is None.
 
     Example:
-        >>> _validate_service_registry(container, "register PolicyRegistry")
+        >>> _validate_service_registry(container, "register RegistryPolicy")
         >>> # Proceed with registration...
     """
     if not hasattr(container, "service_registry"):
@@ -177,7 +179,7 @@ def _analyze_type_error(error_str: str) -> tuple[str, str]:
     if "interface" in error_str:
         return "interface", (
             "Invalid 'interface' argument. "
-            "Expected a type class (e.g., PolicyRegistry), not an instance."
+            "Expected a type class (e.g., RegistryPolicy), not an instance."
         )
     if "instance" in error_str:
         return "instance", (
@@ -202,7 +204,7 @@ async def wire_infrastructure_services(
 ) -> dict[str, list[str] | str]:
     """Register infrastructure services with the container.
 
-    Registers PolicyRegistry, ProtocolBindingRegistry, and RegistryCompute as global
+    Registers RegistryPolicy, RegistryProtocolBinding, and RegistryCompute as global
     singleton services in the container. Uses ModelONEXContainer.service_registry.register_instance()
     with the respective class as the interface type.
 
@@ -226,9 +228,9 @@ async def wire_infrastructure_services(
         >>> container = ModelONEXContainer()
         >>> summary = await wire_infrastructure_services(container)
         >>> print(summary)
-        {'services': ['PolicyRegistry', 'ProtocolBindingRegistry', 'RegistryCompute'], 'status': 'success'}
-        >>> policy_reg = await container.service_registry.resolve_service(PolicyRegistry)
-        >>> handler_reg = await container.service_registry.resolve_service(ProtocolBindingRegistry)
+        {'services': ['RegistryPolicy', 'RegistryProtocolBinding', 'RegistryCompute'], 'status': 'success'}
+        >>> policy_reg = await container.service_registry.resolve_service(RegistryPolicy)
+        >>> handler_reg = await container.service_registry.resolve_service(RegistryProtocolBinding)
         >>> compute_reg = await container.service_registry.resolve_service(RegistryCompute)
         >>> # Verify via duck typing (per ONEX conventions)
         >>> hasattr(policy_reg, 'register_policy') and callable(policy_reg.register_policy)
@@ -244,12 +246,12 @@ async def wire_infrastructure_services(
     services_registered: list[str] = []
 
     try:
-        # Create PolicyRegistry instance
-        policy_registry = PolicyRegistry()
+        # Create RegistryPolicy instance
+        policy_registry = RegistryPolicy()
 
         # Register with container using type interface (global scope = singleton)
         await container.service_registry.register_instance(
-            interface=PolicyRegistry,
+            interface=RegistryPolicy,
             instance=policy_registry,
             scope="global",
             metadata={
@@ -258,15 +260,15 @@ async def wire_infrastructure_services(
             },
         )
 
-        services_registered.append("PolicyRegistry")
-        logger.debug("Registered PolicyRegistry in container (global scope)")
+        services_registered.append("RegistryPolicy")
+        logger.debug("Registered RegistryPolicy in container (global scope)")
 
-        # Create ProtocolBindingRegistry instance
-        handler_registry = ProtocolBindingRegistry()
+        # Create RegistryProtocolBinding instance
+        handler_registry = RegistryProtocolBinding()
 
         # Register with container using type interface (global scope = singleton)
         await container.service_registry.register_instance(
-            interface=ProtocolBindingRegistry,
+            interface=RegistryProtocolBinding,
             instance=handler_registry,
             scope="global",
             metadata={
@@ -275,8 +277,8 @@ async def wire_infrastructure_services(
             },
         )
 
-        services_registered.append("ProtocolBindingRegistry")
-        logger.debug("Registered ProtocolBindingRegistry in container (global scope)")
+        services_registered.append("RegistryProtocolBinding")
+        logger.debug("Registered RegistryProtocolBinding in container (global scope)")
 
         # Create RegistryCompute instance
         compute_registry = RegistryCompute()
@@ -356,43 +358,43 @@ async def wire_infrastructure_services(
 
 async def get_policy_registry_from_container(
     container: ModelONEXContainer,
-) -> PolicyRegistry:
-    """Get PolicyRegistry from container.
+) -> RegistryPolicy:
+    """Get RegistryPolicy from container.
 
-    Resolves PolicyRegistry using ModelONEXContainer.service_registry.resolve_service().
-    This is the preferred method for accessing PolicyRegistry in container-based code.
+    Resolves RegistryPolicy using ModelONEXContainer.service_registry.resolve_service().
+    This is the preferred method for accessing RegistryPolicy in container-based code.
 
     Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
     is async in omnibase_core v0.5.6 and later (see omnibase_core.container.ModelONEXContainer).
 
     Args:
-        container: ONEX container instance with registered PolicyRegistry.
+        container: ONEX container instance with registered RegistryPolicy.
 
     Returns:
-        PolicyRegistry instance from container.
+        RegistryPolicy instance from container.
 
     Raises:
-        RuntimeError: If PolicyRegistry not registered in container.
+        RuntimeError: If RegistryPolicy not registered in container.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
         >>> container = ModelONEXContainer()
         >>> await wire_infrastructure_services(container)
         >>> registry = await get_policy_registry_from_container(container)
-        >>> isinstance(registry, PolicyRegistry)
+        >>> isinstance(registry, RegistryPolicy)
         True
 
     Note:
-        This function assumes PolicyRegistry was registered via
+        This function assumes RegistryPolicy was registered via
         wire_infrastructure_services(). If not, it will raise RuntimeError.
         For auto-registration, use get_or_create_policy_registry() instead.
     """
     # Validate service_registry is available
-    _validate_service_registry(container, "resolve PolicyRegistry")
+    _validate_service_registry(container, "resolve RegistryPolicy")
 
     try:
-        registry: PolicyRegistry = await container.service_registry.resolve_service(
-            PolicyRegistry
+        registry: RegistryPolicy = await container.service_registry.resolve_service(
+            RegistryPolicy
         )
         return registry
     except AttributeError as e:
@@ -408,32 +410,32 @@ async def get_policy_registry_from_container(
             hint = f"Missing attribute in resolution chain: {e}"
 
         logger.exception(
-            "Failed to resolve PolicyRegistry from container",
+            "Failed to resolve RegistryPolicy from container",
             extra={
                 "error": error_str,
                 "error_type": "AttributeError",
-                "service_type": "PolicyRegistry",
+                "service_type": "RegistryPolicy",
                 "hint": hint,
             },
         )
         raise RuntimeError(
-            f"Failed to resolve PolicyRegistry - {hint}\n"
-            f"Required API: container.service_registry.resolve_service(PolicyRegistry)\n"
+            f"Failed to resolve RegistryPolicy - {hint}\n"
+            f"Required API: container.service_registry.resolve_service(RegistryPolicy)\n"
             f"Original error: {e}"
         ) from e
     except Exception as e:
         logger.exception(
-            "Failed to resolve PolicyRegistry from container",
+            "Failed to resolve RegistryPolicy from container",
             extra={
                 "error": str(e),
                 "error_type": type(e).__name__,
-                "service_type": "PolicyRegistry",
+                "service_type": "RegistryPolicy",
             },
         )
         raise RuntimeError(
-            f"PolicyRegistry not registered in container.\n"
-            f"Service type requested: PolicyRegistry\n"
-            f"Resolution method: container.service_registry.resolve_service(PolicyRegistry)\n"
+            f"RegistryPolicy not registered in container.\n"
+            f"Service type requested: RegistryPolicy\n"
+            f"Resolution method: container.service_registry.resolve_service(RegistryPolicy)\n"
             f"Fix: Call wire_infrastructure_services(container) first.\n"
             f"Original error: {e}"
         ) from e
@@ -441,11 +443,11 @@ async def get_policy_registry_from_container(
 
 async def get_or_create_policy_registry(
     container: ModelONEXContainer,
-) -> PolicyRegistry:
-    """Get PolicyRegistry from container, creating if not registered.
+) -> RegistryPolicy:
+    """Get RegistryPolicy from container, creating if not registered.
 
     Convenience function that provides lazy initialization semantics.
-    Attempts to resolve PolicyRegistry from container, and if not found,
+    Attempts to resolve RegistryPolicy from container, and if not found,
     creates and registers a new instance.
 
     This function is useful when code paths may not have called
@@ -458,13 +460,13 @@ async def get_or_create_policy_registry(
         container: ONEX container instance.
 
     Returns:
-        PolicyRegistry instance from container (existing or newly created).
+        RegistryPolicy instance from container (existing or newly created).
 
     Example:
         >>> container = ModelONEXContainer()
         >>> # No wiring yet, but this still works
         >>> registry = await get_or_create_policy_registry(container)
-        >>> isinstance(registry, PolicyRegistry)
+        >>> isinstance(registry, RegistryPolicy)
         True
         >>> # Second call returns same instance
         >>> registry2 = await get_or_create_policy_registry(container)
@@ -477,22 +479,22 @@ async def get_or_create_policy_registry(
         initialization order and error handling.
     """
     # Validate service_registry is available
-    _validate_service_registry(container, "get_or_create PolicyRegistry")
+    _validate_service_registry(container, "get_or_create RegistryPolicy")
 
     try:
-        # Try to resolve existing PolicyRegistry
-        registry: PolicyRegistry = await container.service_registry.resolve_service(
-            PolicyRegistry
+        # Try to resolve existing RegistryPolicy
+        registry: RegistryPolicy = await container.service_registry.resolve_service(
+            RegistryPolicy
         )
         return registry
     except Exception:
-        # PolicyRegistry not registered, create and register it
-        logger.debug("PolicyRegistry not found in container, auto-registering")
+        # RegistryPolicy not registered, create and register it
+        logger.debug("RegistryPolicy not found in container, auto-registering")
 
         try:
-            policy_registry = PolicyRegistry()
+            policy_registry = RegistryPolicy()
             await container.service_registry.register_instance(
-                interface=PolicyRegistry,
+                interface=RegistryPolicy,
                 instance=policy_registry,
                 scope="global",
                 metadata={
@@ -501,38 +503,38 @@ async def get_or_create_policy_registry(
                     "auto_registered": True,
                 },
             )
-            logger.debug("Auto-registered PolicyRegistry in container (lazy init)")
+            logger.debug("Auto-registered RegistryPolicy in container (lazy init)")
             return policy_registry
 
         except Exception as e:
             logger.exception(
-                "Failed to auto-register PolicyRegistry",
+                "Failed to auto-register RegistryPolicy",
                 extra={"error": str(e), "error_type": type(e).__name__},
             )
             raise RuntimeError(
-                f"Failed to create and register PolicyRegistry: {e}"
+                f"Failed to create and register RegistryPolicy: {e}"
             ) from e
 
 
 async def get_handler_registry_from_container(
     container: ModelONEXContainer,
-) -> ProtocolBindingRegistry:
-    """Get ProtocolBindingRegistry from container.
+) -> RegistryProtocolBinding:
+    """Get RegistryProtocolBinding from container.
 
-    Resolves ProtocolBindingRegistry using ModelONEXContainer.service_registry.resolve_service().
-    This is the preferred method for accessing ProtocolBindingRegistry in container-based code.
+    Resolves RegistryProtocolBinding using ModelONEXContainer.service_registry.resolve_service().
+    This is the preferred method for accessing RegistryProtocolBinding in container-based code.
 
     Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
     is async in omnibase_core v0.5.6 and later (see omnibase_core.container.ModelONEXContainer).
 
     Args:
-        container: ONEX container instance with registered ProtocolBindingRegistry.
+        container: ONEX container instance with registered RegistryProtocolBinding.
 
     Returns:
-        ProtocolBindingRegistry instance from container.
+        RegistryProtocolBinding instance from container.
 
     Raises:
-        RuntimeError: If ProtocolBindingRegistry not registered in container.
+        RuntimeError: If RegistryProtocolBinding not registered in container.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -544,15 +546,15 @@ async def get_handler_registry_from_container(
         True
 
     Note:
-        This function assumes ProtocolBindingRegistry was registered via
+        This function assumes RegistryProtocolBinding was registered via
         wire_infrastructure_services(). If not, it will raise RuntimeError.
     """
     # Validate service_registry is available
-    _validate_service_registry(container, "resolve ProtocolBindingRegistry")
+    _validate_service_registry(container, "resolve RegistryProtocolBinding")
 
     try:
-        registry: ProtocolBindingRegistry = (
-            await container.service_registry.resolve_service(ProtocolBindingRegistry)
+        registry: RegistryProtocolBinding = (
+            await container.service_registry.resolve_service(RegistryProtocolBinding)
         )
         return registry
     except AttributeError as e:
@@ -568,32 +570,32 @@ async def get_handler_registry_from_container(
             hint = f"Missing attribute in resolution chain: {e}"
 
         logger.exception(
-            "Failed to resolve ProtocolBindingRegistry from container",
+            "Failed to resolve RegistryProtocolBinding from container",
             extra={
                 "error": error_str,
                 "error_type": "AttributeError",
-                "service_type": "ProtocolBindingRegistry",
+                "service_type": "RegistryProtocolBinding",
                 "hint": hint,
             },
         )
         raise RuntimeError(
-            f"Failed to resolve ProtocolBindingRegistry - {hint}\n"
-            f"Required API: container.service_registry.resolve_service(ProtocolBindingRegistry)\n"
+            f"Failed to resolve RegistryProtocolBinding - {hint}\n"
+            f"Required API: container.service_registry.resolve_service(RegistryProtocolBinding)\n"
             f"Original error: {e}"
         ) from e
     except Exception as e:
         logger.exception(
-            "Failed to resolve ProtocolBindingRegistry from container",
+            "Failed to resolve RegistryProtocolBinding from container",
             extra={
                 "error": str(e),
                 "error_type": type(e).__name__,
-                "service_type": "ProtocolBindingRegistry",
+                "service_type": "RegistryProtocolBinding",
             },
         )
         raise RuntimeError(
-            f"ProtocolBindingRegistry not registered in container.\n"
-            f"Service type requested: ProtocolBindingRegistry\n"
-            f"Resolution method: container.service_registry.resolve_service(ProtocolBindingRegistry)\n"
+            f"RegistryProtocolBinding not registered in container.\n"
+            f"Service type requested: RegistryProtocolBinding\n"
+            f"Resolution method: container.service_registry.resolve_service(RegistryProtocolBinding)\n"
             f"Fix: Call wire_infrastructure_services(container) first.\n"
             f"Original error: {e}"
         ) from e
@@ -1199,7 +1201,7 @@ async def wire_registration_dispatchers(
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
-        >>> from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+        >>> from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
         >>> import asyncpg
         >>>
         >>> container = ModelONEXContainer()

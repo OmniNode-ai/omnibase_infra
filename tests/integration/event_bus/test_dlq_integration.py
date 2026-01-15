@@ -18,7 +18,7 @@ Environment Variables:
 
 Related:
     - omnibase_infra.event_bus.topic_constants: DLQ topic utilities
-    - omnibase_infra.event_bus.kafka_event_bus: KafkaEventBus with DLQ support
+    - omnibase_infra.event_bus.kafka_event_bus: EventBusKafka with DLQ support
     - omnibase_infra.event_bus.models.model_dlq_event: DLQ event model
 """
 
@@ -37,7 +37,7 @@ import pytest
 from .conftest import wait_for_consumer_ready
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models import ModelDlqEvent
 
 # Import ModelEventMessage at runtime for use in tests
@@ -96,14 +96,14 @@ def unique_group() -> str:
 async def kafka_event_bus_with_dlq(
     kafka_bootstrap_servers: str,
     created_unique_dlq_topic: str,
-) -> AsyncGenerator[KafkaEventBus, None]:
-    """Create KafkaEventBus with DLQ configured for integration testing.
+) -> AsyncGenerator[EventBusKafka, None]:
+    """Create EventBusKafka with DLQ configured for integration testing.
 
-    Yields a started KafkaEventBus instance with DLQ enabled and ensures
+    Yields a started EventBusKafka instance with DLQ enabled and ensures
     cleanup after test. The DLQ topic is pre-created by the
     created_unique_dlq_topic fixture.
     """
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     # Create config with DLQ enabled
@@ -119,7 +119,7 @@ async def kafka_event_bus_with_dlq(
         dead_letter_topic=created_unique_dlq_topic,
     )
 
-    bus = KafkaEventBus.from_config(config)
+    bus = EventBusKafka.from_config(config)
 
     yield bus
 
@@ -132,9 +132,9 @@ async def kafka_event_bus_with_dlq(
 
 @pytest.fixture
 async def started_dlq_bus(
-    kafka_event_bus_with_dlq: KafkaEventBus,
-) -> KafkaEventBus:
-    """Provide a started KafkaEventBus instance with DLQ enabled."""
+    kafka_event_bus_with_dlq: EventBusKafka,
+) -> EventBusKafka:
+    """Provide a started EventBusKafka instance with DLQ enabled."""
     await kafka_event_bus_with_dlq.start()
     return kafka_event_bus_with_dlq
 
@@ -273,7 +273,7 @@ class TestDlqTopicIntegration:
 
     async def test_dlq_topic_creation(
         self,
-        started_dlq_bus: KafkaEventBus,
+        started_dlq_bus: EventBusKafka,
         created_unique_dlq_topic: str,
     ) -> None:
         """Verify DLQ topic can be created and published to.
@@ -319,7 +319,7 @@ class TestDlqPublishing:
 
     async def test_dlq_publish_on_handler_failure(
         self,
-        started_dlq_bus: KafkaEventBus,
+        started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
         created_unique_dlq_topic: str,
         unique_group: str,
@@ -427,7 +427,7 @@ class TestDlqMessageFormat:
 
     async def test_dlq_message_contains_original_context(
         self,
-        started_dlq_bus: KafkaEventBus,
+        started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
         created_unique_dlq_topic: str,
         unique_group: str,
@@ -528,7 +528,7 @@ class TestDlqCallbacks:
 
     async def test_dlq_callback_invoked_on_publish(
         self,
-        started_dlq_bus: KafkaEventBus,
+        started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -595,7 +595,7 @@ class TestDlqCallbacks:
 
     async def test_dlq_callback_unregister(
         self,
-        started_dlq_bus: KafkaEventBus,
+        started_dlq_bus: EventBusKafka,
     ) -> None:
         """Verify DLQ callbacks can be unregistered."""
         callback_count = 0
@@ -630,7 +630,7 @@ class TestDlqMetrics:
 
     async def test_dlq_metrics_available(
         self,
-        started_dlq_bus: KafkaEventBus,
+        started_dlq_bus: EventBusKafka,
     ) -> None:
         """Verify DLQ metrics are accessible and properly initialized."""
         metrics = started_dlq_bus.dlq_metrics
@@ -648,7 +648,7 @@ class TestDlqMetrics:
 
     async def test_dlq_metrics_increment_on_successful_publish(
         self,
-        started_dlq_bus: KafkaEventBus,
+        started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
     ) -> None:
         """Verify DLQ metrics are incremented when messages are published successfully.
@@ -717,7 +717,7 @@ class TestDlqMetrics:
 
     async def test_dlq_metrics_increment_on_full_flow(
         self,
-        started_dlq_bus: KafkaEventBus,
+        started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
     ) -> None:

@@ -5,7 +5,7 @@
 #
 # Capability-Oriented Design: "I'm interested in what you do, not what you are"
 # This node is named by capability (service.discovery) not vendor (consul/k8s/etcd).
-# Supports pluggable backends through ProtocolServiceDiscoveryHandler.
+# Supports pluggable backends through ProtocolHandlerServiceDiscovery.
 #
 contract_version:
   major: 1
@@ -87,7 +87,7 @@ io_operations:
 dependencies:
   - name: "service_discovery_handler"
     type: "protocol"
-    class_name: "ProtocolServiceDiscoveryHandler"
+    class_name: "ProtocolHandlerServiceDiscovery"
     module: "omnibase_infra.nodes.node_service_discovery_effect.protocols"
     description: >
       Protocol for pluggable service discovery backends. Implementations include Consul, Kubernetes, and Etcd handlers.

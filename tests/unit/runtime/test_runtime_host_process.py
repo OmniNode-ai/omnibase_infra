@@ -16,7 +16,7 @@ All tests validate:
 - Health check functionality
 
 Acceptance Criteria (OMN-249):
-- RuntimeHostProcess owns and manages an InMemoryEventBus
+- RuntimeHostProcess owns and manages an EventBusInmemory
 - Registers handlers via wiring.py
 - Subscribes to event bus and routes envelopes
 - Handles errors by producing success=False response envelopes
@@ -38,7 +38,7 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from tests.conftest import seed_mock_handlers
 from tests.helpers import DeterministicClock, DeterministicIdGenerator
@@ -53,7 +53,7 @@ try:
     from omnibase_infra.runtime.protocol_lifecycle_executor import (
         ProtocolLifecycleExecutor,
     )
-    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+    from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
     _RUNTIME_HOST_IMPLEMENTED = True
 except ImportError:
@@ -314,7 +314,7 @@ class TestRuntimeHostProcessInitialization:
     async def test_creates_event_bus_on_init(self) -> None:
         """Test that RuntimeHostProcess creates an event bus on initialization.
 
-        The process should own an InMemoryEventBus instance that it manages
+        The process should own an EventBusInmemory instance that it manages
         throughout its lifecycle.
         """
         # Import will fail until implementation exists - this is TDD red phase
@@ -322,7 +322,7 @@ class TestRuntimeHostProcessInitialization:
         process = RuntimeHostProcess()
 
         assert process.event_bus is not None
-        assert isinstance(process.event_bus, InMemoryEventBus)
+        assert isinstance(process.event_bus, EventBusInmemory)
 
     @pytest.mark.asyncio
     async def test_initializes_with_default_config(self) -> None:
@@ -657,7 +657,7 @@ class TestRuntimeHostProcessLifecycle:
         process = RuntimeHostProcess()
 
         with patch(
-            "omnibase_infra.runtime.runtime_host_process.wire_handlers"
+            "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
         ) as mock_wire:
             mock_wire.return_value = {}
             await process.start()
@@ -1736,7 +1736,7 @@ class TestRuntimeHostProcessDeterministic:
 class TestRuntimeHostProcessLogWarnings:
     """Test log warning assertions (following OMN-252 patterns)."""
 
-    RUNTIME_MODULE = "omnibase_infra.runtime.runtime_host_process"
+    RUNTIME_MODULE = "omnibase_infra.runtime.service_runtime_host_process"
 
     @pytest.mark.asyncio
     async def test_no_unexpected_warnings_during_normal_operation(
@@ -2567,12 +2567,12 @@ class TestRuntimeHostProcessContainerInjection:
 
     Container Integration:
         RuntimeHostProcess accepts ModelONEXContainer as optional first parameter.
-        When provided, the runtime host can resolve ProtocolBindingRegistry from
+        When provided, the runtime host can resolve RegistryProtocolBinding from
         the container's service_registry during async start().
 
         Resolution Order (during _get_handler_registry):
             1. If handler_registry was provided to __init__, uses it
-            2. If container was provided and has ProtocolBindingRegistry, resolves from container
+            2. If container was provided and has RegistryProtocolBinding, resolves from container
             3. Falls back to singleton via get_handler_registry()
     """
 
@@ -2625,13 +2625,13 @@ class TestRuntimeHostProcessContainerInjection:
         """Handler registry should be resolved from container when provided.
 
         When a container with a service_registry is provided, the runtime host
-        should attempt to resolve ProtocolBindingRegistry from the container
+        should attempt to resolve RegistryProtocolBinding from the container
         during _get_handler_registry() call.
         """
-        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+        from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
         # Create mock registry
-        mock_registry = ProtocolBindingRegistry()
+        mock_registry = RegistryProtocolBinding()
 
         # Create mock service_registry that returns our mock registry
         mock_service_registry = AsyncMock()
@@ -2647,9 +2647,9 @@ class TestRuntimeHostProcessContainerInjection:
         # Call _get_handler_registry
         resolved_registry = await process._get_handler_registry()
 
-        # Verify resolve_service was called with ProtocolBindingRegistry
+        # Verify resolve_service was called with RegistryProtocolBinding
         mock_service_registry.resolve_service.assert_called_once_with(
-            ProtocolBindingRegistry
+            RegistryProtocolBinding
         )
 
         # Verify the resolved registry is returned
@@ -2771,10 +2771,10 @@ class TestRuntimeHostProcessContainerInjection:
         When both handler_registry and container are provided, the explicit
         handler_registry should be used instead of resolving from container.
         """
-        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+        from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
         # Create explicit registry
-        explicit_registry = ProtocolBindingRegistry()
+        explicit_registry = RegistryProtocolBinding()
 
         # Create mock container with service_registry
         mock_service_registry = AsyncMock()
@@ -2803,10 +2803,10 @@ class TestRuntimeHostProcessContainerInjection:
         When _get_handler_registry() resolves from container, the result should
         be cached so subsequent calls do not re-resolve from container.
         """
-        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+        from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
         # Create mock registry
-        mock_registry = ProtocolBindingRegistry()
+        mock_registry = RegistryProtocolBinding()
 
         # Create mock service_registry that returns our mock registry
         mock_service_registry = AsyncMock()

@@ -23,7 +23,7 @@ Integration Status:
     4. Runtime validation - Add security constraint enforcement
 
 Usage:
-    >>> from omnibase_infra.validation.security_validator import (
+    >>> from omnibase_infra.validation.validator_security import (
     ...     validate_method_exposure,
     ...     validate_handler_security,
     ... )

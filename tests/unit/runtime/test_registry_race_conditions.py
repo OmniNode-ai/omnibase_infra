@@ -3,9 +3,9 @@
 """Race condition and concurrent access tests for registry components.
 
 This module provides comprehensive race condition tests for:
-- PolicyRegistry: Thread-safe policy registration and versioning
-- ProtocolBindingRegistry: Thread-safe handler registration
-- EventBusBindingRegistry: Thread-safe event bus registration
+- RegistryPolicy: Thread-safe policy registration and versioning
+- RegistryProtocolBinding: Thread-safe handler registration
+- RegistryEventBusBinding: Thread-safe event bus registration
 - Singleton factory functions: Thread-safe lazy initialization
 
 Test Categories:
@@ -14,7 +14,7 @@ Test Categories:
 3. State Consistency: Verifying shared state under concurrent modifications
 4. Boundary Conditions: Testing at threshold boundaries (e.g., circuit breaker)
 5. Stress Tests: High-volume concurrent operations
-6. Secondary Index Consistency: PolicyRegistry index integrity under load
+6. Secondary Index Consistency: RegistryPolicy index integrity under load
 
 All tests are designed to be deterministic and not flaky.
 """
@@ -34,13 +34,13 @@ from omnibase_infra.errors import ComputeRegistryError, PolicyRegistryError
 from omnibase_infra.runtime import handler_registry as registry_module
 from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_HTTP,
-    EventBusBindingRegistry,
-    ProtocolBindingRegistry,
+    RegistryEventBusBinding,
+    RegistryProtocolBinding,
     get_event_bus_registry,
     get_handler_registry,
 )
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -108,23 +108,23 @@ class MockComputePluginV2:
 
 
 @pytest.fixture
-def policy_registry() -> PolicyRegistry:
-    """Provide a fresh PolicyRegistry instance."""
+def policy_registry() -> RegistryPolicy:
+    """Provide a fresh RegistryPolicy instance."""
     # Reset the semver cache to ensure test isolation
-    PolicyRegistry._reset_semver_cache()
-    return PolicyRegistry()
+    RegistryPolicy._reset_semver_cache()
+    return RegistryPolicy()
 
 
 @pytest.fixture
-def handler_registry() -> ProtocolBindingRegistry:
-    """Provide a fresh ProtocolBindingRegistry instance."""
-    return ProtocolBindingRegistry()
+def handler_registry() -> RegistryProtocolBinding:
+    """Provide a fresh RegistryProtocolBinding instance."""
+    return RegistryProtocolBinding()
 
 
 @pytest.fixture
-def event_bus_registry() -> EventBusBindingRegistry:
-    """Provide a fresh EventBusBindingRegistry instance."""
-    return EventBusBindingRegistry()
+def event_bus_registry() -> RegistryEventBusBinding:
+    """Provide a fresh RegistryEventBusBinding instance."""
+    return RegistryEventBusBinding()
 
 
 @pytest.fixture
@@ -148,7 +148,7 @@ def reset_singletons() -> Iterator[None]:
 
 
 # =============================================================================
-# PolicyRegistry Race Condition Tests
+# RegistryPolicy Race Condition Tests
 # =============================================================================
 
 
@@ -156,7 +156,7 @@ class TestPolicyRegistryConcurrentRegistration:
     """Tests for concurrent policy registration scenarios."""
 
     def test_concurrent_registration_different_policies(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test concurrent registration of different policies is thread-safe."""
         num_threads = 50
@@ -186,7 +186,7 @@ class TestPolicyRegistryConcurrentRegistration:
         assert len(policy_registry) == num_threads
 
     def test_concurrent_registration_same_policy_different_versions(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test concurrent registration of same policy with different versions."""
         num_versions = 20
@@ -218,7 +218,7 @@ class TestPolicyRegistryConcurrentRegistration:
         assert len(versions) == num_versions
 
     def test_concurrent_get_during_registration(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test concurrent get operations during registration."""
         # Pre-register a policy to read
@@ -270,7 +270,7 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
     """Tests for secondary index (_policy_id_index) integrity under concurrent access."""
 
     def test_secondary_index_consistency_under_concurrent_registration(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that _policy_id_index remains consistent under concurrent registration."""
         num_threads = 30
@@ -309,7 +309,7 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
             )
 
     def test_secondary_index_consistency_during_unregister(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test secondary index remains consistent during concurrent unregister operations."""
         # Pre-register policies
@@ -362,7 +362,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
 
     def test_semver_cache_concurrent_initialization(self) -> None:
         """Test semver cache is initialized safely under concurrent access."""
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         results: list[tuple[int, int, int, str]] = []
         errors: list[Exception] = []
@@ -370,7 +370,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
         def parse_version() -> None:
             try:
                 for i in range(50):
-                    result = PolicyRegistry._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
+                    result = RegistryPolicy._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
                     results.append(result)
             except Exception as e:
                 errors.append(e)
@@ -387,7 +387,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
 
     def test_semver_cache_returns_consistent_results_under_load(self) -> None:
         """Test that semver cache returns consistent results under concurrent load."""
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         results: dict[str, list[tuple[int, int, int, str]]] = {}
         lock = threading.Lock()
@@ -395,7 +395,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
 
         def parse_and_collect(version: str) -> None:
             try:
-                result = PolicyRegistry._parse_semver(version)
+                result = RegistryPolicy._parse_semver(version)
                 with lock:
                     if version not in results:
                         results[version] = []
@@ -435,10 +435,10 @@ class TestPolicyRegistrySemverCacheRaceConditions:
         The fix stores the cache reference in a local variable before the check,
         ensuring the returned reference is always valid.
         """
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Initialize the cache first
-        PolicyRegistry._parse_semver("1.0.0")
+        RegistryPolicy._parse_semver("1.0.0")
 
         errors: list[Exception] = []
         parse_count = 0
@@ -452,7 +452,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
             try:
                 for i in range(200):
                     # This should NEVER raise TypeError even during resets
-                    result = PolicyRegistry._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
+                    result = RegistryPolicy._parse_semver(f"{i % 10}.{i % 5}.{i % 3}")
                     assert result is not None
                     local_count += 1
             except Exception as e:
@@ -467,7 +467,7 @@ class TestPolicyRegistrySemverCacheRaceConditions:
             local_count = 0
             try:
                 for _ in range(50):
-                    PolicyRegistry._reset_semver_cache()
+                    RegistryPolicy._reset_semver_cache()
                     local_count += 1
                     # Small sleep to allow interleaving
                     time.sleep(0.0001)
@@ -576,33 +576,33 @@ class TestSemverCacheClearOnReset:
     """
 
     def test_policy_registry_cache_clear_on_reset(self) -> None:
-        """Test that PolicyRegistry clears LRU cache entries on reset."""
+        """Test that RegistryPolicy clears LRU cache entries on reset."""
         # Reset to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Populate the cache with some entries
         for i in range(50):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
         # Get cache info before reset using the proper accessor method
-        # Note: PolicyRegistry uses a two-level cache structure:
+        # Note: RegistryPolicy uses a two-level cache structure:
         # - _semver_cache: outer wrapper function (normalizes input)
         # - _semver_cache_inner: inner LRU-cached function (has cache_info())
         # The _get_semver_cache_info() method accesses the inner function's cache_info()
-        cache_info_before = PolicyRegistry._get_semver_cache_info()
+        cache_info_before = RegistryPolicy._get_semver_cache_info()
         assert cache_info_before is not None, "Cache should be initialized"
         assert cache_info_before.currsize > 0, "Cache should have entries"
 
         # Reset the cache
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Verify cache reference is None
-        assert PolicyRegistry._semver_cache is None
+        assert RegistryPolicy._semver_cache is None
 
         # Create new cache and verify it's empty
         # Trigger cache initialization by parsing a version
-        PolicyRegistry._get_semver_parser()
-        cache_info_after = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._get_semver_parser()
+        cache_info_after = RegistryPolicy._get_semver_cache_info()
         assert cache_info_after is not None, "Cache should be re-initialized"
         assert cache_info_after.currsize == 0, "New cache should be empty after reset"
 
@@ -707,10 +707,10 @@ class TestSemverCacheClearOnReset:
 
 
 class TestPolicyRegistryStressTest:
-    """Stress tests for PolicyRegistry under high concurrent load."""
+    """Stress tests for RegistryPolicy under high concurrent load."""
 
     def test_high_volume_concurrent_operations(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Stress test with high volume of concurrent operations."""
         num_operations = 1000
@@ -765,15 +765,15 @@ class TestPolicyRegistryStressTest:
 
 
 # =============================================================================
-# ProtocolBindingRegistry Race Condition Tests
+# RegistryProtocolBinding Race Condition Tests
 # =============================================================================
 
 
 class TestHandlerRegistryConcurrentOperations:
-    """Tests for concurrent operations on ProtocolBindingRegistry."""
+    """Tests for concurrent operations on RegistryProtocolBinding."""
 
     def test_concurrent_registration_multiple_handlers(
-        self, handler_registry: ProtocolBindingRegistry
+        self, handler_registry: RegistryProtocolBinding
     ) -> None:
         """Test concurrent registration of multiple handlers is thread-safe."""
         errors: list[Exception] = []
@@ -806,7 +806,7 @@ class TestHandlerRegistryConcurrentOperations:
         assert len(handler_registry) == 50
 
     def test_concurrent_read_write_handler_registry(
-        self, handler_registry: ProtocolBindingRegistry
+        self, handler_registry: RegistryProtocolBinding
     ) -> None:
         """Test concurrent reads and writes don't cause data corruption."""
         handler_registry.register(HANDLER_TYPE_HTTP, MockHandler)  # type: ignore[arg-type]
@@ -853,7 +853,7 @@ class TestHandlerRegistryConcurrentOperations:
         assert write_count == 150  # 3 threads * 50 writes
 
     def test_concurrent_unregister_operations(
-        self, handler_registry: ProtocolBindingRegistry
+        self, handler_registry: RegistryProtocolBinding
     ) -> None:
         """Test concurrent unregister operations are thread-safe."""
         # Pre-register handlers
@@ -887,15 +887,15 @@ class TestHandlerRegistryConcurrentOperations:
 
 
 # =============================================================================
-# EventBusBindingRegistry Race Condition Tests
+# RegistryEventBusBinding Race Condition Tests
 # =============================================================================
 
 
 class TestEventBusRegistryConcurrentOperations:
-    """Tests for concurrent operations on EventBusBindingRegistry."""
+    """Tests for concurrent operations on RegistryEventBusBinding."""
 
     def test_concurrent_registration_unique_kinds(
-        self, event_bus_registry: EventBusBindingRegistry
+        self, event_bus_registry: RegistryEventBusBinding
     ) -> None:
         """Test concurrent registration of unique bus kinds is thread-safe."""
         num_buses = 50
@@ -919,7 +919,7 @@ class TestEventBusRegistryConcurrentOperations:
         assert len(event_bus_registry.list_bus_kinds()) == num_buses
 
     def test_concurrent_duplicate_registration_races(
-        self, event_bus_registry: EventBusBindingRegistry
+        self, event_bus_registry: RegistryEventBusBinding
     ) -> None:
         """Test that concurrent duplicate registrations are properly handled."""
         num_threads = 10
@@ -948,7 +948,7 @@ class TestEventBusRegistryConcurrentOperations:
         assert len(errors) == num_threads - 1
 
     def test_concurrent_is_registered_during_registration(
-        self, event_bus_registry: EventBusBindingRegistry
+        self, event_bus_registry: RegistryEventBusBinding
     ) -> None:
         """Test is_registered during concurrent registration."""
         check_results: list[bool] = []
@@ -998,7 +998,7 @@ class TestSingletonFactoryRaceConditions:
 
     def test_get_handler_registry_concurrent_initialization(self) -> None:
         """Test get_handler_registry is thread-safe during lazy initialization."""
-        registries: list[ProtocolBindingRegistry] = []
+        registries: list[RegistryProtocolBinding] = []
         errors: list[Exception] = []
         lock = threading.Lock()
 
@@ -1024,7 +1024,7 @@ class TestSingletonFactoryRaceConditions:
 
     def test_get_event_bus_registry_concurrent_initialization(self) -> None:
         """Test get_event_bus_registry is thread-safe during lazy initialization."""
-        registries: list[EventBusBindingRegistry] = []
+        registries: list[RegistryEventBusBinding] = []
         errors: list[Exception] = []
         lock = threading.Lock()
 
@@ -1050,8 +1050,8 @@ class TestSingletonFactoryRaceConditions:
 
     def test_both_singletons_concurrent_initialization(self) -> None:
         """Test both singletons can be initialized concurrently without issues."""
-        handler_registries: list[ProtocolBindingRegistry] = []
-        event_bus_registries: list[EventBusBindingRegistry] = []
+        handler_registries: list[RegistryProtocolBinding] = []
+        event_bus_registries: list[RegistryEventBusBinding] = []
         errors: list[Exception] = []
         lock = threading.Lock()
 
@@ -1097,9 +1097,9 @@ class TestThreadPoolExecutorStress:
     """Stress tests using ThreadPoolExecutor for controlled concurrency."""
 
     def test_policy_registry_high_concurrency_executor(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
-        """Stress test PolicyRegistry with ThreadPoolExecutor."""
+        """Stress test RegistryPolicy with ThreadPoolExecutor."""
         num_workers = 20
         num_operations = 200
         errors: list[Exception] = []
@@ -1126,9 +1126,9 @@ class TestThreadPoolExecutorStress:
         assert len(policy_registry) == num_operations
 
     def test_handler_registry_high_concurrency_executor(
-        self, handler_registry: ProtocolBindingRegistry
+        self, handler_registry: RegistryProtocolBinding
     ) -> None:
-        """Stress test ProtocolBindingRegistry with ThreadPoolExecutor."""
+        """Stress test RegistryProtocolBinding with ThreadPoolExecutor."""
         num_workers = 20
         num_operations = 200
         errors: list[Exception] = []
@@ -1151,8 +1151,8 @@ class TestThreadPoolExecutorStress:
 
     def test_mixed_registry_operations_executor(
         self,
-        policy_registry: PolicyRegistry,
-        handler_registry: ProtocolBindingRegistry,
+        policy_registry: RegistryPolicy,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test mixed operations across multiple registries with ThreadPoolExecutor."""
         num_workers = 15
@@ -1208,7 +1208,7 @@ class TestVersionSelectionRaceConditions:
     """Tests for race conditions during version selection (get latest)."""
 
     def test_get_latest_during_version_registration(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test get() returns valid version during concurrent version registration."""
         policy_id = "versioned-race"
@@ -1271,7 +1271,7 @@ class TestClearOperationRaceConditions:
     """Tests for race conditions during clear operations."""
 
     def test_clear_during_concurrent_operations(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test clear() during concurrent read/write operations."""
         # Pre-register some policies
@@ -1332,7 +1332,7 @@ class TestClearOperationRaceConditions:
         assert len(unexpected_errors) == 0, f"Unexpected errors: {unexpected_errors}"
 
     def test_handler_registry_clear_during_concurrent_operations(
-        self, handler_registry: ProtocolBindingRegistry
+        self, handler_registry: RegistryProtocolBinding
     ) -> None:
         """Test handler registry clear() during concurrent operations."""
         # Pre-register handlers

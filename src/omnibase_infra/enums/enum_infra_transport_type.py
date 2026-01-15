@@ -20,7 +20,7 @@ Supported transport types:
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
     - HandlerVault: Secret retrieval, token management, lease renewal
-    - KafkaEventBus: Event publishing/subscription, consumer groups
+    - EventBusKafka: Event publishing/subscription, consumer groups
     - PostgresConnectionManager: Connection pooling, query execution
     - HandlerMCP: MCP server for exposing ONEX nodes as AI agent tools
     - HandlerFileSystem: File read/write, directory operations

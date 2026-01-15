@@ -3,7 +3,7 @@
 """Unit tests for ContractHandlerDiscovery class.
 
 This module tests the ContractHandlerDiscovery service which bridges
-the HandlerPluginLoader with the ProtocolBindingRegistry.
+the HandlerPluginLoader with the RegistryProtocolBinding.
 
 Part of OMN-1133: Handler Discovery Service implementation.
 """
@@ -18,8 +18,8 @@ import pytest
 from omnibase_infra.models.runtime.model_discovery_result import ModelDiscoveryResult
 from omnibase_infra.runtime import (
     ContractHandlerDiscovery,
-    ProtocolBindingRegistry,
     ProtocolHandlerDiscovery,
+    RegistryProtocolBinding,
 )
 
 
@@ -49,7 +49,7 @@ class TestContractHandlerDiscoveryBasicFunctionality:
     async def test_discover_single_valid_contract(
         self,
         discovery_service: ContractHandlerDiscovery,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
         valid_contract_path: Path,
     ) -> None:
         """Test discovery and registration of a single valid contract file."""
@@ -68,7 +68,7 @@ class TestContractHandlerDiscoveryBasicFunctionality:
     async def test_discover_directory_with_multiple_contracts(
         self,
         discovery_service: ContractHandlerDiscovery,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
         valid_contract_directory: Path,
     ) -> None:
         """Test discovery and registration from a directory with multiple contracts."""
@@ -125,7 +125,7 @@ class TestContractHandlerDiscoveryErrorHandling:
     async def test_mixed_valid_invalid_contracts_partial_success(
         self,
         discovery_service: ContractHandlerDiscovery,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
         mixed_valid_invalid_directory: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -314,7 +314,7 @@ class TestContractHandlerDiscoveryMixedPaths:
     async def test_handles_mixed_files_and_directories(
         self,
         discovery_service: ContractHandlerDiscovery,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
         valid_contract_path: Path,
         valid_contract_directory: Path,
     ) -> None:
@@ -371,13 +371,13 @@ class TestContractHandlerDiscoveryResultModel:
 
 
 class TestContractHandlerDiscoveryRegistryIntegration:
-    """Tests for integration with ProtocolBindingRegistry."""
+    """Tests for integration with RegistryProtocolBinding."""
 
     @pytest.mark.asyncio
     async def test_registered_handler_is_retrievable(
         self,
         discovery_service: ContractHandlerDiscovery,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
         valid_contract_path: Path,
     ) -> None:
         """Test that registered handlers can be retrieved from registry."""
@@ -390,7 +390,7 @@ class TestContractHandlerDiscoveryRegistryIntegration:
     async def test_multiple_discoveries_idempotent_reregistration(
         self,
         discovery_service: ContractHandlerDiscovery,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
         valid_contract_directory: Path,
     ) -> None:
         """Test that multiple discovery calls with same contracts are idempotent.

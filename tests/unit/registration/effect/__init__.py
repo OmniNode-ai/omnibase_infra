@@ -11,7 +11,7 @@ Test Modules:
     - test_retry: Retry logic and exponential backoff tests
 
 Fixtures (conftest.py):
-    - inmemory_idempotency_store: InMemoryIdempotencyStore for testing
+    - inmemory_idempotency_store: StoreIdempotencyInmemory for testing
     - mock_consul_client: Mock Consul client for service registration
     - mock_postgres_handler: Mock PostgreSQL handler
     - sample_registry_request: Sample registration request

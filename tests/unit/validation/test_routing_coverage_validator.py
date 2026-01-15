@@ -26,7 +26,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 )
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
-from omnibase_infra.validation.routing_coverage_validator import (
+from omnibase_infra.validation.validator_routing_coverage import (
     RoutingCoverageError,
     RoutingCoverageValidator,
     check_routing_coverage_ci,

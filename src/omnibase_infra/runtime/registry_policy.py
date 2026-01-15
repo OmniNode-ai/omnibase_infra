@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Policy Registry - SINGLE SOURCE OF TRUTH for policy plugin registration.
 
-This module provides the PolicyRegistry class for registering and resolving
+This module provides the RegistryPolicy class for registering and resolving
 pure decision policy plugins in the ONEX infrastructure layer.
 
 The registry is responsible for:
@@ -35,14 +35,14 @@ Policy plugins MUST NOT:
 Example Usage:
     ```python
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.runtime.policy_registry import PolicyRegistry, ModelPolicyRegistration
-    from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+    from omnibase_infra.runtime.registry_policy import RegistryPolicy, ModelPolicyRegistration
+    from omnibase_infra.runtime.util_container_wiring import wire_infrastructure_services
     from omnibase_infra.enums import EnumPolicyType
 
     # Container-based DI (preferred)
     container = ModelONEXContainer()
     await wire_infrastructure_services(container)
-    registry = await container.service_registry.resolve_service(PolicyRegistry)
+    registry = await container.service_registry.resolve_service(RegistryPolicy)
 
     # Register a synchronous policy using the model (preferred)
     registration = ModelPolicyRegistration(
@@ -104,7 +104,7 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
-class PolicyRegistry:
+class RegistryPolicy:
     """SINGLE SOURCE OF TRUTH for policy plugin registration in omnibase_infra.
 
     Thread-safe registry for policy plugins. Manages pure decision logic plugins
@@ -119,19 +119,19 @@ class PolicyRegistry:
     while internal operations use ModelPolicyKey for strong typing.
 
     Container Integration:
-        PolicyRegistry is designed to be managed by ModelONEXContainer from omnibase_core.
-        Use container_wiring.wire_infrastructure_services() to register PolicyRegistry
+        RegistryPolicy is designed to be managed by ModelONEXContainer from omnibase_core.
+        Use container_wiring.wire_infrastructure_services() to register RegistryPolicy
         in the container, then resolve it via:
 
         ```python
         from omnibase_core.container import ModelONEXContainer
-        from omnibase_infra.runtime.policy_registry import PolicyRegistry
+        from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
         # Resolve from container (preferred) - async in omnibase_core v0.5.6+
-        registry = await container.service_registry.resolve_service(PolicyRegistry)
+        registry = await container.service_registry.resolve_service(RegistryPolicy)
 
         # Or use helper function (also async)
-        from omnibase_infra.runtime.container_wiring import get_policy_registry_from_container
+        from omnibase_infra.runtime.util_container_wiring import get_policy_registry_from_container
         registry = await get_policy_registry_from_container(container)
         ```
 
@@ -257,7 +257,7 @@ class PolicyRegistry:
                 import time
                 from omnibase_core.metrics import histogram, counter
 
-                # In production PolicyRegistry wrapper:
+                # In production RegistryPolicy wrapper:
                 start = time.perf_counter()
                 policy_cls = registry.get(policy_id)
                 histogram("policy_registry.get_latency_ms", (time.perf_counter() - start) * 1000)
@@ -274,11 +274,11 @@ class PolicyRegistry:
 
     Trust Model and Security Considerations:
 
-        PolicyRegistry performs LIMITED validation on registered policy classes.
+        RegistryPolicy performs LIMITED validation on registered policy classes.
         This section documents what guarantees exist and what the caller is
         responsible for.
 
-        VALIDATED (by PolicyRegistry):
+        VALIDATED (by RegistryPolicy):
             - Async method detection: Policies with async methods (reduce, decide,
               evaluate) must explicitly set allow_async=True. This prevents
               accidental async policy registration that could cause runtime issues.
@@ -324,7 +324,7 @@ class PolicyRegistry:
                - No runtime logging (use structured outputs only)
 
         For High-Security Environments:
-            If deploying PolicyRegistry in environments with stricter security
+            If deploying RegistryPolicy in environments with stricter security
             requirements, consider implementing additional safeguards:
 
             - Code Review: Mandatory review for all policy implementations before
@@ -355,7 +355,7 @@ class PolicyRegistry:
               ```
 
             - Sandboxing: Execute policy code in isolated environments (not built
-              into PolicyRegistry, requires external infrastructure):
+              into RegistryPolicy, requires external infrastructure):
               - Process isolation (subprocess with resource limits)
               - Container isolation (Docker with security profiles)
               - WASM isolation (for extreme security requirements)
@@ -412,20 +412,20 @@ class PolicyRegistry:
 
         ```python
         # Option 1: Set class attribute before first use
-        PolicyRegistry.SEMVER_CACHE_SIZE = 256
+        RegistryPolicy.SEMVER_CACHE_SIZE = 256
 
         # Option 2: Use configure method (recommended)
-        PolicyRegistry.configure_semver_cache(maxsize=256)
+        RegistryPolicy.configure_semver_cache(maxsize=256)
 
         # Must be done BEFORE any registry operations
-        registry = PolicyRegistry()
+        registry = RegistryPolicy()
         ```
 
         For testing, use _reset_semver_cache() to clear and reconfigure.
 
     Example:
         >>> from omnibase_infra.runtime.models import ModelPolicyRegistration
-        >>> registry = PolicyRegistry()
+        >>> registry = RegistryPolicy()
         >>> registration = ModelPolicyRegistration(
         ...     policy_id="retry_backoff",
         ...     policy_class=RetryBackoffPolicy,
@@ -629,7 +629,7 @@ class PolicyRegistry:
 
         Example:
             >>> from omnibase_infra.enums import EnumPolicyType
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> # Enum to string
             >>> registry._normalize_policy_type(EnumPolicyType.ORCHESTRATOR)
             'orchestrator'
@@ -683,9 +683,9 @@ class PolicyRegistry:
             ProtocolConfigurationError: If the version format is invalid
 
         Example:
-            >>> PolicyRegistry._normalize_version("1.0")
+            >>> RegistryPolicy._normalize_version("1.0")
             '1.0.0'
-            >>> PolicyRegistry._normalize_version("v2.1")
+            >>> RegistryPolicy._normalize_version("v2.1")
             '2.1.0'
         """
         try:
@@ -720,7 +720,7 @@ class PolicyRegistry:
 
         Example:
             >>> from omnibase_infra.runtime.models import ModelPolicyRegistration
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registration = ModelPolicyRegistration(
             ...     policy_id="retry_backoff",
             ...     policy_class=RetryBackoffPolicy,
@@ -799,7 +799,7 @@ class PolicyRegistry:
             ProtocolConfigurationError: If version format is invalid
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register_policy(
             ...     policy_id="retry_backoff",
             ...     policy_class=RetryBackoffPolicy,
@@ -884,7 +884,7 @@ class PolicyRegistry:
             PolicyRegistryError: If no matching policy is found.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
             >>> policy_cls = registry.get("retry")
             >>> policy_cls = registry.get("retry", policy_type="orchestrator")
@@ -1006,8 +1006,8 @@ class PolicyRegistry:
 
         Example:
             >>> # Configure before any registry operations
-            >>> PolicyRegistry.configure_semver_cache(maxsize=256)
-            >>> registry = PolicyRegistry()
+            >>> RegistryPolicy.configure_semver_cache(maxsize=256)
+            >>> registry = RegistryPolicy()
 
         Note:
             For testing purposes, use _reset_semver_cache() to clear the cache
@@ -1017,7 +1017,7 @@ class PolicyRegistry:
             if cls._semver_cache is not None:
                 raise RuntimeError(
                     "Cannot reconfigure semver cache after first use. "
-                    "Set PolicyRegistry.SEMVER_CACHE_SIZE before creating any "
+                    "Set RegistryPolicy.SEMVER_CACHE_SIZE before creating any "
                     "registry instances, or use _reset_semver_cache() for testing."
                 )
             cls.SEMVER_CACHE_SIZE = maxsize
@@ -1053,8 +1053,8 @@ class PolicyRegistry:
 
         Example:
             >>> # In test fixture
-            >>> PolicyRegistry._reset_semver_cache()
-            >>> PolicyRegistry.SEMVER_CACHE_SIZE = 64
+            >>> RegistryPolicy._reset_semver_cache()
+            >>> RegistryPolicy.SEMVER_CACHE_SIZE = 64
             >>> # Now cache will be initialized with size 64 on next use
         """
         with cls._semver_cache_lock:
@@ -1162,7 +1162,7 @@ class PolicyRegistry:
                 """
                 # Delegate all validation to _normalize_version (single source of truth)
                 # This eliminates duplicated validation logic (empty check, prerelease suffix)
-                normalized = PolicyRegistry._normalize_version(version)
+                normalized = RegistryPolicy._normalize_version(version)
 
                 # Now call the cached function with the NORMALIZED version
                 # This ensures "1.0", "1.0.0", "v1.0.0" all use the same cache entry
@@ -1215,7 +1215,7 @@ class PolicyRegistry:
 
             Cache Size Configuration:
                 For large deployments, configure before first use:
-                    PolicyRegistry.configure_semver_cache(maxsize=256)
+                    RegistryPolicy.configure_semver_cache(maxsize=256)
 
             Cache Size Rationale (default 128):
                 - Typical registry: 10-50 unique policy versions
@@ -1237,18 +1237,18 @@ class PolicyRegistry:
             ProtocolConfigurationError: If version format is invalid
 
         Examples:
-            >>> PolicyRegistry._parse_semver("1.9.0")
+            >>> RegistryPolicy._parse_semver("1.9.0")
             ModelSemVer(major=1, minor=9, patch=0, prerelease='')
-            >>> PolicyRegistry._parse_semver("1.10.0")
+            >>> RegistryPolicy._parse_semver("1.10.0")
             ModelSemVer(major=1, minor=10, patch=0, prerelease='')
-            >>> PolicyRegistry._parse_semver("1.10.0") > PolicyRegistry._parse_semver("1.9.0")
+            >>> RegistryPolicy._parse_semver("1.10.0") > RegistryPolicy._parse_semver("1.9.0")
             True
-            >>> PolicyRegistry._parse_semver("10.0.0") > PolicyRegistry._parse_semver("2.0.0")
+            >>> RegistryPolicy._parse_semver("10.0.0") > RegistryPolicy._parse_semver("2.0.0")
             True
-            >>> PolicyRegistry._parse_semver("1.0.0-alpha")
+            >>> RegistryPolicy._parse_semver("1.0.0-alpha")
             ModelSemVer(major=1, minor=0, patch=0, prerelease='alpha')
             >>> # Prerelease is parsed but NOT used in comparisons:
-            >>> PolicyRegistry._parse_semver("1.0.0-alpha") == PolicyRegistry._parse_semver("1.0.0")
+            >>> RegistryPolicy._parse_semver("1.0.0-alpha") == RegistryPolicy._parse_semver("1.0.0")
             True  # Same major.minor.patch, prerelease ignored
         """
         parser = cls._get_semver_parser()
@@ -1267,13 +1267,13 @@ class PolicyRegistry:
             or None if cache not yet initialized.
 
         Example:
-            >>> PolicyRegistry._reset_semver_cache()
-            >>> PolicyRegistry._parse_semver("1.0.0")
-            >>> info = PolicyRegistry._get_semver_cache_info()
+            >>> RegistryPolicy._reset_semver_cache()
+            >>> RegistryPolicy._parse_semver("1.0.0")
+            >>> info = RegistryPolicy._get_semver_cache_info()
             >>> info.misses  # First call is a miss
             1
-            >>> PolicyRegistry._parse_semver("1.0.0")
-            >>> info = PolicyRegistry._get_semver_cache_info()
+            >>> RegistryPolicy._parse_semver("1.0.0")
+            >>> info = RegistryPolicy._get_semver_cache_info()
             >>> info.hits  # Second call is a hit
             1
         """
@@ -1314,7 +1314,7 @@ class PolicyRegistry:
             List of (policy_id, policy_type, version) tuples, sorted alphabetically.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
             >>> registry.register("merge", MergePolicy, EnumPolicyType.REDUCER)
             >>> print(registry.list_keys())
@@ -1346,7 +1346,7 @@ class PolicyRegistry:
             List of unique policy type strings that have registered policies.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
             >>> print(registry.list_policy_types())
             ['orchestrator']
@@ -1365,7 +1365,7 @@ class PolicyRegistry:
             List of version strings registered for the policy ID, sorted.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register("retry", RetryPolicyV1, "orchestrator", "1.0.0")
             >>> registry.register("retry", RetryPolicyV2, "orchestrator", "2.0.0")
             >>> print(registry.list_versions("retry"))
@@ -1394,7 +1394,7 @@ class PolicyRegistry:
             True if a matching policy is registered, False otherwise.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
             >>> registry.is_registered("retry")
             True
@@ -1446,7 +1446,7 @@ class PolicyRegistry:
             Number of policies unregistered.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register("retry", RetryPolicyV1, "orchestrator", "1.0.0")
             >>> registry.register("retry", RetryPolicyV2, "orchestrator", "2.0.0")
             >>> registry.unregister("retry")  # Removes all versions
@@ -1506,14 +1506,14 @@ class PolicyRegistry:
             It breaks the immutability guarantee after startup.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
             >>> registry.clear()
             >>> registry.list_keys()
             []
         """
         warnings.warn(
-            "PolicyRegistry.clear() is intended for testing only. "
+            "RegistryPolicy.clear() is intended for testing only."
             "Do not use in production code.",
             UserWarning,
             stacklevel=2,
@@ -1529,7 +1529,7 @@ class PolicyRegistry:
             Number of registered policy (id, type, version) combinations.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> len(registry)
             0
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
@@ -1549,7 +1549,7 @@ class PolicyRegistry:
             True if policy ID is registered (any type/version), False otherwise.
 
         Example:
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
             >>> "retry" in registry
             True
@@ -1568,5 +1568,5 @@ __all__: list[str] = [
     # Models
     "ModelPolicyRegistration",
     # Registry class
-    "PolicyRegistry",
+    "RegistryPolicy",
 ]

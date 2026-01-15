@@ -62,7 +62,7 @@ Performance:
     optimal performance.
 
 Usage:
-    >>> from omnibase_infra.validation.execution_shape_validator import (
+    >>> from omnibase_infra.validation.validator_execution_shape import (
     ...     validate_execution_shapes,
     ...     validate_execution_shapes_ci,
     ... )

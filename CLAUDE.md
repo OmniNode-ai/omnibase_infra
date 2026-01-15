@@ -165,14 +165,22 @@ The `@allow_any` decorator is recognized by the validator when applied to functi
 
 | Type | File Pattern | Class Pattern |
 |------|-------------|---------------|
-| Model | `model_<name>.py` | `Model<Name>` |
+| Adapter | `adapter_<name>.py` | `Adapter<Name>` |
+| Constants | `constants_<name>.py` | (constants) |
+| Dispatcher | `dispatcher_<name>.py` | `Dispatcher<Name>` |
 | Enum | `enum_<name>.py` | `Enum<Name>` |
-| Protocol | `protocol_<name>.py` or `protocols.py` | `Protocol<Name>` |
-| Mixin | `mixin_<name>.py` | `Mixin<Name>` |
-| Service | `service_<name>.py` | `Service<Name>` |
-| Util | `util_<name>.py` | (functions) |
 | Error | In `errors/` | `<Domain><Type>Error` |
+| Mixin | `mixin_<name>.py` | `Mixin<Name>` |
+| Model | `model_<name>.py` | `Model<Name>` |
 | Node | `node.py` | `Node<Name><Type>` |
+| Plugin | `plugin_<name>.py` | `Plugin<Name>` |
+| Protocol | `protocol_<name>.py` or `protocols.py` | `Protocol<Name>` |
+| Reducer | `reducer_<name>.py` | `Reducer<Name>` |
+| Service | `service_<name>.py` | `Service<Name>` |
+| Store | `store_<name>.py` | `Store<Name>` |
+| Transport | `transport_<name>.py` | `Transport<Name>` |
+| Util | `util_<name>.py` | (functions) |
+| Validator | `validator_<name>.py` | `Validator<Name>` |
 
 **Protocol File Naming**:
 - Single protocol: `protocol_<name>.py`

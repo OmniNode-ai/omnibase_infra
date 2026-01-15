@@ -17,8 +17,8 @@ implements the required protocol. This enables:
 - Environment-specific handler selection (dev vs prod)
 
 Handlers Tested:
-    - MockRegistrationStorageHandler: In-memory mock for testing
-    - PostgresRegistrationStorageHandler: PostgreSQL backend (requires DB)
+    - HandlerRegistrationStorageMock: In-memory mock for testing
+    - HandlerRegistrationStoragePostgres: PostgreSQL backend (requires DB)
 
 CI/CD Graceful Skip Behavior
 ----------------------------
@@ -28,7 +28,7 @@ without database access.
 
 Related:
     - OMN-1131: Capability-oriented node architecture
-    - ProtocolRegistrationStorageHandler: Protocol definition
+    - ProtocolHandlerRegistrationStorage: Protocol definition
     - NodeRegistrationStorageEffect: Effect node that uses these handlers
     - PR #119: Test coverage for handler swapping
 """
@@ -44,14 +44,14 @@ import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.handlers.registration_storage.handler_mock_registration_storage import (
-    MockRegistrationStorageHandler,
+from omnibase_infra.handlers.registration_storage.handler_registration_storage_mock import (
+    HandlerRegistrationStorageMock,
 )
 from omnibase_infra.handlers.registration_storage.models import (
     ModelDeleteRegistrationRequest,
 )
-from omnibase_infra.handlers.registration_storage.protocol_registration_storage_handler import (
-    ProtocolRegistrationStorageHandler,
+from omnibase_infra.handlers.registration_storage.protocol_handler_registration_storage import (
+    ProtocolHandlerRegistrationStorage,
 )
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
@@ -80,9 +80,9 @@ POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
 
 
 @pytest.fixture
-def mock_handler() -> MockRegistrationStorageHandler:
-    """Create a MockRegistrationStorageHandler for testing."""
-    return MockRegistrationStorageHandler()
+def mock_handler() -> HandlerRegistrationStorageMock:
+    """Create a HandlerRegistrationStorageMock for testing."""
+    return HandlerRegistrationStorageMock()
 
 
 @pytest.fixture
@@ -135,22 +135,22 @@ class BaseHandlerSwappingTests:
     """
 
     @pytest.fixture
-    def handler(self) -> ProtocolRegistrationStorageHandler:
+    def handler(self) -> ProtocolHandlerRegistrationStorage:
         """Override in subclass to provide the handler to test."""
         pytest.skip("Subclasses must implement handler fixture")
 
     async def test_handler_conforms_to_protocol(
         self,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
     ) -> None:
-        """Handler is an instance of ProtocolRegistrationStorageHandler."""
-        assert isinstance(handler, ProtocolRegistrationStorageHandler), (
-            f"{type(handler).__name__} must implement ProtocolRegistrationStorageHandler"
+        """Handler is an instance of ProtocolHandlerRegistrationStorage."""
+        assert isinstance(handler, ProtocolHandlerRegistrationStorage), (
+            f"{type(handler).__name__} must implement ProtocolHandlerRegistrationStorage"
         )
 
     async def test_handler_has_handler_type(
         self,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
     ) -> None:
         """Handler has handler_type property returning non-empty string."""
         handler_type = handler.handler_type
@@ -159,7 +159,7 @@ class BaseHandlerSwappingTests:
 
     async def test_store_and_query_roundtrip(
         self,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
         sample_registration_record: ModelRegistrationRecord,
     ) -> None:
         """Records can be stored and retrieved correctly."""
@@ -199,7 +199,7 @@ class BaseHandlerSwappingTests:
 
     async def test_delete_registration(
         self,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
         sample_registration_record: ModelRegistrationRecord,
     ) -> None:
         """Records can be deleted correctly."""
@@ -239,7 +239,7 @@ class BaseHandlerSwappingTests:
 
     async def test_health_check_returns_status(
         self,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
     ) -> None:
         """Health check returns valid status information."""
         correlation_id = uuid4()
@@ -263,7 +263,7 @@ class BaseHandlerSwappingTests:
 
 
 class TestMockHandlerSwapping(BaseHandlerSwappingTests):
-    """Test handler swapping with MockRegistrationStorageHandler.
+    """Test handler swapping with HandlerRegistrationStorageMock.
 
     These tests verify that the mock handler can be used as a drop-in
     replacement for any other handler implementing the protocol.
@@ -271,15 +271,15 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
 
     @pytest.fixture
     def handler(
-        self, mock_handler: MockRegistrationStorageHandler
-    ) -> MockRegistrationStorageHandler:
-        """Provide MockRegistrationStorageHandler for testing."""
+        self, mock_handler: HandlerRegistrationStorageMock
+    ) -> HandlerRegistrationStorageMock:
+        """Provide HandlerRegistrationStorageMock for testing."""
         return mock_handler
 
     @pytest.mark.asyncio
     async def test_mock_handler_store_and_query(
         self,
-        handler: MockRegistrationStorageHandler,
+        handler: HandlerRegistrationStorageMock,
         sample_registration_record: ModelRegistrationRecord,
     ) -> None:
         """Mock handler can store and query records."""
@@ -288,7 +288,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_delete(
         self,
-        handler: MockRegistrationStorageHandler,
+        handler: HandlerRegistrationStorageMock,
         sample_registration_record: ModelRegistrationRecord,
     ) -> None:
         """Mock handler can delete records."""
@@ -297,7 +297,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_health_check(
         self,
-        handler: MockRegistrationStorageHandler,
+        handler: HandlerRegistrationStorageMock,
     ) -> None:
         """Mock handler health check works."""
         await self.test_health_check_returns_status(handler)
@@ -305,7 +305,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_multiple_records(
         self,
-        handler: MockRegistrationStorageHandler,
+        handler: HandlerRegistrationStorageMock,
         multiple_registration_records: list[ModelRegistrationRecord],
     ) -> None:
         """Mock handler can store and query multiple records."""
@@ -333,7 +333,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_pagination(
         self,
-        handler: MockRegistrationStorageHandler,
+        handler: HandlerRegistrationStorageMock,
         multiple_registration_records: list[ModelRegistrationRecord],
     ) -> None:
         """Mock handler supports pagination."""
@@ -369,7 +369,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_upsert_behavior(
         self,
-        handler: MockRegistrationStorageHandler,
+        handler: HandlerRegistrationStorageMock,
         sample_registration_record: ModelRegistrationRecord,
     ) -> None:
         """Mock handler supports upsert (insert or update)."""
@@ -418,7 +418,7 @@ class TestHandlerFactoryPattern:
 
     def create_handler_by_type(
         self, handler_type: str
-    ) -> ProtocolRegistrationStorageHandler:
+    ) -> ProtocolHandlerRegistrationStorage:
         """Factory method to create handlers by type identifier.
 
         In production code, this pattern would be used to select handlers
@@ -428,19 +428,19 @@ class TestHandlerFactoryPattern:
             handler_type: Type identifier ("mock", "postgresql")
 
         Returns:
-            Handler instance implementing ProtocolRegistrationStorageHandler
+            Handler instance implementing ProtocolHandlerRegistrationStorage
 
         Raises:
             ValueError: If handler_type is not recognized
         """
         if handler_type == "mock":
-            return MockRegistrationStorageHandler()
+            return HandlerRegistrationStorageMock()
         elif handler_type == "postgresql":
-            from omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage import (
-                PostgresRegistrationStorageHandler,
+            from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
+                HandlerRegistrationStoragePostgres,
             )
 
-            return PostgresRegistrationStorageHandler(
+            return HandlerRegistrationStoragePostgres(
                 host=os.getenv("POSTGRES_HOST", "localhost"),
                 port=int(os.getenv("POSTGRES_PORT", "5432")),
                 database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
@@ -451,11 +451,11 @@ class TestHandlerFactoryPattern:
             raise ValueError(f"Unknown handler type: {handler_type}")
 
     def test_factory_creates_mock_handler(self) -> None:
-        """Factory creates MockRegistrationStorageHandler for 'mock' type."""
+        """Factory creates HandlerRegistrationStorageMock for 'mock' type."""
         handler = self.create_handler_by_type("mock")
 
-        assert isinstance(handler, MockRegistrationStorageHandler)
-        assert isinstance(handler, ProtocolRegistrationStorageHandler)
+        assert isinstance(handler, HandlerRegistrationStorageMock)
+        assert isinstance(handler, ProtocolHandlerRegistrationStorage)
         assert handler.handler_type == "mock"
 
     @pytest.mark.skipif(
@@ -463,15 +463,15 @@ class TestHandlerFactoryPattern:
         reason="PostgreSQL not available (POSTGRES_HOST/POSTGRES_PASSWORD not set)",
     )
     def test_factory_creates_postgres_handler(self) -> None:
-        """Factory creates PostgresRegistrationStorageHandler for 'postgresql' type."""
+        """Factory creates HandlerRegistrationStoragePostgres for 'postgresql' type."""
         handler = self.create_handler_by_type("postgresql")
 
-        from omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage import (
-            PostgresRegistrationStorageHandler,
+        from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
+            HandlerRegistrationStoragePostgres,
         )
 
-        assert isinstance(handler, PostgresRegistrationStorageHandler)
-        assert isinstance(handler, ProtocolRegistrationStorageHandler)
+        assert isinstance(handler, HandlerRegistrationStoragePostgres)
+        assert isinstance(handler, ProtocolHandlerRegistrationStorage)
         assert handler.handler_type == "postgresql"
 
     def test_factory_raises_for_unknown_type(self) -> None:
@@ -552,8 +552,8 @@ class TestRuntimeHandlerSwapping:
         )
 
         # Start with mock handler
-        current_handler: ProtocolRegistrationStorageHandler = (
-            MockRegistrationStorageHandler()
+        current_handler: ProtocolHandlerRegistrationStorage = (
+            HandlerRegistrationStorageMock()
         )
 
         # Store data with first handler
@@ -561,7 +561,7 @@ class TestRuntimeHandlerSwapping:
         assert result.success
 
         # Swap to a new mock handler (simulating handler switch)
-        new_handler = MockRegistrationStorageHandler()
+        new_handler = HandlerRegistrationStorageMock()
 
         # Store same record in new handler
         result2 = await new_handler.store_registration(record, correlation_id)
@@ -582,7 +582,7 @@ class TestRuntimeHandlerSwapping:
         """
 
         async def perform_operations(
-            handler: ProtocolRegistrationStorageHandler,
+            handler: ProtocolHandlerRegistrationStorage,
         ) -> tuple[bool, bool, bool]:
             """Perform a series of operations using only protocol methods."""
             correlation_id = uuid4()
@@ -622,7 +622,7 @@ class TestRuntimeHandlerSwapping:
             )
 
         # Test with mock handler
-        mock = MockRegistrationStorageHandler()
+        mock = HandlerRegistrationStorageMock()
         store_ok, query_ok, delete_ok = await perform_operations(mock)
 
         assert store_ok, "Mock handler store failed"
@@ -640,20 +640,20 @@ class TestRuntimeHandlerSwapping:
     reason="PostgreSQL not available (POSTGRES_HOST/POSTGRES_PASSWORD not set)",
 )
 class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
-    """Test handler swapping with PostgresRegistrationStorageHandler.
+    """Test handler swapping with HandlerRegistrationStoragePostgres.
 
     These tests require a running PostgreSQL instance and are skipped
     in CI environments without database access.
     """
 
     @pytest.fixture
-    async def handler(self) -> AsyncGenerator[ProtocolRegistrationStorageHandler, None]:
-        """Provide PostgresRegistrationStorageHandler for testing."""
-        from omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage import (
-            PostgresRegistrationStorageHandler,
+    async def handler(self) -> AsyncGenerator[ProtocolHandlerRegistrationStorage, None]:
+        """Provide HandlerRegistrationStoragePostgres for testing."""
+        from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
+            HandlerRegistrationStoragePostgres,
         )
 
-        handler = PostgresRegistrationStorageHandler(
+        handler = HandlerRegistrationStoragePostgres(
             host=os.getenv("POSTGRES_HOST", "localhost"),
             port=int(os.getenv("POSTGRES_PORT", "5432")),
             database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
@@ -669,7 +669,7 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_postgres_handler_store_and_query(
         self,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
         sample_registration_record: ModelRegistrationRecord,
     ) -> None:
         """PostgreSQL handler can store and query records."""
@@ -678,7 +678,7 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_postgres_handler_delete(
         self,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
         sample_registration_record: ModelRegistrationRecord,
     ) -> None:
         """PostgreSQL handler can delete records."""
@@ -687,7 +687,7 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_postgres_handler_health_check(
         self,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolHandlerRegistrationStorage,
     ) -> None:
         """PostgreSQL handler health check works."""
         await self.test_health_check_returns_status(handler)

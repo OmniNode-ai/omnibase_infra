@@ -25,7 +25,7 @@ Usage:
     from omnibase_infra.mixins import MixinAsyncCircuitBreaker
     from omnibase_infra.enums import EnumInfraTransportType
 
-    class KafkaEventBus(MixinAsyncCircuitBreaker):
+    class EventBusKafka(MixinAsyncCircuitBreaker):
         def __init__(self, config):
             # Initialize circuit breaker with configuration
             self._init_circuit_breaker(
@@ -268,7 +268,7 @@ class MixinAsyncCircuitBreaker:
             from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
             from omnibase_infra.enums import EnumInfraTransportType
 
-            class KafkaEventBus(MixinAsyncCircuitBreaker):
+            class EventBusKafka(MixinAsyncCircuitBreaker):
                 def __init__(self, environment: str):
                     config = ModelCircuitBreakerConfig(
                         threshold=5,

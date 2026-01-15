@@ -3,7 +3,7 @@
 """
 Central Message Type Registry Implementation.
 
-Provides the MessageTypeRegistry class that maps message types to handler
+Provides the RegistryMessageType class that maps message types to handler
 implementations and enforces topic category constraints and domain ownership.
 
 Design Principles:
@@ -14,7 +14,7 @@ Design Principles:
     - Extensibility for new domains
 
 Thread Safety:
-    MessageTypeRegistry follows the freeze-after-init pattern:
+    RegistryMessageType follows the freeze-after-init pattern:
     1. **Registration Phase** (single-threaded): Register message types
     2. **Freeze**: Call freeze() to validate and lock the registry
     3. **Query Phase** (multi-threaded safe): Thread-safe lookups
@@ -36,7 +36,7 @@ Related:
 from __future__ import annotations
 
 __all__ = [
-    "MessageTypeRegistry",
+    "RegistryMessageType",
     "MessageTypeRegistryError",
 ]
 
@@ -267,7 +267,7 @@ def extract_domain_from_topic(topic: str | None) -> str | None:
 # =============================================================================
 
 
-class MessageTypeRegistry:
+class RegistryMessageType:
     """
     Central Message Type Registry for ONEX runtime dispatch.
 
@@ -291,14 +291,14 @@ class MessageTypeRegistry:
 
     Example:
         >>> from omnibase_infra.runtime.registry import (
-        ...     MessageTypeRegistry,
+        ...     RegistryMessageType,
         ...     ModelMessageTypeEntry,
         ...     ModelDomainConstraint,
         ... )
         >>> from omnibase_infra.enums import EnumMessageCategory
         >>>
         >>> # Create registry and register message types
-        >>> registry = MessageTypeRegistry()
+        >>> registry = RegistryMessageType()
         >>> entry = ModelMessageTypeEntry(
         ...     message_type="UserCreated",
         ...     handler_ids=("user-handler",),
@@ -342,7 +342,7 @@ class MessageTypeRegistry:
         logger_instance: logging.Logger | None = None,
     ) -> None:
         """
-        Initialize MessageTypeRegistry with empty registries.
+        Initialize RegistryMessageType with empty registries.
 
         Creates empty message type registry. Register message types before
         freeze(). Call validate_startup() after freeze() to ensure fail-fast
@@ -415,7 +415,7 @@ class MessageTypeRegistry:
         with self._lock:
             if self._frozen:
                 raise ModelOnexError(
-                    message="Cannot register message type: MessageTypeRegistry is frozen. "
+                    message="Cannot register message type: RegistryMessageType is frozen. "
                     "Registration is not allowed after freeze() has been called.",
                     error_code=EnumCoreErrorCode.INVALID_STATE,
                 )
@@ -572,7 +572,7 @@ class MessageTypeRegistry:
 
             self._frozen = True
             self._logger.info(
-                "MessageTypeRegistry frozen with %d message types across %d domains",
+                "RegistryMessageType frozen with %d message types across %d domains",
                 len(self._entries),
                 len(self._domains),
             )
@@ -887,12 +887,12 @@ class MessageTypeRegistry:
         # Log validation result
         if errors:
             self._logger.warning(
-                "MessageTypeRegistry startup validation failed with %d errors",
+                "RegistryMessageType startup validation failed with %d errors",
                 len(errors),
             )
         else:
             self._logger.info(
-                "MessageTypeRegistry startup validation passed "
+                "RegistryMessageType startup validation passed"
                 "(%d message types, %d handlers, %d domains)",
                 len(self._entries),
                 len(self._handler_references),
@@ -1063,7 +1063,7 @@ class MessageTypeRegistry:
     def __str__(self) -> str:
         """Human-readable string representation."""
         return (
-            f"MessageTypeRegistry[entries={len(self._entries)}, "
+            f"RegistryMessageType[entries={len(self._entries)}, "
             f"domains={len(self._domains)}, frozen={self._frozen}]"
         )
 
@@ -1081,7 +1081,7 @@ class MessageTypeRegistry:
         )
 
         return (
-            f"MessageTypeRegistry("
+            f"RegistryMessageType("
             f"entries={type_repr}, "
             f"domains={domain_repr}, "
             f"frozen={self._frozen})"

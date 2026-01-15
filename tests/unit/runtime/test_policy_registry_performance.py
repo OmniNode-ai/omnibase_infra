@@ -3,7 +3,7 @@
 """Performance benchmarks for policy_registry module.
 
 This module contains performance tests to verify the optimization work
-done to reduce redundant operations in the PolicyRegistry.get() method.
+done to reduce redundant operations in the RegistryPolicy.get() method.
 
 Key optimizations tested:
 1. Secondary index for O(1) policy_id lookup (vs O(n) scan)
@@ -21,7 +21,7 @@ import pytest
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
 # =============================================================================
 # Mock Policy Classes for Performance Testing
@@ -61,7 +61,7 @@ class MockPolicy:
 
 
 @pytest.fixture
-def large_policy_registry() -> PolicyRegistry:
+def large_policy_registry() -> RegistryPolicy:
     """Create a registry with many policies for performance testing.
 
     Creates 100 policies with 5 versions each (500 total registrations).
@@ -71,7 +71,7 @@ def large_policy_registry() -> PolicyRegistry:
     characteristics. Container DI overhead would confound performance measurements.
     For integration tests, use container-based fixtures from conftest.py.
     """
-    registry = PolicyRegistry()
+    registry = RegistryPolicy()
     for i in range(100):
         for version_idx in range(5):
             registry.register_policy(
@@ -90,10 +90,10 @@ def large_policy_registry() -> PolicyRegistry:
 
 @pytest.mark.performance
 class TestPolicyRegistryPerformance:
-    """Performance benchmarks for PolicyRegistry optimizations."""
+    """Performance benchmarks for RegistryPolicy optimizations."""
 
     def test_get_performance_with_secondary_index(
-        self, large_policy_registry: PolicyRegistry
+        self, large_policy_registry: RegistryPolicy
     ) -> None:
         """Verify secondary index provides O(1) lookup vs O(n) scan.
 
@@ -120,7 +120,7 @@ class TestPolicyRegistryPerformance:
         )
 
     def test_get_performance_early_exit_on_missing(
-        self, large_policy_registry: PolicyRegistry
+        self, large_policy_registry: RegistryPolicy
     ) -> None:
         """Verify early exit optimization for missing policy_id.
 
@@ -146,7 +146,7 @@ class TestPolicyRegistryPerformance:
         )
 
     def test_get_performance_fast_path_correctness(
-        self, large_policy_registry: PolicyRegistry
+        self, large_policy_registry: RegistryPolicy
     ) -> None:
         """Verify fast path returns correct results and completes efficiently.
 
@@ -187,7 +187,7 @@ class TestPolicyRegistryPerformance:
         reason="Flaky in CI: microbenchmark variance can show warm > cold time"
     )
     def test_semver_cache_performance(
-        self, large_policy_registry: PolicyRegistry
+        self, large_policy_registry: RegistryPolicy
     ) -> None:
         """Verify LRU cache improves semver parsing performance.
 
@@ -233,7 +233,7 @@ class TestPolicyRegistryPerformance:
         )
 
     def test_get_performance_with_version_sorting(
-        self, large_policy_registry: PolicyRegistry
+        self, large_policy_registry: RegistryPolicy
     ) -> None:
         """Verify version sorting performance with multiple versions.
 
@@ -274,7 +274,7 @@ class TestPolicyRegistryPerformance:
         assert explicit_policy is MockPolicy
 
     def test_concurrent_get_performance(
-        self, large_policy_registry: PolicyRegistry
+        self, large_policy_registry: RegistryPolicy
     ) -> None:
         """Verify lookup performance under concurrent access.
 
@@ -343,7 +343,7 @@ class TestPolicyRegistryOptimizationRegression:
         We use distinct mock classes for each version to verify that the
         correct policy class was returned, not just that a policy was returned.
         """
-        registry = PolicyRegistry()
+        registry = RegistryPolicy()
 
         # Use distinct classes to verify which version was selected
         # Each class must fully implement ProtocolPolicy to avoid type:ignore
@@ -440,7 +440,7 @@ class TestPolicyRegistryOptimizationRegression:
 
     def test_early_exit_raises_correct_error(self) -> None:
         """Verify early exit still raises descriptive error."""
-        registry = PolicyRegistry()
+        registry = RegistryPolicy()
         registry.register_policy(
             policy_id="existing",
             policy_class=MockPolicy,
@@ -459,7 +459,7 @@ class TestPolicyRegistryOptimizationRegression:
 
     def test_deferred_error_generation_is_correct(self) -> None:
         """Verify deferred _list_internal() produces same error message."""
-        registry = PolicyRegistry()
+        registry = RegistryPolicy()
         for i in range(10):
             registry.register_policy(
                 policy_id=f"policy_{i}",
@@ -496,10 +496,10 @@ class TestPolicyRegistryPerformanceRegression:
     """
 
     @pytest.fixture
-    def large_registry(self) -> PolicyRegistry:
+    def large_registry(self) -> RegistryPolicy:
         """Create registry with 500 policies (100 IDs x 5 versions).
 
-        This fixture matches the stress test scale documented in PolicyRegistry:
+        This fixture matches the stress test scale documented in RegistryPolicy:
         - 100 unique policy IDs
         - 5 versions per policy
         - 500 total registrations
@@ -507,7 +507,7 @@ class TestPolicyRegistryPerformanceRegression:
         Note: Direct instantiation avoids container DI overhead for accurate
         performance measurement.
         """
-        registry = PolicyRegistry()
+        registry = RegistryPolicy()
         for i in range(100):
             for v in range(5):
                 registry.register_policy(
@@ -522,7 +522,7 @@ class TestPolicyRegistryPerformanceRegression:
         reason="Flaky in CI: P99 latency microbenchmark too sensitive to environment variance"
     )
     def test_get_p99_latency_under_threshold(
-        self, large_registry: PolicyRegistry
+        self, large_registry: RegistryPolicy
     ) -> None:
         """P99 get() latency must be under 1ms.
 
@@ -585,7 +585,7 @@ class TestPolicyRegistryPerformanceRegression:
         - Lock contention in registration path
         - Semver validation performance issues
         """
-        registry = PolicyRegistry()
+        registry = RegistryPolicy()
 
         start = time.perf_counter()
         for i in range(1000):
@@ -604,7 +604,7 @@ class TestPolicyRegistryPerformanceRegression:
         )
 
     def test_concurrent_get_throughput_regression(
-        self, large_registry: PolicyRegistry
+        self, large_registry: RegistryPolicy
     ) -> None:
         """10 threads x 100 get() calls must complete in < 1s.
 
@@ -681,7 +681,7 @@ class TestPolicyRegistryPerformanceRegression:
         - Secondary index not being used effectively
         - Index lookup overhead exceeding benefit
         """
-        registry = PolicyRegistry()
+        registry = RegistryPolicy()
 
         # Register 500 policies
         for i in range(100):
@@ -750,7 +750,7 @@ class TestPolicyRegistryPerformanceRegression:
         gc.collect()
 
         # Create registry with 500 policies
-        registry = PolicyRegistry()
+        registry = RegistryPolicy()
         for i in range(100):
             for v in range(5):
                 registry.register_policy(
@@ -793,7 +793,7 @@ class TestPolicyRegistryPerformanceRegression:
         assert len(registry) == 500, f"Expected 500 registrations, got {len(registry)}"
 
     def test_fast_path_speedup_vs_filtered(
-        self, large_registry: PolicyRegistry
+        self, large_registry: RegistryPolicy
     ) -> None:
         """Fast path and filtered path should have comparable performance.
 
@@ -868,7 +868,7 @@ class TestPolicyRegistryPerformanceRegression:
         - Cache lookup overhead exceeds benefit
         """
         # Reset cache to ensure cold start
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         versions = [
             f"{major}.{minor}.{patch}"
@@ -880,14 +880,14 @@ class TestPolicyRegistryPerformanceRegression:
         # Cold cache: first parse of each version
         cold_start = time.perf_counter()
         for v in versions:
-            _ = PolicyRegistry._parse_semver(v)
+            _ = RegistryPolicy._parse_semver(v)
         cold_time = time.perf_counter() - cold_start
 
         # Warm cache: repeated parse (should hit cache)
         warm_start = time.perf_counter()
         for _ in range(10):  # 10 iterations
             for v in versions:
-                _ = PolicyRegistry._parse_semver(v)
+                _ = RegistryPolicy._parse_semver(v)
         warm_time = time.perf_counter() - warm_start
 
         # Warm should be at least 5x faster due to cache (10 iterations)
@@ -903,7 +903,7 @@ class TestPolicyRegistryPerformanceRegression:
             f"This indicates cache regression."
         )
 
-    def test_list_versions_performance(self, large_registry: PolicyRegistry) -> None:
+    def test_list_versions_performance(self, large_registry: RegistryPolicy) -> None:
         """list_versions() must complete in < 1ms per call.
 
         This test validates the O(k) list_versions implementation
@@ -932,7 +932,7 @@ class TestPolicyRegistryPerformanceRegression:
             f"This indicates list_versions performance regression."
         )
 
-    def test_is_registered_performance(self, large_registry: PolicyRegistry) -> None:
+    def test_is_registered_performance(self, large_registry: RegistryPolicy) -> None:
         """is_registered() must complete in < 0.5ms per call.
 
         This test validates the O(k) is_registered implementation.

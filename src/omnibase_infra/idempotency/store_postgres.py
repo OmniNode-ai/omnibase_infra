@@ -93,7 +93,7 @@ logger = logging.getLogger(__name__)
 _TABLE_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
-class PostgresIdempotencyStore(ProtocolIdempotencyStore):
+class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
     """PostgreSQL-based idempotency store using asyncpg connection pool.
 
     This implementation provides exactly-once semantics by using PostgreSQL's
@@ -134,7 +134,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         ...     dsn="postgresql://user:pass@localhost:5432/mydb",
         ...     table_name="idempotency_records",
         ... )
-        >>> store = PostgresIdempotencyStore(config)
+        >>> store = StoreIdempotencyPostgres(config)
         >>> await store.initialize()
         >>> try:
         ...     is_new = await store.check_and_record(
@@ -263,7 +263,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
 
             self._initialized = True
             logger.info(
-                "PostgresIdempotencyStore initialized",
+                "StoreIdempotencyPostgres initialized",
                 extra={
                     "table_name": self._config.table_name,
                     "pool_min_size": self._config.pool_min_size,
@@ -371,7 +371,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             await self._pool.close()
             self._pool = None
         self._initialized = False
-        logger.info("PostgresIdempotencyStore shutdown complete")
+        logger.info("StoreIdempotencyPostgres shutdown complete")
 
     async def check_and_record(
         self,
@@ -899,4 +899,4 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             )
 
 
-__all__: list[str] = ["PostgresIdempotencyStore"]
+__all__: list[str] = ["StoreIdempotencyPostgres"]

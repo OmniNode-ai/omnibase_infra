@@ -3,7 +3,7 @@
 """Performance tests for Event Bus implementations.
 
 This package contains performance and benchmark tests for:
-- InMemoryEventBus throughput and latency
+- EventBusInmemory throughput and latency
 - Concurrent publisher/subscriber performance
 - Load testing and memory stability
 
@@ -14,6 +14,6 @@ Test Categories:
 
 Related:
     - OMN-57: Event bus performance testing (Phase 9)
-    - InMemoryEventBus: Primary implementation under test
-    - KafkaEventBus: Production implementation (tested with mocks)
+    - EventBusInmemory: Primary implementation under test
+    - EventBusKafka: Production implementation (tested with mocks)
 """

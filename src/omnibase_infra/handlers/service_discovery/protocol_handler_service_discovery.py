@@ -13,8 +13,8 @@ Concurrency Safety:
 
 Related:
     - NodeServiceDiscoveryEffect: Effect node that uses this protocol
-    - ConsulServiceDiscoveryHandler: Consul implementation
-    - MockServiceDiscoveryHandler: In-memory mock for testing
+    - HandlerServiceDiscoveryConsul: Consul implementation
+    - HandlerServiceDiscoveryMock: In-memory mock for testing
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from omnibase_infra.nodes.node_service_discovery_effect.models import (
 
 
 @runtime_checkable
-class ProtocolServiceDiscoveryHandler(Protocol):
+class ProtocolHandlerServiceDiscovery(Protocol):
     """Protocol for service discovery handler implementations.
 
     Defines the interface that all service discovery handlers must implement.
@@ -152,4 +152,4 @@ class ProtocolServiceDiscoveryHandler(Protocol):
         ...
 
 
-__all__ = ["ProtocolServiceDiscoveryHandler"]
+__all__ = ["ProtocolHandlerServiceDiscovery"]

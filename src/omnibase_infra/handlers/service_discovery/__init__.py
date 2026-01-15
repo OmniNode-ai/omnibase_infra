@@ -6,8 +6,8 @@ This module provides pluggable handler implementations for service discovery
 operations, supporting the capability-oriented node architecture.
 
 Handlers:
-    - ConsulServiceDiscoveryHandler: Consul-backed service discovery
-    - MockServiceDiscoveryHandler: In-memory mock for testing
+    - HandlerServiceDiscoveryConsul: Consul-backed service discovery
+    - HandlerServiceDiscoveryMock: In-memory mock for testing
 
 Models:
     - ModelServiceInfo: Service information model
@@ -15,29 +15,29 @@ Models:
     - ModelDiscoveryResult: Discovery operation result
 
 Protocols:
-    - ProtocolServiceDiscoveryHandler: Handler protocol definition
+    - ProtocolHandlerServiceDiscovery: Handler protocol definition
 """
 
-from omnibase_infra.handlers.service_discovery.handler_consul_service_discovery import (
-    ConsulServiceDiscoveryHandler,
+from omnibase_infra.handlers.service_discovery.handler_service_discovery_consul import (
+    HandlerServiceDiscoveryConsul,
 )
-from omnibase_infra.handlers.service_discovery.handler_mock_service_discovery import (
-    MockServiceDiscoveryHandler,
+from omnibase_infra.handlers.service_discovery.handler_service_discovery_mock import (
+    HandlerServiceDiscoveryMock,
 )
 from omnibase_infra.handlers.service_discovery.models import (
     ModelDiscoveryResult,
     ModelHandlerRegistrationResult,
     ModelServiceInfo,
 )
-from omnibase_infra.handlers.service_discovery.protocol_service_discovery_handler import (
-    ProtocolServiceDiscoveryHandler,
+from omnibase_infra.handlers.service_discovery.protocol_handler_service_discovery import (
+    ProtocolHandlerServiceDiscovery,
 )
 
 __all__: list[str] = [
-    "ConsulServiceDiscoveryHandler",
-    "MockServiceDiscoveryHandler",
+    "HandlerServiceDiscoveryConsul",
+    "HandlerServiceDiscoveryMock",
     "ModelDiscoveryResult",
     "ModelHandlerRegistrationResult",
     "ModelServiceInfo",
-    "ProtocolServiceDiscoveryHandler",
+    "ProtocolHandlerServiceDiscovery",
 ]

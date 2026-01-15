@@ -29,7 +29,7 @@ from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.models.validation.model_any_type_violation import (
     ModelAnyTypeViolation,
 )
-from omnibase_infra.validation.any_type_validator import (
+from omnibase_infra.validation.validator_any_type import (
     AnyTypeDetector,
     ModelAnyTypeValidationResult,
     validate_any_types_in_file,
@@ -1585,7 +1585,7 @@ class TestValidateAnyTypesDirectory:
 
     def test_validate_any_types_recursive(self, temp_dir: Path) -> None:
         """Validate recursively finds violations in subdirectories."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         # Create subdirectory with file
         subdir = temp_dir / "subdir"
@@ -1605,7 +1605,7 @@ class TestValidateAnyTypesDirectory:
 
     def test_validate_any_types_non_recursive(self, temp_dir: Path) -> None:
         """Non-recursive validation only checks immediate directory."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         # Create file in root
         code_root = """
@@ -1635,7 +1635,7 @@ class TestValidateAnyTypesDirectory:
 
     def test_validate_any_types_ci(self, temp_dir: Path) -> None:
         """CI validation returns structured result."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types_ci
+        from omnibase_infra.validation.validator_any_type import validate_any_types_ci
 
         code = """
         from typing import Any
@@ -1654,7 +1654,7 @@ class TestValidateAnyTypesDirectory:
 
     def test_validate_any_types_ci_no_violations(self, temp_dir: Path) -> None:
         """CI validation with no violations returns passed result."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types_ci
+        from omnibase_infra.validation.validator_any_type import validate_any_types_ci
 
         code = """
         def process(data: object) -> str:
@@ -1674,7 +1674,7 @@ class TestFileSkipping:
 
     def test_skip_test_files(self, temp_dir: Path) -> None:
         """Files in tests/ directories are skipped."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         # Create tests directory with violation file
         tests_dir = temp_dir / "tests"
@@ -1694,7 +1694,7 @@ class TestFileSkipping:
 
     def test_skip_underscore_prefixed_files(self, temp_dir: Path) -> None:
         """Files starting with underscore are skipped."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         code = """
         from typing import Any
@@ -1711,7 +1711,7 @@ class TestFileSkipping:
 
     def test_skip_archive_directory(self, temp_dir: Path) -> None:
         """Files in archive/ directories are skipped."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         # Create archive directory with violation file
         archive_dir = temp_dir / "archive"

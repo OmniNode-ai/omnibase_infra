@@ -136,7 +136,7 @@ DELETE FROM node_registrations WHERE node_id = $1 RETURNING node_id;
 """
 
 
-class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
+class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
     """PostgreSQL implementation of ProtocolRegistrationStorageHandler.
 
     Wraps existing PostgreSQL adapter functionality with circuit breaker
@@ -151,7 +151,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         handler_type: Returns "postgresql" identifier.
 
     Example:
-        >>> handler = PostgresRegistrationStorageHandler(
+        >>> handler = HandlerRegistrationStoragePostgres(
         ...     postgres_adapter=postgres_adapter,
         ...     circuit_breaker_config={"threshold": 5, "reset_timeout": 30.0},
         ... )
@@ -174,7 +174,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         auto_create_schema: bool = False,
     ) -> None:
-        """Initialize PostgresRegistrationStorageHandler.
+        """Initialize HandlerRegistrationStoragePostgres.
 
         Args:
             postgres_adapter: Optional existing PostgreSQL adapter (ProtocolPostgresAdapter).
@@ -244,7 +244,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
         self._postgres_adapter = postgres_adapter
 
         logger.info(
-            "PostgresRegistrationStorageHandler created",
+            "HandlerRegistrationStoragePostgres created",
             extra={
                 "host": host,
                 "port": port,
@@ -912,7 +912,7 @@ class PostgresRegistrationStorageHandler(MixinAsyncCircuitBreaker):
             self._pool = None
 
         self._initialized = False
-        logger.info("PostgresRegistrationStorageHandler shutdown complete")
+        logger.info("HandlerRegistrationStoragePostgres shutdown complete")
 
 
-__all__ = ["PostgresRegistrationStorageHandler"]
+__all__ = ["HandlerRegistrationStoragePostgres"]

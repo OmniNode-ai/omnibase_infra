@@ -32,8 +32,8 @@ Test Organization:
 
 Related:
     - RegistrationReducer: Emits registration intents
-    - InMemoryIdempotencyStore: In-memory store for testing
-    - PostgresIdempotencyStore: Production store
+    - StoreIdempotencyInmemory: In-memory store for testing
+    - StoreIdempotencyPostgres: Production store
     - OMN-954: Effect idempotency acceptance criteria
 """
 
@@ -47,8 +47,8 @@ import pytest
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.idempotency import (
-    InMemoryIdempotencyStore,
     ModelIdempotencyRecord,
+    StoreIdempotencyInmemory,
 )
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -136,7 +136,7 @@ class SimulatedEffectExecutor:
 
     def __init__(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         consul_client: MagicMock,
         postgres_client: MagicMock,
     ) -> None:
@@ -305,7 +305,7 @@ class TestDuplicateIntentSafety:
     @pytest.mark.asyncio
     async def test_duplicate_intent_causes_no_additional_side_effects(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         mock_consul_client: MagicMock,
         mock_postgres_client: MagicMock,
     ) -> None:
@@ -354,7 +354,7 @@ class TestDuplicateIntentSafety:
     @pytest.mark.asyncio
     async def test_different_intent_ids_execute_separately(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         mock_consul_client: MagicMock,
         mock_postgres_client: MagicMock,
     ) -> None:
@@ -396,7 +396,7 @@ class TestNaturalKeyConflict:
     @pytest.mark.asyncio
     async def test_natural_key_conflict_treated_as_duplicate(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         mock_consul_client: MagicMock,
         mock_postgres_client: MagicMock,
     ) -> None:
@@ -457,7 +457,7 @@ class TestNaturalKeyConflict:
     @pytest.mark.asyncio
     async def test_different_natural_keys_execute_separately(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         mock_consul_client: MagicMock,
         mock_postgres_client: MagicMock,
     ) -> None:
@@ -504,7 +504,7 @@ class TestIdempotencyAcrossRestart:
     @pytest.mark.asyncio
     async def test_idempotency_across_effect_restart(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         mock_consul_client: MagicMock,
         mock_postgres_client: MagicMock,
     ) -> None:
@@ -566,7 +566,7 @@ class TestIdempotencyAcrossRestart:
     @pytest.mark.asyncio
     async def test_idempotency_record_persisted_in_store(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Verify that idempotency records are actually stored.
 
@@ -618,7 +618,7 @@ class TestStorageFailureSafety:
             3. Assert: exception raised, backend NOT called
         """
         # Arrange - create store that raises on check_and_record
-        failing_store = MagicMock(spec=InMemoryIdempotencyStore)
+        failing_store = MagicMock(spec=StoreIdempotencyInmemory)
         failing_store.check_and_record = AsyncMock(
             side_effect=ConnectionError("Store unavailable")
         )
@@ -648,7 +648,7 @@ class TestStorageFailureSafety:
         if the check fails, execution never starts.
         """
         # Arrange
-        failing_store = MagicMock(spec=InMemoryIdempotencyStore)
+        failing_store = MagicMock(spec=StoreIdempotencyInmemory)
         failing_store.check_and_record = AsyncMock(
             side_effect=RuntimeError("Database connection lost")
         )
@@ -689,7 +689,7 @@ class TestStorageFailureSafety:
     ) -> None:
         """Verify that store timeout is handled without partial execution."""
         # Arrange
-        timing_out_store = MagicMock(spec=InMemoryIdempotencyStore)
+        timing_out_store = MagicMock(spec=StoreIdempotencyInmemory)
         timing_out_store.check_and_record = AsyncMock(
             side_effect=TimeoutError("Store query timed out")
         )
@@ -714,7 +714,7 @@ class TestDomainIsolation:
     @pytest.mark.asyncio
     async def test_same_intent_id_different_domains_independent(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Verify that the same intent_id in different domains is independent.
 
@@ -743,7 +743,7 @@ class TestDomainIsolation:
     @pytest.mark.asyncio
     async def test_duplicate_in_same_domain_detected(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Verify that duplicates within the same domain are detected."""
         # Arrange

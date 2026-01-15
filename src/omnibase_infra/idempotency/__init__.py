@@ -18,14 +18,14 @@ Models:
     - ModelIdempotencyGuardConfig: Configuration for the idempotency guard
 
 Stores:
-    - InMemoryIdempotencyStore: In-memory store for testing (OMN-945)
-    - PostgresIdempotencyStore: Production PostgreSQL store (OMN-945)
+    - StoreIdempotencyInmemory: In-memory store for testing (OMN-945)
+    - StoreIdempotencyPostgres: Production PostgreSQL store (OMN-945)
 
 Example - InMemory (Testing):
-    >>> from omnibase_infra.idempotency import InMemoryIdempotencyStore
+    >>> from omnibase_infra.idempotency import StoreIdempotencyInmemory
     >>> from uuid import uuid4
     >>>
-    >>> store = InMemoryIdempotencyStore()
+    >>> store = StoreIdempotencyInmemory()
     >>> message_id = uuid4()
     >>>
     >>> # First call returns True (message is new)
@@ -76,19 +76,19 @@ from omnibase_infra.idempotency.models import (
 from omnibase_infra.idempotency.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
-from omnibase_infra.idempotency.store_inmemory import InMemoryIdempotencyStore
-from omnibase_infra.idempotency.store_postgres import PostgresIdempotencyStore
+from omnibase_infra.idempotency.store_inmemory import StoreIdempotencyInmemory
+from omnibase_infra.idempotency.store_postgres import StoreIdempotencyPostgres
 
 __all__: list[str] = [
     # Stores
-    "InMemoryIdempotencyStore",
+    "StoreIdempotencyInmemory",
     # Models
     "ModelIdempotencyCheckResult",
     "ModelIdempotencyGuardConfig",
     "ModelIdempotencyRecord",
     "ModelIdempotencyStoreMetrics",
     "ModelPostgresIdempotencyStoreConfig",
-    "PostgresIdempotencyStore",
+    "StoreIdempotencyPostgres",
     # Protocol
     "ProtocolIdempotencyStore",
 ]

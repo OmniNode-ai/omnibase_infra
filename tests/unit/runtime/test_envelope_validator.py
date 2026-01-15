@@ -21,18 +21,18 @@ from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
     validate_envelope,
 )
-from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
 
 @pytest.fixture
-def mock_registry() -> ProtocolBindingRegistry:
+def mock_registry() -> RegistryProtocolBinding:
     """Create a mock registry with common handler types registered.
 
     Note: This fixture uses direct instantiation for unit testing the
     envelope validator. For integration tests that need real container-based
     registries, use container_with_registries from conftest.py.
     """
-    registry = ProtocolBindingRegistry()
+    registry = RegistryProtocolBinding()
 
     # Create a minimal mock handler class
     class MockHandler:
@@ -61,7 +61,7 @@ class TestOperationValidation:
     """Tests for operation presence and type validation."""
 
     def test_missing_operation_raises_error(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Envelope without operation field raises EnvelopeValidationError."""
         envelope: dict[str, object] = {"payload": {"data": "test"}}
@@ -72,7 +72,7 @@ class TestOperationValidation:
         assert "operation is required" in str(exc_info.value)
 
     def test_none_operation_raises_error(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Envelope with None operation raises EnvelopeValidationError."""
         envelope: dict[str, object] = {"operation": None, "payload": {}}
@@ -83,7 +83,7 @@ class TestOperationValidation:
         assert "operation is required" in str(exc_info.value)
 
     def test_empty_string_operation_raises_error(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Envelope with empty string operation raises EnvelopeValidationError."""
         envelope: dict[str, object] = {"operation": "", "payload": {}}
@@ -94,7 +94,7 @@ class TestOperationValidation:
         assert "operation is required" in str(exc_info.value)
 
     def test_non_string_operation_raises_error(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Envelope with non-string operation raises EnvelopeValidationError."""
         envelope: dict[str, object] = {"operation": 123, "payload": {}}
@@ -110,7 +110,7 @@ class TestHandlerPrefixValidation:
     """Tests for handler prefix validation against registry."""
 
     def test_unknown_prefix_raises_error(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Operation with unknown prefix raises UnknownHandlerTypeError."""
         envelope: dict[str, object] = {"operation": "lolnope.query"}
@@ -122,7 +122,7 @@ class TestHandlerPrefixValidation:
         assert "No handler registered" in str(exc_info.value)
 
     def test_unknown_prefix_includes_registered_prefixes(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """UnknownHandlerTypeError includes list of registered prefixes."""
         envelope: dict[str, object] = {"operation": "unknown.action"}
@@ -148,7 +148,7 @@ class TestHandlerPrefixValidation:
         assert set(registered_prefixes) == expected_prefixes
 
     def test_valid_http_prefix_passes(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Operation with valid 'http' prefix passes validation."""
         envelope: dict[str, object] = {"operation": "http.get"}
@@ -156,7 +156,7 @@ class TestHandlerPrefixValidation:
         # Should not raise
 
     def test_valid_db_prefix_passes(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Operation with valid 'db' prefix passes validation (with payload)."""
         envelope: dict[str, object] = {
@@ -167,7 +167,7 @@ class TestHandlerPrefixValidation:
         # Should not raise
 
     def test_valid_kafka_prefix_passes(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Operation with valid 'kafka' prefix passes validation."""
         envelope: dict[str, object] = {"operation": "kafka.consume"}
@@ -175,7 +175,7 @@ class TestHandlerPrefixValidation:
         # Should not raise (consume doesn't require payload)
 
     def test_operation_without_dot_uses_whole_string_as_prefix(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Operation without dot uses entire string as prefix."""
         envelope: dict[str, object] = {"operation": "http"}  # No dot
@@ -203,7 +203,7 @@ class TestPayloadValidation:
         ],
     )
     def test_payload_required_operations_without_payload_raises_error(
-        self, mock_registry: ProtocolBindingRegistry, operation: str
+        self, mock_registry: RegistryProtocolBinding, operation: str
     ) -> None:
         """Operations that require payload raise error when payload is missing."""
         envelope: dict[str, object] = {"operation": operation}
@@ -231,7 +231,7 @@ class TestPayloadValidation:
         ],
     )
     def test_payload_required_operations_with_empty_dict_raises_error(
-        self, mock_registry: ProtocolBindingRegistry, operation: str
+        self, mock_registry: RegistryProtocolBinding, operation: str
     ) -> None:
         """Operations that require payload raise error when payload is empty dict."""
         envelope: dict[str, object] = {"operation": operation, "payload": {}}
@@ -258,7 +258,7 @@ class TestPayloadValidation:
         ],
     )
     def test_payload_required_operations_with_payload_passes(
-        self, mock_registry: ProtocolBindingRegistry, operation: str
+        self, mock_registry: RegistryProtocolBinding, operation: str
     ) -> None:
         """Operations that require payload pass when payload is provided."""
         envelope: dict[str, object] = {
@@ -279,7 +279,7 @@ class TestPayloadValidation:
         ],
     )
     def test_operations_without_payload_requirement_pass(
-        self, mock_registry: ProtocolBindingRegistry, operation: str
+        self, mock_registry: RegistryProtocolBinding, operation: str
     ) -> None:
         """Operations that don't require payload pass without payload."""
         envelope: dict[str, object] = {"operation": operation}
@@ -308,7 +308,7 @@ class TestCorrelationIdNormalization:
     """Tests for correlation_id normalization to UUID."""
 
     def test_missing_correlation_id_generates_uuid(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Missing correlation_id is generated as UUID."""
         envelope: dict[str, object] = {"operation": "http.get"}
@@ -318,7 +318,7 @@ class TestCorrelationIdNormalization:
         assert isinstance(envelope["correlation_id"], UUID)
 
     def test_none_correlation_id_generates_uuid(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """None correlation_id is replaced with generated UUID."""
         envelope: dict[str, object] = {"operation": "http.get", "correlation_id": None}
@@ -328,7 +328,7 @@ class TestCorrelationIdNormalization:
         assert isinstance(envelope["correlation_id"], UUID)
 
     def test_uuid_correlation_id_preserved(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """UUID correlation_id is preserved."""
         original_id = uuid4()
@@ -341,7 +341,7 @@ class TestCorrelationIdNormalization:
         assert envelope["correlation_id"] == original_id
 
     def test_valid_string_correlation_id_converted_to_uuid(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Valid UUID string is converted to UUID object."""
         original_id = uuid4()
@@ -355,7 +355,7 @@ class TestCorrelationIdNormalization:
         assert isinstance(envelope["correlation_id"], UUID)
 
     def test_invalid_string_correlation_id_replaced_with_new_uuid(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Invalid UUID string is replaced with new UUID."""
         envelope: dict[str, object] = {
@@ -367,7 +367,7 @@ class TestCorrelationIdNormalization:
         assert isinstance(envelope["correlation_id"], UUID)
 
     def test_non_string_non_uuid_correlation_id_replaced(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Non-string, non-UUID correlation_id is replaced with new UUID."""
         envelope: dict[str, object] = {"operation": "http.get", "correlation_id": 12345}
@@ -380,7 +380,7 @@ class TestValidationScopeLimit:
     """Tests to ensure validation does NOT inspect handler-specific schemas."""
 
     def test_validation_does_not_check_sql_in_db_query_payload(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Validation does NOT check for 'sql' field in db.query payload."""
         # This should pass - we only check payload exists, not its contents
@@ -392,7 +392,7 @@ class TestValidationScopeLimit:
         # Should not raise - handler will check for sql field
 
     def test_validation_does_not_check_url_in_http_payload(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Validation does NOT check for 'url' field in http payload."""
         envelope: dict[str, object] = {
@@ -403,7 +403,7 @@ class TestValidationScopeLimit:
         # Should not raise - handler will check for required fields
 
     def test_any_non_empty_payload_satisfies_requirement(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Any non-empty payload satisfies the payload requirement."""
         envelope: dict[str, object] = {
@@ -418,7 +418,7 @@ class TestEdgeCases:
     """Edge case tests."""
 
     def test_envelope_mutation_only_affects_correlation_id(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Validation only mutates correlation_id, preserves other fields."""
         original_payload = {"sql": "SELECT 1"}
@@ -435,14 +435,14 @@ class TestEdgeCases:
 
     def test_empty_registry_rejects_all_operations(self) -> None:
         """Empty registry rejects all operations."""
-        empty_registry = ProtocolBindingRegistry()
+        empty_registry = RegistryProtocolBinding()
         envelope: dict[str, object] = {"operation": "http.get"}
 
         with pytest.raises(UnknownHandlerTypeError):
             validate_envelope(envelope, empty_registry)
 
     def test_case_sensitive_prefix_matching(
-        self, mock_registry: ProtocolBindingRegistry
+        self, mock_registry: RegistryProtocolBinding
     ) -> None:
         """Prefix matching is case-sensitive."""
         envelope: dict[str, object] = {"operation": "HTTP.get"}  # Uppercase

@@ -304,7 +304,7 @@ pattern_exemptions:
   # - validator_no_handler_publishing.py
   # - validator_no_direct_dispatch.py
   # - validator_no_orchestrator_fsm.py
-  # - any_type_validator.py (OMN-1276)
+  # - validator_any_type.py (OMN-1276)
   #
   # Common AST visitor methods:
   # - visit_ClassDef, visit_FunctionDef, visit_AsyncFunctionDef

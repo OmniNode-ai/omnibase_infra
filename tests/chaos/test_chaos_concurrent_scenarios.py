@@ -51,7 +51,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
 )
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from tests.chaos.conftest import (
     ChaosConfig,
     ChaosEffectExecutor,
@@ -141,7 +141,7 @@ class MultiServiceExecutor:
     """
 
     services: dict[str, ServiceSimulator]
-    idempotency_store: InMemoryIdempotencyStore
+    idempotency_store: StoreIdempotencyInmemory
     completed_operations: list[str] = field(default_factory=list)
     failed_operations: list[str] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -263,7 +263,7 @@ def multi_service_executor(
             "cache": cache_service,
             "external_api": external_api_service,
         },
-        idempotency_store=InMemoryIdempotencyStore(),
+        idempotency_store=StoreIdempotencyInmemory(),
     )
 
 
@@ -473,7 +473,7 @@ class TestCascadingFailures:
     @pytest.mark.asyncio
     async def test_cascading_failure_chain(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test a chain of failures where each triggers the next.
@@ -525,7 +525,7 @@ class TestCascadingFailures:
     @pytest.mark.asyncio
     async def test_circuit_breaker_prevents_infinite_cascade(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Test that circuit breaker logic prevents infinite cascading.
 
@@ -615,7 +615,7 @@ class TestRaceConditionHandling:
     @pytest.mark.asyncio
     async def test_concurrent_idempotency_checks(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
         failure_injector: FailureInjector,
     ) -> None:
@@ -659,7 +659,7 @@ class TestRaceConditionHandling:
     @pytest.mark.asyncio
     async def test_counter_accuracy_under_concurrent_chaos(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test that counters remain accurate under concurrent operations.
@@ -756,7 +756,7 @@ class TestMixedFailureModes:
     @pytest.mark.asyncio
     async def test_mixed_timeouts_and_connection_errors(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test handling of mixed timeout and connection errors.
@@ -861,7 +861,7 @@ class TestMixedFailureModes:
     @pytest.mark.asyncio
     async def test_latency_injection_with_failures(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test that latency and failures can occur together.
@@ -980,7 +980,7 @@ class TestDataIntegrityUnderChaos:
     @pytest.mark.asyncio
     async def test_no_duplicate_executions_under_chaos(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test that idempotency prevents duplicates even under chaos.
@@ -1988,7 +1988,7 @@ class TestSimultaneousMultipleFailureModes:
     @pytest.mark.asyncio
     async def test_simultaneous_failure_timeout_latency_injection(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test concurrent operations with all chaos modes active.
@@ -2152,7 +2152,7 @@ class TestSimultaneousMultipleFailureModes:
     @pytest.mark.asyncio
     async def test_counter_consistency_after_concurrent_multi_mode_chaos(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test that counters remain accurate after intense multi-mode chaos.
@@ -2220,7 +2220,7 @@ class TestSimultaneousMultipleFailureModes:
     @pytest.mark.asyncio
     async def test_recovery_after_simultaneous_multi_mode_failures(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test system recovery after experiencing all failure modes.
@@ -2307,7 +2307,7 @@ class TestSimultaneousMultipleFailureModes:
     @pytest.mark.asyncio
     async def test_interleaved_success_failure_timeout_sequence(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Test deterministic interleaved failure patterns.
@@ -2400,7 +2400,7 @@ class TestSimultaneousMultipleFailureModes:
     @pytest.mark.asyncio
     async def test_high_concurrency_multi_mode_stress(
         self,
-        chaos_idempotency_store: InMemoryIdempotencyStore,
+        chaos_idempotency_store: StoreIdempotencyInmemory,
         mock_backend_client: MagicMock,
     ) -> None:
         """Stress test with very high concurrency and all chaos modes.

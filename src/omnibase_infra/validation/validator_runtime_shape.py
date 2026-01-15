@@ -21,15 +21,15 @@ Scope and Design:
        @enforce_execution_shape decorator or passed to validation methods.
 
     **Complementary Validators**:
-    - execution_shape_validator.py: AST-based static analysis (catches issues
+    - validator_execution_shape.py: AST-based static analysis (catches issues
       before runtime, analyzes code structure)
-    - runtime_shape_validator.py (this module): Runtime validation (catches
+    - validator_runtime_shape.py (this module): Runtime validation (catches
       issues when actual values are produced)
 
     The runtime validator catches violations that cannot be determined statically,
     such as dynamically constructed return values or conditional returns.
 
-Execution Shape Rules (imported from execution_shape_validator):
+Execution Shape Rules (imported from validator_execution_shape):
     - EFFECT: Can return EVENTs and COMMANDs, but not PROJECTIONs
     - COMPUTE: Can return any message type (most permissive)
     - REDUCER: Can return PROJECTIONs only, not EVENTs (deterministic state management)
@@ -120,7 +120,7 @@ Security Design (Intentional Fail-Open Architecture):
     - Network layer: TLS, firewall rules, service mesh policies
 
 Usage:
-    >>> from omnibase_infra.validation.runtime_shape_validator import (
+    >>> from omnibase_infra.validation.validator_runtime_shape import (
     ...     RuntimeShapeValidator,
     ...     enforce_execution_shape,
     ... )
@@ -172,8 +172,8 @@ from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
 
-# Import canonical execution shape rules from execution_shape_validator (single source of truth)
-from omnibase_infra.validation.execution_shape_validator import (
+# Import canonical execution shape rules from validator_execution_shape (single source of truth)
+from omnibase_infra.validation.validator_execution_shape import (
     EXECUTION_SHAPE_RULES,
 )
 

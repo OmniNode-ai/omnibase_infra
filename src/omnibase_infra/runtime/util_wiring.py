@@ -3,7 +3,7 @@
 """Handler Wiring Module - Registers concrete handlers with the handler registry.
 
 This module provides functions to wire up concrete handler implementations
-with the ProtocolBindingRegistry and EventBusBindingRegistry. It serves as
+with the RegistryProtocolBinding and RegistryEventBusBinding. It serves as
 the bridge between handler implementations and the registry system.
 
 The wiring module is responsible for:
@@ -13,10 +13,10 @@ The wiring module is responsible for:
 - Providing a summary of registered handlers for debugging
 
 Event Bus Support:
-    This module registers InMemoryEventBus as the default event bus. For production
-    deployments requiring KafkaEventBus, the event bus is selected at kernel bootstrap
+    This module registers EventBusInmemory as the default event bus. For production
+    deployments requiring EventBusKafka, the event bus is selected at kernel bootstrap
     time based on:
-    - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses KafkaEventBus)
+    - KAFKA_BOOTSTRAP_SERVERS environment variable (if set, uses EventBusKafka)
     - config.event_bus.type field in runtime_config.yaml
 
     See kernel.py for event bus selection logic during runtime bootstrap.
@@ -60,7 +60,7 @@ Adding New Handlers:
        wire_custom_handler():
 
         ```python
-        from omnibase_infra.runtime.wiring import wire_custom_handler
+        from omnibase_infra.runtime.util_wiring import wire_custom_handler
 
         wire_custom_handler("custom", MyCustomHandler)
         ```
@@ -71,7 +71,7 @@ Integration with RuntimeHostProcess:
 
     Phase 1 - Class Registration (wiring module):
         When wire_default_handlers() is called, handler CLASSES are registered
-        with the singleton ProtocolBindingRegistry. At this point, no handler
+        with the singleton RegistryProtocolBinding. At this point, no handler
         instances exist - only the class types are stored in the registry.
 
     Phase 2 - Instance Creation (RuntimeHostProcess):
@@ -89,7 +89,7 @@ Integration with RuntimeHostProcess:
 
 Example Usage:
     ```python
-    from omnibase_infra.runtime.wiring import (
+    from omnibase_infra.runtime.util_wiring import (
         wire_default_handlers,
         wire_handlers_from_contract,
     )
@@ -120,10 +120,10 @@ from uuid import uuid4
 from omnibase_core.types import JsonType
 
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
-from omnibase_infra.handlers.handler_http import HttpRestHandler
+from omnibase_infra.handlers.handler_http import HandlerHttpRest
 from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
@@ -131,8 +131,8 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_VAULT,
-    EventBusBindingRegistry,
-    ProtocolBindingRegistry,
+    RegistryEventBusBinding,
+    RegistryProtocolBinding,
     get_event_bus_registry,
     get_handler_registry,
 )
@@ -163,25 +163,25 @@ logger = logging.getLogger(__name__)
 # 2. Import the handler class at the top of this module
 # 3. Add entry below: HANDLER_TYPE_XXX: (XxxHandler, "Description"),
 #
-# NOTE: HttpRestHandler and HandlerDb use legacy execute(envelope: dict) signature.
+# NOTE: HandlerHttpRest and HandlerDb use legacy execute(envelope: dict) signature.
 # They will be migrated to ProtocolHandler.execute(request, operation_config) in future.
 # Type ignore comments suppress MyPy errors during MVP phase.
 _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
     HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]
     HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]
-    HANDLER_TYPE_HTTP: (HttpRestHandler, "HTTP REST protocol handler"),  # type: ignore[dict-item]
+    HANDLER_TYPE_HTTP: (HandlerHttpRest, "HTTP REST protocol handler"),  # type: ignore[dict-item]
     HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]
 }
 
 # Known event bus kinds that can be wired via this module.
 # Maps bus kind constant to (bus_class, description)
 #
-# Note: KafkaEventBus is NOT in this registry. It is selected at kernel bootstrap
+# Note: EventBusKafka is NOT in this registry. It is selected at kernel bootstrap
 # time via environment variable (KAFKA_BOOTSTRAP_SERVERS) or runtime config
 # (event_bus.type = "kafka"). This registry handles only contract-based wiring
 # while production event bus selection is handled by kernel.py.
 _KNOWN_EVENT_BUSES: dict[str, tuple[type[ProtocolEventBus], str]] = {
-    EVENT_BUS_INMEMORY: (InMemoryEventBus, "In-memory event bus for local/testing"),
+    EVENT_BUS_INMEMORY: (EventBusInmemory, "In-memory event bus for local/testing"),
 }
 
 
@@ -195,19 +195,19 @@ def wire_default_handlers() -> dict[str, list[str]]:
     Registered Handlers:
         - CONSUL: HandlerConsul for HashiCorp Consul service discovery
         - DB: HandlerDb for PostgreSQL database operations
-        - HTTP: HttpRestHandler for HTTP/REST protocol operations
+        - HTTP: HandlerHttpRest for HTTP/REST protocol operations
         - VAULT: HandlerVault for HashiCorp Vault secret management
 
     Registered Event Buses:
-        - INMEMORY: InMemoryEventBus for local/testing deployments
+        - INMEMORY: EventBusInmemory for local/testing deployments
 
     Event Bus Selection Note:
-        This function only registers InMemoryEventBus in the event bus registry.
-        For production deployments with KafkaEventBus:
+        This function only registers EventBusInmemory in the event bus registry.
+        For production deployments with EventBusKafka:
         - Set KAFKA_BOOTSTRAP_SERVERS environment variable, OR
         - Configure event_bus.type = "kafka" in runtime_config.yaml
 
-        KafkaEventBus selection happens at kernel bootstrap time (see kernel.py),
+        EventBusKafka selection happens at kernel bootstrap time (see kernel.py),
         not through this registry-based wiring mechanism.
 
     Returns:
@@ -242,7 +242,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
         )
 
     # Register all known event buses
-    # Note: EventBusBindingRegistry raises if already registered,
+    # Note: RegistryEventBusBinding raises if already registered,
     # so we check first to make this idempotent
     for bus_kind, (bus_cls, description) in _KNOWN_EVENT_BUSES.items():
         if not event_bus_registry.is_registered(bus_kind):
@@ -484,7 +484,7 @@ def get_known_event_bus_kinds() -> list[str]:
 def wire_custom_handler(
     handler_type: str,
     handler_cls: type[ProtocolHandler],
-    registry: ProtocolBindingRegistry | None = None,
+    registry: RegistryProtocolBinding | None = None,
 ) -> None:
     """Register a custom handler class with the registry.
 
@@ -518,7 +518,7 @@ def wire_custom_handler(
 def wire_custom_event_bus(
     bus_kind: str,
     bus_cls: type[ProtocolEventBus],
-    registry: EventBusBindingRegistry | None = None,
+    registry: RegistryEventBusBinding | None = None,
 ) -> None:
     """Register a custom event bus class with the registry.
 
@@ -542,7 +542,7 @@ def wire_custom_event_bus(
         >>> wire_custom_event_bus("custom", CustomEventBus)
     """
     target_registry = registry if registry is not None else get_event_bus_registry()
-    # Note: EventBusBindingRegistry.register() raises if already registered
+    # Note: RegistryEventBusBinding.register() raises if already registered
     target_registry.register(bus_kind, bus_cls)
     logger.debug(
         "Registered custom event bus",

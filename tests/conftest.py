@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
 
-    from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
-    from omnibase_infra.runtime.policy_registry import PolicyRegistry
+    from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
+    from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
 
 # =============================================================================
@@ -100,7 +100,7 @@ def assert_has_methods(
         >>> assert_has_methods(
         ...     registry,
         ...     ["register", "get", "list_keys", "is_registered"],
-        ...     protocol_name="PolicyRegistry",
+        ...     protocol_name="RegistryPolicy",
         ... )
     """
     name = protocol_name or obj.__class__.__name__
@@ -202,13 +202,13 @@ def assert_method_signature(
 
 
 def assert_policy_registry_interface(registry: object) -> None:
-    """Assert that an object implements the PolicyRegistry interface.
+    """Assert that an object implements the RegistryPolicy interface.
 
     Per ONEX conventions, protocol conformance is verified via duck typing.
     Collection-like protocols must include __len__ for complete duck typing.
 
     Args:
-        registry: The object to verify as a PolicyRegistry implementation.
+        registry: The object to verify as a RegistryPolicy implementation.
 
     Raises:
         AssertionError: If required methods are missing.
@@ -226,17 +226,17 @@ def assert_policy_registry_interface(registry: object) -> None:
         "is_registered",
         "__len__",
     ]
-    assert_has_methods(registry, required_methods, protocol_name="PolicyRegistry")
+    assert_has_methods(registry, required_methods, protocol_name="RegistryPolicy")
 
 
 def assert_handler_registry_interface(registry: object) -> None:
-    """Assert that an object implements the ProtocolBindingRegistry interface.
+    """Assert that an object implements the RegistryProtocolBinding interface.
 
     Per ONEX conventions, protocol conformance is verified via duck typing.
     Collection-like protocols must include __len__ for complete duck typing.
 
     Args:
-        registry: The object to verify as a ProtocolBindingRegistry implementation.
+        registry: The object to verify as a RegistryProtocolBinding implementation.
 
     Raises:
         AssertionError: If required methods are missing.
@@ -254,7 +254,7 @@ def assert_handler_registry_interface(registry: object) -> None:
         "__len__",
     ]
     assert_has_methods(
-        registry, required_methods, protocol_name="ProtocolBindingRegistry"
+        registry, required_methods, protocol_name="RegistryProtocolBinding"
     )
 
 
@@ -393,23 +393,23 @@ def simple_mock_container() -> MagicMock:
 
 
 @pytest.fixture
-def container_with_policy_registry(mock_container: MagicMock) -> PolicyRegistry:
-    """Create PolicyRegistry and configure mock container to resolve it.
+def container_with_policy_registry(mock_container: MagicMock) -> RegistryPolicy:
+    """Create RegistryPolicy and configure mock container to resolve it.
 
-    Provides a real PolicyRegistry instance registered in a mock container.
+    Provides a real RegistryPolicy instance registered in a mock container.
     This fixture demonstrates the container-based DI pattern for testing.
 
     Args:
         mock_container: Mock container fixture (automatically injected).
 
     Returns:
-        PolicyRegistry instance that can be resolved from mock_container.
+        RegistryPolicy instance that can be resolved from mock_container.
 
     Example:
         >>> def test_container_based_policy_access(container_with_policy_registry, mock_container):
         ...     # Registry is already registered in mock_container
-        ...     from omnibase_infra.runtime.policy_registry import PolicyRegistry
-        ...     registry = mock_container.service_registry.resolve_service(PolicyRegistry)
+        ...     from omnibase_infra.runtime.registry_policy import RegistryPolicy
+        ...     registry = mock_container.service_registry.resolve_service(RegistryPolicy)
         ...     assert registry is container_with_policy_registry
         ...
         ...     # Use registry to register and retrieve policies
@@ -421,14 +421,14 @@ def container_with_policy_registry(mock_container: MagicMock) -> PolicyRegistry:
         ...     )
         ...     assert registry.is_registered("test_policy")
     """
-    from omnibase_infra.runtime.policy_registry import PolicyRegistry
+    from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
-    # Create real PolicyRegistry instance
-    registry = PolicyRegistry()
+    # Create real RegistryPolicy instance
+    registry = RegistryPolicy()
 
     # Configure mock container to return this registry when resolved
-    async def resolve_service_side_effect(interface_type: type) -> PolicyRegistry:
-        if interface_type is PolicyRegistry:
+    async def resolve_service_side_effect(interface_type: type) -> RegistryPolicy:
+        if interface_type is RegistryPolicy:
             return registry
         raise ValueError(f"Service not registered: {interface_type}")
 
@@ -443,8 +443,8 @@ def container_with_policy_registry(mock_container: MagicMock) -> PolicyRegistry:
 async def container_with_registries() -> ModelONEXContainer:
     """Create real ONEX container with wired infrastructure services.
 
-    Provides a fully wired ModelONEXContainer with PolicyRegistry and
-    ProtocolBindingRegistry registered as global services. This fixture
+    Provides a fully wired ModelONEXContainer with RegistryPolicy and
+    RegistryProtocolBinding registered as global services. This fixture
     demonstrates the real container-based DI pattern for integration tests.
 
     Note: This fixture is async because wire_infrastructure_services() is async.
@@ -463,12 +463,12 @@ async def container_with_registries() -> ModelONEXContainer:
 
     Example:
         >>> async def test_with_real_container(container_with_registries):
-        ...     from omnibase_infra.runtime.policy_registry import PolicyRegistry
-        ...     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+        ...     from omnibase_infra.runtime.registry_policy import RegistryPolicy
+        ...     from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
         ...
         ...     # Resolve services from real container (async)
-        ...     policy_reg = await container_with_registries.service_registry.resolve_service(PolicyRegistry)
-        ...     handler_reg = await container_with_registries.service_registry.resolve_service(ProtocolBindingRegistry)
+        ...     policy_reg = await container_with_registries.service_registry.resolve_service(RegistryPolicy)
+        ...     handler_reg = await container_with_registries.service_registry.resolve_service(RegistryProtocolBinding)
         ...
         ...     # Verify interface via duck typing (ONEX convention)
         ...     # Per ONEX conventions, check for required methods rather than isinstance
@@ -485,7 +485,7 @@ async def container_with_registries() -> ModelONEXContainer:
     """
     from omnibase_core.container import ModelONEXContainer
 
-    from omnibase_infra.runtime.container_wiring import (
+    from omnibase_infra.runtime.util_container_wiring import (
         ServiceRegistryUnavailableError,
         wire_infrastructure_services,
     )
@@ -531,10 +531,10 @@ async def container_with_registries() -> ModelONEXContainer:
 @pytest.fixture
 async def container_with_handler_registry(
     container_with_registries: ModelONEXContainer,
-) -> ProtocolBindingRegistry:
-    """Get ProtocolBindingRegistry from wired container.
+) -> RegistryProtocolBinding:
+    """Get RegistryProtocolBinding from wired container.
 
-    Convenience fixture that extracts ProtocolBindingRegistry from the
+    Convenience fixture that extracts RegistryProtocolBinding from the
     container_with_registries fixture. Use this when you only need the
     handler registry without the full container.
 
@@ -544,7 +544,7 @@ async def container_with_handler_registry(
         container_with_registries: Container fixture (automatically injected).
 
     Returns:
-        ProtocolBindingRegistry instance from container.
+        RegistryProtocolBinding instance from container.
 
     Example:
         >>> async def test_handler_registry(container_with_handler_registry):
@@ -552,11 +552,11 @@ async def container_with_handler_registry(
         ...     container_with_handler_registry.register(HANDLER_TYPE_HTTP, MockHandler)
         ...     assert container_with_handler_registry.is_registered(HANDLER_TYPE_HTTP)
     """
-    from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+    from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
-    registry: ProtocolBindingRegistry = (
+    registry: RegistryProtocolBinding = (
         await container_with_registries.service_registry.resolve_service(
-            ProtocolBindingRegistry
+            RegistryProtocolBinding
         )
     )
     return registry

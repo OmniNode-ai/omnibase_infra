@@ -85,7 +85,7 @@ if TYPE_CHECKING:
     import asyncpg
     from omnibase_core.container import ModelONEXContainer
 
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
@@ -131,7 +131,7 @@ class TestSuite1NodeStartupIntrospection:
     async def test_node_publishes_introspection_on_startup(
         self,
         introspectable_test_node: ProtocolIntrospectableTestNode,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
     ) -> None:
         """Test node publishes introspection event on startup.
@@ -244,7 +244,7 @@ class TestSuite1NodeStartupIntrospection:
     async def test_introspection_broadcast_latency_under_50ms(
         self,
         introspectable_test_node: ProtocolIntrospectableTestNode,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
     ) -> None:
         """Test introspection broadcast latency is under 50ms.
 
@@ -276,7 +276,7 @@ class TestSuite1NodeStartupIntrospection:
     @pytest.mark.asyncio
     async def test_introspection_event_node_types(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         unique_node_id: UUID,
     ) -> None:
         """Test introspection events work for all ONEX node types.
@@ -295,7 +295,7 @@ class TestSuite1NodeStartupIntrospection:
             """Minimal test node for type verification."""
 
             def __init__(
-                self, node_id: UUID, node_type: EnumNodeKind, event_bus: KafkaEventBus
+                self, node_id: UUID, node_type: EnumNodeKind, event_bus: EventBusKafka
             ) -> None:
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
@@ -373,7 +373,7 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
 
@@ -753,7 +753,7 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
 
@@ -846,7 +846,7 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
 
@@ -931,7 +931,7 @@ class TestSuite3ReIntrospection:
     @pytest.mark.asyncio
     async def test_registry_publishes_request_introspection_on_startup(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         wired_container: ModelONEXContainer,
     ) -> None:
         """Test registry publishes REQUEST_INTROSPECTION on startup.
@@ -1003,7 +1003,7 @@ class TestSuite3ReIntrospection:
     async def test_nodes_respond_with_fresh_introspection(
         self,
         introspectable_test_node: ProtocolIntrospectableTestNode,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
     ) -> None:
         """Test nodes respond to re-introspection request with fresh data.
@@ -1029,7 +1029,7 @@ class TestSuite3ReIntrospection:
         # RATIONALE: This uses wait_for_consumer_ready for consistency with other
         # consumer waits, though we can't access the internal event bus directly.
         # The wait_for_consumer_ready helper documents the known limitation that
-        # true readiness polling would require KafkaEventBus API changes.
+        # true readiness polling would require EventBusKafka API changes.
         await wait_for_consumer_ready(
             real_kafka_event_bus, DEFAULT_REQUEST_INTROSPECTION_TOPIC, max_wait=2.0
         )
@@ -1107,7 +1107,7 @@ class TestSuite3ReIntrospection:
     async def test_request_response_correlation(
         self,
         introspectable_test_node: ProtocolIntrospectableTestNode,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
     ) -> None:
         """Test request and response have matching correlation_id.
@@ -1232,7 +1232,7 @@ class TestSuite4HeartbeatPublishing:
     async def test_heartbeat_published_every_30_seconds(
         self,
         introspectable_test_node: ProtocolIntrospectableTestNode,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
     ) -> None:
         """Test heartbeat publishes every 30 seconds.
 
@@ -1317,7 +1317,7 @@ class TestSuite4HeartbeatPublishing:
     async def test_heartbeat_includes_uptime_and_operations(
         self,
         introspectable_test_node: ProtocolIntrospectableTestNode,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
     ) -> None:
         """Test heartbeat includes uptime and active operations count.
 
@@ -1538,7 +1538,7 @@ class TestHeartbeatPerformanceExtended:
     async def test_heartbeat_interval_consistency_over_multiple_cycles(
         self,
         introspectable_test_node: ProtocolIntrospectableTestNode,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
     ) -> None:
         """Test heartbeat interval remains consistent over multiple cycles.
 
@@ -1630,7 +1630,7 @@ class TestSuite5RegistryRecovery:
         self,
         wired_container: ModelONEXContainer,
         postgres_pool: asyncpg.Pool,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -1655,7 +1655,7 @@ class TestSuite5RegistryRecovery:
             ModelRegistrationProjection,
         )
         from omnibase_infra.projectors import ProjectorRegistration
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
 
@@ -1693,7 +1693,7 @@ class TestSuite5RegistryRecovery:
         # Step 2: Create a NEW container and orchestrator (simulating restart)
         from omnibase_core.container import ModelONEXContainer as ContainerClass
 
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             wire_infrastructure_services,
             wire_registration_handlers,
         )
@@ -1756,7 +1756,7 @@ class TestSuite5RegistryRecovery:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
 

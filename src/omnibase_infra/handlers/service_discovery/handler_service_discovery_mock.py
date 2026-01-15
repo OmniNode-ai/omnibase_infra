@@ -35,7 +35,7 @@ from omnibase_infra.nodes.node_service_discovery_effect.models.enum_service_disc
 logger = logging.getLogger(__name__)
 
 
-class MockServiceDiscoveryHandler:
+class HandlerServiceDiscoveryMock:
     """In-memory mock for testing service discovery.
 
     Provides a simple in-memory implementation of the service discovery
@@ -49,17 +49,17 @@ class MockServiceDiscoveryHandler:
         handler_type: Returns "mock" identifier.
 
     Example:
-        >>> handler = MockServiceDiscoveryHandler()
+        >>> handler = HandlerServiceDiscoveryMock()
         >>> result = await handler.register_service(service_info)
         >>> assert result.success
     """
 
     def __init__(self) -> None:
-        """Initialize MockServiceDiscoveryHandler with empty service store."""
+        """Initialize HandlerServiceDiscoveryMock with empty service store."""
         self._services: dict[UUID, ModelServiceInfo] = {}
         self._lock = asyncio.Lock()
 
-        logger.debug("MockServiceDiscoveryHandler initialized")
+        logger.debug("HandlerServiceDiscoveryMock initialized")
 
     @property
     def handler_type(self) -> str:
@@ -255,4 +255,4 @@ class MockServiceDiscoveryHandler:
             return len(self._services)
 
 
-__all__ = ["MockServiceDiscoveryHandler"]
+__all__ = ["HandlerServiceDiscoveryMock"]

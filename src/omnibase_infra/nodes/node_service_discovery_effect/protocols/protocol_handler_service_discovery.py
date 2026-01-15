@@ -2,11 +2,11 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol for Service Discovery Handlers.
 
-This module defines ProtocolServiceDiscoveryHandler, the protocol for
+This module defines ProtocolHandlerServiceDiscovery, the protocol for
 pluggable service discovery backends in the NodeServiceDiscoveryEffect node.
 
 Architecture:
-    ProtocolServiceDiscoveryHandler defines the interface for service
+    ProtocolHandlerServiceDiscovery defines the interface for service
     discovery backends. Implementations include:
     - Consul: HashiCorp Consul service discovery
     - Kubernetes: K8s native service discovery
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class ProtocolServiceDiscoveryHandler(Protocol):
+class ProtocolHandlerServiceDiscovery(Protocol):
     """Protocol for service discovery backends.
 
     Defines the interface that all service discovery backend handlers
@@ -252,4 +252,4 @@ class ProtocolServiceDiscoveryHandler(Protocol):
         ...
 
 
-__all__ = ["ProtocolServiceDiscoveryHandler"]
+__all__ = ["ProtocolHandlerServiceDiscovery"]

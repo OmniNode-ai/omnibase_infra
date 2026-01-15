@@ -35,7 +35,7 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
 logger = logging.getLogger(__name__)
 
 
-class MockRegistrationStorageHandler:
+class HandlerRegistrationStorageMock:
     """In-memory mock for testing registration storage.
 
     Provides a simple in-memory implementation of the registration storage
@@ -49,17 +49,17 @@ class MockRegistrationStorageHandler:
         handler_type: Returns "mock" identifier.
 
     Example:
-        >>> handler = MockRegistrationStorageHandler()
+        >>> handler = HandlerRegistrationStorageMock()
         >>> result = await handler.store_registration(record)
         >>> assert result.success
     """
 
     def __init__(self) -> None:
-        """Initialize MockRegistrationStorageHandler with empty record store."""
+        """Initialize HandlerRegistrationStorageMock with empty record store."""
         self._records: dict[UUID, ModelRegistrationRecord] = {}
         self._lock = asyncio.Lock()
 
-        logger.debug("MockRegistrationStorageHandler initialized")
+        logger.debug("HandlerRegistrationStorageMock initialized")
 
     @property
     def handler_type(self) -> str:
@@ -389,4 +389,4 @@ class MockRegistrationStorageHandler:
             return self._records.get(node_id)
 
 
-__all__ = ["MockRegistrationStorageHandler"]
+__all__ = ["HandlerRegistrationStorageMock"]

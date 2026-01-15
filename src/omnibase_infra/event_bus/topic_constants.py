@@ -46,7 +46,7 @@ Usage:
 
 See Also:
     - ModelKafkaEventBusConfig.dead_letter_topic: DLQ configuration
-    - KafkaEventBus._publish_to_dlq(): DLQ publishing implementation
+    - EventBusKafka._publish_to_dlq(): DLQ publishing implementation
     - topic_category_validator.py: Topic naming validation
 """
 

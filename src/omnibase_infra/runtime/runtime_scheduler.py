@@ -31,11 +31,11 @@ Usage:
     ```python
     from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
     from omnibase_infra.runtime.models import ModelRuntimeSchedulerConfig
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
     # Create scheduler with configuration
     config = ModelRuntimeSchedulerConfig.default()
-    event_bus = KafkaEventBus.default()
+    event_bus = EventBusKafka.default()
     await event_bus.start()
 
     scheduler = RuntimeScheduler(config=config, event_bus=event_bus)
@@ -83,7 +83,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
 )
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.runtime.enums import EnumSchedulerStatus
@@ -126,7 +126,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
     Example:
         ```python
         config = ModelRuntimeSchedulerConfig.default()
-        event_bus = KafkaEventBus.default()
+        event_bus = EventBusKafka.default()
         await event_bus.start()
 
         scheduler = RuntimeScheduler(config=config, event_bus=event_bus)
@@ -143,13 +143,13 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
     def __init__(
         self,
         config: ModelRuntimeSchedulerConfig,
-        event_bus: KafkaEventBus,
+        event_bus: EventBusKafka,
     ) -> None:
         """Initialize the RuntimeScheduler.
 
         Args:
             config: Configuration model containing all scheduler settings.
-            event_bus: KafkaEventBus instance for publishing tick events.
+            event_bus: EventBusKafka instance for publishing tick events.
 
         Raises:
             ValueError: If config or event_bus is None.

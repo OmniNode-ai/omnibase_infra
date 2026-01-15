@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Policy Registry Key Model.
 
-Strongly-typed key for PolicyRegistry dict operations.
+Strongly-typed key for RegistryPolicy dict operations.
 Replaces primitive tuple[str, str, str] pattern.
 """
 

@@ -107,7 +107,7 @@ Environment Variables:
 Dual Retry Configuration:
     ONEX uses TWO distinct retry mechanisms that serve different purposes:
 
-    1. **Bus-Level Retry** (KafkaEventBus internal):
+    1. **Bus-Level Retry** (EventBusKafka internal):
        - Configured via: max_retry_attempts, retry_backoff_base
        - Purpose: Handle transient Kafka connection/publish failures
        - Scope: Single publish operation within the event bus
@@ -132,11 +132,11 @@ Dual Retry Configuration:
 
 Usage:
     ```python
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     # Option 1: Use defaults with environment variable overrides
-    bus = KafkaEventBus.default()
+    bus = EventBusKafka.default()
     await bus.start()
 
     # Option 2: Explicit configuration via config model
@@ -144,7 +144,7 @@ Usage:
         bootstrap_servers="kafka:9092",
         environment="dev",
     )
-    bus = KafkaEventBus(config=config)
+    bus = EventBusKafka(config=config)
     await bus.start()
 
     # Subscribe to a topic
@@ -205,7 +205,7 @@ DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]
 logger = logging.getLogger(__name__)
 
 
-class KafkaEventBus(MixinAsyncCircuitBreaker):
+class EventBusKafka(MixinAsyncCircuitBreaker):
     """Kafka-backed event bus for production message streaming.
 
     Implements ProtocolEventBus interface using Apache Kafka (via aiokafka)
@@ -248,7 +248,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             bootstrap_servers="kafka:9092",
             environment="dev",
         )
-        bus = KafkaEventBus(config=config)
+        bus = EventBusKafka(config=config)
         await bus.start()
 
         # Subscribe
@@ -285,11 +285,11 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 bootstrap_servers="kafka:9092",
                 environment="prod",
             )
-            bus = KafkaEventBus(config=config)
+            bus = EventBusKafka(config=config)
 
             # Using factory methods
-            bus = KafkaEventBus.default()
-            bus = KafkaEventBus.from_yaml(Path("kafka.yaml"))
+            bus = EventBusKafka.default()
+            bus = EventBusKafka.from_yaml(Path("kafka.yaml"))
             ```
         """
         # Use provided config or create default with environment overrides
@@ -365,14 +365,14 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     # =========================================================================
 
     @classmethod
-    def from_config(cls, config: ModelKafkaEventBusConfig) -> KafkaEventBus:
-        """Create KafkaEventBus from a configuration model.
+    def from_config(cls, config: ModelKafkaEventBusConfig) -> EventBusKafka:
+        """Create EventBusKafka from a configuration model.
 
         Args:
             config: Configuration model containing all settings
 
         Returns:
-            KafkaEventBus instance configured with the provided settings
+            EventBusKafka instance configured with the provided settings
 
         Example:
             ```python
@@ -381,14 +381,14 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 environment="prod",
                 timeout_seconds=60,
             )
-            bus = KafkaEventBus.from_config(config)
+            bus = EventBusKafka.from_config(config)
             ```
         """
         return cls(config=config)
 
     @classmethod
-    def from_yaml(cls, path: Path) -> KafkaEventBus:
-        """Create KafkaEventBus from a YAML configuration file.
+    def from_yaml(cls, path: Path) -> EventBusKafka:
+        """Create EventBusKafka from a YAML configuration file.
 
         Loads configuration from a YAML file with environment variable
         overrides applied automatically.
@@ -397,7 +397,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             path: Path to YAML configuration file
 
         Returns:
-            KafkaEventBus instance configured from the YAML file
+            EventBusKafka instance configured from the YAML file
 
         Raises:
             FileNotFoundError: If the YAML file does not exist
@@ -405,26 +405,26 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
         Example:
             ```python
-            bus = KafkaEventBus.from_yaml(Path("/etc/kafka/config.yaml"))
+            bus = EventBusKafka.from_yaml(Path("/etc/kafka/config.yaml"))
             ```
         """
         config = ModelKafkaEventBusConfig.from_yaml(path)
         return cls(config=config)
 
     @classmethod
-    def default(cls) -> KafkaEventBus:
-        """Create KafkaEventBus with default configuration.
+    def default(cls) -> EventBusKafka:
+        """Create EventBusKafka with default configuration.
 
         Creates an instance with default settings and environment variable
         overrides applied automatically. This is the recommended way to
-        create a KafkaEventBus for most use cases.
+        create a EventBusKafka for most use cases.
 
         Returns:
-            KafkaEventBus instance with default configuration
+            EventBusKafka instance with default configuration
 
         Example:
             ```python
-            bus = KafkaEventBus.default()
+            bus = EventBusKafka.default()
             await bus.start()
             ```
         """
@@ -444,7 +444,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         return self._config
 
     @property
-    def adapter(self) -> KafkaEventBus:
+    def adapter(self) -> EventBusKafka:
         """Return self for protocol compatibility.
 
         Returns:
@@ -540,7 +540,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 circuit breaker is open
         """
         if self._started:
-            logger.debug("KafkaEventBus already started")
+            logger.debug("EventBusKafka already started")
             return
 
         correlation_id = uuid4()
@@ -577,7 +577,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     await self._reset_circuit_breaker()
 
                 logger.info(
-                    "KafkaEventBus started",
+                    "EventBusKafka started",
                     extra={
                         "environment": self._environment,
                         "group": self._group,
@@ -764,7 +764,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             self._subscribers.clear()
 
         logger.info(
-            "KafkaEventBus closed",
+            "EventBusKafka closed",
             extra={"environment": self._environment, "group": self._group},
         )
 
@@ -1024,7 +1024,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
         Note: Unlike typical Kafka consumer groups, this implementation maintains
         a subscriber registry and fans out messages to all registered callbacks,
-        matching the InMemoryEventBus interface.
+        matching the EventBusInmemory interface.
 
         Args:
             topic: Topic to subscribe to
@@ -2318,4 +2318,4 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         await self._invoke_dlq_callbacks(dlq_event)
 
 
-__all__: list[str] = ["KafkaEventBus"]
+__all__: list[str] = ["EventBusKafka"]

@@ -81,7 +81,7 @@ class TestInfraValidatorConstants:
         - Fixed (code corrected to pass validation)
         - Exempted (added to exempted_patterns list with documented rationale)
 
-        Documented exemptions (KafkaEventBus, RuntimeHostProcess, etc.) are handled
+        Documented exemptions (EventBusKafka, RuntimeHostProcess, etc.) are handled
         via the exempted_patterns list in validate_infra_patterns().
         """
         assert INFRA_PATTERNS_STRICT is True, (

@@ -3,7 +3,7 @@
 """Policy Registration Model.
 
 This module provides the Pydantic model for policy registration parameters,
-used to register policy plugins with the PolicyRegistry.
+used to register policy plugins with the RegistryPolicy.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ class ModelPolicyRegistration(BaseModel):
     """Model for policy registration parameters.
 
     Encapsulates all parameters needed to register a policy plugin with
-    the PolicyRegistry. This model reduces the number of parameters in
+    the RegistryPolicy. This model reduces the number of parameters in
     the register() method signature.
 
     Attributes:

@@ -19,7 +19,7 @@ Memory Characteristics:
 Production Note:
     This in-memory store does NOT persist across restarts and does NOT
     support distributed scenarios. For production use:
-    - Use PostgresIdempotencyStore from omnibase_infra.idempotency
+    - Use StoreIdempotencyPostgres from omnibase_infra.idempotency
     - Or implement a Redis/Valkey-backed store
     - Consider the existing ProtocolIdempotencyStore for full persistence
 

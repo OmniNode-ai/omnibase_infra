@@ -104,7 +104,7 @@ def _categorize_size(size: int) -> str:
         return "very_large"
 
 
-class HttpRestHandler(MixinEnvelopeExtraction):
+class HandlerHttpRest(MixinEnvelopeExtraction):
     """HTTP REST protocol handler using httpx async client (MVP: GET, POST only).
 
     Security Features:
@@ -114,7 +114,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize HttpRestHandler in uninitialized state."""
+        """Initialize HandlerHttpRest in uninitialized state."""
         self._client: httpx.AsyncClient | None = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._max_request_size: int = _DEFAULT_MAX_REQUEST_SIZE
@@ -294,7 +294,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             await self._client.aclose()
             self._client = None
         self._initialized = False
-        logger.info("HttpRestHandler shutdown complete")
+        logger.info("HandlerHttpRest shutdown complete")
 
     async def execute(
         self, envelope: dict[str, object]
@@ -326,7 +326,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestHandler not initialized. Call initialize() first.", context=ctx
+                "HandlerHttpRest not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -726,7 +726,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestHandler not initialized - call initialize() first", context=ctx
+                "HandlerHttpRest not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -910,4 +910,4 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         }
 
 
-__all__: list[str] = ["HttpRestHandler"]
+__all__: list[str] = ["HandlerHttpRest"]

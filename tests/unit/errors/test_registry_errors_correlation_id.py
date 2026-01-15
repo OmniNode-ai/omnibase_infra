@@ -7,10 +7,10 @@ observability and debugging. These tests verify that all registry error paths
 include auto-generated correlation_ids for traceability.
 
 Registry classes covered:
-- ProtocolBindingRegistry (registry_protocol_binding.py)
-- EventBusBindingRegistry (registry_event_bus_binding.py)
+- RegistryProtocolBinding (registry_protocol_binding.py)
+- RegistryEventBusBinding (registry_event_bus_binding.py)
 - RegistryCompute (registry_compute.py)
-- MessageTypeRegistry (registry_message_type.py) - via MessageTypeRegistryError
+- RegistryMessageType (registry_message_type.py) - via MessageTypeRegistryError
 """
 
 from datetime import UTC
@@ -31,21 +31,21 @@ from omnibase_infra.models.registry.model_message_type_entry import (
 )
 from omnibase_infra.runtime.models import ModelComputeRegistration
 from omnibase_infra.runtime.registry.registry_event_bus_binding import (
-    EventBusBindingRegistry,
+    RegistryEventBusBinding,
 )
 from omnibase_infra.runtime.registry.registry_message_type import (
-    MessageTypeRegistry,
     MessageTypeRegistryError,
+    RegistryMessageType,
 )
 from omnibase_infra.runtime.registry.registry_protocol_binding import (
-    ProtocolBindingRegistry,
     RegistryError,
+    RegistryProtocolBinding,
 )
 from omnibase_infra.runtime.registry_compute import RegistryCompute
 
 
 class TestProtocolBindingRegistryCorrelationId:
-    """Tests for correlation_id in ProtocolBindingRegistry errors."""
+    """Tests for correlation_id in RegistryProtocolBinding errors."""
 
     def test_register_missing_execute_method_has_correlation_id(self) -> None:
         """Test that missing execute method error includes correlation_id."""
@@ -53,7 +53,7 @@ class TestProtocolBindingRegistryCorrelationId:
         class InvalidHandler:
             """Handler without execute method."""
 
-        registry = ProtocolBindingRegistry()
+        registry = RegistryProtocolBinding()
 
         with pytest.raises(RegistryError) as exc_info:
             registry.register("test", InvalidHandler)  # type: ignore[arg-type]
@@ -68,7 +68,7 @@ class TestProtocolBindingRegistryCorrelationId:
         class InvalidHandlerNonCallable:
             execute = "not_callable"
 
-        registry = ProtocolBindingRegistry()
+        registry = RegistryProtocolBinding()
 
         with pytest.raises(RegistryError) as exc_info:
             registry.register("test", InvalidHandlerNonCallable)  # type: ignore[arg-type]
@@ -79,7 +79,7 @@ class TestProtocolBindingRegistryCorrelationId:
 
     def test_get_unregistered_has_correlation_id(self) -> None:
         """Test that get unregistered error includes correlation_id."""
-        registry = ProtocolBindingRegistry()
+        registry = RegistryProtocolBinding()
 
         with pytest.raises(RegistryError) as exc_info:
             registry.get("nonexistent")
@@ -90,7 +90,7 @@ class TestProtocolBindingRegistryCorrelationId:
 
 
 class TestEventBusBindingRegistryCorrelationId:
-    """Tests for correlation_id in EventBusBindingRegistry errors."""
+    """Tests for correlation_id in RegistryEventBusBinding errors."""
 
     def test_register_missing_publish_has_correlation_id(self) -> None:
         """Test that missing publish method error includes correlation_id."""
@@ -98,7 +98,7 @@ class TestEventBusBindingRegistryCorrelationId:
         class InvalidBus:
             """Bus without publish methods."""
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.register("test", InvalidBus)  # type: ignore[arg-type]
@@ -113,7 +113,7 @@ class TestEventBusBindingRegistryCorrelationId:
         class InvalidBusNonCallable:
             publish_envelope = "not_callable"
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.register("test", InvalidBusNonCallable)  # type: ignore[arg-type]
@@ -129,7 +129,7 @@ class TestEventBusBindingRegistryCorrelationId:
             async def publish_envelope(self, envelope: object, topic: str) -> None:
                 pass
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
         registry.register("test", MockEventBus)  # type: ignore[arg-type]
 
         with pytest.raises(EventBusRegistryError) as exc_info:
@@ -141,7 +141,7 @@ class TestEventBusBindingRegistryCorrelationId:
 
     def test_get_unregistered_has_correlation_id(self) -> None:
         """Test that get unregistered error includes correlation_id."""
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.get("nonexistent")
@@ -267,9 +267,9 @@ class TestRegistryComputeCorrelationId:
 
 
 class TestMessageTypeRegistryCorrelationId:
-    """Tests for correlation_id in MessageTypeRegistry errors.
+    """Tests for correlation_id in RegistryMessageType errors.
 
-    Note: MessageTypeRegistry uses MessageTypeRegistryError which now accepts
+    Note: RegistryMessageType uses MessageTypeRegistryError which now accepts
     context parameter with correlation_id. The error raises use auto-generated
     correlation_ids via ModelInfraErrorContext.with_correlation().
     """
@@ -297,7 +297,7 @@ class TestMessageTypeRegistryCorrelationId:
         """Test MessageTypeRegistryError structure for constraint mismatch."""
         from datetime import datetime
 
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         now = datetime.now(tz=UTC)
 
         # Register first entry
@@ -328,7 +328,7 @@ class TestMessageTypeRegistryCorrelationId:
 
     def test_none_entry_registration_fails(self) -> None:
         """Test that registering None entry raises proper error."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
 
         with pytest.raises(ModelOnexError) as exc_info:
             registry.register_message_type(None)  # type: ignore[arg-type]

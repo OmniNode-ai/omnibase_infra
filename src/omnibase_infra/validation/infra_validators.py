@@ -66,14 +66,14 @@ class ExemptionPattern(TypedDict, total=False):
 
     Fields:
         file_pattern: Regex pattern matching the filename (e.g., r"kafka_event_bus\\.py")
-        class_pattern: Optional regex for class name (e.g., r"Class 'KafkaEventBus'")
+        class_pattern: Optional regex for class name (e.g., r"Class 'EventBusKafka'")
         method_pattern: Optional regex for method name (e.g., r"Function '__init__'")
         violation_pattern: Regex matching the violation type (e.g., r"too many (methods|parameters)")
 
     Example:
         {
             "file_pattern": r"kafka_event_bus\\.py",
-            "class_pattern": r"Class 'KafkaEventBus'",
+            "class_pattern": r"Class 'EventBusKafka'",
             "violation_pattern": r"has \\d+ methods"
         }
 
@@ -320,7 +320,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #
 # Infrastructure Pattern Exemptions (OMN-934, PR #61):
 # ----------------------------------------------------
-# KafkaEventBus (14 methods, 10 __init__ params):
+# EventBusKafka (14 methods, 10 __init__ params):
 #   - Event bus pattern requires: lifecycle (start/stop/health), pub/sub
 #     (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility
 #   - Backwards compatibility during config migration requires multiple __init__ params
@@ -336,11 +336,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #
 # Exemption Pattern Examples (explicit format):
 # ---------------------------------------------
-# KafkaEventBus method count:
-#   {"file_pattern": r"kafka_event_bus\.py", "class_pattern": r"Class 'KafkaEventBus'",
+# EventBusKafka method count:
+#   {"file_pattern": r"kafka_event_bus\.py", "class_pattern": r"Class 'EventBusKafka'",
 #    "violation_pattern": r"has \d+ methods"}
 #
-# KafkaEventBus __init__ params:
+# EventBusKafka __init__ params:
 #   {"file_pattern": r"kafka_event_bus\.py", "method_pattern": r"Function '__init__'",
 #    "violation_pattern": r"has \d+ parameters"}
 #
@@ -484,9 +484,9 @@ def validate_infra_patterns(
         See that file for the complete list of exemptions with rationale and ticket references.
 
         Key exemption categories:
-        - KafkaEventBus: Event bus pattern with many methods/params (OMN-934)
+        - EventBusKafka: Event bus pattern with many methods/params (OMN-934)
         - RuntimeHostProcess: Central coordinator pattern (OMN-756)
-        - PolicyRegistry: Domain registry pattern
+        - RegistryPolicy: Domain registry pattern
         - ExecutionShapeValidator: AST analysis validator pattern (OMN-958)
         - MixinNodeIntrospection: Introspection mixin pattern (OMN-958)
 
@@ -545,16 +545,16 @@ def _filter_exempted_errors(
         Pattern:
             {
                 "file_pattern": r"kafka_event_bus\\.py",
-                "class_pattern": r"Class 'KafkaEventBus'",
+                "class_pattern": r"Class 'EventBusKafka'",
                 "violation_pattern": r"has \\d+ methods"
             }
 
         Matches error:
-            "kafka_event_bus.py:123: Class 'KafkaEventBus' has 14 methods (threshold: 10)"
+            "kafka_event_bus.py:123: Class 'EventBusKafka' has 14 methods (threshold: 10)"
 
         Does not match:
             "kafka_event_bus.py:50: Function 'connect' has 7 parameters" (no class_pattern)
-            "other_file.py:10: Class 'KafkaEventBus' has 14 methods" (wrong file)
+            "other_file.py:10: Class 'EventBusKafka' has 14 methods" (wrong file)
     """
     # Defensive type checks for list inputs
     if not isinstance(errors, list):

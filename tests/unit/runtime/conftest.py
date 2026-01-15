@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnibase_infra.runtime.registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.registry import RegistryProtocolBinding
 
 # Re-export handler seeding utilities from root conftest
 # These are available here for convenience but defined in tests/conftest.py
@@ -42,10 +42,10 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
     1. wire_infrastructure_services - to be a no-op async function
     2. ModelONEXContainer - to have a mock service_registry with resolve_service
 
-    Note: Returns a real ProtocolBindingRegistry for handler registration to work.
+    Note: Returns a real RegistryProtocolBinding for handler registration to work.
     """
     # Create a shared registry instance that will be used throughout the test
-    shared_registry = ProtocolBindingRegistry()
+    shared_registry = RegistryProtocolBinding()
 
     async def noop_wire(container: object) -> dict[str, list[str]]:
         """Async no-op for wire_infrastructure_services."""
@@ -53,23 +53,23 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
 
     async def mock_resolve_service(
         service_class: type,
-    ) -> MagicMock | ProtocolBindingRegistry:
+    ) -> MagicMock | RegistryProtocolBinding:
         """Mock resolve_service to return appropriate instances.
 
-        Returns a real ProtocolBindingRegistry for handler registration,
+        Returns a real RegistryProtocolBinding for handler registration,
         and MagicMock for other service types.
         """
-        if service_class == ProtocolBindingRegistry:
+        if service_class == RegistryProtocolBinding:
             return shared_registry
         return MagicMock()
 
     with patch(
-        "omnibase_infra.runtime.kernel.wire_infrastructure_services"
+        "omnibase_infra.runtime.service_kernel.wire_infrastructure_services"
     ) as mock_wire:
         mock_wire.side_effect = noop_wire
 
         with patch(
-            "omnibase_infra.runtime.kernel.ModelONEXContainer"
+            "omnibase_infra.runtime.service_kernel.ModelONEXContainer"
         ) as mock_container_cls:
             mock_container = MagicMock()
             mock_service_registry = MagicMock()

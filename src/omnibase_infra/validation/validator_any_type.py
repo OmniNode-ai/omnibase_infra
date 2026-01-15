@@ -32,7 +32,7 @@ Limitations:
     - String annotations (e.g., ``"Any"``) are not detected
 
 Usage:
-    >>> from omnibase_infra.validation.any_type_validator import (
+    >>> from omnibase_infra.validation.validator_any_type import (
     ...     validate_any_types,
     ...     validate_any_types_ci,
     ... )

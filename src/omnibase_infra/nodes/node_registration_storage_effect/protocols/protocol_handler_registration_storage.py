@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol for Registration Storage Handlers.
 
-This module defines ProtocolRegistrationStorageHandler, the interface for
+This module defines ProtocolHandlerRegistrationStorage, the interface for
 pluggable storage backends in the registration storage effect node.
 
 Architecture:
@@ -36,7 +36,7 @@ Related:
 
 from __future__ import annotations
 
-__all__ = ["ProtocolRegistrationStorageHandler"]
+__all__ = ["ProtocolHandlerRegistrationStorage"]
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class ProtocolRegistrationStorageHandler(Protocol):
+class ProtocolHandlerRegistrationStorage(Protocol):
     """Protocol for registration storage backend handlers.
 
     Defines the interface for pluggable storage backends. Each implementation

@@ -45,7 +45,7 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ class IntrospectionEventRouter:
 
     Attributes:
         _dispatcher: The DispatcherNodeIntrospected to route events to.
-        _event_bus: The KafkaEventBus for publishing output events.
+        _event_bus: The EventBusKafka for publishing output events.
         _output_topic: The topic to publish output events to.
 
     Example:
@@ -114,14 +114,14 @@ class IntrospectionEventRouter:
     def __init__(
         self,
         dispatcher: DispatcherNodeIntrospected,
-        event_bus: KafkaEventBus,
+        event_bus: EventBusKafka,
         output_topic: str,
     ) -> None:
         """Initialize the event router.
 
         Args:
             dispatcher: The DispatcherNodeIntrospected to route events to.
-            event_bus: The KafkaEventBus for publishing output events.
+            event_bus: The EventBusKafka for publishing output events.
             output_topic: The topic to publish output events to.
         """
         self._dispatcher = dispatcher

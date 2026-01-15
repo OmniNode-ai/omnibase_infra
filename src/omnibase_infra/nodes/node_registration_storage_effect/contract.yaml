@@ -9,7 +9,7 @@
 # Principle: "I'm interested in what you do, not what you are"
 #
 # This contract defines the interface for storage operations with pluggable backends.
-# Handlers implementing ProtocolRegistrationStorageHandler can be swapped without
+# Handlers implementing ProtocolHandlerRegistrationStorage can be swapped without
 # changing the node interface.
 # Contract identifiers
 name: "node_registration_storage_effect"
@@ -147,7 +147,7 @@ database_schema:
 dependencies:
   - name: "protocol_registration_storage_handler"
     type: "protocol"
-    class_name: "ProtocolRegistrationStorageHandler"
+    class_name: "ProtocolHandlerRegistrationStorage"
     module: "omnibase_infra.nodes.node_registration_storage_effect.protocols"
     description: "Protocol for registration storage backends (e.g., PostgreSQL, mock)"
     pluggable: true
@@ -163,13 +163,13 @@ handler_routing:
   handlers:
     - handler_type: "postgresql"
       handler:
-        name: "HandlerPostgresRegistrationStorage"
-        module: "omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage"
+        name: "HandlerRegistrationStoragePostgres"
+        module: "omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres"
       description: "PostgreSQL storage handler"
     - handler_type: "mock"
       handler:
-        name: "HandlerMockRegistrationStorage"
-        module: "omnibase_infra.handlers.registration_storage.handler_mock_registration_storage"
+        name: "HandlerRegistrationStorageMock"
+        module: "omnibase_infra.handlers.registration_storage.handler_registration_storage_mock"
       description: "Mock storage handler for testing"
 # Error handling configuration
 error_handling:

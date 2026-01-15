@@ -33,7 +33,7 @@ Usage:
 
 Integration with ONEX Architecture:
     - Supports ONEX 4-node architecture message categories
-    - Integrates with ProtocolBindingRegistry for runtime route inspection
+    - Integrates with RegistryProtocolBinding for runtime route inspection
     - Returns ModelExecutionShapeViolationResult for consistency with other validators
 """
 
@@ -64,7 +64,7 @@ from omnibase_infra.models.validation.model_execution_shape_violation import (
 from omnibase_infra.validation.infra_validators import should_skip_path
 
 if TYPE_CHECKING:
-    from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+    from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
 logger = logging.getLogger(__name__)
 
@@ -415,7 +415,7 @@ def discover_message_types(
 
 
 def discover_registered_routes(
-    registry: ProtocolBindingRegistry | None = None,
+    registry: RegistryProtocolBinding | None = None,
     source_directory: Path | None = None,
 ) -> set[str]:
     """Discover routing registrations from registry or source code.
@@ -425,7 +425,7 @@ def discover_registered_routes(
     correct usage.
 
     **Strategy 1: Runtime Registry Inspection** (returns HANDLER CATEGORIES)
-        When `registry` is provided, inspects the ProtocolBindingRegistry
+        When `registry` is provided, inspects the RegistryProtocolBinding
         to find registered protocol handlers.
 
         Returns: Handler category strings (e.g., "http", "db", "kafka")
@@ -695,7 +695,7 @@ class RoutingCoverageValidator:
     def __init__(
         self,
         source_directory: Path,
-        registry: ProtocolBindingRegistry | None = None,
+        registry: RegistryProtocolBinding | None = None,
     ) -> None:
         """Initialize the routing coverage validator.
 
@@ -879,7 +879,7 @@ class RoutingCoverageValidator:
 def validate_routing_coverage_on_startup(
     source_directory: Path,
     fail_on_unmapped: bool = True,
-    registry: ProtocolBindingRegistry | None = None,
+    registry: RegistryProtocolBinding | None = None,
 ) -> bool:
     """Validate routing coverage at application startup.
 
@@ -927,7 +927,7 @@ def validate_routing_coverage_on_startup(
 
 def check_routing_coverage_ci(
     source_directory: Path,
-    registry: ProtocolBindingRegistry | None = None,
+    registry: RegistryProtocolBinding | None = None,
 ) -> tuple[bool, list[ModelExecutionShapeViolationResult]]:
     """CI gate for routing coverage.
 

@@ -33,7 +33,7 @@ Usage:
 
 Related:
     - NodeServiceDiscoveryEffect: Node that consumes registered dependencies
-    - ProtocolServiceDiscoveryHandler: Protocol for handlers
+    - ProtocolHandlerServiceDiscovery: Protocol for handlers
     - ModelONEXContainer: DI container for dependency resolution
     - OMN-1131: Capability-oriented node architecture
 """
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
     from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-        ProtocolServiceDiscoveryHandler,
+        ProtocolHandlerServiceDiscovery,
     )
 
 
@@ -84,7 +84,7 @@ class RegistryInfraServiceDiscovery:
             RegistryInfraServiceDiscovery.register(container)
 
             # Explicit handler registration
-            consul_handler = ConsulServiceDiscoveryHandler(config)
+            consul_handler = HandlerServiceDiscoveryConsul(config)
             RegistryInfraServiceDiscovery.register_with_handler(
                 container,
                 handler=consul_handler,
@@ -116,21 +116,21 @@ class RegistryInfraServiceDiscovery:
 
         # Import here to avoid circular imports
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolHandlerServiceDiscovery,
         )
 
         # Register protocol with lazy resolution
         # The actual implementation is determined at resolution time
         # based on configuration (CONSUL_AGENT_URL, K8S_NAMESPACE, etc.)
         container.register_factory(
-            ProtocolServiceDiscoveryHandler,
+            ProtocolHandlerServiceDiscovery,
             RegistryInfraServiceDiscovery._create_handler_from_config,
         )
 
     @staticmethod
     def register_with_handler(
         container: ModelONEXContainer,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolHandlerServiceDiscovery,
     ) -> None:
         """Register service discovery dependencies with explicit handler.
 
@@ -142,11 +142,11 @@ class RegistryInfraServiceDiscovery:
             handler: Pre-configured handler implementation.
 
         Raises:
-            TypeError: If handler does not implement ProtocolServiceDiscoveryHandler.
+            TypeError: If handler does not implement ProtocolHandlerServiceDiscovery.
 
         Example:
             >>> container = ModelONEXContainer()
-            >>> handler = ConsulServiceDiscoveryHandler(config)
+            >>> handler = HandlerServiceDiscoveryConsul(config)
             >>> RegistryInfraServiceDiscovery.register_with_handler(
             ...     container,
             ...     handler=handler,
@@ -154,24 +154,24 @@ class RegistryInfraServiceDiscovery:
         """
         # Import at runtime for isinstance check (protocol is @runtime_checkable)
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolHandlerServiceDiscovery,
         )
 
-        if not isinstance(handler, ProtocolServiceDiscoveryHandler):
+        if not isinstance(handler, ProtocolHandlerServiceDiscovery):
             raise TypeError(
-                f"Handler must implement ProtocolServiceDiscoveryHandler, "
+                f"Handler must implement ProtocolHandlerServiceDiscovery, "
                 f"got {type(handler).__name__}"
             )
 
         if container.service_registry is None:
             return
 
-        container.register_instance(ProtocolServiceDiscoveryHandler, handler)
+        container.register_instance(ProtocolHandlerServiceDiscovery, handler)
 
     @staticmethod
     def _create_handler_from_config(
         _container: ModelONEXContainer,
-    ) -> ProtocolServiceDiscoveryHandler:
+    ) -> ProtocolHandlerServiceDiscovery:
         """Create handler based on configuration.
 
         Factory function that creates the appropriate handler

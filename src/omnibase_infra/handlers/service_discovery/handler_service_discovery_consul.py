@@ -70,7 +70,7 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 NAMESPACE_ONEX_SERVICE = uuid5(NAMESPACE_DNS, "omninode.service.discovery")
 
 
-class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
+class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
     """Consul implementation of ProtocolServiceDiscoveryHandler.
 
     Wraps existing Consul client functionality with circuit breaker resilience
@@ -90,7 +90,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         handler_type: Returns "consul" identifier.
 
     Example:
-        >>> handler = ConsulServiceDiscoveryHandler(
+        >>> handler = HandlerServiceDiscoveryConsul(
         ...     consul_client=consul_client,
         ...     circuit_breaker_config=ModelCircuitBreakerConfig(threshold=5),
         ... )
@@ -110,7 +110,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         max_workers: int = DEFAULT_MAX_WORKERS,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        """Initialize ConsulServiceDiscoveryHandler.
+        """Initialize HandlerServiceDiscoveryConsul.
 
         Args:
             consul_client: Optional existing Consul client (ProtocolConsulClient).
@@ -188,7 +188,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
         self._max_workers = max_workers
 
         logger.info(
-            "ConsulServiceDiscoveryHandler initialized",
+            "HandlerServiceDiscoveryConsul initialized",
             extra={
                 "consul_host": consul_host,
                 "consul_port": consul_port,
@@ -735,7 +735,7 @@ class ConsulServiceDiscoveryHandler(MixinAsyncCircuitBreaker):
             self._consul_client = None
             self._owns_client = False
 
-        logger.info("ConsulServiceDiscoveryHandler shutdown complete")
+        logger.info("HandlerServiceDiscoveryConsul shutdown complete")
 
 
-__all__ = ["ConsulServiceDiscoveryHandler"]
+__all__ = ["HandlerServiceDiscoveryConsul"]

@@ -250,7 +250,7 @@ class RegistryCompute:
                 - list_versions(): O(k) where k = versions for plugin_id
                 - unregister(): O(k) where k = versions for plugin_id
 
-            Benchmark Targets (match PolicyRegistry):
+            Benchmark Targets (match RegistryPolicy):
                 - 1000 sequential get() calls: < 100ms (< 0.1ms per lookup)
                 - 1000 concurrent get() calls (10 threads): < 500ms
                 - 100 failed lookups (missing plugin_id): < 500ms (early exit optimization)

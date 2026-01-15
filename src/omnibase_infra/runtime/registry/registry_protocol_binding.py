@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol Binding Registry - SINGLE SOURCE OF TRUTH for handler registration.
 
-This module provides the ProtocolBindingRegistry class which implements the
+This module provides the RegistryProtocolBinding class which implements the
 ProtocolHandlerRegistry protocol from omnibase_spi. It serves as the
 centralized location for registering and resolving protocol handlers
 in the omnibase_infra layer.
@@ -30,14 +30,14 @@ Handler Categories (by protocol type):
 Example Usage:
     ```python
     from omnibase_infra.runtime.registry import (
-        ProtocolBindingRegistry,
+        RegistryProtocolBinding,
     )
     from omnibase_infra.runtime.handler_registry import (
         HANDLER_TYPE_HTTP,
         HANDLER_TYPE_DATABASE,
     )
 
-    registry = ProtocolBindingRegistry()
+    registry = RegistryProtocolBinding()
 
     # Register handlers
     registry.register(HANDLER_TYPE_HTTP, HttpHandler)
@@ -89,7 +89,7 @@ class RegistryError(RuntimeHostError):
     Extends RuntimeHostError as this is an infrastructure-layer runtime concern.
 
     Example:
-        >>> registry = ProtocolBindingRegistry()
+        >>> registry = RegistryProtocolBinding()
         >>> try:
         ...     handler = registry.get("unknown_protocol")
         ... except RegistryError as e:
@@ -127,7 +127,7 @@ class RegistryError(RuntimeHostError):
 # =============================================================================
 
 
-class ProtocolBindingRegistry:
+class RegistryProtocolBinding:
     """SINGLE SOURCE OF TRUTH for handler registration in omnibase_infra.
 
     Thread-safe registry for protocol handlers. Implements ProtocolHandlerRegistry
@@ -140,7 +140,7 @@ class ProtocolBindingRegistry:
     TODO(OMN-40): Migrate handler signature from tuple[str, str] to structured model.
         Current implementation uses bare strings for protocol types. Should migrate
         to ModelHandlerKey(handler_type: str, handler_kind: str) for consistency
-        with PolicyRegistry's ModelPolicyKey pattern and improved type safety.
+        with RegistryPolicy's ModelPolicyKey pattern and improved type safety.
         See: https://linear.app/omninode/issue/OMN-880
 
     Thread Safety:
@@ -152,7 +152,7 @@ class ProtocolBindingRegistry:
         _lock: Threading lock for thread-safe registration operations
 
     Example:
-        >>> registry = ProtocolBindingRegistry()
+        >>> registry = RegistryProtocolBinding()
         >>> registry.register("http", HttpHandler)
         >>> registry.register("db", PostgresHandler)
         >>> handler_cls = registry.get("http")
@@ -184,7 +184,7 @@ class ProtocolBindingRegistry:
                allowed for existing protocol types
 
         Note:
-            Unlike EventBusBindingRegistry, this registry allows overwriting
+            Unlike RegistryEventBusBinding, this registry allows overwriting
             existing registrations. This enables hot-reload patterns during
             development and testing.
 
@@ -225,13 +225,13 @@ class ProtocolBindingRegistry:
                           (missing or non-callable execute()/handle() method).
 
         Example:
-            >>> registry = ProtocolBindingRegistry()
+            >>> registry = RegistryProtocolBinding()
             >>> registry.register(HANDLER_TYPE_HTTP, HttpHandler)
             >>> registry.register(HANDLER_TYPE_DATABASE, PostgresHandler)
         """
         # Runtime type validation: Ensure handler_cls implements ProtocolHandler protocol
         # Check if execute() or handle() method exists and is callable
-        # Following EventBusBindingRegistry pattern of supporting alternative methods
+        # Following RegistryEventBusBinding pattern of supporting alternative methods
         has_execute = hasattr(handler_cls, "execute")
         has_handle = hasattr(handler_cls, "handle")
 
@@ -293,7 +293,7 @@ class ProtocolBindingRegistry:
             RegistryError: If protocol type is not registered.
 
         Example:
-            >>> registry = ProtocolBindingRegistry()
+            >>> registry = RegistryProtocolBinding()
             >>> registry.register("http", HttpHandler)
             >>> handler_cls = registry.get("http")
             >>> handler = handler_cls()
@@ -320,7 +320,7 @@ class ProtocolBindingRegistry:
             List of registered protocol type identifiers, sorted alphabetically.
 
         Example:
-            >>> registry = ProtocolBindingRegistry()
+            >>> registry = RegistryProtocolBinding()
             >>> registry.register("http", HttpHandler)
             >>> registry.register("db", PostgresHandler)
             >>> print(registry.list_protocols())
@@ -339,7 +339,7 @@ class ProtocolBindingRegistry:
             True if protocol type is registered, False otherwise.
 
         Example:
-            >>> registry = ProtocolBindingRegistry()
+            >>> registry = RegistryProtocolBinding()
             >>> registry.register("http", HttpHandler)
             >>> registry.is_registered("http")
             True
@@ -362,7 +362,7 @@ class ProtocolBindingRegistry:
             True if the protocol was unregistered, False if it wasn't registered.
 
         Example:
-            >>> registry = ProtocolBindingRegistry()
+            >>> registry = RegistryProtocolBinding()
             >>> registry.register("http", HttpHandler)
             >>> registry.unregister("http")
             True
@@ -386,14 +386,14 @@ class ProtocolBindingRegistry:
             It breaks the immutability guarantee after startup.
 
         Example:
-            >>> registry = ProtocolBindingRegistry()
+            >>> registry = RegistryProtocolBinding()
             >>> registry.register("http", HttpHandler)
             >>> registry.clear()
             >>> registry.list_protocols()
             []
         """
         warnings.warn(
-            "ProtocolBindingRegistry.clear() is intended for testing only. "
+            "RegistryProtocolBinding.clear() is intended for testing only."
             "Do not use in production code.",
             UserWarning,
             stacklevel=2,
@@ -408,7 +408,7 @@ class ProtocolBindingRegistry:
             Number of registered protocol handlers.
 
         Example:
-            >>> registry = ProtocolBindingRegistry()
+            >>> registry = RegistryProtocolBinding()
             >>> len(registry)
             0
             >>> registry.register("http", HttpHandler)
@@ -428,7 +428,7 @@ class ProtocolBindingRegistry:
             True if protocol type is registered, False otherwise.
 
         Example:
-            >>> registry = ProtocolBindingRegistry()
+            >>> registry = RegistryProtocolBinding()
             >>> registry.register("http", HttpHandler)
             >>> "http" in registry
             True
@@ -439,6 +439,6 @@ class ProtocolBindingRegistry:
 
 
 __all__: list[str] = [
-    "ProtocolBindingRegistry",
+    "RegistryProtocolBinding",
     "RegistryError",
 ]

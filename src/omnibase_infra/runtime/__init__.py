@@ -7,7 +7,7 @@ including three SINGLE SOURCE OF TRUTH registries and the runtime execution host
 
 Core Registries
 ---------------
-- **PolicyRegistry**: SINGLE SOURCE OF TRUTH for policy plugin registration
+- **RegistryPolicy**: SINGLE SOURCE OF TRUTH for policy plugin registration
     - Container-based DI support (preferred) or singleton accessor (legacy)
     - Thread-safe registration by (policy_id, policy_type, version)
     - Enforces synchronous-by-default execution (async must be explicit)
@@ -15,12 +15,12 @@ Core Registries
     - Pure decision logic plugins (no I/O, no side effects)
     - Integrates with ModelOnexContainer for DI pattern
 
-- **ProtocolBindingRegistry**: SINGLE SOURCE OF TRUTH for protocol handler registration
+- **RegistryProtocolBinding**: SINGLE SOURCE OF TRUTH for protocol handler registration
     - Maps handler types to handler implementations
     - Enables protocol-based dependency injection
     - Supports HTTP, database, Kafka, Vault, Consul, Valkey/Redis, gRPC handlers
 
-- **EventBusBindingRegistry**: Registry for event bus implementations
+- **RegistryEventBusBinding**: Registry for event bus implementations
     - Maps event bus kinds to event bus implementations
     - Supports in-memory and Kafka event buses
     - Enables event-driven architectures
@@ -75,9 +75,9 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_KAFKA,
     HANDLER_TYPE_VALKEY,
     HANDLER_TYPE_VAULT,
-    EventBusBindingRegistry,
-    ProtocolBindingRegistry,
     RegistryError,
+    RegistryEventBusBinding,
+    RegistryProtocolBinding,
     get_event_bus_class,
     get_event_bus_registry,
     get_handler_class,
@@ -85,28 +85,28 @@ from omnibase_infra.runtime.handler_registry import (
     register_handlers_from_config,
 )
 
-from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
-from omnibase_infra.runtime.kernel import load_runtime_config
-from omnibase_infra.runtime.kernel import main as kernel_main
-from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.service_kernel import bootstrap as kernel_bootstrap
+from omnibase_infra.runtime.service_kernel import load_runtime_config
+from omnibase_infra.runtime.service_kernel import main as kernel_main
+from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.models import (
     ModelRuntimeSchedulerConfig,
     ModelRuntimeSchedulerMetrics,
     ModelRuntimeTick,
 )
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
 from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
 from omnibase_infra.runtime.protocols import ProtocolRuntimeScheduler
 from omnibase_infra.runtime.registry import (
-    MessageTypeRegistry,
     MessageTypeRegistryError,
     ModelDomainConstraint,
     ModelMessageTypeEntry,
     ProtocolMessageTypeRegistry,
+    RegistryMessageType,
 )
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
-from omnibase_infra.runtime.wiring import (
+from omnibase_infra.runtime.util_wiring import (
     get_known_event_bus_kinds,
     get_known_handler_types,
     wire_custom_event_bus,
@@ -116,7 +116,7 @@ from omnibase_infra.runtime.wiring import (
 )
 
 # Container wiring (OMN-888)
-from omnibase_infra.runtime.container_wiring import (
+from omnibase_infra.runtime.util_container_wiring import (
     get_compute_registry_from_container,
     get_handler_node_introspected_from_container,
     get_handler_node_registration_acked_from_container,
@@ -211,22 +211,22 @@ __all__: list[str] = [
     "ChainAwareDispatcher",
     # Context enforcement
     "DispatchContextEnforcer",
-    "EventBusBindingRegistry",
     # Message dispatch engine
     "MessageDispatchEngine",
     # Message type registry (OMN-937)
-    "MessageTypeRegistry",
     "MessageTypeRegistryError",
     "ModelDomainConstraint",
     "ModelMessageTypeEntry",
     "ModelRuntimeSchedulerConfig",
     "ModelRuntimeSchedulerMetrics",
     "ModelRuntimeTick",
-    "PolicyRegistry",
-    # Registry classes
-    "ProtocolBindingRegistry",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
+    # Registry classes
+    "RegistryEventBusBinding",
+    "RegistryMessageType",
+    "RegistryPolicy",
+    "RegistryProtocolBinding",
     # Policy protocol and registry
     "ProtocolPolicy",
     # Dispatcher registry

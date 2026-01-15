@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for PolicyRegistry with real ModelONEXContainer.
+"""Integration tests for RegistryPolicy with real ModelONEXContainer.
 
-These tests verify PolicyRegistry works correctly with actual omnibase_core
+These tests verify RegistryPolicy works correctly with actual omnibase_core
 container implementation, not mocks. Tests cover:
 
 1. Container wiring and service resolution
@@ -39,14 +39,14 @@ def _skip_if_service_registry_none(container: ModelONEXContainer) -> None:
 
 
 from omnibase_infra.enums import EnumPolicyType
-from omnibase_infra.runtime.container_wiring import (
+from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
+from omnibase_infra.runtime.util_container_wiring import (
     get_handler_registry_from_container,
     get_or_create_policy_registry,
     get_policy_registry_from_container,
     wire_infrastructure_services,
 )
-from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
 # Import shared conformance helpers from conftest
 from tests.conftest import (
@@ -68,16 +68,16 @@ _service_registry_available = check_service_registry_available()
     reason="ServiceRegistry not available in omnibase_core (removed in 0.6.x)",
 )
 class TestPolicyRegistryContainerIntegration:
-    """Integration tests for PolicyRegistry with real container."""
+    """Integration tests for RegistryPolicy with real container."""
 
     @pytest.mark.asyncio
     async def test_wire_and_resolve_policy_registry_real_container(self) -> None:
-        """Test wiring and resolving PolicyRegistry with real container.
+        """Test wiring and resolving RegistryPolicy with real container.
 
         This test verifies the complete container-based DI workflow:
         1. Create real ModelONEXContainer
         2. Wire infrastructure services
-        3. Resolve PolicyRegistry from container
+        3. Resolve RegistryPolicy from container
         4. Verify instance type
         """
         # Create real container
@@ -89,14 +89,14 @@ class TestPolicyRegistryContainerIntegration:
         # Wire infrastructure services (async operation)
         summary = await wire_infrastructure_services(container)
 
-        # Verify PolicyRegistry is in the summary
-        assert "PolicyRegistry" in summary["services"]
-        assert "ProtocolBindingRegistry" in summary["services"]
+        # Verify RegistryPolicy is in the summary
+        assert "RegistryPolicy" in summary["services"]
+        assert "RegistryProtocolBinding" in summary["services"]
 
-        # Resolve PolicyRegistry from container
+        # Resolve RegistryPolicy from container
         registry = await get_policy_registry_from_container(container)
 
-        # Verify PolicyRegistry interface via shared conformance helper
+        # Verify RegistryPolicy interface via shared conformance helper
         assert_policy_registry_interface(registry)
         assert len(registry) == 0  # Empty initially (also verifies __len__ works)
 
@@ -250,7 +250,7 @@ class TestPolicyRegistryContainerIntegration:
         This test verifies lazy initialization:
         1. Create container WITHOUT wiring
         2. Call get_or_create_policy_registry
-        3. Verify it creates and registers PolicyRegistry
+        3. Verify it creates and registers RegistryPolicy
         4. Call again to verify same instance is returned
         """
         # Create real container WITHOUT wiring
@@ -259,10 +259,10 @@ class TestPolicyRegistryContainerIntegration:
         # Skip if service_registry is None (circular import bug)
         _skip_if_service_registry_none(container)
 
-        # get_or_create should create and register PolicyRegistry
+        # get_or_create should create and register RegistryPolicy
         registry1 = await get_or_create_policy_registry(container)
 
-        # Verify PolicyRegistry interface via shared conformance helper
+        # Verify RegistryPolicy interface via shared conformance helper
         assert_policy_registry_interface(registry1)
         assert len(registry1) == 0  # Empty initially (also verifies __len__ works)
 
@@ -289,11 +289,11 @@ class TestPolicyRegistryContainerIntegration:
 
     @pytest.mark.asyncio
     async def test_handler_registry_wiring(self) -> None:
-        """Test ProtocolBindingRegistry wiring alongside PolicyRegistry.
+        """Test RegistryProtocolBinding wiring alongside RegistryPolicy.
 
         This test verifies that both registries are wired correctly:
         1. Wire services to container
-        2. Resolve ProtocolBindingRegistry
+        2. Resolve RegistryProtocolBinding
         3. Verify it's the correct type
         4. Verify basic operations work
         """
@@ -306,13 +306,13 @@ class TestPolicyRegistryContainerIntegration:
         summary = await wire_infrastructure_services(container)
 
         # Verify both services are registered
-        assert "PolicyRegistry" in summary["services"]
-        assert "ProtocolBindingRegistry" in summary["services"]
+        assert "RegistryPolicy" in summary["services"]
+        assert "RegistryProtocolBinding" in summary["services"]
 
         # Resolve handler registry
         handler_registry = await get_handler_registry_from_container(container)
 
-        # Verify ProtocolBindingRegistry interface via shared conformance helper
+        # Verify RegistryProtocolBinding interface via shared conformance helper
         assert_handler_registry_interface(handler_registry)
 
         # Verify basic operations work
@@ -325,8 +325,8 @@ class TestPolicyRegistryContainerIntegration:
 
         This verifies singleton behavior per container:
         1. Wire container
-        2. Resolve PolicyRegistry twice
-        3. Resolve ProtocolBindingRegistry twice
+        2. Resolve RegistryPolicy twice
+        3. Resolve RegistryProtocolBinding twice
         4. Verify same instances returned each time
         """
         container = ModelONEXContainer()
@@ -336,12 +336,12 @@ class TestPolicyRegistryContainerIntegration:
 
         await wire_infrastructure_services(container)
 
-        # Resolve PolicyRegistry twice
+        # Resolve RegistryPolicy twice
         policy_reg1 = await get_policy_registry_from_container(container)
         policy_reg2 = await get_policy_registry_from_container(container)
         assert policy_reg1 is policy_reg2
 
-        # Resolve ProtocolBindingRegistry twice
+        # Resolve RegistryProtocolBinding twice
         handler_reg1 = await get_handler_registry_from_container(container)
         handler_reg2 = await get_handler_registry_from_container(container)
         assert handler_reg1 is handler_reg2
@@ -439,10 +439,10 @@ class TestContainerWiringErrorHandling:
         _skip_if_service_registry_none(container)
 
         # Attempt to resolve without wiring should fail
-        # Error may indicate PolicyRegistry not registered OR container missing resolve_service
+        # Error may indicate RegistryPolicy not registered OR container missing resolve_service
         with pytest.raises(
             RuntimeError,
-            match=r"(PolicyRegistry not registered|Container\.service_registry missing|Failed to resolve PolicyRegistry)",
+            match=r"(RegistryPolicy not registered|Container\.service_registry missing|Failed to resolve RegistryPolicy)",
         ):
             await get_policy_registry_from_container(container)
 
@@ -498,24 +498,24 @@ class TestContainerWithRegistriesFixture:
         self, container_with_registries: ModelONEXContainer
     ) -> None:
         """Test that fixture provides properly wired container."""
-        # Resolve PolicyRegistry
+        # Resolve RegistryPolicy
         policy_registry = (
             await container_with_registries.service_registry.resolve_service(
-                PolicyRegistry
+                RegistryPolicy
             )
         )
 
-        # Verify PolicyRegistry interface via shared conformance helper
+        # Verify RegistryPolicy interface via shared conformance helper
         assert_policy_registry_interface(policy_registry)
 
-        # Resolve ProtocolBindingRegistry
+        # Resolve RegistryProtocolBinding
         handler_registry = (
             await container_with_registries.service_registry.resolve_service(
-                ProtocolBindingRegistry
+                RegistryProtocolBinding
             )
         )
 
-        # Verify ProtocolBindingRegistry interface via shared conformance helper
+        # Verify RegistryProtocolBinding interface via shared conformance helper
         assert_handler_registry_interface(handler_registry)
 
     @pytest.mark.asyncio
@@ -525,7 +525,7 @@ class TestContainerWithRegistriesFixture:
         """Test that fixture-provided registries work correctly."""
         policy_registry = (
             await container_with_registries.service_registry.resolve_service(
-                PolicyRegistry
+                RegistryPolicy
             )
         )
 
