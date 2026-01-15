@@ -46,7 +46,9 @@ from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
+    from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
+        DispatcherNodeIntrospected,
+    )
 
 logger = logging.getLogger(__name__)
 
