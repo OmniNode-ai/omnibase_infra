@@ -293,6 +293,9 @@ class PluginRegistration:
 
     async def _load_projector(self, config: ModelDomainPluginConfig) -> None:
         """Load projector from contracts via ProjectorPluginLoader."""
+        from omnibase_infra.runtime.models.model_projector_plugin_loader_config import (
+            ModelProjectorPluginLoaderConfig,
+        )
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -320,9 +323,9 @@ class PluginRegistration:
             return
 
         projector_loader = ProjectorPluginLoader(
+            config=ModelProjectorPluginLoaderConfig(graceful_mode=True),
             container=config.container,
             pool=self._pool,
-            graceful_mode=True,
         )
 
         try:
