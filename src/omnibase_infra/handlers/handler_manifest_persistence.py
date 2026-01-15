@@ -139,7 +139,7 @@ from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.models.model_retry_error_classification import (
     ModelRetryErrorClassification,
 )
-from omnibase_infra.utils import parse_env_int
+from omnibase_infra.utils import parse_env_int, warn_if_naive_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -162,41 +162,6 @@ _SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 HANDLER_ID_MANIFEST_PERSISTENCE: str = "manifest-persistence-handler"
-
-
-def _warn_if_naive_datetime(
-    dt: datetime,
-    field_name: str,
-    correlation_id: UUID,
-) -> None:
-    """Log a warning if the datetime is naive (lacks timezone info).
-
-    This helper supports the timezone awareness policy documented in the module
-    docstring. Naive datetimes are accepted for backwards compatibility but
-    logged as warnings to encourage migration to timezone-aware datetimes.
-
-    Args:
-        dt: The datetime to check.
-        field_name: Name of the field (for logging context).
-        correlation_id: Correlation ID for tracing.
-
-    Note:
-        This is a non-blocking warning. The datetime is still used, but users
-        are alerted that comparisons may behave unexpectedly if mixed with
-        timezone-aware datetimes from stored manifests.
-    """
-    if dt.tzinfo is None:
-        logger.warning(
-            "Naive datetime detected for '%s'. For accurate comparisons, use "
-            "timezone-aware datetimes (e.g., datetime.now(timezone.utc)). "
-            "See module docstring for timezone handling details.",
-            field_name,
-            extra={
-                "field_name": field_name,
-                "datetime_value": dt.isoformat(),
-                "correlation_id": str(correlation_id),
-            },
-        )
 
 
 class HandlerManifestPersistence(
@@ -885,7 +850,9 @@ class HandlerManifestPersistence(
         try:
             if isinstance(created_at_raw, datetime):
                 created_at = created_at_raw
-                _warn_if_naive_datetime(created_at, "created_at", correlation_id)
+                warn_if_naive_datetime(
+                    created_at, field_name="created_at", correlation_id=correlation_id
+                )
             elif isinstance(created_at_raw, str):
                 # Try ISO format parsing (Z suffix converted to +00:00)
                 created_at = datetime.fromisoformat(
@@ -1236,8 +1203,10 @@ class HandlerManifestPersistence(
             try:
                 if isinstance(created_after_raw, datetime):
                     filter_created_after = created_after_raw
-                    _warn_if_naive_datetime(
-                        filter_created_after, "created_after", correlation_id
+                    warn_if_naive_datetime(
+                        filter_created_after,
+                        field_name="created_after",
+                        correlation_id=correlation_id,
                     )
                 elif isinstance(created_after_raw, str):
                     filter_created_after = datetime.fromisoformat(
@@ -1267,8 +1236,10 @@ class HandlerManifestPersistence(
             try:
                 if isinstance(created_before_raw, datetime):
                     filter_created_before = created_before_raw
-                    _warn_if_naive_datetime(
-                        filter_created_before, "created_before", correlation_id
+                    warn_if_naive_datetime(
+                        filter_created_before,
+                        field_name="created_before",
+                        correlation_id=correlation_id,
                     )
                 elif isinstance(created_before_raw, str):
                     filter_created_before = datetime.fromisoformat(
