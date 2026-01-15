@@ -35,7 +35,6 @@ class ModelCaptureConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    # ONEX_EXCLUDE: entity_pattern - corpus_display_name is a user-provided label, not entity reference
     corpus_display_name: str = Field(
         ...,
         min_length=1,

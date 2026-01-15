@@ -44,6 +44,171 @@ class ProtocolManifestPersistence(Protocol):
         ...
 
 
+# =============================================================================
+# Module-Level Helper Functions (extracted to reduce class method count)
+# =============================================================================
+
+
+def _compute_dedupe_hash(
+    manifest: ModelExecutionManifest,
+    strategy: EnumDedupeStrategy,
+) -> str | None:
+    """
+    Compute hash for deduplication based on configured strategy.
+
+    Args:
+        manifest: The manifest to hash.
+        strategy: The deduplication strategy to apply.
+
+    Returns:
+        The hash string, or None if no deduplication.
+
+    Raises:
+        ValueError: If strategy is unknown.
+    """
+    if strategy == EnumDedupeStrategy.NONE:
+        return None
+
+    if strategy == EnumDedupeStrategy.INPUT_HASH:
+        # Hash based on handler identity (input fingerprint)
+        data = (
+            f"{manifest.node_identity.node_id}:{manifest.contract_identity.contract_id}"
+        )
+        return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+    if strategy == EnumDedupeStrategy.FULL_MANIFEST_HASH:
+        # Hash based on manifest content, excluding unique identifiers
+        # (manifest_id, created_at, correlation_id) that would defeat deduplication
+        manifest_data = manifest.model_dump(mode="json")
+        # Remove unique per-execution fields to enable content-based deduplication
+        manifest_data.pop("manifest_id", None)
+        manifest_data.pop("created_at", None)
+        manifest_data.pop("correlation_id", None)
+        # Sort keys for deterministic hashing
+        data = json.dumps(manifest_data, sort_keys=True, default=str)
+        return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+    # Explicit error for unknown strategies - fail fast rather than silently returning None
+    raise ValueError(f"Unknown dedupe strategy: {strategy}")
+
+
+def _create_capture_result(
+    manifest_id: UUID,
+    outcome: EnumCaptureOutcome,
+    start_time: datetime,
+    dedupe_hash: str | None = None,
+    error_message: str | None = None,
+) -> ModelCaptureResult:
+    """
+    Create a capture result with timing.
+
+    Module-level helper to keep parameter count within limits.
+
+    Args:
+        manifest_id: ID of the manifest processed.
+        outcome: Result of the capture attempt.
+        start_time: When capture processing started.
+        dedupe_hash: Hash used for deduplication (if computed).
+        error_message: Error message if capture failed.
+
+    Returns:
+        A ModelCaptureResult with computed duration.
+    """
+    end_time = datetime.now(UTC)
+    duration_ms = (end_time - start_time).total_seconds() * 1000
+    was_captured = outcome == EnumCaptureOutcome.CAPTURED
+
+    return ModelCaptureResult(
+        manifest_id=manifest_id,
+        outcome=outcome,
+        captured_at=end_time if was_captured else None,
+        dedupe_hash=dedupe_hash,
+        duration_ms=duration_ms,
+        error_message=error_message,
+    )
+
+
+# =============================================================================
+# State Machine Helper Class (extracted to reduce service class method count)
+# =============================================================================
+
+
+class CaptureLifecycleFSM:
+    """
+    Internal state machine for capture lifecycle management.
+
+    Encapsulates state transition logic to keep the main service class focused
+    on capture operations.
+
+    Note:
+        This is an internal helper class and should not be imported directly.
+        Use ServiceCorpusCapture as the public API.
+
+    .. versionadded:: 0.5.0
+        Extracted from ServiceCorpusCapture for OMN-1203 refactoring.
+    """
+
+    # Valid state transitions map
+    _VALID_TRANSITIONS: dict[EnumCaptureState, set[EnumCaptureState]] = {
+        EnumCaptureState.IDLE: {EnumCaptureState.READY},
+        EnumCaptureState.READY: {
+            EnumCaptureState.CAPTURING,
+            EnumCaptureState.CLOSED,
+        },
+        EnumCaptureState.CAPTURING: {
+            EnumCaptureState.PAUSED,
+            EnumCaptureState.FULL,
+            EnumCaptureState.CLOSED,
+        },
+        EnumCaptureState.PAUSED: {
+            EnumCaptureState.CAPTURING,
+            EnumCaptureState.CLOSED,
+        },
+        EnumCaptureState.FULL: {EnumCaptureState.CLOSED},
+        EnumCaptureState.CLOSED: set(),  # Terminal state
+    }
+
+    def __init__(self) -> None:
+        """Initialize state machine in IDLE state."""
+        self._state: EnumCaptureState = EnumCaptureState.IDLE
+
+    @property
+    def state(self) -> EnumCaptureState:
+        """Get the current capture state."""
+        return self._state
+
+    @state.setter
+    def state(self, value: EnumCaptureState) -> None:
+        """Set state directly (for internal use in critical sections)."""
+        self._state = value
+
+    def transition_to(self, target: EnumCaptureState) -> None:
+        """
+        Transition to a new state with validation.
+
+        Args:
+            target: The target state to transition to.
+
+        Raises:
+            ValueError: If the transition is not valid.
+        """
+        valid_targets = self._VALID_TRANSITIONS.get(self._state, set())
+        if target not in valid_targets:
+            raise ValueError(
+                f"Invalid state transition: {self._state.value} -> {target.value}"
+            )
+        self._state = target
+
+    def can_capture(self) -> bool:
+        """Check if current state allows capture."""
+        return self._state.can_capture()
+
+
+# =============================================================================
+# Main Service Class
+# =============================================================================
+
+
 class ServiceCorpusCapture:
     """
     Service for capturing production executions into a corpus.
@@ -76,26 +241,6 @@ class ServiceCorpusCapture:
         Added for OMN-1203
     """
 
-    # Cached state transition map for efficient validation
-    _VALID_TRANSITIONS: dict[EnumCaptureState, set[EnumCaptureState]] = {
-        EnumCaptureState.IDLE: {EnumCaptureState.READY},
-        EnumCaptureState.READY: {
-            EnumCaptureState.CAPTURING,
-            EnumCaptureState.CLOSED,
-        },
-        EnumCaptureState.CAPTURING: {
-            EnumCaptureState.PAUSED,
-            EnumCaptureState.FULL,
-            EnumCaptureState.CLOSED,
-        },
-        EnumCaptureState.PAUSED: {
-            EnumCaptureState.CAPTURING,
-            EnumCaptureState.CLOSED,
-        },
-        EnumCaptureState.FULL: {EnumCaptureState.CLOSED},
-        EnumCaptureState.CLOSED: set(),  # Terminal state
-    }
-
     def __init__(
         self,
         persistence: ProtocolManifestPersistence | None = None,
@@ -108,7 +253,7 @@ class ServiceCorpusCapture:
                 If provided, manifests will be persisted via this handler
                 when close_corpus() is called or max_executions is reached.
         """
-        self._state: EnumCaptureState = EnumCaptureState.IDLE
+        self._state_machine = CaptureLifecycleFSM()
         self._config: ModelCaptureConfig | None = None
         self._corpus: ModelExecutionCorpus | None = None
         self._seen_hashes: set[str] = set()
@@ -127,26 +272,7 @@ class ServiceCorpusCapture:
     @property
     def state(self) -> EnumCaptureState:
         """Get the current capture state."""
-        return self._state
-
-    def _transition_state(self, target: EnumCaptureState) -> None:
-        """
-        Transition to a new state with validation.
-
-        Uses the cached class-level transition map for efficient validation.
-
-        Args:
-            target: The target state to transition to.
-
-        Raises:
-            ValueError: If the transition is not valid.
-        """
-        valid_targets = self._VALID_TRANSITIONS.get(self._state, set())
-        if target not in valid_targets:
-            raise ValueError(
-                f"Invalid state transition: {self._state.value} -> {target.value}"
-            )
-        self._state = target
+        return self._state_machine.state
 
     def create_corpus(self, config: ModelCaptureConfig) -> ModelExecutionCorpus:
         """
@@ -161,7 +287,7 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If not in IDLE state.
         """
-        self._transition_state(EnumCaptureState.READY)
+        self._state_machine.transition_to(EnumCaptureState.READY)
         self._config = config
         self._seen_hashes = set()
 
@@ -181,7 +307,7 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If not in READY state.
         """
-        self._transition_state(EnumCaptureState.CAPTURING)
+        self._state_machine.transition_to(EnumCaptureState.CAPTURING)
 
     def pause_capture(self) -> None:
         """
@@ -190,7 +316,7 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If not in CAPTURING state.
         """
-        self._transition_state(EnumCaptureState.PAUSED)
+        self._state_machine.transition_to(EnumCaptureState.PAUSED)
 
     def resume_capture(self) -> None:
         """
@@ -199,7 +325,7 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If not in PAUSED state.
         """
-        self._transition_state(EnumCaptureState.CAPTURING)
+        self._state_machine.transition_to(EnumCaptureState.CAPTURING)
 
     def close_corpus(self) -> ModelExecutionCorpus:
         """
@@ -214,7 +340,7 @@ class ServiceCorpusCapture:
         if self._corpus is None:
             raise ValueError("No corpus to close")
 
-        self._transition_state(EnumCaptureState.CLOSED)
+        self._state_machine.transition_to(EnumCaptureState.CLOSED)
 
         corpus = self._corpus
         self._corpus = None
@@ -248,22 +374,22 @@ class ServiceCorpusCapture:
         start_time = datetime.now(UTC)
 
         # Check state allows capture
-        if self._state == EnumCaptureState.FULL:
-            return self._make_result(
+        if self._state_machine.state == EnumCaptureState.FULL:
+            return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_CORPUS_FULL,
                 start_time,
             )
 
-        if not self._state.can_capture():
-            return self._make_result(
+        if not self._state_machine.can_capture():
+            return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_NOT_CAPTURING,
                 start_time,
             )
 
         if self._config is None or self._corpus is None:
-            return self._make_result(
+            return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_NOT_CAPTURING,
                 start_time,
@@ -272,7 +398,7 @@ class ServiceCorpusCapture:
         # Apply handler filter
         handler_id = manifest.node_identity.node_id
         if not self._config.is_handler_allowed(handler_id):
-            return self._make_result(
+            return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_HANDLER_FILTER,
                 start_time,
@@ -280,7 +406,7 @@ class ServiceCorpusCapture:
 
         # Apply time window filter
         if not self._config.is_in_time_window(manifest.created_at):
-            return self._make_result(
+            return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_TIME_WINDOW,
                 start_time,
@@ -289,28 +415,28 @@ class ServiceCorpusCapture:
         # Apply sample rate filter
         if self._config.sample_rate < 1.0:
             if random.random() > self._config.sample_rate:
-                return self._make_result(
+                return _create_capture_result(
                     manifest.manifest_id,
                     EnumCaptureOutcome.SKIPPED_SAMPLE_RATE,
                     start_time,
                 )
 
         # Apply deduplication - compute hash outside lock (pure computation)
-        dedupe_hash = self._compute_dedupe_hash(manifest)
+        dedupe_hash = _compute_dedupe_hash(manifest, self._config.dedupe_strategy)
 
         # Thread-safe critical section for shared state access
         # Protects: _seen_hashes (check + add), _corpus (update), _state (update)
         with self._sync_lock:
             # Re-check state under lock (may have changed)
-            if self._state == EnumCaptureState.FULL:
-                return self._make_result(
+            if self._state_machine.state == EnumCaptureState.FULL:
+                return _create_capture_result(
                     manifest.manifest_id,
                     EnumCaptureOutcome.SKIPPED_CORPUS_FULL,
                     start_time,
                 )
 
             if dedupe_hash is not None and dedupe_hash in self._seen_hashes:
-                return self._make_result(
+                return _create_capture_result(
                     manifest.manifest_id,
                     EnumCaptureOutcome.SKIPPED_DUPLICATE,
                     start_time,
@@ -319,7 +445,7 @@ class ServiceCorpusCapture:
 
             # Add to corpus (requires _corpus not None, checked above)
             if self._corpus is None:
-                return self._make_result(
+                return _create_capture_result(
                     manifest.manifest_id,
                     EnumCaptureOutcome.SKIPPED_NOT_CAPTURING,
                     start_time,
@@ -334,75 +460,14 @@ class ServiceCorpusCapture:
                 self._config is not None
                 and self._corpus.execution_count >= self._config.max_executions
             ):
-                self._state = EnumCaptureState.FULL
+                self._state_machine.state = EnumCaptureState.FULL
 
-        return self._make_result(
+        return _create_capture_result(
             manifest.manifest_id,
             EnumCaptureOutcome.CAPTURED,
             start_time,
             dedupe_hash=dedupe_hash,
         )
-
-    def _compute_dedupe_hash(self, manifest: ModelExecutionManifest) -> str | None:
-        """
-        Compute hash for deduplication based on configured strategy.
-
-        Args:
-            manifest: The manifest to hash.
-
-        Returns:
-            The hash string, or None if no deduplication.
-        """
-        if self._config is None:
-            return None
-
-        strategy = self._config.dedupe_strategy
-
-        if strategy == EnumDedupeStrategy.NONE:
-            return None
-
-        if strategy == EnumDedupeStrategy.INPUT_HASH:
-            # Hash based on handler identity (input fingerprint)
-            data = f"{manifest.node_identity.node_id}:{manifest.contract_identity.contract_id}"
-            return hashlib.sha256(data.encode()).hexdigest()[:16]
-
-        if strategy == EnumDedupeStrategy.FULL_MANIFEST_HASH:
-            # Hash based on manifest content, excluding unique identifiers
-            # (manifest_id, created_at, correlation_id) that would defeat deduplication
-            manifest_data = manifest.model_dump(mode="json")
-            # Remove unique per-execution fields to enable content-based deduplication
-            manifest_data.pop("manifest_id", None)
-            manifest_data.pop("created_at", None)
-            manifest_data.pop("correlation_id", None)
-            # Sort keys for deterministic hashing
-            data = json.dumps(manifest_data, sort_keys=True, default=str)
-            return hashlib.sha256(data.encode()).hexdigest()[:16]
-
-        return None
-
-    def _make_result(
-        self,
-        manifest_id: UUID,
-        outcome: EnumCaptureOutcome,
-        start_time: datetime,
-        dedupe_hash: str | None = None,
-        error_message: str | None = None,
-    ) -> ModelCaptureResult:
-        """Create a capture result with timing."""
-        end_time = datetime.now(UTC)
-        duration_ms = (end_time - start_time).total_seconds() * 1000
-        was_captured = outcome == EnumCaptureOutcome.CAPTURED
-
-        return ModelCaptureResult(
-            manifest_id=manifest_id,
-            outcome=outcome,
-            captured_at=end_time if was_captured else None,
-            dedupe_hash=dedupe_hash,
-            duration_ms=duration_ms,
-            error_message=error_message,
-        )
-
-    # === Async Capture Methods ===
 
     async def capture_async(
         self,
@@ -458,7 +523,7 @@ class ServiceCorpusCapture:
                 stacklevel=2,
             )
 
-            return self._make_result(
+            return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_TIMEOUT,
                 start_time,
@@ -479,14 +544,12 @@ class ServiceCorpusCapture:
             # Sanitize error message for external exposure - use exception type only
             sanitized_error = f"Capture failed: {type(e).__name__}"
 
-            return self._make_result(
+            return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.FAILED,
                 start_time,
                 error_message=sanitized_error,
             )
-
-    # === Persistence Methods ===
 
     async def flush_to_persistence(self) -> int:
         """
@@ -560,8 +623,6 @@ class ServiceCorpusCapture:
 
         corpus = self.close_corpus()
         return corpus, persisted_count
-
-    # === Metrics ===
 
     def get_metrics(self) -> dict[str, int | float]:
         """
