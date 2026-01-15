@@ -87,6 +87,40 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# Projector Discovery Configuration
+# =============================================================================
+
+
+# Default path for projector contract files, calculated relative to the
+# omnibase_infra package root for robustness (avoids fragile parent counting).
+# This path can be overridden via ONEX_PROJECTOR_CONTRACTS_DIR environment variable.
+#
+# Package structure assumption:
+#   omnibase_infra/
+#     projectors/
+#       contracts/
+#         registration_projector.yaml
+#
+# The default resolves to: <package_root>/projectors/contracts
+def _get_default_projector_contracts_dir() -> Path:
+    """Calculate default projector contracts directory from package root.
+
+    Uses the omnibase_infra package location as the reference point rather than
+    counting parent directories from __file__, making it robust against
+    internal directory restructuring within the package.
+
+    Returns:
+        Path to the projectors/contracts directory within omnibase_infra package.
+    """
+    import omnibase_infra
+
+    package_root = Path(omnibase_infra.__file__).parent
+    return package_root / "projectors" / "contracts"
+
+
+PROJECTOR_CONTRACTS_DEFAULT_DIR = _get_default_projector_contracts_dir()
+
 
 class PluginRegistration:
     """Registration domain plugin for kernel initialization.
@@ -268,10 +302,12 @@ class PluginRegistration:
 
         # Configurable projector contracts directory (supports different deployment layouts)
         # Environment variable allows overriding the default path when package structure differs
+        # Uses PROJECTOR_CONTRACTS_DEFAULT_DIR constant which is calculated from package root
+        # for robustness against internal directory restructuring
         projector_contracts_dir = Path(
             os.getenv(
                 "ONEX_PROJECTOR_CONTRACTS_DIR",
-                str(Path(__file__).parent.parent.parent / "projectors" / "contracts"),
+                str(PROJECTOR_CONTRACTS_DEFAULT_DIR),
             )
         )
 
@@ -642,7 +678,6 @@ class PluginRegistration:
         Returns:
             Result with unsubscribe_callbacks for cleanup.
         """
-        from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
         from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router import (
             IntrospectionEventRouter,
         )
@@ -656,10 +691,12 @@ class PluginRegistration:
                 reason="Introspection dispatcher not available",
             )
 
-        if not isinstance(config.event_bus, KafkaEventBus):
+        # Duck typing: check for subscribe capability rather than concrete type
+        # Per CLAUDE.md: "Protocol Resolution - Duck typing through protocols, never isinstance"
+        if not hasattr(config.event_bus, "subscribe"):
             return ModelDomainPluginResult.skipped(
                 plugin_id=self.plugin_id,
-                reason="Event bus is not KafkaEventBus",
+                reason="Event bus does not support subscribe",
             )
 
         try:
@@ -789,5 +826,6 @@ class PluginRegistration:
 _: ProtocolDomainPlugin = PluginRegistration()
 
 __all__: list[str] = [
+    "PROJECTOR_CONTRACTS_DEFAULT_DIR",
     "PluginRegistration",
 ]

@@ -683,8 +683,11 @@ async def bootstrap() -> int:
                 correlation_id,
                 extra={
                     "resources_created": init_result.resources_created,
+                    # Use explicit None check for type narrowing - wire_result may be
+                    # a failed result (success=False) which is falsy but still has
+                    # valid attributes. We only use [] when wire_result is None.
                     "services_registered": wire_result.services_registered
-                    if wire_result
+                    if wire_result is not None
                     else [],
                 },
             )
@@ -914,10 +917,18 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
             elif not consumer_result:
+                # Use explicit None check for type narrowing - consumer_result may be
+                # a failed result (success=False) which is falsy but still has valid
+                # error_message. We only use "unknown" when consumer_result is None.
+                error_msg = (
+                    consumer_result.error_message
+                    if consumer_result is not None
+                    else "unknown"
+                )
                 logger.warning(
                     "Plugin %s consumer startup failed: %s (correlation_id=%s)",
                     plugin.plugin_id,
-                    consumer_result.error_message if consumer_result else "unknown",
+                    error_msg,
                     correlation_id,
                 )
 
@@ -1061,10 +1072,18 @@ async def bootstrap() -> int:
                         correlation_id,
                     )
                 else:
+                    # Use explicit None check for type narrowing - shutdown_result may
+                    # be a failed result (success=False) which is falsy but still has
+                    # valid error_message. We only use "unknown" when it's None.
+                    error_msg = (
+                        shutdown_result.error_message
+                        if shutdown_result is not None
+                        else "unknown"
+                    )
                     logger.warning(
                         "Plugin %s shutdown failed: %s (correlation_id=%s)",
                         plugin.plugin_id,
-                        shutdown_result.error_message if shutdown_result else "unknown",
+                        error_msg,
                         correlation_id,
                     )
             except Exception as plugin_shutdown_error:
@@ -1164,24 +1183,26 @@ async def bootstrap() -> int:
 
         # Shutdown plugins (close pools, connections, etc.)
         # Use empty config for cleanup - plugins should handle gracefully
-        cleanup_config = ModelDomainPluginConfig(
-            container=ModelONEXContainer(),  # Minimal container for cleanup
-            event_bus=InMemoryEventBus(),  # Minimal event bus for cleanup
-            correlation_id=correlation_id,
-            input_topic="",
-            output_topic="",
-            consumer_group="",
-        )
-        for plugin in reversed(activated_plugins):
-            try:
-                await plugin.shutdown(cleanup_config)
-            except Exception as cleanup_error:
-                logger.warning(
-                    "Failed to shutdown plugin %s during cleanup: %s (correlation_id=%s)",
-                    plugin.plugin_id,
-                    sanitize_error_message(cleanup_error),
-                    correlation_id,
-                )
+        # Only create cleanup config if there are plugins to clean up
+        if activated_plugins:
+            cleanup_config = ModelDomainPluginConfig(
+                container=ModelONEXContainer(),  # Minimal container for cleanup
+                event_bus=InMemoryEventBus(),  # Minimal event bus for cleanup
+                correlation_id=correlation_id,
+                input_topic="",
+                output_topic="",
+                consumer_group="",
+            )
+            for plugin in reversed(activated_plugins):
+                try:
+                    await plugin.shutdown(cleanup_config)
+                except Exception as cleanup_error:
+                    logger.warning(
+                        "Failed to shutdown plugin %s during cleanup: %s (correlation_id=%s)",
+                        plugin.plugin_id,
+                        sanitize_error_message(cleanup_error),
+                        correlation_id,
+                    )
 
 
 def configure_logging() -> None:

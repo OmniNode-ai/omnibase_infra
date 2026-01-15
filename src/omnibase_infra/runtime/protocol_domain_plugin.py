@@ -320,11 +320,60 @@ class ProtocolDomainPlugin(Protocol):
         Called during kernel shutdown. This method should close pools,
         connections, and any other resources created during initialize().
 
+        Shutdown Order (LIFO):
+            Plugins are shut down in **reverse activation order** (Last In, First Out).
+            This ensures plugins activated later are shut down before plugins they may
+            depend on. For example, if plugins A, B, C are activated in order, shutdown
+            order is C, B, A.
+
+        Self-Contained Constraint:
+            **CRITICAL**: Plugins MUST be self-contained during shutdown.
+
+            - Plugins MUST NOT depend on resources from other plugins during shutdown
+            - Each plugin should only clean up its own resources (pools, connections)
+            - If a plugin accesses shared resources, it must handle graceful degradation
+              in case those resources are already released by another plugin
+            - Shutdown errors in one plugin do not block other plugins from shutting down
+
+            This constraint exists because:
+            1. Shutdown order may change as plugins are added/removed
+            2. Other plugins may fail to initialize, leaving resources unavailable
+            3. Exception handling during shutdown should not cascade failures
+
+        Error Handling:
+            Implementations should catch and log errors rather than raising them.
+            The kernel will continue shutting down other plugins even if one fails.
+            Return a failed ModelDomainPluginResult to report errors without blocking.
+
         Args:
-            config: Plugin configuration.
+            config: Plugin configuration. Note that during cleanup after errors,
+                a minimal config may be passed instead of the original config.
 
         Returns:
             Result indicating success/failure of cleanup.
+
+        Example:
+            ```python
+            async def shutdown(
+                self, config: ModelDomainPluginConfig
+            ) -> ModelDomainPluginResult:
+                errors: list[str] = []
+
+                # Close pool - handle graceful degradation
+                if self._pool is not None:
+                    try:
+                        await self._pool.close()
+                    except Exception as e:
+                        errors.append(f"pool: {e}")
+                    self._pool = None  # Always clear reference
+
+                if errors:
+                    return ModelDomainPluginResult.failed(
+                        plugin_id=self.plugin_id,
+                        error_message="; ".join(errors),
+                    )
+                return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
+            ```
         """
         ...
 

@@ -71,6 +71,7 @@ if TYPE_CHECKING:
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
     )
+    from omnibase_infra.nodes.node_registration_orchestrator.wiring import WiringResult
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
     from omnibase_infra.runtime.projector_shell import ProjectorShell
@@ -763,7 +764,7 @@ async def wire_registration_handlers(
     liveness_interval_seconds: int | None = None,
     projector: ProjectorShell | None = None,
     consul_handler: HandlerConsul | None = None,
-) -> dict[str, list[str] | str]:
+) -> WiringResult:
     """Register registration orchestrator handlers with the container.
 
     This function delegates to the Registration domain wiring module,
