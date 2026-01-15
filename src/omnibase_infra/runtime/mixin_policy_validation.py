@@ -131,6 +131,79 @@ class MixinPolicyValidation:
                 policy_class=policy_class.__name__,
             )
 
+        # Validate policy_id attribute value on the class (not just existence)
+        # Note: If policy_id is a property, we can't validate the value at class level
+        # (it's only available on instances). Properties are valid as they follow the
+        # protocol pattern. We only validate if it's a direct class attribute.
+        class_policy_id_attr = getattr(policy_class, "policy_id", None)
+        is_policy_id_property = isinstance(
+            getattr(type(policy_class), "policy_id", None), property
+        ) or isinstance(class_policy_id_attr, property)
+
+        if not is_policy_id_property:
+            # Direct class attribute - validate the value
+            if class_policy_id_attr is None:
+                raise PolicyRegistryError(
+                    f"Policy class {policy_class.__name__!r} has policy_id attribute "
+                    f"but its value is None - must be a non-empty string",
+                    policy_id=policy_id,
+                    policy_class=policy_class.__name__,
+                )
+            if not isinstance(class_policy_id_attr, str):
+                raise PolicyRegistryError(
+                    f"Policy class {policy_class.__name__!r} has policy_id attribute "
+                    f"but its value must be a string, got {type(class_policy_id_attr).__name__}",
+                    policy_id=policy_id,
+                    policy_class=policy_class.__name__,
+                )
+            if not class_policy_id_attr.strip():
+                raise PolicyRegistryError(
+                    f"Policy class {policy_class.__name__!r} has policy_id attribute "
+                    f"but its value is empty - must be a non-empty string",
+                    policy_id=policy_id,
+                    policy_class=policy_class.__name__,
+                )
+
+        # Validate policy_type attribute value on the class (not just existence)
+        # Note: If policy_type is a property, we can't validate the value at class level
+        # (it's only available on instances). Properties are valid as they follow the
+        # protocol pattern. We only validate if it's a direct class attribute.
+        class_policy_type_attr = getattr(policy_class, "policy_type", None)
+        is_policy_type_property = isinstance(
+            getattr(type(policy_class), "policy_type", None), property
+        ) or isinstance(class_policy_type_attr, property)
+
+        if not is_policy_type_property:
+            # Direct class attribute - validate the value
+            if class_policy_type_attr is None:
+                raise PolicyRegistryError(
+                    f"Policy class {policy_class.__name__!r} has policy_type attribute "
+                    f"but its value is None - must be a valid EnumPolicyType",
+                    policy_id=policy_id,
+                    policy_class=policy_class.__name__,
+                )
+            # Accept both EnumPolicyType enum and string values
+            if isinstance(class_policy_type_attr, EnumPolicyType):
+                pass  # Valid enum type
+            elif isinstance(class_policy_type_attr, str):
+                # Validate string against enum values
+                valid_types = {e.value for e in EnumPolicyType}
+                if class_policy_type_attr not in valid_types:
+                    raise PolicyRegistryError(
+                        f"Policy class {policy_class.__name__!r} has invalid policy_type "
+                        f"value: {class_policy_type_attr!r}. Must be one of: {sorted(valid_types)}",
+                        policy_id=policy_id,
+                        policy_class=policy_class.__name__,
+                    )
+            else:
+                raise PolicyRegistryError(
+                    f"Policy class {policy_class.__name__!r} has policy_type attribute "
+                    f"but its value must be EnumPolicyType or string, "
+                    f"got {type(class_policy_type_attr).__name__}",
+                    policy_id=policy_id,
+                    policy_class=policy_class.__name__,
+                )
+
         # Check evaluate() method exists
         if not has_evaluate:
             raise PolicyRegistryError(

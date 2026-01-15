@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""ModelPolicyKey - Strongly-typed policy registry key.
+"""ModelPolicyKey - Strongly-typed RegistryPolicy key.
 
-Defines ModelPolicyKey for policy registry dict operations.
+Defines ModelPolicyKey for RegistryPolicy dict operations.
 Replaces primitive tuple[str, str, str] pattern with named fields.
 """
 

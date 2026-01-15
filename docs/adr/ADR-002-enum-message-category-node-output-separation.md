@@ -50,7 +50,7 @@ We separated the concerns into two distinct enums:
 
 ### EnumMessageCategory (Routing)
 
-Location: `omnibase_infra/enums/enum_message_category.py`
+Location: `src/omnibase_infra/enums/enum_message_category.py`
 
 ```python
 class EnumMessageCategory(str, Enum):
@@ -69,7 +69,7 @@ class EnumMessageCategory(str, Enum):
 
 ### EnumNodeOutputType (Validation)
 
-Location: `omnibase_infra/enums/enum_node_output_type.py`
+Location: `src/omnibase_infra/enums/enum_node_output_type.py`
 
 ```python
 class EnumNodeOutputType(str, Enum):

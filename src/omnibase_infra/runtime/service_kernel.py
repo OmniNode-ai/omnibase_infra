@@ -80,7 +80,10 @@ from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.introspection_event_router import (
     IntrospectionEventRouter,
 )
-from omnibase_infra.runtime.models import ModelRuntimeConfig
+from omnibase_infra.runtime.models import (
+    ModelProjectorPluginLoaderConfig,
+    ModelRuntimeConfig,
+)
 from omnibase_infra.runtime.projector_plugin_loader import (
     ProjectorPluginLoader,
     ProjectorShell,
@@ -492,7 +495,8 @@ async def bootstrap() -> int:
 
         if use_kafka:
             # Use EventBusKafka for production/integration testing
-            # bootstrap_servers is guaranteed non-empty at this point due to validation above
+            # NOTE: bootstrap_servers is guaranteed non-empty at this point due to validation
+            # above, but mypy cannot narrow the Optional[str] type through control flow.
             kafka_config = ModelKafkaEventBusConfig(
                 bootstrap_servers=kafka_bootstrap_servers,  # type: ignore[arg-type]
                 environment=environment,
@@ -673,9 +677,9 @@ async def bootstrap() -> int:
 
                 # Try to discover projectors from contracts
                 projector_loader = ProjectorPluginLoader(
+                    config=ModelProjectorPluginLoaderConfig(graceful_mode=True),
                     container=container,
                     pool=postgres_pool,
-                    graceful_mode=True,  # Continue on errors during discovery
                 )
 
                 discovered_projectors: list[ProtocolEventProjector] = []

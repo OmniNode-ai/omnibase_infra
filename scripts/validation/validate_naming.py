@@ -157,6 +157,9 @@ INFRA_ALLOWED_FILES: frozenset[str] = frozenset(
     }
 )
 
+# Maximum file size to validate (10 MB) - prevents memory issues with large files
+MAX_FILE_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MB
+
 # PERFORMANCE: Combined set of all allowed files for single O(1) lookup
 # Merges both omnibase_core's ALLOWED_FILES and INFRA_ALLOWED_FILES
 _ALL_ALLOWED_FILES: frozenset[str] = INFRA_ALLOWED_FILES | frozenset(ALLOWED_FILES)
@@ -349,6 +352,7 @@ class InfraNamingConventionValidator:
         "handlers/": [
             "Handler*",  # All Handler classes
             "Adapter*",  # Adapter classes in handlers/mcp/
+            "*Adapter",  # Legacy adapter classes (ONEXToMCPAdapter)
         ],
         # Dispatchers directory allows Dispatcher* prefix
         "dispatchers/": [
@@ -383,6 +387,7 @@ class InfraNamingConventionValidator:
         "effects/": [
             "Store*",  # Store effect classes
             "Registry*",  # Registry effect classes
+            "InMemory*",  # Legacy InMemory store classes
         ],
         # DLQ directory
         "dlq/": [
@@ -407,6 +412,10 @@ class InfraNamingConventionValidator:
         # PERFORMANCE: Cache all Python files found during directory scan
         # Avoids multiple rglob calls for different categories
         self._all_python_files: list[Path] | None = None
+        # Track files skipped due to size limit (path, size_in_bytes)
+        self._skipped_large_files: list[tuple[Path, int]] = []
+        # Track which (file, category) pairs have been validated to prevent duplicates
+        self._validated_file_categories: set[tuple[Path, str]] = set()
 
     def check_file_name(self, file_path: Path) -> tuple[str | None, str]:
         """Check if a file name conforms to omnibase_infra naming conventions.
@@ -506,6 +515,17 @@ class InfraNamingConventionValidator:
                     continue
                 # Skip symbolic links
                 if file_path.is_symlink():
+                    continue
+                # Skip files exceeding size limit to prevent memory issues
+                try:
+                    file_size = file_path.stat().st_size
+                    if file_size > MAX_FILE_SIZE_BYTES:
+                        self._skipped_large_files.append(
+                            (file_path.resolve(), file_size)
+                        )
+                        continue
+                except OSError:
+                    # If we can't stat the file, skip it
                     continue
                 # Store resolved paths for proper deduplication
                 self._all_python_files.append(file_path.resolve())
@@ -686,7 +706,14 @@ class InfraNamingConventionValidator:
             - Uses cached parsed file info from _get_parsed_file_info()
             - Each file is read and parsed only once across all categories
             - Class definitions are pre-extracted during parsing
+            - Tracks (file, category) pairs to prevent duplicate validations
         """
+        # Prevent duplicate validation of the same file for the same category
+        validation_key = (file_path, category)
+        if validation_key in self._validated_file_categories:
+            return
+        self._validated_file_categories.add(validation_key)
+
         # PERFORMANCE: Use cached parsed info instead of re-reading file
         file_info = self._get_parsed_file_info(file_path)
 
@@ -904,7 +931,7 @@ class InfraNamingConventionValidator:
         Returns:
             Formatted string report with violation details.
         """
-        if not self.violations:
+        if not self.violations and not self._skipped_large_files:
             return "All naming conventions are compliant!"
 
         errors = [v for v in self.violations if v.severity == "error"]
@@ -913,7 +940,19 @@ class InfraNamingConventionValidator:
         report = "Naming Convention Validation Report\n"
         report += "=" * 50 + "\n\n"
 
-        report += f"Summary: {len(errors)} errors, {len(warnings)} warnings\n\n"
+        report += f"Summary: {len(errors)} errors, {len(warnings)} warnings"
+        if self._skipped_large_files:
+            report += f", {len(self._skipped_large_files)} files skipped (too large)"
+        report += "\n\n"
+
+        # Report skipped large files
+        if self._skipped_large_files:
+            report += "SKIPPED FILES (exceeding size limit):\n"
+            report += "-" * 40 + "\n"
+            for file_path, size in self._skipped_large_files:
+                size_mb = size / (1024 * 1024)
+                report += f"  {file_path} ({size_mb:.2f} MB)\n"
+            report += "\n"
 
         if errors:
             report += "NAMING ERRORS (Must Fix):\n"
@@ -1088,11 +1127,16 @@ Class Naming Conventions:
     if args.json:
         import json
 
+        # Get count of skipped large files
+        skipped_files_count = len(validator._skipped_large_files)
+
         output = {
             "path": str(repo_path),
             "errors": errors,
             "warnings": warnings,
             "ast_issues": ast_count,
+            "skipped_files": skipped_files_count,
+            "max_file_size_bytes": MAX_FILE_SIZE_BYTES,
             "violations": [
                 {
                     "file_path": v.file_path,
@@ -1105,11 +1149,17 @@ Class Naming Conventions:
                 for v in validator.violations
                 if not args.errors_only or v.severity == "error"
             ],
-            # IMPORTANT: 'passed' mirrors the script exit code logic exactly:
-            # - True (exit 0): No errors, no AST issues, and either no warnings
-            #   or --fail-on-warnings not set
-            # - False (exit 1): Any errors, AST issues, or warnings with
-            #   --fail-on-warnings set
+            # IMPORTANT: 'passed' mirrors the script exit code logic exactly.
+            # The exit code is determined by has_failures (line ~1122):
+            #   has_failures = errors > 0 or ast_count > 0 or
+            #                  (args.fail_on_warnings and warnings > 0)
+            # Therefore:
+            # - passed=True  (exit 0): No errors, no AST issues, and either
+            #   no warnings or --fail-on-warnings not set
+            # - passed=False (exit 1): Any errors, AST issues, or warnings
+            #   with --fail-on-warnings set
+            # Note: Skipped large files do NOT affect pass/fail status - they
+            # are informational only (the file is simply not validated).
             "passed": not has_failures,
         }
         print(json.dumps(output, indent=2))

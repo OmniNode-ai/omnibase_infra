@@ -139,12 +139,14 @@ class MixinAnyTypeExemption:
             MixinAnyTypeClassification and the main class respectively.
         """
         # Check if value is a Field() call
-        # _is_field_call is provided by MixinAnyTypeClassification
+        # NOTE: _is_field_call is provided by MixinAnyTypeClassification via multiple
+        # inheritance. Mypy cannot verify mixin method availability at static analysis.
         if node.value is None or not self._is_field_call(node.value):  # type: ignore[attr-defined]
             return False
 
         # Check if annotation contains Any
-        # _contains_any is provided by the main class
+        # NOTE: _contains_any is provided by the main class via multiple inheritance.
+        # Mypy cannot verify method availability in mixin composition.
         if not self._contains_any(node.annotation):  # type: ignore[attr-defined]
             return False
 

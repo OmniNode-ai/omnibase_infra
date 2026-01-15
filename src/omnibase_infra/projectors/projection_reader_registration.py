@@ -294,7 +294,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -377,7 +377,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -460,7 +460,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -562,7 +562,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -668,7 +668,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -754,7 +754,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -866,7 +866,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -968,7 +968,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -1098,7 +1098,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -1199,7 +1199,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -1301,7 +1301,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -1420,7 +1420,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
@@ -1541,7 +1541,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                     operation=ctx.operation,
                     target_name=ctx.target_name,
                     correlation_id=ctx.correlation_id,
-                    timeout_seconds=0.0,  # Timeout value not available in this context
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
                 ),
             ) from e
 
