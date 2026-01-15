@@ -1539,17 +1539,16 @@ pattern_exemptions:
     documentation:
       - src/omnibase_infra/runtime/handler_contract_source.py (reference pattern)
     ticket: OMN-1168
-  # ProjectorPluginLoader __init__ requires 6 parameters for configuration and DI
   - file_pattern: 'projector_plugin_loader\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
-      ProjectorPluginLoader.__init__ requires multiple parameters for complete configuration: base_path for discovery root, allowed_namespaces for security allowlisting, protocol_class for projector protocol validation, plus standard config and logger injection. Mirrors HandlerPluginLoader pattern.
+      ProjectorPluginLoader.__init__ requires multiple configuration parameters for security controls (allowed_namespaces), observability (correlation_id), and plugin discovery settings. Mirrors HandlerPluginLoader pattern which has similar constructor signature.
 
     documentation:
       - src/omnibase_infra/runtime/handler_plugin_loader.py (reference pattern)
       - docs/patterns/handler_plugin_loader.md (security model)
-    ticket: OMN-1246
+    ticket: OMN-1316
   # ==========================================================================
   # ProjectorShell Exemptions (OMN-1169)
   # ==========================================================================

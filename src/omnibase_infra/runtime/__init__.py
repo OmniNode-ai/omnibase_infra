@@ -131,17 +131,11 @@ from omnibase_infra.runtime.util_container_wiring import (
     wire_registration_handlers,
 )
 
-# Registration dispatchers (OMN-892)
-from omnibase_infra.runtime.dispatchers import (
-    DispatcherNodeIntrospected,
-    DispatcherNodeRegistrationAcked,
-    DispatcherRuntimeTick,
-)
-
-# Introspection event router (PR #101)
-from omnibase_infra.runtime.introspection_event_router import (
-    IntrospectionEventRouter,
-)
+# NOTE: Registration dispatchers (DispatcherNodeIntrospected, DispatcherRuntimeTick,
+# DispatcherNodeRegistrationAcked) and IntrospectionEventRouter moved to registration
+# domain (OMN-1346). Import directly from:
+#   omnibase_infra.nodes.node_registration_orchestrator.dispatchers
+#   omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router
 
 # Handler plugin loader (OMN-1132)
 from omnibase_infra.runtime.handler_plugin_loader import (
@@ -272,12 +266,8 @@ __all__: list[str] = [
     "wire_infrastructure_services",
     "wire_registration_handlers",
     "wire_registration_dispatchers",
-    # Registration dispatchers (OMN-892)
-    "DispatcherNodeIntrospected",
-    "DispatcherRuntimeTick",
-    "DispatcherNodeRegistrationAcked",
-    # Introspection event router (PR #101)
-    "IntrospectionEventRouter",
+    # NOTE: DispatcherNodeIntrospected, DispatcherRuntimeTick, DispatcherNodeRegistrationAcked,
+    # and IntrospectionEventRouter moved to registration domain (OMN-1346)
     # Handler plugin loader (OMN-1132)
     "CONTRACT_YAML_FILENAME",
     "HANDLER_CONTRACT_FILENAME",
