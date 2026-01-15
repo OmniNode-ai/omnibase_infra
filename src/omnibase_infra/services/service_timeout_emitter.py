@@ -39,13 +39,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
-from omnibase_infra.projectors.projector_registration import ProjectorRegistration
 from omnibase_infra.services.service_timeout_scanner import ServiceTimeoutScanner
 
 if TYPE_CHECKING:
     # Import protocols inside TYPE_CHECKING to avoid circular imports.
     # ProtocolEventBus is used only for type annotations.
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+
+    from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +262,7 @@ class ServiceTimeoutEmitter:
         self,
         timeout_query: ServiceTimeoutScanner,
         event_bus: ProtocolEventBus,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         config: ModelTimeoutEmissionConfig | None = None,
     ) -> None:
         """Initialize with required dependencies.
@@ -271,8 +272,8 @@ class ServiceTimeoutEmitter:
                 Must be initialized with a ProjectionReaderRegistration.
             event_bus: Event bus for publishing timeout events.
                 Must implement ProtocolEventBus (publish_envelope method).
-            projector: Projector for updating emission markers.
-                Must be initialized with an asyncpg connection pool.
+            projector: ProjectorShell for updating emission markers.
+                Should be loaded from the registration projector contract.
             config: Configuration for environment and namespace.
                 Defaults to ModelTimeoutEmissionConfig() if not provided.
 
@@ -280,7 +281,7 @@ class ServiceTimeoutEmitter:
             >>> reader = ProjectionReaderRegistration(pool)
             >>> timeout_query = ServiceTimeoutScanner(reader)
             >>> bus = KafkaEventBus.default()
-            >>> projector = ProjectorRegistration(pool)
+            >>> projector = projector_loader.load("registration_projector")
             >>> emitter = ServiceTimeoutEmitter(
             ...     timeout_query=timeout_query,
             ...     event_bus=bus,
@@ -574,10 +575,12 @@ class ServiceTimeoutEmitter:
         # 3. Update emission marker atomically
         # This MUST happen AFTER successful publish to ensure exactly-once semantics
         # Uses atomic marker update to avoid race conditions with concurrent updates
-        await self._projector.update_ack_timeout_marker(
-            entity_id=projection.entity_id,
-            domain=projection.domain,
-            emitted_at=detected_at,
+        await self._projector.partial_update(
+            aggregate_id=projection.entity_id,
+            updates={
+                "ack_timeout_emitted_at": detected_at,
+                "updated_at": detected_at,
+            },
             correlation_id=correlation_id,
         )
 
@@ -661,10 +664,12 @@ class ServiceTimeoutEmitter:
         # 3. Update emission marker atomically
         # This MUST happen AFTER successful publish to ensure exactly-once semantics
         # Uses atomic marker update to avoid race conditions with concurrent updates
-        await self._projector.update_liveness_timeout_marker(
-            entity_id=projection.entity_id,
-            domain=projection.domain,
-            emitted_at=detected_at,
+        await self._projector.partial_update(
+            aggregate_id=projection.entity_id,
+            updates={
+                "liveness_timeout_emitted_at": detected_at,
+                "updated_at": detected_at,
+            },
             correlation_id=correlation_id,
         )
 

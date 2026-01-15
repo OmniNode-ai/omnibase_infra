@@ -9,7 +9,6 @@ entity state.
 
 Exports:
     ProjectionReaderRegistration: Registration projection reader implementation
-    ProjectorRegistration: Registration projector implementation
     SnapshotPublisherRegistration: Registration snapshot publisher for Kafka
 
 Related Tickets:
@@ -21,13 +20,11 @@ Related Tickets:
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
-from omnibase_infra.projectors.projector_registration import ProjectorRegistration
 from omnibase_infra.projectors.snapshot_publisher_registration import (
     SnapshotPublisherRegistration,
 )
 
 __all__ = [
     "ProjectionReaderRegistration",
-    "ProjectorRegistration",
     "SnapshotPublisherRegistration",
 ]

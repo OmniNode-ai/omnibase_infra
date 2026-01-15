@@ -71,11 +71,9 @@ if TYPE_CHECKING:
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
     )
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+    from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 # Default semantic version for infrastructure components (from omnibase_core)
 SEMVER_DEFAULT = ModelSemVer.parse("1.0.0")
@@ -763,7 +761,7 @@ async def wire_registration_handlers(
     container: ModelONEXContainer,
     pool: asyncpg.Pool,
     liveness_interval_seconds: int | None = None,
-    projector: ProjectorRegistration | None = None,
+    projector: ProjectorShell | None = None,
     consul_handler: HandlerConsul | None = None,
 ) -> dict[str, list[str] | str]:
     """Register registration orchestrator handlers with the container.
@@ -782,10 +780,11 @@ async def wire_registration_handlers(
         pool: asyncpg connection pool for database access.
         liveness_interval_seconds: Liveness deadline interval for ack handler.
             If None, uses ONEX_LIVENESS_INTERVAL_SECONDS env var or default (60s).
-        projector: Optional ProjectorRegistration for persisting state transitions.
+        projector: Optional ProjectorShell for persisting state transitions.
             If provided, HandlerNodeIntrospected will persist projections to the
-            database. If None, the handler operates in read-only mode (useful for
-            testing or when projection persistence is handled elsewhere).
+            database using ProjectorShell.partial_update() and upsert_partial().
+            If None, the handler operates in read-only mode (useful for testing
+            or when projection persistence is handled elsewhere).
         consul_handler: Optional HandlerConsul for dual registration with Consul.
             If provided, HandlerNodeIntrospected will register nodes with Consul
             for service discovery. If None, only PostgreSQL registration occurs.
@@ -801,11 +800,14 @@ async def wire_registration_handlers(
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
+        >>> from omnibase_infra.runtime.projector_shell import ProjectorShell
+        >>> from omnibase_infra.runtime.projector_plugin_loader import ProjectorPluginLoader
         >>> import asyncpg
         >>> container = ModelONEXContainer()
         >>> pool = await asyncpg.create_pool(dsn)
-        >>> projector = ProjectorRegistration(pool)
-        >>> await projector.initialize_schema()
+        >>> # Load projector from contract
+        >>> loader = ProjectorPluginLoader()
+        >>> projector = await loader.load_from_contract("registration_projector", pool)
         >>> summary = await wire_registration_handlers(container, pool, projector=projector)
         >>> print(summary)
         {'services': ['ProjectionReaderRegistration', 'HandlerNodeIntrospected', ...], 'status': 'success'}
@@ -829,10 +831,8 @@ async def wire_registration_handlers(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_registration_acked import (
         get_liveness_interval_seconds,
     )
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime.projector_shell import ProjectorShell
 
     # Resolve the actual liveness interval (from param, env var, or default)
     resolved_liveness_interval = get_liveness_interval_seconds(
@@ -860,10 +860,10 @@ async def wire_registration_handlers(
             "Registered ProjectionReaderRegistration in container (global scope)"
         )
 
-        # 1.5. Register ProjectorRegistration if provided
+        # 1.5. Register ProjectorShell if provided
         if projector is not None:
             await container.service_registry.register_instance(
-                interface=ProjectorRegistration,
+                interface=ProjectorShell,
                 instance=projector,
                 scope="global",
                 metadata={
@@ -871,8 +871,8 @@ async def wire_registration_handlers(
                     "version": str(SEMVER_DEFAULT),
                 },
             )
-            services_registered.append("ProjectorRegistration")
-            logger.debug("Registered ProjectorRegistration in container (global scope)")
+            services_registered.append("ProjectorShell")
+            logger.debug("Registered ProjectorShell in container (global scope)")
 
         # 2. Register HandlerNodeIntrospected (with projector and consul_handler if available)
         handler_introspected = HandlerNodeIntrospected(

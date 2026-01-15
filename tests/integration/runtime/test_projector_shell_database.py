@@ -1040,6 +1040,221 @@ class TestErrorHandling:
 
 
 # =============================================================================
+# Partial Update Tests (Real Database)
+# =============================================================================
+
+
+class TestPartialUpdate:
+    """Tests for partial_update with real database operations.
+
+    These tests verify that partial_update correctly updates specific columns
+    without requiring full event-driven projection.
+    """
+
+    async def test_partial_update_returns_true_when_row_exists(
+        self,
+        db_pool: asyncpg.Pool,
+        test_table: str,
+    ) -> None:
+        """partial_update returns True when row is found and updated.
+
+        Given: Projected event in test table
+        When: partial_update() called with valid aggregate_id
+        Then: Returns True and updates the specified columns
+        """
+        contract = _make_contract(test_table, mode="upsert")
+        projector = ProjectorShell(contract=contract, pool=db_pool)
+
+        # First, project an event to create the row
+        envelope = _make_event_envelope(status="pending", total_amount=100.0)
+        order_id = envelope.payload.order_id
+        correlation_id = uuid4()
+        await projector.project(envelope, correlation_id)
+
+        # Now perform partial update
+        result = await projector.partial_update(
+            aggregate_id=order_id,
+            updates={"status": "confirmed", "amount": 150.0},
+            correlation_id=correlation_id,
+        )
+
+        assert result is True
+
+        # Verify the database was updated
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f'SELECT status, amount FROM "{test_table}" WHERE id = $1',
+                order_id,
+            )
+
+        assert row is not None
+        assert row["status"] == "confirmed"
+        assert float(row["amount"]) == 150.0
+
+    async def test_partial_update_returns_false_when_row_not_found(
+        self,
+        db_pool: asyncpg.Pool,
+        test_table: str,
+    ) -> None:
+        """partial_update returns False when no row matches.
+
+        Given: Empty test table
+        When: partial_update() called with non-existent aggregate_id
+        Then: Returns False (no row updated)
+        """
+        contract = _make_contract(test_table, mode="upsert")
+        projector = ProjectorShell(contract=contract, pool=db_pool)
+
+        non_existent_id = uuid4()
+        correlation_id = uuid4()
+
+        result = await projector.partial_update(
+            aggregate_id=non_existent_id,
+            updates={"status": "confirmed"},
+            correlation_id=correlation_id,
+        )
+
+        assert result is False
+
+        # Verify no row was inserted
+        async with db_pool.acquire() as conn:
+            count = await conn.fetchval(f'SELECT COUNT(*) FROM "{test_table}"')
+
+        assert count == 0
+
+    async def test_partial_update_single_column(
+        self,
+        db_pool: asyncpg.Pool,
+        test_table: str,
+    ) -> None:
+        """partial_update works with single column (like timeout markers).
+
+        Given: Projected event in test table
+        When: partial_update() called with single column update
+        Then: Only that column is updated, others remain unchanged
+        """
+        contract = _make_contract(test_table, mode="upsert")
+        projector = ProjectorShell(contract=contract, pool=db_pool)
+
+        # Create the row
+        envelope = _make_event_envelope(status="pending", total_amount=100.0)
+        order_id = envelope.payload.order_id
+        correlation_id = uuid4()
+        await projector.project(envelope, correlation_id)
+
+        # Update only status
+        result = await projector.partial_update(
+            aggregate_id=order_id,
+            updates={"status": "shipped"},
+            correlation_id=correlation_id,
+        )
+
+        assert result is True
+
+        # Verify only status changed, amount unchanged
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f'SELECT status, amount FROM "{test_table}" WHERE id = $1',
+                order_id,
+            )
+
+        assert row is not None
+        assert row["status"] == "shipped"
+        assert float(row["amount"]) == 100.0  # Unchanged
+
+    async def test_partial_update_with_timestamp(
+        self,
+        db_pool: asyncpg.Pool,
+        test_table: str,
+    ) -> None:
+        """partial_update handles timestamp columns correctly.
+
+        Given: Projected event in test table
+        When: partial_update() called with updated_at timestamp
+        Then: Timestamp is correctly stored in database
+        """
+        contract = _make_contract(test_table, mode="upsert")
+        projector = ProjectorShell(contract=contract, pool=db_pool)
+
+        # Create the row
+        envelope = _make_event_envelope(status="pending")
+        order_id = envelope.payload.order_id
+        correlation_id = uuid4()
+        await projector.project(envelope, correlation_id)
+
+        # Update with timestamp
+        now = datetime.now(UTC)
+        result = await projector.partial_update(
+            aggregate_id=order_id,
+            updates={"updated_at": now},
+            correlation_id=correlation_id,
+        )
+
+        assert result is True
+
+        # Verify timestamp was stored
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f'SELECT updated_at FROM "{test_table}" WHERE id = $1',
+                order_id,
+            )
+
+        assert row is not None
+        assert row["updated_at"] is not None
+        # Compare timestamps (accounting for timezone normalization)
+        stored_ts = row["updated_at"]
+        assert abs((stored_ts - now).total_seconds()) < 1.0
+
+    async def test_partial_update_preserves_other_columns(
+        self,
+        db_pool: asyncpg.Pool,
+        test_table: str,
+    ) -> None:
+        """partial_update does not affect columns not in updates dict.
+
+        Given: Row with multiple columns populated
+        When: partial_update() called with subset of columns
+        Then: Other columns retain their original values
+        """
+        contract = _make_contract(test_table, mode="upsert")
+        projector = ProjectorShell(contract=contract, pool=db_pool)
+
+        # Create the row with specific values
+        envelope = _make_event_envelope(status="pending", total_amount=99.99)
+        order_id = envelope.payload.order_id
+        correlation_id = uuid4()
+        await projector.project(envelope, correlation_id)
+
+        # Get original created_at
+        async with db_pool.acquire() as conn:
+            original_row = await conn.fetchrow(
+                f'SELECT created_at, amount FROM "{test_table}" WHERE id = $1',
+                order_id,
+            )
+
+        original_created_at = original_row["created_at"]
+        original_amount = original_row["amount"]
+
+        # Update only status
+        await projector.partial_update(
+            aggregate_id=order_id,
+            updates={"status": "confirmed"},
+            correlation_id=correlation_id,
+        )
+
+        # Verify other columns unchanged
+        async with db_pool.acquire() as conn:
+            updated_row = await conn.fetchrow(
+                f'SELECT status, created_at, amount FROM "{test_table}" WHERE id = $1',
+                order_id,
+            )
+
+        assert updated_row["status"] == "confirmed"
+        assert updated_row["created_at"] == original_created_at
+        assert updated_row["amount"] == original_amount
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
@@ -1048,6 +1263,7 @@ __all__ = [
     "TestErrorHandling",
     "TestEventFiltering",
     "TestIdempotency",
+    "TestPartialUpdate",
     "TestProjectionModes",
     "TestStateRetrieval",
     "TestValueExtraction",

@@ -467,11 +467,12 @@ class TestHandlerNodeIntrospectedTimezoneValidation:
 
 
 def create_mock_projector() -> AsyncMock:
-    """Create a mock ProjectorRegistration."""
-    from omnibase_infra.projectors import ProjectorRegistration
+    """Create a mock ProjectorShell."""
+    from omnibase_infra.runtime.projector_shell import ProjectorShell
 
-    mock = AsyncMock(spec=ProjectorRegistration)
-    mock.persist_state_transition = AsyncMock(return_value=True)
+    mock = AsyncMock(spec=ProjectorShell)
+    mock.upsert_partial = AsyncMock(return_value=True)
+    mock.partial_update = AsyncMock(return_value=True)
     return mock
 
 
@@ -506,16 +507,23 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
         # Should have called projector to persist state transition
-        mock_projector.persist_state_transition.assert_called_once()
+        mock_projector.upsert_partial.assert_called_once()
 
         # Verify correct parameters were passed
-        call_kwargs = mock_projector.persist_state_transition.call_args[1]
-        assert call_kwargs["entity_id"] == node_id
-        assert call_kwargs["domain"] == "registration"
-        assert call_kwargs["new_state"] == EnumRegistrationState.PENDING_REGISTRATION
-        assert call_kwargs["node_type"] == "effect"
-        assert call_kwargs["now"] == TEST_NOW
+        call_kwargs = mock_projector.upsert_partial.call_args[1]
+        assert call_kwargs["aggregate_id"] == node_id
         assert call_kwargs["correlation_id"] == correlation_id
+        assert call_kwargs["conflict_columns"] == ["entity_id", "domain"]
+
+        # Verify values dict contains expected fields
+        values = call_kwargs["values"]
+        assert values["entity_id"] == node_id
+        assert values["domain"] == "registration"
+        assert (
+            values["current_state"] == EnumRegistrationState.PENDING_REGISTRATION.value
+        )
+        assert values["node_type"] == "effect"
+        assert values["updated_at"] == TEST_NOW
 
     @pytest.mark.asyncio
     async def test_does_not_persist_when_no_projector(self) -> None:
@@ -586,9 +594,11 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         await handler.handle(envelope)
 
         # Verify capabilities were passed to projector
-        call_kwargs = mock_projector.persist_state_transition.call_args[1]
-        assert call_kwargs["capabilities"] == capabilities
-        assert str(call_kwargs["node_version"]) == "2.0.0"
+        call_kwargs = mock_projector.upsert_partial.call_args[1]
+        values = call_kwargs["values"]
+        # Capabilities are serialized to JSON string
+        assert values["capabilities"] == capabilities.model_dump_json()
+        assert values["node_version"] == "2.0.0"
 
     @pytest.mark.asyncio
     async def test_projection_calculates_ack_deadline(self) -> None:
@@ -612,9 +622,10 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         await handler.handle(envelope)
 
         # Verify ack_deadline was calculated
-        call_kwargs = mock_projector.persist_state_transition.call_args[1]
+        call_kwargs = mock_projector.upsert_partial.call_args[1]
+        values = call_kwargs["values"]
         expected_deadline = TEST_NOW + timedelta(seconds=ack_timeout_seconds)
-        assert call_kwargs["ack_deadline"] == expected_deadline
+        assert values["ack_deadline"] == expected_deadline
 
     @pytest.mark.asyncio
     async def test_default_ack_timeout(self) -> None:
@@ -636,9 +647,10 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         await handler.handle(envelope)
 
         # Verify default ack_deadline (30 seconds)
-        call_kwargs = mock_projector.persist_state_transition.call_args[1]
+        call_kwargs = mock_projector.upsert_partial.call_args[1]
+        values = call_kwargs["values"]
         expected_deadline = TEST_NOW + timedelta(seconds=30.0)
-        assert call_kwargs["ack_deadline"] == expected_deadline
+        assert values["ack_deadline"] == expected_deadline
 
     @pytest.mark.asyncio
     async def test_does_not_persist_for_blocking_states(self) -> None:
@@ -669,7 +681,7 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         assert len(output.events) == 0
 
         # Should NOT call projector
-        mock_projector.persist_state_transition.assert_not_called()
+        mock_projector.upsert_partial.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_persists_for_retriable_states(self) -> None:
@@ -704,9 +716,12 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
         # Should persist projection for re-registration
-        mock_projector.persist_state_transition.assert_called_once()
-        call_kwargs = mock_projector.persist_state_transition.call_args[1]
-        assert call_kwargs["new_state"] == EnumRegistrationState.PENDING_REGISTRATION
+        mock_projector.upsert_partial.assert_called_once()
+        call_kwargs = mock_projector.upsert_partial.call_args[1]
+        values = call_kwargs["values"]
+        assert (
+            values["current_state"] == EnumRegistrationState.PENDING_REGISTRATION.value
+        )
 
 
 def create_mock_consul_handler() -> AsyncMock:
@@ -916,5 +931,5 @@ class TestHandlerNodeIntrospectedConsulRegistration:
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
         # Both PostgreSQL and Consul should be called
-        mock_projector.persist_state_transition.assert_called_once()
+        mock_projector.upsert_partial.assert_called_once()
         mock_consul.execute.assert_called_once()

@@ -59,10 +59,8 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
 if TYPE_CHECKING:
     import asyncpg
 
-    from omnibase_infra.projectors import (
-        ProjectionReaderRegistration,
-        ProjectorRegistration,
-    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import ProjectorShell
 
 # Test markers
 pytestmark = [
@@ -190,20 +188,45 @@ def make_sequence(
 
 
 async def seed_projection(
-    projector: ProjectorRegistration,
+    projector: ProjectorShell,
     projection: ModelRegistrationProjection,
 ) -> None:
     """Seed the database with a projection for testing.
 
     Args:
-        projector: Projector instance for persistence.
+        projector: ProjectorShell instance for persistence.
         projection: Projection to seed.
     """
-    result = await projector.persist(
-        projection=projection,
-        entity_id=projection.entity_id,
-        domain=projection.domain,
-        sequence_info=make_sequence(projection.last_applied_offset or 100),
+    # Convert projection to values dict for upsert_partial
+    values: dict[str, object] = {
+        "entity_id": projection.entity_id,
+        "domain": projection.domain,
+        "current_state": projection.current_state.value
+        if hasattr(projection.current_state, "value")
+        else str(projection.current_state),
+        "node_type": projection.node_type.value
+        if hasattr(projection.node_type, "value")
+        else str(projection.node_type),
+        "node_version": str(projection.node_version),
+        "capabilities": projection.capabilities.model_dump_json()
+        if projection.capabilities
+        else "{}",
+        "ack_deadline": projection.ack_deadline,
+        "liveness_deadline": projection.liveness_deadline,
+        "last_heartbeat_at": projection.last_heartbeat_at,
+        "last_applied_event_id": projection.last_applied_event_id,
+        "last_applied_offset": 100
+        if projection.last_applied_offset is None
+        else projection.last_applied_offset,
+        "registered_at": projection.registered_at,
+        "updated_at": projection.updated_at,
+    }
+
+    result = await projector.upsert_partial(
+        aggregate_id=projection.entity_id,
+        values=values,
+        correlation_id=uuid4(),
+        conflict_columns=["entity_id", "domain"],
     )
     assert result is True, "Failed to seed projection"
 
@@ -219,7 +242,7 @@ class TestHandlerNodeHeartbeatInit:
     async def test_handler_initializes_with_default_liveness_window(
         self,
         reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
     ) -> None:
         """Verify handler initializes with default liveness window."""
         handler = HandlerNodeHeartbeat(
@@ -233,7 +256,7 @@ class TestHandlerNodeHeartbeatInit:
     async def test_handler_accepts_custom_liveness_window(
         self,
         reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
     ) -> None:
         """Verify handler accepts custom liveness window."""
         handler = HandlerNodeHeartbeat(
@@ -261,7 +284,7 @@ class TestHandlerNodeHeartbeatHappyPath:
     async def test_handle_heartbeat_for_active_node(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify heartbeat processing for an ACTIVE node updates projection."""
@@ -292,7 +315,7 @@ class TestHandlerNodeHeartbeatHappyPath:
     async def test_handle_heartbeat_extends_liveness_deadline(
         self,
         heartbeat_handler_fast_window: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify heartbeat extends liveness deadline by window duration."""
@@ -321,7 +344,7 @@ class TestHandlerNodeHeartbeatHappyPath:
     async def test_handle_heartbeat_preserves_correlation_id(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify heartbeat preserves correlation ID for tracing."""
@@ -346,7 +369,7 @@ class TestHandlerNodeHeartbeatHappyPath:
     async def test_handle_heartbeat_generates_correlation_id_if_missing(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify handler generates correlation ID when not provided."""
@@ -370,7 +393,7 @@ class TestHandlerNodeHeartbeatHappyPath:
     async def test_handle_heartbeat_updates_only_heartbeat_fields(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify heartbeat only updates heartbeat-specific fields."""
@@ -487,7 +510,7 @@ class TestHandlerNodeHeartbeatNonActiveNode:
     async def test_handle_heartbeat_for_non_active_node(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
         state: EnumRegistrationState,
     ) -> None:
@@ -532,7 +555,7 @@ class TestHandlerNodeHeartbeatLivenessWindow:
     async def test_liveness_deadline_calculation_default_window(
         self,
         reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
     ) -> None:
         """Verify liveness deadline calculation with default liveness window."""
         handler = HandlerNodeHeartbeat(
@@ -567,7 +590,7 @@ class TestHandlerNodeHeartbeatLivenessWindow:
     async def test_liveness_deadline_uses_event_timestamp(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify liveness deadline is based on event timestamp, not current time."""
@@ -598,7 +621,7 @@ class TestHandlerNodeHeartbeatLivenessWindow:
     async def test_consecutive_heartbeats_extend_deadline(
         self,
         heartbeat_handler_fast_window: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify consecutive heartbeats extend the deadline progressively."""
@@ -653,7 +676,7 @@ class TestHandlerNodeHeartbeatConcurrency:
     async def test_concurrent_heartbeats_from_different_nodes(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify concurrent heartbeats from different nodes are handled correctly."""
@@ -684,7 +707,7 @@ class TestHandlerNodeHeartbeatConcurrency:
     async def test_rapid_heartbeats_same_node(
         self,
         heartbeat_handler_fast_window: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify rapid heartbeats from same node are handled correctly.
@@ -784,7 +807,7 @@ class TestHandlerNodeHeartbeatErrors:
     async def test_handle_propagates_connection_error(
         self,
         reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
     ) -> None:
         """Verify handler propagates InfraConnectionError from projector."""
         handler = HandlerNodeHeartbeat(
@@ -803,14 +826,14 @@ class TestHandlerNodeHeartbeatErrors:
 
         with patch.object(
             projector,
-            "update_heartbeat",
+            "partial_update",
             new_callable=AsyncMock,
         ) as mock_update:
             mock_update.side_effect = InfraConnectionError(
                 "Database connection failed",
                 context=ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.DATABASE,
-                    operation="update_heartbeat",
+                    operation="partial_update",
                     target_name="test",
                 ),
             )
@@ -823,7 +846,7 @@ class TestHandlerNodeHeartbeatErrors:
     async def test_handle_wraps_unexpected_error(
         self,
         reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
     ) -> None:
         """Verify handler wraps unexpected errors in RuntimeHostError."""
         from omnibase_infra.errors import RuntimeHostError
@@ -841,7 +864,7 @@ class TestHandlerNodeHeartbeatErrors:
         # Mock the projector to raise unexpected error
         with patch.object(
             projector,
-            "update_heartbeat",
+            "partial_update",
             new_callable=AsyncMock,
         ) as mock_update:
             mock_update.side_effect = ValueError("Unexpected error")
@@ -856,7 +879,7 @@ class TestHandlerNodeHeartbeatErrors:
     async def test_handle_returns_empty_output_when_update_fails(
         self,
         reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         pg_pool: asyncpg.Pool,
     ) -> None:
         """Verify handler returns empty output when update fails (entity deleted).
@@ -878,7 +901,7 @@ class TestHandlerNodeHeartbeatErrors:
         # Delete the entity after lookup but before update (simulated)
         with patch.object(
             projector,
-            "update_heartbeat",
+            "partial_update",
             new_callable=AsyncMock,
         ) as mock_update:
             mock_update.return_value = False  # Entity not found during update
@@ -909,7 +932,7 @@ class TestModelHandlerOutputStructure:
     async def test_output_has_correct_structure(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify output has correct structure for ORCHESTRATOR node."""
@@ -938,7 +961,7 @@ class TestModelHandlerOutputStructure:
     async def test_output_contains_input_envelope_id(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
     ) -> None:
         """Verify output links back to input envelope."""
         node_id = uuid4()
@@ -965,7 +988,7 @@ class TestHandlerNodeHeartbeatDatabaseState:
     async def test_database_state_after_successful_heartbeat(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
@@ -999,7 +1022,7 @@ class TestHandlerNodeHeartbeatDatabaseState:
     async def test_heartbeat_does_not_reset_timeout_markers(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         pg_pool: asyncpg.Pool,
     ) -> None:
         """Verify heartbeat does not reset timeout emission markers."""
@@ -1043,7 +1066,7 @@ class TestHandlerNodeHeartbeatDatabaseState:
     async def test_heartbeat_leaves_ack_deadline_unchanged(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
@@ -1104,7 +1127,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
     async def test_heartbeat_timestamp_matches_event_timestamp_exactly(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify last_heartbeat_at exactly matches event timestamp.
@@ -1135,7 +1158,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
     async def test_liveness_deadline_calculation_precision(
         self,
         reader: ProjectionReaderRegistration,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
     ) -> None:
         """Verify liveness_deadline is calculated with sub-second precision.
 
@@ -1182,7 +1205,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
     async def test_heartbeat_preserves_utc_timezone(
         self,
         heartbeat_handler: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify timestamps preserve UTC timezone.
@@ -1212,7 +1235,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
     async def test_successive_heartbeats_update_timestamps_monotonically(
         self,
         heartbeat_handler_fast_window: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
     ) -> None:
         """Verify successive heartbeats update timestamps monotonically.
@@ -1262,7 +1285,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
     async def test_timestamp_accuracy_for_liveness_expired_event_reporting(
         self,
         heartbeat_handler_fast_window: HandlerNodeHeartbeat,
-        projector: ProjectorRegistration,
+        projector: ProjectorShell,
         reader: ProjectionReaderRegistration,
         pg_pool: asyncpg.Pool,
     ) -> None:
