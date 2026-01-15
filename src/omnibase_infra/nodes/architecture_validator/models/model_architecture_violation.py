@@ -104,7 +104,7 @@ class ModelArchitectureViolation(BaseModel):
         """Check if this violation should block runtime startup.
 
         Returns:
-            True if severity is ERROR, False otherwise.
+            True if severity is ERROR or CRITICAL, False otherwise.
 
         Example:
             >>> violation.blocks_startup()

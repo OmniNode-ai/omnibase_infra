@@ -63,6 +63,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumValidationSeverity
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,
 )
@@ -180,8 +181,6 @@ class ModelFileValidationResult(BaseModel):
         Returns:
             Count of violations with ERROR severity.
         """
-        from omnibase_infra.enums import EnumValidationSeverity
-
         return sum(
             1 for v in self.violations if v.severity == EnumValidationSeverity.ERROR
         )
@@ -193,8 +192,6 @@ class ModelFileValidationResult(BaseModel):
         Returns:
             Count of violations with WARNING severity.
         """
-        from omnibase_infra.enums import EnumValidationSeverity
-
         return sum(
             1 for v in self.violations if v.severity == EnumValidationSeverity.WARNING
         )
