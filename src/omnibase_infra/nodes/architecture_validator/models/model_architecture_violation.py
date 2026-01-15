@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.enums import EnumValidationSeverity
 
 
 class ModelArchitectureViolation(BaseModel):

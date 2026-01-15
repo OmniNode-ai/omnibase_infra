@@ -180,9 +180,7 @@ class ModelFileValidationResult(BaseModel):
         Returns:
             Count of violations with ERROR severity.
         """
-        from omnibase_infra.nodes.architecture_validator.enums import (
-            EnumValidationSeverity,
-        )
+        from omnibase_infra.enums import EnumValidationSeverity
 
         return sum(
             1 for v in self.violations if v.severity == EnumValidationSeverity.ERROR
@@ -195,9 +193,7 @@ class ModelFileValidationResult(BaseModel):
         Returns:
             Count of violations with WARNING severity.
         """
-        from omnibase_infra.nodes.architecture_validator.enums import (
-            EnumValidationSeverity,
-        )
+        from omnibase_infra.enums import EnumValidationSeverity
 
         return sum(
             1 for v in self.violations if v.severity == EnumValidationSeverity.WARNING
