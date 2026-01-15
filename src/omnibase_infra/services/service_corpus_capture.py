@@ -287,18 +287,19 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If not in IDLE state.
         """
-        self._state_machine.transition_to(EnumCaptureState.READY)
-        self._config = config
-        self._seen_hashes = set()
+        with self._sync_lock:
+            self._state_machine.transition_to(EnumCaptureState.READY)
+            self._config = config
+            self._seen_hashes = set()
 
-        # Create empty corpus
-        self._corpus = ModelExecutionCorpus(
-            name=config.corpus_display_name,
-            version="1.0.0",
-            source="capture",
-        )
+            # Create empty corpus
+            self._corpus = ModelExecutionCorpus(
+                name=config.corpus_display_name,
+                version="1.0.0",
+                source="capture",
+            )
 
-        return self._corpus
+            return self._corpus
 
     def start_capture(self) -> None:
         """
@@ -337,15 +338,16 @@ class ServiceCorpusCapture:
         Raises:
             ValueError: If no corpus is active.
         """
-        if self._corpus is None:
-            raise ValueError("No corpus to close")
+        with self._sync_lock:
+            if self._corpus is None:
+                raise ValueError("No corpus to close")
 
-        self._state_machine.transition_to(EnumCaptureState.CLOSED)
+            self._state_machine.transition_to(EnumCaptureState.CLOSED)
 
-        corpus = self._corpus
-        self._corpus = None
-        self._config = None
-        self._seen_hashes = set()
+            corpus = self._corpus
+            self._corpus = None
+            self._config = None
+            self._seen_hashes = set()
 
         return corpus
 
@@ -373,6 +375,11 @@ class ServiceCorpusCapture:
         """
         start_time = datetime.now(UTC)
 
+        # Snapshot config early for thread-safety - prevents race with close_corpus()
+        # which may set _config to None between our checks and usage.
+        # This read is safe because Python's GIL ensures atomic reference reads.
+        config = self._config
+
         # Check state allows capture
         if self._state_machine.state == EnumCaptureState.FULL:
             return _create_capture_result(
@@ -388,33 +395,33 @@ class ServiceCorpusCapture:
                 start_time,
             )
 
-        if self._config is None or self._corpus is None:
+        if config is None or self._corpus is None:
             return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_NOT_CAPTURING,
                 start_time,
             )
 
-        # Apply handler filter
+        # Apply handler filter (using snapshot)
         handler_id = manifest.node_identity.node_id
-        if not self._config.is_handler_allowed(handler_id):
+        if not config.is_handler_allowed(handler_id):
             return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_HANDLER_FILTER,
                 start_time,
             )
 
-        # Apply time window filter
-        if not self._config.is_in_time_window(manifest.created_at):
+        # Apply time window filter (using snapshot)
+        if not config.is_in_time_window(manifest.created_at):
             return _create_capture_result(
                 manifest.manifest_id,
                 EnumCaptureOutcome.SKIPPED_TIME_WINDOW,
                 start_time,
             )
 
-        # Apply sample rate filter
-        if self._config.sample_rate < 1.0:
-            if random.random() > self._config.sample_rate:
+        # Apply sample rate filter (using snapshot)
+        if config.sample_rate < 1.0:
+            if random.random() > config.sample_rate:
                 return _create_capture_result(
                     manifest.manifest_id,
                     EnumCaptureOutcome.SKIPPED_SAMPLE_RATE,
@@ -422,7 +429,7 @@ class ServiceCorpusCapture:
                 )
 
         # Apply deduplication - compute hash outside lock (pure computation)
-        dedupe_hash = _compute_dedupe_hash(manifest, self._config.dedupe_strategy)
+        dedupe_hash = _compute_dedupe_hash(manifest, config.dedupe_strategy)
 
         # Thread-safe critical section for shared state access
         # Protects: _seen_hashes (check + add), _corpus (update), _state (update)
@@ -455,11 +462,8 @@ class ServiceCorpusCapture:
             if dedupe_hash is not None:
                 self._seen_hashes.add(dedupe_hash)
 
-            # Check if we hit max_executions
-            if (
-                self._config is not None
-                and self._corpus.execution_count >= self._config.max_executions
-            ):
+            # Check if we hit max_executions (using snapshot for thread-safety)
+            if self._corpus.execution_count >= config.max_executions:
                 self._state_machine.state = EnumCaptureState.FULL
 
         return _create_capture_result(

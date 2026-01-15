@@ -26,7 +26,7 @@ class ModelCaptureConfig(BaseModel):
         ...     corpus_display_name="regression-suite-v1",
         ...     max_executions=50,
         ...     sample_rate=0.5,
-        ...     handler_filter=["compute-handler", "effect-handler"],
+        ...     handler_filter=("compute-handler", "effect-handler"),
         ... )
 
     .. versionadded:: 0.5.0

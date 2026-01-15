@@ -11,7 +11,6 @@ Written test-first per OMN-1203 requirements.
     Added for ServiceCorpusCapture (OMN-1203)
 """
 
-import asyncio
 import random
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
