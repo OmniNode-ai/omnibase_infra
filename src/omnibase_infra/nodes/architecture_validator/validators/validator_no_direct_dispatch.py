@@ -49,7 +49,7 @@ import ast
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.enums import EnumValidationSeverity
 from omnibase_infra.nodes.architecture_validator.mixins import MixinFilePathRule
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (
     ModelArchitectureViolation,

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.enums import EnumValidationSeverity
 from omnibase_infra.nodes.architecture_validator.validators import (
     RuleNoDirectDispatch,
     RuleNoHandlerPublishing,

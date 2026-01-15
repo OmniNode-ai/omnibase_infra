@@ -18,9 +18,7 @@ Example:
     >>> from omnibase_infra.nodes.architecture_validator.protocols import (
     ...     ProtocolArchitectureRule,
     ... )
-    >>> from omnibase_infra.nodes.architecture_validator.enums import (
-    ...     EnumValidationSeverity,
-    ... )
+    >>> from omnibase_infra.enums import EnumValidationSeverity
     >>> from omnibase_infra.nodes.architecture_validator.models import (
     ...     ModelRuleCheckResult,
     ... )
@@ -56,7 +54,7 @@ Example:
 See Also:
     omnibase_infra.nodes.architecture_validator.models.ModelRuleCheckResult:
         Result model returned by check method
-    omnibase_infra.nodes.architecture_validator.enums.EnumValidationSeverity:
+    omnibase_infra.enums.EnumValidationSeverity:
         Severity levels for rule violations
 
 .. versionadded:: 0.6.0
@@ -67,7 +65,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+    from omnibase_infra.enums import EnumValidationSeverity
     from omnibase_infra.nodes.architecture_validator.models import ModelRuleCheckResult
 
 __all__ = ["ProtocolArchitectureRule"]

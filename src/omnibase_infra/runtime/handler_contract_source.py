@@ -461,15 +461,6 @@ class HandlerContractSource(ProtocolContractSource):
         #   - Unified error handling for file operations
         #
         # See: docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
-        #
-        # TODO(performance): Consider using aiofiles for true async I/O
-        #
-        # Current implementation uses synchronous file I/O which is acceptable for
-        # MVP but may become a bottleneck in high-throughput scenarios. The aiofiles
-        # library would provide non-blocking file operations:
-        #   - async with aiofiles.open(path, "r") as f: data = await f.read()
-        # This is a NITPICK optimization - only implement if profiling shows file I/O
-        # as a bottleneck. Current synchronous I/O handles 100-500 contracts/sec.
 
         # Validate file size before reading to prevent memory exhaustion
         file_size = contract_path.stat().st_size

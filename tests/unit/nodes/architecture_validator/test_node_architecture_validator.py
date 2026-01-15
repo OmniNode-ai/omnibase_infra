@@ -232,6 +232,23 @@ def info_rule() -> MockRule:
 
 
 @pytest.fixture
+def critical_rule() -> MockRule:
+    """Create a mock rule that fails with CRITICAL severity.
+
+    Returns:
+        MockRule configured to return passed=False with CRITICAL severity.
+        Uses NO_DIRECT_HANDLER_DISPATCH as a valid supported rule_id.
+    """
+    return MockRule(
+        rule_id="NO_DIRECT_HANDLER_DISPATCH",
+        name="No Direct Handler Dispatch Rule",
+        severity=EnumValidationSeverity.CRITICAL,
+        should_pass=False,
+        message="Critical violation",
+    )
+
+
+@pytest.fixture
 def sample_node() -> object:
     """Create a sample node object for testing.
 
@@ -831,8 +848,8 @@ class TestValidationResultBoolBehavior:
 class TestViolationSeverityBehavior:
     """Tests for severity-based blocking behavior.
 
-    ERROR severity violations should block startup, while WARNING and INFO
-    severity violations should allow startup to proceed.
+    ERROR and CRITICAL severity violations should block startup, while WARNING
+    and INFO severity violations should allow startup to proceed.
     """
 
     def test_error_severity_blocks_startup(
@@ -856,6 +873,29 @@ class TestViolationSeverityBehavior:
         assert result.valid is False
         violation = result.violations[0]
         assert violation.severity == EnumValidationSeverity.ERROR
+        assert violation.blocks_startup() is True
+
+    def test_critical_severity_blocks_startup(
+        self,
+        mock_container: MagicMock,
+        critical_rule: MockRule,
+        sample_node: object,
+    ) -> None:
+        """Test that CRITICAL severity violations block startup."""
+        validator = NodeArchitectureValidatorCompute(
+            container=mock_container,
+            rules=(critical_rule,),
+        )
+        request = ModelArchitectureValidationRequest(
+            nodes=(sample_node,),
+            handlers=(),
+        )
+
+        result = validator.compute(request)
+
+        assert result.valid is False
+        violation = result.violations[0]
+        assert violation.severity == EnumValidationSeverity.CRITICAL
         assert violation.blocks_startup() is True
 
     def test_warning_severity_does_not_block_startup(

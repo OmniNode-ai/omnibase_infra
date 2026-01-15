@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.architecture_validator.enums import EnumValidationSeverity
+from omnibase_infra.enums import EnumValidationSeverity
 
 
 class ModelArchitectureViolation(BaseModel):
@@ -104,7 +104,7 @@ class ModelArchitectureViolation(BaseModel):
         """Check if this violation should block runtime startup.
 
         Returns:
-            True if severity is ERROR, False otherwise.
+            True if severity is ERROR or CRITICAL, False otherwise.
 
         Example:
             >>> violation.blocks_startup()
