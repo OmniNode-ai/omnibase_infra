@@ -53,20 +53,13 @@ Related Modules:
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
 
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.models.routing import (
-    ModelRoutingEntry,
-    ModelRoutingSubcontract,
-)
+from omnibase_infra.models.routing import ModelRoutingSubcontract
+from omnibase_infra.runtime.contract_loaders import load_handler_routing_subcontract
 
 if TYPE_CHECKING:
     from omnibase_core.models.container import ModelONEXContainer
@@ -74,177 +67,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# TODO(OMN-1315): Consider relocating module-level helper functions to a dedicated
-# utility module (e.g., omnibase_infra.utils.handler_utils) if they become shared
-# across multiple orchestrators. Currently kept here for locality with the
-# _create_handler_routing_subcontract function that uses it.
-
-
-def _convert_class_to_handler_key(class_name: str) -> str:
-    """Convert handler class name to handler_key format (kebab-case).
-
-    Converts CamelCase handler class names to kebab-case handler keys
-    as used in ServiceHandlerRegistry.
-
-    Args:
-        class_name: Handler class name in CamelCase (e.g., "HandlerNodeIntrospected").
-
-    Returns:
-        Handler key in kebab-case (e.g., "handler-node-introspected").
-
-    Example:
-        >>> _convert_class_to_handler_key("HandlerNodeIntrospected")
-        'handler-node-introspected'
-        >>> _convert_class_to_handler_key("HandlerRuntimeTick")
-        'handler-runtime-tick'
-    """
-    # Insert hyphen before uppercase letters that follow lowercase letters
-    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1-\2", class_name)
-    # Insert hyphen before uppercase letters that follow other uppercase+lowercase sequences
-    return re.sub("([a-z0-9])([A-Z])", r"\1-\2", s1).lower()
-
-
 def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
-    """Load handler routing configuration from contract.yaml.
+    """Load handler routing configuration from this node's contract.yaml.
 
-    Loads the handler_routing section from this node's contract.yaml
-    and converts it to ModelRoutingSubcontract format. This follows
-    the Handler Plugin Loader pattern (see CLAUDE.md) where routing is
-    defined declaratively in contract.yaml, not hardcoded in Python.
+    Thin wrapper around the shared utility load_handler_routing_subcontract()
+    that provides the contract path for this node. This maintains the existing
+    function signature for internal callers while delegating to the shared
+    implementation.
 
-    Contract Structure:
-        The contract.yaml uses a nested structure::
-
-            handler_routing:
-              routing_strategy: "payload_type_match"
-              handlers:
-                - event_model:
-                    name: "ModelNodeIntrospectionEvent"
-                    module: "omnibase_infra.models..."
-                  handler:
-                    name: "HandlerNodeIntrospected"
-                    module: "omnibase_infra.nodes..."
-
-        This is converted to ModelRoutingEntry with flat fields::
-
-            ModelRoutingEntry(
-                routing_key="ModelNodeIntrospectionEvent",  # from event_model.name
-                handler_key="handler-node-introspected",    # kebab-case of handler.name
-            )
-
-        The ``routing_key`` maps to ``event_model.name`` from contract.yaml.
-        The ``handler_key`` is derived by converting ``handler.name`` to kebab-case,
-        matching the handler's adapter ID in ServiceHandlerRegistry.
+    Part of OMN-1316: Refactored to use shared handler routing loader utility.
 
     Returns:
         ModelRoutingSubcontract with entries mapping event models to handlers.
 
     Raises:
         ProtocolConfigurationError: If contract.yaml does not exist, contains invalid
-            YAML syntax, is empty, or handler_routing section is missing. Error context
-            includes operation and target_name for debugging.
+            YAML syntax, is empty, or handler_routing section is missing.
     """
-    # Load contract.yaml from same directory as this module
     contract_path = Path(__file__).parent / "contract.yaml"
-
-    try:
-        with contract_path.open("r", encoding="utf-8") as f:
-            contract = yaml.safe_load(f)
-    except FileNotFoundError as e:
-        ctx = ModelInfraErrorContext.with_correlation(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="load_handler_routing_contract",
-            target_name=str(contract_path),
-        )
-        logger.exception(
-            "contract.yaml not found at %s - handler routing cannot be loaded",
-            contract_path,
-        )
-        raise ProtocolConfigurationError(
-            f"contract.yaml not found at {contract_path} - handler routing cannot be loaded",
-            context=ctx,
-        ) from e
-    except yaml.YAMLError as e:
-        ctx = ModelInfraErrorContext.with_correlation(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="parse_handler_routing_contract",
-            target_name=str(contract_path),
-        )
-        # Sanitize error message - don't include raw YAML error which may contain file contents
-        error_type = type(e).__name__
-        logger.exception(
-            "Invalid YAML syntax in contract.yaml at %s: %s",
-            contract_path,
-            error_type,
-        )
-        raise ProtocolConfigurationError(
-            f"Invalid YAML syntax in contract.yaml at {contract_path}: {error_type}",
-            context=ctx,
-        ) from e
-
-    if contract is None:
-        ctx = ModelInfraErrorContext.with_correlation(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="validate_handler_routing_contract",
-            target_name=str(contract_path),
-        )
-        msg = f"contract.yaml at {contract_path} is empty"
-        logger.error(msg)
-        raise ProtocolConfigurationError(msg, context=ctx)
-
-    handler_routing = contract.get("handler_routing")
-    if handler_routing is None:
-        ctx = ModelInfraErrorContext.with_correlation(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="validate_handler_routing_contract",
-            target_name=str(contract_path),
-        )
-        msg = f"handler_routing section not found in contract.yaml at {contract_path}"
-        logger.error(msg)
-        raise ProtocolConfigurationError(msg, context=ctx)
-
-    # Build routing entries from contract
-    entries: list[ModelRoutingEntry] = []
-    handlers_config = handler_routing.get("handlers", [])
-
-    for handler_config in handlers_config:
-        event_model = handler_config.get("event_model", {})
-        handler = handler_config.get("handler", {})
-
-        event_model_name = event_model.get("name")
-        handler_class_name = handler.get("name")
-
-        if not event_model_name:
-            logger.warning(
-                "Skipping handler entry with missing event_model.name in contract.yaml"
-            )
-            continue
-
-        if not handler_class_name:
-            logger.warning(
-                "Skipping handler entry for %s with missing handler.name in contract.yaml",
-                event_model_name,
-            )
-            continue
-
-        entries.append(
-            ModelRoutingEntry(
-                routing_key=event_model_name,
-                handler_key=_convert_class_to_handler_key(handler_class_name),
-            )
-        )
-
-    logger.debug(
-        "Loaded %d handler routing entries from contract.yaml",
-        len(entries),
-    )
-
-    return ModelRoutingSubcontract(
-        version=ModelSemVer(major=1, minor=0, patch=0),
-        routing_strategy=handler_routing.get("routing_strategy", "payload_type_match"),
-        handlers=entries,
-        default_handler=None,
-    )
+    return load_handler_routing_subcontract(contract_path)
 
 
 class NodeRegistrationOrchestrator(NodeOrchestrator):
