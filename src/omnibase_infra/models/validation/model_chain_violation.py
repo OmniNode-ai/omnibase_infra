@@ -51,7 +51,7 @@ class ModelChainViolation(BaseModel):
         ...     message_id=uuid4(),
         ...     parent_message_id=uuid4(),
         ...     violation_message="Child message has different correlation_id than parent",
-        ...     severity="error",
+        ...     severity=EnumValidationSeverity.ERROR,
         ... )
         >>> violation.is_blocking()
         True

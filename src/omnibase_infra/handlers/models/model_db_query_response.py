@@ -23,7 +23,7 @@ class ModelDbQueryResponse(BaseModel):
     with status, payload, and correlation tracking.
 
     Attributes:
-        status: Operation status ("success" or "error")
+        status: Operation status (EnumResponseStatus.SUCCESS or EnumResponseStatus.ERROR)
         payload: Query result payload containing rows and count
         correlation_id: UUID for request/response correlation
 

@@ -32,7 +32,7 @@ class ModelConsulHandlerResponse(BaseModel):
     interfaces across infrastructure handlers.
 
     Attributes:
-        status: Operation status ("success" or "error")
+        status: Operation status (EnumResponseStatus.SUCCESS or EnumResponseStatus.ERROR)
         payload: Consul operation result payload containing operation-specific data
         correlation_id: UUID for request/response correlation
 
@@ -73,6 +73,24 @@ class ModelConsulHandlerResponse(BaseModel):
     correlation_id: UUID = Field(
         description="UUID for request/response correlation",
     )
+
+    @property
+    def is_success(self) -> bool:
+        """Check if the response indicates a successful operation.
+
+        Returns:
+            True if status is SUCCESS, False otherwise.
+        """
+        return self.status == EnumResponseStatus.SUCCESS
+
+    @property
+    def is_error(self) -> bool:
+        """Check if the response indicates an error.
+
+        Returns:
+            True if status is ERROR, False otherwise.
+        """
+        return self.status == EnumResponseStatus.ERROR
 
 
 __all__: list[str] = ["ModelConsulHandlerResponse"]

@@ -351,6 +351,7 @@ from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from omnibase_infra.enums import EnumConfirmationEventType
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,

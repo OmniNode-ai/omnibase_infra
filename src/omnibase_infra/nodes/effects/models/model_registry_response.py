@@ -40,7 +40,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumRegistryResponseStatus
+from omnibase_infra.enums import EnumBackendType, EnumRegistryResponseStatus
 from omnibase_infra.nodes.effects.models.model_backend_result import (
     ModelBackendResult,
 )
@@ -241,9 +241,9 @@ class ModelRegistryResponse(BaseModel):
         """
         failed: list[str] = []
         if not self.consul_result.success:
-            failed.append("consul")
+            failed.append(EnumBackendType.CONSUL.value)
         if not self.postgres_result.success:
-            failed.append("postgres")
+            failed.append(EnumBackendType.POSTGRES.value)
         return failed
 
     def get_successful_backends(self) -> list[str]:
@@ -254,9 +254,9 @@ class ModelRegistryResponse(BaseModel):
         """
         succeeded: list[str] = []
         if self.consul_result.success:
-            succeeded.append("consul")
+            succeeded.append(EnumBackendType.CONSUL.value)
         if self.postgres_result.success:
-            succeeded.append("postgres")
+            succeeded.append(EnumBackendType.POSTGRES.value)
         return succeeded
 
 

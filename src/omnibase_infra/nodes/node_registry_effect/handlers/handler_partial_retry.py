@@ -70,7 +70,7 @@ class ProtocolPartialRetryRequest(Protocol):
         node_id: Unique identifier for the node being registered.
         node_type: Type of ONEX node (effect, compute, reducer, orchestrator).
         node_version: Semantic version of the node.
-        target_backend: Backend to retry ("consul" or "postgres").
+        target_backend: Backend to retry (EnumBackendType.CONSUL or EnumBackendType.POSTGRES).
         idempotency_key: Optional key for idempotent retry semantics.
         service_name: Optional service name for Consul registration.
         tags: Tags for Consul service discovery.
@@ -100,8 +100,8 @@ class HandlerPartialRetry:
     but another failed.
 
     Backend Routing:
-        - target_backend="consul": Routes to Consul registration
-        - target_backend="postgres": Routes to PostgreSQL upsert
+        - target_backend=EnumBackendType.CONSUL: Routes to Consul registration
+        - target_backend=EnumBackendType.POSTGRES: Routes to PostgreSQL upsert
         - Unknown values: Returns error result
 
     Error Handling:
@@ -155,7 +155,7 @@ class HandlerPartialRetry:
             request: Retry request with target backend specification including:
                 - node_id: UUID of the node to register
                 - node_type: ONEX node type (effect, compute, reducer, orchestrator)
-                - target_backend: "consul" or "postgres"
+                - target_backend: EnumBackendType.CONSUL or EnumBackendType.POSTGRES
                 - idempotency_key: Optional key for safe retry semantics
                 - service_name: Optional custom service name (for Consul)
                 - tags: List of service discovery tags (for Consul)
@@ -187,7 +187,11 @@ class HandlerPartialRetry:
         elif target_backend == EnumBackendType.POSTGRES:
             return await self._retry_postgres(request, correlation_id, start_time)
         else:
-            # Unknown backend - return error result
+            # Defensive: This branch handles unexpected enum values that may arise from
+            # duck-typed Protocol usage, where callers could pass objects with a
+            # target_backend attribute that isn't a valid EnumBackendType member.
+            # While static typing prevents this in normal usage, the Protocol pattern
+            # allows runtime duck typing that bypasses compile-time checks.
             duration_ms = (time.perf_counter() - start_time) * 1000
             error_msg = (
                 f"Unknown target backend: {target_backend}. "

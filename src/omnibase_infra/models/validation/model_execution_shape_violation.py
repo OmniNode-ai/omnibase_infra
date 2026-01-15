@@ -42,12 +42,12 @@ class ModelExecutionShapeViolationResult(BaseModel):
         ...     file_path="/src/handlers/order_reducer.py",
         ...     line_number=42,
         ...     message="Reducer 'OrderReducer.handle' returns EVENT type 'OrderCreated'",
-        ...     severity="error",
+        ...     severity=EnumValidationSeverity.ERROR,
         ... )
 
     Note:
-        Violations with severity='error' should block CI pipelines.
-        Violations with severity='warning' are advisory and should be logged.
+        Violations with severity=EnumValidationSeverity.ERROR should block CI pipelines.
+        Violations with severity=EnumValidationSeverity.WARNING are advisory and should be logged.
     """
 
     violation_type: EnumExecutionShapeViolation = Field(

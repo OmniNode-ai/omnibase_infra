@@ -293,7 +293,7 @@ class ModelHandlerValidationError(BaseModel):
             "source_type": self.source_type.value,
             "message": self.message,
             "remediation_hint": self.remediation_hint,
-            "severity": self.severity,
+            "severity": self.severity.value,
         }
 
         # Add optional fields if present

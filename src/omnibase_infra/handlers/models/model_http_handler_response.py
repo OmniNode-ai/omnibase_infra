@@ -34,7 +34,7 @@ class ModelHttpHandlerResponse(BaseModel):
     infrastructure handlers.
 
     Attributes:
-        status: Operation status ("success" or "error")
+        status: Operation status (EnumResponseStatus.SUCCESS or EnumResponseStatus.ERROR)
         payload: HTTP operation result payload containing operation-specific data
         correlation_id: UUID for request/response correlation
 
