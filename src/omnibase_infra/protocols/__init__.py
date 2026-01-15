@@ -15,6 +15,7 @@ Protocols:
     - ProtocolPluginCompute: Interface for deterministic compute plugins
     - ProtocolRegistryMetrics: Interface for registry metrics collection (optional)
     - ProtocolSnapshotPublisher: Interface for snapshot publishing services (F2)
+    - ProtocolSnapshotStore: Interface for snapshot storage backends
 
 Note:
     ProtocolCircuitBreakerAware is defined in omnibase_infra.mixins (tightly coupled
@@ -34,6 +35,7 @@ Usage:
         ProtocolPluginCompute,
         ProtocolRegistryMetrics,
         ProtocolSnapshotPublisher,
+        ProtocolSnapshotStore,
     )
 
     # Verify protocol compliance via duck typing (per ONEX conventions)
@@ -79,6 +81,7 @@ from omnibase_infra.protocols.protocol_registry_metrics import ProtocolRegistryM
 from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
 )
+from omnibase_infra.protocols.protocol_snapshot_store import ProtocolSnapshotStore
 
 __all__: list[str] = [
     "ProtocolCapabilityProjection",
@@ -92,4 +95,5 @@ __all__: list[str] = [
     "ProtocolProjectorSchemaValidator",
     "ProtocolRegistryMetrics",
     "ProtocolSnapshotPublisher",
+    "ProtocolSnapshotStore",
 ]
