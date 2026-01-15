@@ -48,7 +48,7 @@ from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProce
 # =============================================================================
 
 # Real handler class path from omnibase_infra.handlers
-REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HttpRestHandler"
+REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HandlerHttpRest"
 
 # Valid handler contract template (matches schema from contracts/handlers/)
 # Uses canonical ONEX field names with required security metadata

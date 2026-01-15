@@ -340,5 +340,5 @@ violation = validator.validate_handler_output(
   - `src/omnibase_infra/enums/enum_node_output_type.py`
   - `src/omnibase_infra/enums/enum_message_category.py`
   - `src/omnibase_infra/validation/validator_execution_shape.py`
-  - `src/omnibase_infra/validation/runtime_shape_validator.py`
+  - `src/omnibase_infra/validation/validator_runtime_shape.py`
   - `src/omnibase_infra/models/validation/model_execution_shape_rule.py`

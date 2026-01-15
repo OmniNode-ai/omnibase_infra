@@ -74,6 +74,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
@@ -470,8 +471,13 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
             metrics_updated = True
             raise InfraTimeoutError(
                 f"Check and record timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._config.command_timeout,
+                ),
             ) from e
         except asyncpg.PostgresConnectionError as e:
             async with self._metrics_lock:
@@ -551,8 +557,13 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
                 f"is_processed query timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._config.command_timeout,
+                ),
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
@@ -651,8 +662,13 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
                 f"mark_processed timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._config.command_timeout,
+                ),
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
@@ -838,8 +854,13 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
                 f"Cleanup timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._config.command_timeout,
+                ),
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(

@@ -187,6 +187,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
@@ -540,11 +541,12 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 sanitized_servers = self._sanitize_bootstrap_servers(
                     self._bootstrap_servers
                 )
-                context = ModelInfraErrorContext(
+                timeout_ctx = ModelTimeoutErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="start",
                     target_name=f"kafka.{self._environment}",
                     correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
                 )
                 logger.warning(
                     f"Timeout connecting to Kafka after {self._timeout_seconds}s",
@@ -555,9 +557,8 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 )
                 raise InfraTimeoutError(
                     f"Timeout connecting to Kafka after {self._timeout_seconds}s",
-                    context=context,
+                    context=timeout_ctx,
                     servers=sanitized_servers,
-                    timeout_seconds=self._timeout_seconds,
                 ) from e
 
             except Exception as e:
@@ -892,12 +893,18 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
             correlation_id=headers.correlation_id,
         )
         if isinstance(last_exception, TimeoutError):
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="publish",
+                target_name=f"kafka.{topic}",
+                correlation_id=headers.correlation_id,
+                timeout_seconds=self._timeout_seconds,
+            )
             raise InfraTimeoutError(
                 f"Timeout publishing to topic {topic} after {self._max_retry_attempts + 1} attempts",
-                context=context,
+                context=timeout_ctx,
                 topic=topic,
                 retry_count=self._max_retry_attempts + 1,
-                timeout_seconds=self._timeout_seconds,
             ) from last_exception
         raise InfraConnectionError(
             f"Failed to publish to topic {topic} after {self._max_retry_attempts + 1} attempts",
@@ -1060,11 +1067,12 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 )
 
             # Propagate timeout error to surface startup failures (differentiate from connection errors)
-            context = ModelInfraErrorContext(
+            timeout_ctx = ModelTimeoutErrorContext(
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="start_consumer",
                 target_name=f"kafka.{topic}",
                 correlation_id=correlation_id,
+                timeout_seconds=self._timeout_seconds,
             )
             logger.exception(
                 f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
@@ -1079,10 +1087,9 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
             )
             raise InfraTimeoutError(
                 f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
-                context=context,
+                context=timeout_ctx,
                 topic=topic,
                 servers=sanitized_servers,
-                timeout_seconds=self._timeout_seconds,
             ) from e
 
         except Exception as e:

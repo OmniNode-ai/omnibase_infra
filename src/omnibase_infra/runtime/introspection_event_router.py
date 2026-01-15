@@ -103,8 +103,15 @@ class IntrospectionEventRouter:
     Dependency Injection:
         This class follows the ONEX container-based DI pattern per CLAUDE.md:
         - Constructor accepts ``ModelONEXContainer`` for dependency injection
-        - ``initialize()`` method accepts runtime configuration and dependencies
-        - Dependencies resolved from container or passed explicitly to initialize()
+        - ``initialize()`` method accepts runtime dependencies created by kernel
+        - Container provides access to configuration, metrics, and service registry
+
+        Runtime dependencies (dispatcher, event_bus) are passed via ``initialize()``
+        because they are created by the kernel at runtime and are not registered
+        in the container's service registry. The container is still used for:
+        - Access to ONEX configuration
+        - Performance metrics tracking
+        - Service registry for future integrations
 
     Attributes:
         _container: ONEX container for dependency injection.
@@ -139,11 +146,13 @@ class IntrospectionEventRouter:
         Args:
             container: ONEX container for dependency injection. Required per ONEX
                 pattern (``def __init__(self, container: ModelONEXContainer)``).
-                Enables full ONEX integration (logging, metrics, service discovery).
+                Provides access to ONEX configuration, metrics, and service registry.
 
         Note:
             After construction, call ``initialize()`` to configure the router
             with its runtime dependencies (dispatcher, event_bus, output_topic).
+            Runtime dependencies are passed to initialize() because they are
+            created by the kernel at runtime, not registered in the container.
 
         See Also:
             - CLAUDE.md "Container-Based Dependency Injection" section for the
@@ -203,6 +212,26 @@ class IntrospectionEventRouter:
     def is_initialized(self) -> bool:
         """Return whether the router has been initialized."""
         return self._initialized
+
+    @property
+    def container(self) -> ModelONEXContainer:
+        """Access the ONEX container for dependency injection.
+
+        Provides access to the container for:
+        - Service resolution via ``get_service_async()``
+        - Configuration access via ``config``
+        - Performance metrics via ``get_performance_metrics()``
+        - Workflow coordination via ``get_workflow_orchestrator()``
+
+        Returns:
+            The ONEX container instance injected at construction.
+
+        Example:
+            >>> router = IntrospectionEventRouter(container)
+            >>> # Access container services
+            >>> metrics = router.container.get_performance_metrics()
+        """
+        return self._container
 
     def _ensure_initialized(self) -> None:
         """Ensure the router is initialized before operation.

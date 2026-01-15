@@ -35,6 +35,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
@@ -767,10 +768,16 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
                 )
 
         except httpx.TimeoutException as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation=f"http.{method.lower()}",
+                target_name=url,
+                correlation_id=correlation_id,
+                timeout_seconds=self._timeout,
+            )
             raise InfraTimeoutError(
                 f"HTTP {method} request timed out after {self._timeout}s",
-                context=ctx,
-                timeout_seconds=self._timeout,
+                context=timeout_ctx,
             ) from e
         except httpx.ConnectError as e:
             raise InfraConnectionError(

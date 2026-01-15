@@ -91,7 +91,7 @@ class TestFilterExemptedErrorsRegexMatching:
 
     def test_simple_file_pattern_match(self) -> None:
         """Verify simple file pattern matching works."""
-        errors = ["kafka_event_bus.py:100: Some violation"]
+        errors = ["event_bus_kafka.py:100: Some violation"]
         patterns: list[ExemptionPattern] = [
             {"file_pattern": r"event_bus_kafka\.py", "violation_pattern": r"violation"}
         ]
@@ -101,8 +101,8 @@ class TestFilterExemptedErrorsRegexMatching:
     def test_regex_digit_pattern_matching(self) -> None:
         """Verify regex patterns with \\d+ work correctly."""
         errors = [
-            "kafka_event_bus.py:100: Class 'EventBusKafka' has 14 methods",
-            "kafka_event_bus.py:200: Class 'EventBusKafka' has 20 methods",
+            "event_bus_kafka.py:100: Class 'EventBusKafka' has 14 methods",
+            "event_bus_kafka.py:200: Class 'EventBusKafka' has 20 methods",
         ]
         patterns: list[ExemptionPattern] = [
             {
@@ -117,8 +117,8 @@ class TestFilterExemptedErrorsRegexMatching:
     def test_method_pattern_matching(self) -> None:
         """Verify method pattern matching works correctly."""
         errors = [
-            "kafka_event_bus.py:50: Function '__init__' has 10 parameters",
-            "kafka_event_bus.py:100: Function 'connect' has 5 parameters",
+            "event_bus_kafka.py:50: Function '__init__' has 10 parameters",
+            "event_bus_kafka.py:100: Function 'connect' has 5 parameters",
         ]
         patterns: list[ExemptionPattern] = [
             {
@@ -135,9 +135,9 @@ class TestFilterExemptedErrorsRegexMatching:
     def test_all_patterns_must_match(self) -> None:
         """Verify all specified patterns must match for exemption."""
         errors = [
-            "kafka_event_bus.py:100: Class 'EventBusKafka' has 14 methods",
+            "event_bus_kafka.py:100: Class 'EventBusKafka' has 14 methods",
             "other_file.py:100: Class 'EventBusKafka' has 14 methods",
-            "kafka_event_bus.py:100: Class 'OtherClass' has 14 methods",
+            "event_bus_kafka.py:100: Class 'OtherClass' has 14 methods",
         ]
         patterns: list[ExemptionPattern] = [
             {
@@ -159,9 +159,9 @@ class TestFilterExemptedErrorsRobustness:
     def test_line_number_changes_dont_break_exemption(self) -> None:
         """Verify exemptions work regardless of line number changes."""
         # Same violation at different line numbers
-        errors_v1 = ["kafka_event_bus.py:100: Class 'EventBusKafka' has 14 methods"]
-        errors_v2 = ["kafka_event_bus.py:200: Class 'EventBusKafka' has 14 methods"]
-        errors_v3 = ["kafka_event_bus.py:999: Class 'EventBusKafka' has 14 methods"]
+        errors_v1 = ["event_bus_kafka.py:100: Class 'EventBusKafka' has 14 methods"]
+        errors_v2 = ["event_bus_kafka.py:200: Class 'EventBusKafka' has 14 methods"]
+        errors_v3 = ["event_bus_kafka.py:999: Class 'EventBusKafka' has 14 methods"]
 
         patterns: list[ExemptionPattern] = [
             {
@@ -180,9 +180,9 @@ class TestFilterExemptedErrorsRobustness:
         """Verify exemptions work with different violation counts."""
         # Same violation with different counts
         errors = [
-            "kafka_event_bus.py:100: Class 'EventBusKafka' has 10 methods",
-            "kafka_event_bus.py:100: Class 'EventBusKafka' has 14 methods",
-            "kafka_event_bus.py:100: Class 'EventBusKafka' has 20 methods",
+            "event_bus_kafka.py:100: Class 'EventBusKafka' has 10 methods",
+            "event_bus_kafka.py:100: Class 'EventBusKafka' has 14 methods",
+            "event_bus_kafka.py:100: Class 'EventBusKafka' has 20 methods",
         ]
 
         patterns: list[ExemptionPattern] = [
@@ -204,7 +204,7 @@ class TestFilterExemptedErrorsPrecision:
     def test_file_pattern_substring_matching(self) -> None:
         """Verify file patterns use substring matching by default."""
         errors = [
-            "kafka_event_bus.py:100: violation",
+            "event_bus_kafka.py:100: violation",
             "other_file.py:100: violation",
         ]
         # Pattern matches substring
@@ -215,7 +215,7 @@ class TestFilterExemptedErrorsPrecision:
             }
         ]
         result = _filter_exempted_errors(errors, patterns)
-        # Only kafka_event_bus.py should be filtered
+        # Only event_bus_kafka.py should be filtered
         assert len(result) == 1
         assert "other_file.py" in result[0]
 
@@ -262,8 +262,8 @@ class TestFilterExemptedErrorsMultiplePatterns:
     def test_multiple_patterns_apply_independently(self) -> None:
         """Verify multiple patterns can exempt different errors."""
         errors = [
-            "kafka_event_bus.py:100: Class 'EventBusKafka' has 14 methods",
-            "kafka_event_bus.py:200: Function '__init__' has 10 parameters",
+            "event_bus_kafka.py:100: Class 'EventBusKafka' has 14 methods",
+            "event_bus_kafka.py:200: Function '__init__' has 10 parameters",
             "other_file.py:50: Class 'Other' has 5 methods",
         ]
         patterns: list[ExemptionPattern] = [

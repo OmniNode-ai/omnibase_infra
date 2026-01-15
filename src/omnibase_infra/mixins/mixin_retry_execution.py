@@ -52,6 +52,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
@@ -297,10 +298,19 @@ class MixinRetryExecution(ABC):
             The infrastructure error to raise.
         """
         if classification.category == EnumRetryErrorCategory.TIMEOUT:
+            # Convert ModelInfraErrorContext to ModelTimeoutErrorContext for stricter typing
+            # ModelTimeoutErrorContext requires transport_type and operation to be non-None
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=ctx.transport_type
+                or self._get_transport_type(),  # Fallback to handler's transport type
+                operation=ctx.operation or "unknown",
+                target_name=ctx.target_name,
+                correlation_id=ctx.correlation_id,
+                timeout_seconds=op_context.timeout_seconds,
+            )
             return InfraTimeoutError(
                 f"Operation timed out after {op_context.timeout_seconds}s",
-                context=ctx,
-                timeout_seconds=op_context.timeout_seconds,
+                context=timeout_ctx,
             )
         elif classification.category == EnumRetryErrorCategory.AUTHENTICATION:
             return InfraAuthenticationError(

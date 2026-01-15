@@ -54,6 +54,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.handlers.registration_storage.models import (
     ModelDeleteRegistrationRequest,
@@ -422,16 +423,15 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                     correlation_id=correlation_id,
                 )
             duration_ms = (time.monotonic() - start_time) * 1000
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="store_registration",
-                target_name="postgres.storage",
-                correlation_id=correlation_id,
-            )
             raise InfraTimeoutError(
                 f"PostgreSQL upsert timed out after {self._timeout_seconds}s",
-                context=context,
-                timeout_seconds=self._timeout_seconds,
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="store_registration",
+                    target_name="postgres.storage",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
             ) from e
 
         except Exception as e:
@@ -591,16 +591,15 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                     correlation_id=correlation_id,
                 )
             duration_ms = (time.monotonic() - start_time) * 1000
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="query_registrations",
-                target_name="postgres.storage",
-                correlation_id=correlation_id,
-            )
             raise InfraTimeoutError(
                 f"PostgreSQL query timed out after {self._timeout_seconds}s",
-                context=context,
-                timeout_seconds=self._timeout_seconds,
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="query_registrations",
+                    target_name="postgres.storage",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
             ) from e
 
         except Exception as e:
@@ -721,16 +720,15 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                     correlation_id=correlation_id,
                 )
             duration_ms = (time.monotonic() - start_time) * 1000
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="update_registration",
-                target_name="postgres.storage",
-                correlation_id=correlation_id,
-            )
             raise InfraTimeoutError(
                 f"PostgreSQL update timed out after {self._timeout_seconds}s",
-                context=context,
-                timeout_seconds=self._timeout_seconds,
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="update_registration",
+                    target_name="postgres.storage",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
             ) from e
 
         except Exception as e:
@@ -823,16 +821,15 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                     operation="delete_registration",
                     correlation_id=correlation_id,
                 )
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="delete_registration",
-                target_name="postgres.storage",
-                correlation_id=correlation_id,
-            )
             raise InfraTimeoutError(
                 f"PostgreSQL delete timed out after {self._timeout_seconds}s",
-                context=context,
-                timeout_seconds=self._timeout_seconds,
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="delete_registration",
+                    target_name="postgres.storage",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
             ) from e
 
         except Exception as e:

@@ -35,6 +35,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.handlers.service_discovery.models import (
     ModelDiscoveryResult,
@@ -351,16 +352,15 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                     correlation_id=correlation_id,
                 )
             duration_ms = (time.monotonic() - start_time) * 1000
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="register_service",
-                target_name="consul.discovery",
-                correlation_id=correlation_id,
-            )
             raise InfraTimeoutError(
                 f"Consul registration timed out after {self._timeout_seconds}s",
-                context=context,
-                timeout_seconds=self._timeout_seconds,
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="register_service",
+                    target_name="consul.discovery",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
             ) from e
 
         except consul.ConsulException as e:
@@ -460,16 +460,15 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                     operation="deregister_service",
                     correlation_id=correlation_id,
                 )
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="deregister_service",
-                target_name="consul.discovery",
-                correlation_id=correlation_id,
-            )
             raise InfraTimeoutError(
                 f"Consul deregistration timed out after {self._timeout_seconds}s",
-                context=context,
-                timeout_seconds=self._timeout_seconds,
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="deregister_service",
+                    target_name="consul.discovery",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
             ) from e
 
         except consul.ConsulException as e:
@@ -630,16 +629,15 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                     correlation_id=correlation_id,
                 )
             duration_ms = (time.monotonic() - start_time) * 1000
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="discover_services",
-                target_name="consul.discovery",
-                correlation_id=correlation_id,
-            )
             raise InfraTimeoutError(
                 f"Consul discovery timed out after {self._timeout_seconds}s",
-                context=context,
-                timeout_seconds=self._timeout_seconds,
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="discover_services",
+                    target_name="consul.discovery",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
             ) from e
 
         except consul.ConsulException as e:

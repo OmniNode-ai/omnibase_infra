@@ -619,17 +619,18 @@ class TestInfraTimeoutError:
 
     def test_with_context_model(self) -> None:
         """Test error with context model and timeout details."""
-        context = ModelInfraErrorContext(
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
             operation="execute_query",
             target_name="postgresql",
+            timeout_seconds=30.0,
         )
         error = InfraTimeoutError(
             "Query timeout exceeded",
             context=context,
-            timeout_seconds=30,
         )
         assert error.model.context["operation"] == "execute_query"
-        assert error.model.context["timeout_seconds"] == 30
+        assert error.model.context["timeout_seconds"] == 30.0
         assert error.model.context["target_name"] == "postgresql"
 
     def test_error_code_mapping(self) -> None:
@@ -643,16 +644,20 @@ class TestInfraTimeoutError:
 
     def test_error_chaining(self) -> None:
         """Test error chaining from timeout exception."""
-        context = ModelInfraErrorContext(operation="select")
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="select",
+            timeout_seconds=10.0,
+        )
         timeout = TimeoutError("Operation exceeded deadline")
         try:
             raise InfraTimeoutError(
-                "Database query timeout", context=context, timeout_seconds=10
+                "Database query timeout", context=context
             ) from timeout
         except InfraTimeoutError as e:
             assert e.__cause__ == timeout
             assert e.model.context["operation"] == "select"
-            assert e.model.context["timeout_seconds"] == 10
+            assert e.model.context["timeout_seconds"] == 10.0
 
 
 class TestInfraAuthenticationError:
@@ -778,11 +783,17 @@ class TestStructuredFieldsComprehensive:
         """Test that all errors support correlation_id via context model."""
         correlation_id = uuid4()
         context = ModelInfraErrorContext(correlation_id=correlation_id)
+        # ModelTimeoutErrorContext for InfraTimeoutError
+        timeout_context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="test",
+            correlation_id=correlation_id,
+        )
         errors = [
             ProtocolConfigurationError("test", context=context),
             SecretResolutionError("test", context=context),
             InfraConnectionError("test", context=context),
-            InfraTimeoutError("test", context=context),
+            InfraTimeoutError("test", context=timeout_context),
             InfraAuthenticationError("test", context=context),
             InfraUnavailableError("test", context=context),
         ]
@@ -821,8 +832,9 @@ class TestStructuredFieldsComprehensive:
             ),
             InfraTimeoutError(
                 "test",
-                context=ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.KAFKA
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="test",
                 ),
             ),
             InfraAuthenticationError(
@@ -863,7 +875,11 @@ class TestStructuredFieldsComprehensive:
                 "test", context=ModelInfraErrorContext(operation="connect")
             ),
             InfraTimeoutError(
-                "test", context=ModelInfraErrorContext(operation="execute")
+                "test",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="execute",
+                ),
             ),
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(operation="authenticate")

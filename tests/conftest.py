@@ -246,7 +246,8 @@ def assert_policy_registry_interface(registry: object) -> None:
         AssertionError: If required methods are missing.
 
     Example:
-        >>> registry = await get_policy_registry_from_container(container)
+        >>> from omnibase_infra.runtime.registry_policy import RegistryPolicy
+        >>> registry = await container.service_registry.resolve_service(RegistryPolicy)
         >>> assert_policy_registry_interface(registry)
         >>> assert len(registry) == 0  # Empty initially
     """
@@ -274,7 +275,8 @@ def assert_handler_registry_interface(registry: object) -> None:
         AssertionError: If required methods are missing.
 
     Example:
-        >>> registry = await get_handler_registry_from_container(container)
+        >>> from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
+        >>> registry = await container.service_registry.resolve_service(RegistryProtocolBinding)
         >>> assert_handler_registry_interface(registry)
         >>> assert len(registry) == 0
     """

@@ -49,11 +49,11 @@ REQUIRED_EXEMPTION_FIELDS = frozenset({"file_pattern", "violation_pattern", "rea
 
 # Key files that have exemptions defined - used for existence validation
 KEY_EXEMPTION_FILES = (
-    "src/omnibase_infra/event_bus/kafka_event_bus.py",
-    "src/omnibase_infra/runtime/runtime_host_process.py",
-    "src/omnibase_infra/runtime/message_dispatch_engine.py",
+    "src/omnibase_infra/event_bus/event_bus_kafka.py",
+    "src/omnibase_infra/runtime/service_runtime_host_process.py",
+    "src/omnibase_infra/runtime/service_message_dispatch_engine.py",
     "src/omnibase_infra/mixins/mixin_node_introspection.py",
-    "src/omnibase_infra/validation/execution_shape_validator.py",
+    "src/omnibase_infra/validation/validator_execution_shape.py",
 )
 
 

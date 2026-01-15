@@ -773,7 +773,7 @@ class TestIntegration:
             yaml.dump(
                 {
                     "name": "handler-http",
-                    "handler_class": "omnibase_infra.handlers.handler_http.HttpRestHandler",
+                    "handler_class": "omnibase_infra.handlers.handler_http.HandlerHttpRest",
                     "handler_type": "effect",
                     "tags": ["http", "test"],
                 }
@@ -817,7 +817,7 @@ class TestIntegration:
             yaml.dump(
                 {
                     "name": "handler-http",
-                    "handler_class": "omnibase_infra.handlers.handler_http.HttpRestHandler",
+                    "handler_class": "omnibase_infra.handlers.handler_http.HandlerHttpRest",
                     "handler_type": "effect",
                     "tags": ["http", "test"],
                 }

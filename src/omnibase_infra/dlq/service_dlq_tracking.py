@@ -62,6 +62,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
@@ -430,10 +431,16 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure(
                     "record_replay_attempt", correlation_id
                 )
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="record_replay_attempt",
+                target_name="dlq_tracking_service",
+                correlation_id=correlation_id,
+                timeout_seconds=self._config.command_timeout,
+            )
             raise InfraTimeoutError(
                 f"Record replay attempt timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                context=timeout_ctx,
             ) from e
         except asyncpg.PostgresConnectionError as e:
             # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)
@@ -540,10 +547,16 @@ class ServiceDlqTracking(MixinAsyncCircuitBreaker):
             # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("get_replay_history", correlation_id)
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_replay_history",
+                target_name="dlq_tracking_service",
+                correlation_id=correlation_id,
+                timeout_seconds=self._config.command_timeout,
+            )
             raise InfraTimeoutError(
                 f"get_replay_history timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                context=timeout_ctx,
             ) from e
         except asyncpg.PostgresConnectionError as e:
             # Circuit breaker failure (caller-held lock pattern per ONEX circuit breaker pattern)

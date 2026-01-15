@@ -51,7 +51,7 @@ from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProce
 # Real handler class paths from omnibase_infra.handlers
 # Note: HttpRestHandler works without config or external services.
 # Other handlers (DB, Consul, Vault) require external services during initialize().
-REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HttpRestHandler"
+REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HandlerHttpRest"
 
 # Handler contract template for creating test contracts
 HANDLER_CONTRACT_YAML_TEMPLATE = """

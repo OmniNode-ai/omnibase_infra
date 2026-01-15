@@ -82,6 +82,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -460,9 +461,15 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
             await self._record_tick_failure(correlation_id)
 
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="emit_tick",
+                target_name=self._config.tick_topic,
+                correlation_id=correlation_id,
+            )
             raise InfraTimeoutError(
                 f"Timeout emitting tick to topic {self._config.tick_topic}",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except Exception as e:

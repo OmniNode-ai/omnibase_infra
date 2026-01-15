@@ -114,6 +114,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.projection import (
@@ -582,7 +583,13 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("publish_snapshot", correlation_id)
             raise InfraTimeoutError(
                 f"Timeout publishing snapshot: {snapshot.to_kafka_key()}",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    timeout_seconds=0.0,  # Timeout value not available in this context
+                ),
             ) from e
 
         except Exception as e:
@@ -995,7 +1002,13 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 await self._cleanup_consumer()
                 raise InfraTimeoutError(
                     f"Timeout loading snapshot cache from topic {self._config.topic}",
-                    context=ctx,
+                    context=ModelTimeoutErrorContext(
+                        transport_type=ctx.transport_type,
+                        operation=ctx.operation,
+                        target_name=ctx.target_name,
+                        correlation_id=ctx.correlation_id,
+                        timeout_seconds=float(self._consumer_timeout_ms) / 1000.0,
+                    ),
                 ) from e
 
             except Exception as e:

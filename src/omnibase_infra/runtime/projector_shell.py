@@ -43,6 +43,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     RuntimeHostError,
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
@@ -320,9 +321,15 @@ class ProjectorShell(MixinProjectorSqlOperations):
             ) from e
 
         except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="project",
+                target_name=f"projector.{self.projector_id}",
+                correlation_id=correlation_id,
+            )
             raise InfraTimeoutError(
                 f"Projection timed out for: {self.projector_id}",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except asyncpg.UniqueViolationError as e:
@@ -515,9 +522,15 @@ class ProjectorShell(MixinProjectorSqlOperations):
             ) from e
 
         except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_state",
+                target_name=f"projector.{self.projector_id}",
+                correlation_id=correlation_id,
+            )
             raise InfraTimeoutError(
                 f"State query timed out for: {self.projector_id}",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except Exception as e:
@@ -619,9 +632,15 @@ class ProjectorShell(MixinProjectorSqlOperations):
             ) from e
 
         except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_states",
+                target_name=f"projector.{self.projector_id}",
+                correlation_id=correlation_id,
+            )
             raise InfraTimeoutError(
                 f"Bulk state query timed out for: {self.projector_id}",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except Exception as e:
@@ -717,9 +736,15 @@ class ProjectorShell(MixinProjectorSqlOperations):
             ) from e
 
         except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="partial_update",
+                target_name=f"projector.{self.projector_id}",
+                correlation_id=correlation_id,
+            )
             raise InfraTimeoutError(
                 f"Partial update timed out for: {self.projector_id}",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except ValueError:
@@ -823,9 +848,15 @@ class ProjectorShell(MixinProjectorSqlOperations):
             ) from e
 
         except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="upsert_partial",
+                target_name=f"projector.{self.projector_id}",
+                correlation_id=correlation_id,
+            )
             raise InfraTimeoutError(
                 f"Partial upsert timed out for: {self.projector_id}",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except ValueError:
