@@ -122,7 +122,7 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     # Type validation
     if dsn is None:
         raise ProtocolConfigurationError(
-            "dsn cannot be None",
+            "Invalid dsn: expected a string, got None",
             context=context,
             parameter="dsn",
             value=None,
@@ -130,7 +130,7 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
 
     if not isinstance(dsn, str):
         raise ProtocolConfigurationError(
-            f"dsn must be a string, got {type(dsn).__name__}",
+            f"Invalid dsn type: expected str, got {type(dsn).__name__}",
             context=context,
             parameter="dsn",
             value=type(dsn).__name__,
@@ -139,7 +139,7 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     # Empty string validation
     if not dsn.strip():
         raise ProtocolConfigurationError(
-            "dsn cannot be empty",
+            "Invalid dsn: expected a non-empty string, got empty string",
             context=context,
             parameter="dsn",
             value="",

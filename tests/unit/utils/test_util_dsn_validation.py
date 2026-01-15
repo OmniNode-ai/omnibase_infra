@@ -159,28 +159,28 @@ class TestDsnValidation:
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             parse_and_validate_dsn("")
 
-        assert "dsn cannot be empty" in str(exc_info.value)
+        assert "expected a non-empty string, got empty string" in str(exc_info.value)
 
     def test_invalid_whitespace_only(self) -> None:
         """Test DSN with only whitespace."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             parse_and_validate_dsn("   ")
 
-        assert "dsn cannot be empty" in str(exc_info.value)
+        assert "expected a non-empty string, got empty string" in str(exc_info.value)
 
     def test_invalid_none_value(self) -> None:
         """Test None value (type checking)."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             parse_and_validate_dsn(None)  # type: ignore[arg-type]
 
-        assert "dsn cannot be None" in str(exc_info.value)
+        assert "expected a string, got None" in str(exc_info.value)
 
     def test_invalid_non_string_type(self) -> None:
         """Test non-string type."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             parse_and_validate_dsn(12345)  # type: ignore[arg-type]
 
-        assert "dsn must be a string" in str(exc_info.value)
+        assert "expected str, got int" in str(exc_info.value)
 
     def test_invalid_missing_database_name(self) -> None:
         """Test DSN without database name."""

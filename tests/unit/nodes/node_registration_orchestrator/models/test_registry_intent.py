@@ -1215,7 +1215,7 @@ class TestUnionRegistrySync:
             # Get the kind from the class default
             kind_default = getattr(union_type, "model_fields", {}).get("kind")
             assert kind_default is not None, (
-                f"{union_type.__name__} has no 'kind' field"
+                f"Invalid union type '{union_type.__name__}': expected 'kind' field, got None"
             )
 
             kind_value = kind_default.default

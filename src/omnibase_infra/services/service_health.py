@@ -58,7 +58,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Literal
-from uuid import uuid4
 
 from aiohttp import web
 
@@ -255,11 +254,10 @@ class ServiceHealth:
 
         # Validate that at least one dependency source is provided
         if container is None and runtime is None:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize_health_server",
                 target_name="ServiceHealth",
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "ServiceHealth requires either 'container' or 'runtime' to be provided. "
@@ -364,11 +362,10 @@ class ServiceHealth:
             :meth:`create_from_container`: Factory method that resolves runtime
         """
         if self._runtime is None:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="get_runtime",
                 target_name="ServiceHealth.runtime",
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 "RuntimeHostProcess not available. "
@@ -812,11 +809,10 @@ class ServiceHealth:
             # NOTE: Use explicit if/raise instead of assert - assertions can be
             # disabled with Python's -O flag, which would skip this safety check
             if not isinstance(health_details, dict):
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.HTTP,
                     operation="validate_health_check_response",
                     target_name="RuntimeHostProcess.health_check",
-                    correlation_id=uuid4(),
                 )
                 raise ProtocolConfigurationError(
                     f"health_check() must return dict, got {type(health_details).__name__}",

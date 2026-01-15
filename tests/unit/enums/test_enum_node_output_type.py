@@ -70,8 +70,8 @@ class TestToMessageCategory:
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             EnumNodeOutputType.PROJECTION.to_message_category()
 
-        assert "PROJECTION has no message category" in str(exc_info.value)
-        assert "not routable" in str(exc_info.value)
+        assert "expected EVENT, COMMAND, or INTENT" in str(exc_info.value)
+        assert "got 'projection'" in str(exc_info.value)
 
     def test_all_routable_types_convert_correctly(self) -> None:
         """All routable types should convert to matching message categories."""
