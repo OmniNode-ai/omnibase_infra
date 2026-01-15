@@ -12,7 +12,7 @@ Test Organization:
     - TestIsTimezoneAwareEdgeCases: Edge cases including broken tzinfo
     - TestEnsureTimezoneAwareConversion: Naive to UTC conversion
     - TestEnsureTimezoneAwarePassthrough: Aware datetime passthrough
-    - TestEnsureTimezoneAwareStrictMode: ValueError on naive with assume_utc=False
+    - TestEnsureTimezoneAwareStrictMode: ProtocolConfigurationError on naive with assume_utc=False
     - TestEnsureTimezoneAwareWarning: Warning logging behavior
     - TestEnsureTimezoneAwareContext: Context parameter in warnings
 
@@ -36,6 +36,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.utils.util_datetime import (
     ensure_timezone_aware,
     is_timezone_aware,
@@ -281,36 +282,38 @@ class TestEnsureTimezoneAwareStrictMode:
     """Test suite for ensure_timezone_aware strict mode (assume_utc=False).
 
     Tests verify:
-    - ValueError raised for naive datetime when assume_utc=False
+    - ProtocolConfigurationError raised for naive datetime when assume_utc=False
     - Error message includes context when provided
     - Error message format is correct
     """
 
     def test_naive_datetime_raises_value_error_when_assume_utc_false(self) -> None:
-        """Test naive datetime raises ValueError when assume_utc=False."""
+        """Test naive datetime raises ProtocolConfigurationError when assume_utc=False."""
         naive_dt = datetime(2025, 1, 15, 12, 0, 0)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             ensure_timezone_aware(naive_dt, assume_utc=False)
 
         assert "Naive datetime not allowed" in str(exc_info.value)
 
-    def test_value_error_includes_context_when_provided(self) -> None:
-        """Test ValueError message includes context parameter."""
+    def test_error_includes_context_when_provided(self) -> None:
+        """Test ProtocolConfigurationError includes context in error context object."""
         naive_dt = datetime(2025, 1, 15, 12, 0, 0)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             ensure_timezone_aware(naive_dt, assume_utc=False, context="updated_at")
 
-        error_message = str(exc_info.value)
-        assert "updated_at" in error_message
-        assert "context:" in error_message
+        # Context is stored in the error's context dict (target_name in additional_context)
+        error = exc_info.value
+        assert error.context is not None
+        additional_context = error.context.get("additional_context", {})
+        assert additional_context.get("target_name") == "updated_at"
 
     def test_value_error_suggests_timezone_aware_usage(self) -> None:
-        """Test ValueError message suggests using timezone-aware datetime."""
+        """Test ProtocolConfigurationError message suggests using timezone-aware datetime."""
         naive_dt = datetime(2025, 1, 15, 12, 0, 0)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             ensure_timezone_aware(naive_dt, assume_utc=False)
 
         error_message = str(exc_info.value)
@@ -420,7 +423,7 @@ class TestEnsureTimezoneAwareContext:
 
     Tests verify:
     - Context appears in warning message
-    - Context appears in ValueError message
+    - Context appears in ProtocolConfigurationError message
     - Context is included in logger extra data
     - None context is handled gracefully
     """
@@ -478,10 +481,10 @@ class TestEnsureTimezoneAwareContext:
         assert "Converting naive datetime to UTC" in caplog.text
 
     def test_none_context_handled_gracefully_in_error(self) -> None:
-        """Test None context does not cause errors in ValueError."""
+        """Test None context does not cause errors in ProtocolConfigurationError."""
         naive_dt = datetime(2025, 1, 15, 12, 0, 0)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             ensure_timezone_aware(naive_dt, assume_utc=False, context=None)
 
         # Should not have "(context: )" with empty context
@@ -532,11 +535,11 @@ class TestEnsureTimezoneAwareBrokenTzInfo:
         assert result.utcoffset() == timedelta(0)
 
     def test_broken_tzinfo_raises_with_assume_utc_false(self) -> None:
-        """Test datetime with broken tzinfo raises ValueError when assume_utc=False."""
+        """Test datetime with broken tzinfo raises ProtocolConfigurationError when assume_utc=False."""
         broken_tz = BrokenTzInfo()
         dt_with_broken_tz = datetime(2025, 1, 15, 12, 0, 0, tzinfo=broken_tz)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             ensure_timezone_aware(dt_with_broken_tz, assume_utc=False)
 
         assert "Naive datetime not allowed" in str(exc_info.value)
