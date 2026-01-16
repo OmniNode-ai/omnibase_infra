@@ -590,6 +590,7 @@ class PluginRegistration:
                 self._pool,
                 projector=self._projector,
                 consul_handler=self._consul_handler,
+                correlation_id=correlation_id,
             )
             duration = time.time() - start_time
 

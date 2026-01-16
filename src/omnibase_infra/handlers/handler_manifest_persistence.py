@@ -117,13 +117,12 @@ from omnibase_infra.enums import (
     EnumRetryErrorCategory,
 )
 from omnibase_infra.errors import (
-    InfraConnectionError,
     InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
+from omnibase_infra.handlers.models import ModelRetryState
 from omnibase_infra.handlers.models.model_manifest_metadata import ModelManifestMetadata
 from omnibase_infra.handlers.models.model_manifest_query_result import (
     ModelManifestQueryResult,

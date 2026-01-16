@@ -17,13 +17,10 @@ Environment Variables:
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from omnibase_infra.dlq.constants_dlq import PATTERN_TABLE_NAME
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.utils import validate_pool_sizes_constraint
 from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 

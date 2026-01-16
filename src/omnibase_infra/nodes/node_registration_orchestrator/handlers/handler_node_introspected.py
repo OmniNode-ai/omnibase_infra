@@ -64,7 +64,7 @@ from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutpu
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
-from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.errors import ModelInfraErrorContext
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul

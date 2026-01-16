@@ -1629,7 +1629,13 @@ class TestPolicyRegistrySemverCacheConfiguration:
             RegistryPolicy.SEMVER_CACHE_SIZE = original_size
 
     def test_configure_semver_cache_after_use_raises_error(self) -> None:
-        """Test that configuring cache after first use raises RuntimeError."""
+        """Test that configuring cache after first use raises ProtocolConfigurationError.
+
+        OMN-1181: Changed from RuntimeError to ProtocolConfigurationError
+        for clearer error messages and structured error handling.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+
         # Reset cache to start fresh
         RegistryPolicy._reset_semver_cache()
 
@@ -1637,7 +1643,7 @@ class TestPolicyRegistrySemverCacheConfiguration:
         RegistryPolicy._parse_semver("1.0.0")
 
         # Attempt to reconfigure should fail
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             RegistryPolicy.configure_semver_cache(maxsize=256)
 
         assert "Cannot reconfigure semver cache after first use" in str(exc_info.value)

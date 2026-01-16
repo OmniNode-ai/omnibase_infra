@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.runtime.util_version import normalize_version
 from omnibase_infra.types import PolicyTypeInput
 from omnibase_infra.utils import validate_policy_type_value

@@ -36,7 +36,7 @@ from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.types import JsonType
 
-from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.snapshot import (
     ModelSnapshot,
     ModelSnapshotDiff,

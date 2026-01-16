@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.enums import EnumContractType
 from omnibase_infra.models.projection.model_registration_projection import (
     ContractTypeWithUnknown,
 )

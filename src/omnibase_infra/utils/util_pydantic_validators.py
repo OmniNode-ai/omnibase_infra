@@ -38,9 +38,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 if TYPE_CHECKING:
-    from pydantic import ValidationInfo
-
-    from omnibase_infra.enums import EnumContractType, EnumPolicyType
+    from omnibase_infra.enums import EnumPolicyType
 
 
 def validate_timezone_aware_datetime(
