@@ -28,7 +28,24 @@ from uuid import UUID, uuid4
 import pytest
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.protocols import ProtocolEventBus
+    from typing import Protocol
+
+    class ProtocolTestEventBus(Protocol):
+        """Test protocol for event bus - matches SimpleAsyncEventBus signature.
+
+        This protocol is defined locally because the production ProtocolEventBusLike
+        uses bytes for publish(topic, key, value) while the test SimpleAsyncEventBus
+        uses dict for publish(topic, message). This test-specific protocol matches
+        the SimpleAsyncEventBus interface used in tests.
+        """
+
+        async def publish(self, topic: str, message: dict[str, object]) -> None:
+            """Publish a message to a topic."""
+            ...
+
+        def subscribe(self, topic: str, handler: object) -> None:
+            """Subscribe a handler to a topic."""
+            ...
 
 
 # =============================================================================
@@ -66,9 +83,11 @@ def log_capture() -> list[logging.LogRecord]:
     original_level = logger.level
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
-    yield captured_records
-    logger.removeHandler(handler)
-    logger.setLevel(original_level)
+    try:
+        yield captured_records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(original_level)
 
 
 @pytest.fixture
@@ -134,9 +153,13 @@ def assert_correlation_in_logs(
         for r in matching
     )
 
+    # Collect actual boundaries for better error message
+    actual_boundaries = [getattr(r, "boundary", "<no boundary>") for r in matching]
+
     assert found, (
         f"No log with correlation_id {correlation_id} at boundary '{boundary}'. "
-        f"Found {len(matching)} records with matching correlation_id."
+        f"Found {len(matching)} records with matching correlation_id. "
+        f"Actual boundaries: {actual_boundaries}"
     )
 
 
@@ -163,7 +186,7 @@ class MockHandlerA:
             assert_correlation_in_logs(log_capture, correlation_id, "handler_a_entry")
     """
 
-    def __init__(self, event_bus: ProtocolEventBus) -> None:
+    def __init__(self, event_bus: ProtocolTestEventBus) -> None:
         """Initialize handler with event bus dependency.
 
         Args:

@@ -256,8 +256,8 @@ class TestCorrelationPreservation:
         handler_c = MockHandlerC()
 
         # Create a custom Handler B that forwards to topic-bc
-        class ForwardingHandlerB:
-            """Handler B that forwards to Handler C with correlation."""
+        class MockHandlerBForwarding:
+            """Mock Handler B variant that forwards to Handler C with correlation."""
 
             def __init__(self, bus: SimpleAsyncEventBus) -> None:
                 self._bus = bus
@@ -295,7 +295,7 @@ class TestCorrelationPreservation:
                     },
                 )
 
-        handler_b = ForwardingHandlerB(event_bus)
+        handler_b = MockHandlerBForwarding(event_bus)
 
         # Subscribe handlers: A -> B -> C
         event_bus.subscribe("correlation-test", handler_b.handle)
