@@ -28,7 +28,7 @@ class ModelQdrantCollectionPayload(BaseModel):
     )
     collection_name: str = Field(
         description="Name of the created collection"
-    )  # ONEX_EXCLUDE: entity_name_pattern
+    )  # ONEX_EXCLUDE: entity_name - Qdrant uses collection_name as the primary identifier, not a reference
     vector_size: int = Field(description="Dimension of vectors in the collection")
     distance: str = Field(
         default="cosine",

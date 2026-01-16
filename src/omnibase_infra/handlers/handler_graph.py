@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from neo4j.exceptions import (
@@ -45,6 +45,7 @@ from neo4j.exceptions import (
     ServiceUnavailable,
     TransactionError,
 )
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.graph import (
     ModelGraphBatchResult,
     ModelGraphDatabaseNode,
@@ -59,6 +60,7 @@ from omnibase_core.models.graph import (
     ModelGraphTraversalResult,
 )
 from omnibase_core.types import JsonType
+from omnibase_spi.protocols.storage import ProtocolGraphDatabaseHandler
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -85,7 +87,7 @@ _DEFAULT_POOL_SIZE: int = 50
 _HEALTH_CACHE_SECONDS: float = 10.0
 
 
-class HandlerGraph(MixinAsyncCircuitBreaker):
+class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
     """Graph database handler implementing ProtocolGraphDatabaseHandler.
 
     Provides typed graph database operations using neo4j async driver,
@@ -126,8 +128,21 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
         ```
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerGraph in uninitialized state."""
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize HandlerGraph with ONEX container for dependency injection.
+
+        Args:
+            container: ONEX container providing dependency injection for
+                services, configuration, and runtime context.
+
+        Note:
+            The container is stored for interface compliance with the standard ONEX
+            handler pattern (def __init__(self, container: ModelONEXContainer)) and
+            to enable future DI-based service resolution. Currently, the handler
+            operates independently but the container parameter ensures API
+            consistency across all handlers.
+        """
+        self._container = container
         self._driver: AsyncDriver | None = None
         self._connection_uri: str = ""
         self._database: str = "memgraph"
@@ -235,7 +250,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 },
             )
         except AuthError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="initialize",
                 target_name="graph_handler",
@@ -245,7 +260,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 "Graph database authentication failed", context=ctx
             ) from e
         except ServiceUnavailable as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="initialize",
                 target_name="graph_handler",
@@ -255,7 +270,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 "Failed to connect to graph database", context=ctx
             ) from e
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="initialize",
                 target_name="graph_handler",
@@ -328,13 +343,13 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
             RuntimeHostError: If handler is not initialized.
         """
         if not self._initialized or self._driver is None:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation=operation,
                 target_name="graph_handler",
                 correlation_id=correlation_id
-                if isinstance(correlation_id, object)
-                else uuid4(),
+                if isinstance(correlation_id, UUID)
+                else None,
             )
             raise RuntimeHostError(
                 "HandlerGraph not initialized. Call initialize() first.", context=ctx
@@ -400,7 +415,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 execution_time_ms=execution_time_ms,
             )
         except Neo4jError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="execute_query",
                 target_name="graph_handler",
@@ -492,7 +507,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 rollback_occurred=rollback_occurred,
             )
         except TransactionError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="execute_query_batch",
                 target_name="graph_handler",
@@ -504,7 +519,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 f"Batch transaction failed: {type(e).__name__}", context=ctx
             ) from e
         except Neo4jError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="execute_query_batch",
                 target_name="graph_handler",
@@ -553,7 +568,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 await result.consume()
 
                 if record is None:
-                    ctx = ModelInfraErrorContext(
+                    ctx = ModelInfraErrorContext.with_correlation(
                         transport_type=EnumInfraTransportType.GRAPH,
                         operation="create_node",
                         target_name="graph_handler",
@@ -574,7 +589,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                     properties=dict(node.items()),
                 )
         except ConstraintError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="create_node",
                 target_name="graph_handler",
@@ -584,7 +599,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 "Node creation failed: constraint violation", context=ctx
             ) from e
         except Neo4jError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="create_node",
                 target_name="graph_handler",
@@ -662,7 +677,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 await result.consume()
 
                 if record is None:
-                    ctx = ModelInfraErrorContext(
+                    ctx = ModelInfraErrorContext.with_correlation(
                         transport_type=EnumInfraTransportType.GRAPH,
                         operation="create_relationship",
                         target_name="graph_handler",
@@ -687,7 +702,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                     end_node_id=end_eid,
                 )
         except Neo4jError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="create_relationship",
                 target_name="graph_handler",
@@ -773,7 +788,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                     execution_time_ms=execution_time_ms,
                 )
         except ConstraintError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="delete_node",
                 target_name="graph_handler",
@@ -783,7 +798,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 "Cannot delete node with relationships. Use detach=True.", context=ctx
             ) from e
         except Neo4jError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="delete_node",
                 target_name="graph_handler",
@@ -859,7 +874,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                     execution_time_ms=execution_time_ms,
                 )
         except Neo4jError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="delete_relationship",
                 target_name="graph_handler",
@@ -1016,7 +1031,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
                 execution_time_ms=execution_time_ms,
             )
         except Neo4jError as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.GRAPH,
                 operation="traverse",
                 target_name="graph_handler",

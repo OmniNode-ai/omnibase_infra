@@ -29,9 +29,9 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def handler() -> HandlerGraph:
-    """Create a fresh HandlerGraph instance."""
-    return HandlerGraph()
+def handler(mock_container: MagicMock) -> HandlerGraph:
+    """Create a fresh HandlerGraph instance with mock container."""
+    return HandlerGraph(container=mock_container)
 
 
 @pytest.fixture
@@ -120,6 +120,7 @@ class TestHandlerGraphInitialization:
                 "bolt://localhost:7687",
                 auth=None,
                 max_connection_pool_size=50,
+                encrypted=False,
             )
 
             await handler.shutdown()
@@ -455,12 +456,9 @@ class TestHandlerGraphExecuteQueryBatch:
 
             mock_tx.run = AsyncMock(return_value=mock_result)
             mock_tx.commit = AsyncMock()
+            mock_tx.rollback = AsyncMock()
 
-            mock_tx_cm = MagicMock()
-            mock_tx_cm.__aenter__ = AsyncMock(return_value=mock_tx)
-            mock_tx_cm.__aexit__ = AsyncMock(return_value=None)
-
-            mock_session.begin_transaction = MagicMock(return_value=mock_tx_cm)
+            mock_session.begin_transaction = AsyncMock(return_value=mock_tx)
 
             mock_session_cm = MagicMock()
             mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)

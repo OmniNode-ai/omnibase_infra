@@ -1587,6 +1587,48 @@ pattern_exemptions:
       - omnibase_spi/protocols/projectors/protocol_event_projector.py (protocol definition)
     ticket: OMN-1169
   # ==========================================================================
+  # Qdrant Handler Model Exemptions (OMN-1142)
+  # ==========================================================================
+  # collection_name is a Qdrant-native identifier, not an entity reference.
+  # Qdrant uses string collection names as the primary way to identify and
+  # access vector collections. This matches the qdrant-client API design.
+  - file_pattern: 'model_qdrant_upsert_payload\.py'
+    violation_pattern: "Field 'collection_name' might reference an entity"
+    reason: >
+      collection_name is a Qdrant collection identifier (e.g., 'embeddings', 'documents'). Qdrant uses string collection names as the primary API identifier, not UUIDs. This matches the qdrant-client library design.
+
+    documentation:
+      - https://qdrant.tech/documentation/concepts/collections/
+      - src/omnibase_infra/handlers/handler_qdrant.py
+    ticket: OMN-1142
+  - file_pattern: 'model_qdrant_collection_payload\.py'
+    violation_pattern: "Field 'collection_name' might reference an entity"
+    reason: >
+      collection_name is a Qdrant collection identifier (e.g., 'embeddings', 'documents'). Qdrant uses string collection names as the primary API identifier, not UUIDs. This matches the qdrant-client library design.
+
+    documentation:
+      - https://qdrant.tech/documentation/concepts/collections/
+      - src/omnibase_infra/handlers/handler_qdrant.py
+    ticket: OMN-1142
+  - file_pattern: 'model_qdrant_search_payload\.py'
+    violation_pattern: "Field 'collection_name' might reference an entity"
+    reason: >
+      collection_name is a Qdrant collection identifier (e.g., 'embeddings', 'documents'). Qdrant uses string collection names as the primary API identifier, not UUIDs. This matches the qdrant-client library design.
+
+    documentation:
+      - https://qdrant.tech/documentation/concepts/collections/
+      - src/omnibase_infra/handlers/handler_qdrant.py
+    ticket: OMN-1142
+  - file_pattern: 'model_qdrant_delete_payload\.py'
+    violation_pattern: "Field 'collection_name' might reference an entity"
+    reason: >
+      collection_name is a Qdrant collection identifier (e.g., 'embeddings', 'documents'). Qdrant uses string collection names as the primary API identifier, not UUIDs. This matches the qdrant-client library design.
+
+    documentation:
+      - https://qdrant.tech/documentation/concepts/collections/
+      - src/omnibase_infra/handlers/handler_qdrant.py
+    ticket: OMN-1142
+  # ==========================================================================
   # Projector Schema Model Exemptions (OMN-1168)
   # ==========================================================================
   # table_name is a standard database identifier, not an entity reference.

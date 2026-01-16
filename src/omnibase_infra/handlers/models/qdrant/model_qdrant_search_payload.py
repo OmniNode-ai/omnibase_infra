@@ -31,7 +31,7 @@ class ModelQdrantSearchPayload(BaseModel):
     )
     collection_name: str = Field(
         description="Name of the collection searched"
-    )  # ONEX_EXCLUDE: entity_name_pattern
+    )  # ONEX_EXCLUDE: entity_name - Qdrant uses collection_name as the primary identifier, not a reference
     results: list[ModelQdrantSearchResult] = Field(
         default_factory=list,
         description="List of search results",

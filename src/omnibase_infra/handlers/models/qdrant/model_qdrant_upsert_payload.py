@@ -28,7 +28,7 @@ class ModelQdrantUpsertPayload(BaseModel):
     )
     collection_name: str = Field(
         description="Name of the collection"
-    )  # ONEX_EXCLUDE: entity_name_pattern
+    )  # ONEX_EXCLUDE: entity_name - Qdrant uses collection_name as the primary identifier, not a reference
     point_id: str | UUID = Field(description="ID of the upserted point")
     success: bool = Field(default=True, description="Whether the upsert was successful")
 

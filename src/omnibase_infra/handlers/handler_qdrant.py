@@ -33,6 +33,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.common.model_schema_value import ModelSchemaValue
 from omnibase_core.models.vector import (
     EnumVectorDistanceMetric,
@@ -71,6 +72,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _DEFAULT_BATCH_SIZE: int = 100
 _HANDLER_VERSION: str = "1.0.0"
+_HEALTH_CACHE_TTL_SECONDS: float = 5.0
 
 # Metric mapping from string to Qdrant distance enum
 _METRIC_MAP: dict[str, qdrant_models.Distance] = {
@@ -99,7 +101,7 @@ _FILTER_OP_MAP: dict[EnumVectorFilterOperator, str] = {
 }
 
 
-class HandlerQdrant(MixinAsyncCircuitBreaker):
+class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
     """Qdrant vector store handler implementing ProtocolVectorStoreHandler.
 
     This handler provides vector storage, similarity search, and index management
@@ -117,13 +119,29 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
         access from different threads. It is coroutine-safe for async operations.
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerQdrant in uninitialized state."""
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize HandlerQdrant with ONEX container for dependency injection.
+
+        Args:
+            container: ONEX container providing dependency injection for
+                services, configuration, and runtime context.
+
+        Note:
+            The container is stored for interface compliance with the standard ONEX
+            handler pattern (def __init__(self, container: ModelONEXContainer)) and
+            to enable future DI-based service resolution (e.g., dispatcher routing,
+            metrics integration). Currently, the handler operates independently but
+            the container parameter ensures API consistency across all handlers.
+        """
+        self._container = container
         self._client: QdrantClient | None = None
         self._config: ModelVectorConnectionConfig | None = None
         self._default_index: str | None = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._initialized: bool = False
+        # Health check caching
+        self._cached_health: ModelVectorHealthStatus | None = None
+        self._health_cache_time: float = 0.0
 
     @property
     def handler_type(self) -> str:
@@ -197,11 +215,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
                 },
             )
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=init_correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation="initialize",
                 target_name="qdrant_handler",
-                correlation_id=init_correlation_id,
             )
             error_msg = str(e).lower()
             if "unauthorized" in error_msg or "forbidden" in error_msg:
@@ -230,6 +248,9 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
             self._client.close()
             self._client = None
         self._initialized = False
+        # Clear health cache
+        self._cached_health = None
+        self._health_cache_time = 0.0
         logger.info("HandlerQdrant shutdown complete")
 
     def _ensure_initialized(
@@ -245,11 +266,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
             RuntimeHostError: If handler is not initialized.
         """
         if not self._initialized or self._client is None:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation=operation,
                 target_name="qdrant_handler",
-                correlation_id=correlation_id or uuid4(),
             )
             raise RuntimeHostError(
                 "HandlerQdrant not initialized. Call initialize() first.",
@@ -472,11 +493,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
         except (InfraUnavailableError, RuntimeHostError):
             raise
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation="store_embedding",
                 target_name=resolved_index,
-                correlation_id=correlation_id,
             )
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("store_embedding", correlation_id)
@@ -558,11 +579,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
         except (InfraUnavailableError, RuntimeHostError):
             raise
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation="store_embeddings_batch",
                 target_name=resolved_index,
-                correlation_id=correlation_id,
             )
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
@@ -673,11 +694,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
         except (InfraUnavailableError, RuntimeHostError):
             raise
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation="query_similar",
                 target_name=resolved_index,
-                correlation_id=correlation_id,
             )
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("query_similar", correlation_id)
@@ -733,11 +754,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
         except (InfraUnavailableError, RuntimeHostError):
             raise
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation="delete_embedding",
                 target_name=resolved_index,
-                correlation_id=correlation_id,
             )
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("delete_embedding", correlation_id)
@@ -795,11 +816,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
         except (InfraUnavailableError, RuntimeHostError):
             raise
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation="delete_embeddings_batch",
                 target_name=resolved_index,
-                correlation_id=correlation_id,
             )
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
@@ -896,11 +917,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
         except (InfraUnavailableError, RuntimeHostError, ValueError):
             raise
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation="create_index",
                 target_name=index_name,
-                correlation_id=correlation_id,
             )
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("create_index", correlation_id)
@@ -951,11 +972,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
         except (InfraUnavailableError, RuntimeHostError):
             raise
         except Exception as e:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.QDRANT,
                 operation="delete_index",
                 target_name=index_name,
-                correlation_id=correlation_id,
             )
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("delete_index", correlation_id)
@@ -966,9 +987,20 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
     async def health_check(self) -> ModelVectorHealthStatus:
         """Check handler health and connectivity to Qdrant.
 
+        Implements caching to avoid overwhelming the backend with frequent
+        health checks. Cache TTL is configured via _HEALTH_CACHE_TTL_SECONDS.
+
         Returns:
             ModelVectorHealthStatus containing health status.
         """
+        # Return cached result if recent
+        current_time = time.time()
+        if (
+            self._cached_health is not None
+            and current_time - self._health_cache_time < _HEALTH_CACHE_TTL_SECONDS
+        ):
+            return self._cached_health
+
         start_time = time.time()
 
         if not self._initialized or self._client is None:
@@ -987,7 +1019,7 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
 
             latency_ms = int((time.time() - start_time) * 1000)
 
-            return ModelVectorHealthStatus(
+            health = ModelVectorHealthStatus(
                 healthy=True,
                 latency_ms=latency_ms,
                 details={
@@ -997,6 +1029,12 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
                 indices=collection_names,
                 last_error=None,
             )
+
+            # Cache the result
+            self._cached_health = health
+            self._health_cache_time = current_time
+
+            return health
         except Exception as e:
             latency_ms = int((time.time() - start_time) * 1000)
             return ModelVectorHealthStatus(
@@ -1033,12 +1071,6 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
                 EnumVectorDistanceMetric.DOT_PRODUCT,
             ],
         )
-
-
-# Type assertion to verify protocol implementation at module load time
-def _verify_protocol_implementation() -> None:
-    """Verify that HandlerQdrant implements ProtocolVectorStoreHandler."""
-    handler: ProtocolVectorStoreHandler = HandlerQdrant()
 
 
 __all__: list[str] = ["HandlerQdrant"]

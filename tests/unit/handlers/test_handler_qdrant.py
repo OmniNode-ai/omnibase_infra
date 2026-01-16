@@ -35,9 +35,9 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def handler() -> HandlerQdrant:
-    """Create a fresh HandlerQdrant instance."""
-    return HandlerQdrant()
+def handler(mock_container: MagicMock) -> HandlerQdrant:
+    """Create a fresh HandlerQdrant instance with mock container."""
+    return HandlerQdrant(container=mock_container)
 
 
 @pytest.fixture
