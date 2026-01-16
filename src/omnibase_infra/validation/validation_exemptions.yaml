@@ -1613,6 +1613,52 @@ pattern_exemptions:
     documentation:
       - docs/patterns/error_handling_patterns.md
     ticket: OMN-1168
+  # ==========================================================================
+  # SecretResolver Exemptions (OMN-764)
+  # ==========================================================================
+  # SecretResolver is a centralized secret resolution service with cohesive
+  # functionality: sync/async resolution, caching, introspection, and refresh.
+  # The 18 methods form a complete API for secret management:
+  # - Primary API (4): get_secret, get_secrets, get_secret_async, get_secrets_async
+  # - Cache management (3): refresh, refresh_all, get_cache_stats
+  # - Introspection (2): list_configured_secrets, get_source_info
+  # - Internal helpers (9): resolution, caching, path conversion
+  - file_pattern: 'secret_resolver\.py'
+    class_pattern: "Class 'SecretResolver'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      SecretResolver provides centralized secret resolution with sync/async APIs, caching with TTL, and safe introspection. The 18 methods are cohesive: 4 primary API methods, 3 cache management, 2 introspection, and 9 internal helpers. Splitting would fragment a unified secret management interface.
+
+    documentation:
+      - docs/patterns/secret_resolver.md
+      - CLAUDE.md (Infrastructure Patterns - SecretResolver)
+    ticket: OMN-764
+  # logical_name is a secret identifier using dotted path convention (e.g., "database.postgres.password")
+  # It is NOT an entity reference - it's a lookup key for secret resolution.
+  - file_pattern: 'model_secret_source_info\.py'
+    violation_pattern: "Field 'logical_name' might reference an entity"
+    reason: >
+      logical_name is a secret identifier using dotted path convention (e.g., "database.postgres.password"), not an entity reference. It's a lookup key for the SecretResolver, similar to how env var names or Vault paths identify secrets.
+
+    documentation:
+      - docs/patterns/secret_resolver.md (Naming Conventions section)
+    ticket: OMN-764
+  - file_pattern: 'model_secret_mapping\.py'
+    violation_pattern: "Field 'logical_name' might reference an entity"
+    reason: >
+      logical_name is a secret identifier using dotted path convention (e.g., "database.postgres.password"), not an entity reference. It's a lookup key for mapping secrets to their sources.
+
+    documentation:
+      - docs/patterns/secret_resolver.md (Naming Conventions section)
+    ticket: OMN-764
+  - file_pattern: 'model_cached_secret\.py'
+    violation_pattern: "Field 'logical_name' might reference an entity"
+    reason: >
+      logical_name is a secret identifier using dotted path convention (e.g., "database.postgres.password"), not an entity reference. It's stored in the cache to track which secret this cached value represents.
+
+    documentation:
+      - docs/patterns/secret_resolver.md (Naming Conventions section)
+    ticket: OMN-764
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
