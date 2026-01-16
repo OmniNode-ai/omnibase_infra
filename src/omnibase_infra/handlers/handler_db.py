@@ -637,7 +637,7 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             async with self._pool.acquire() as conn:
                 result = await conn.execute(sql, *parameters)
 
-            # Reset circuit breaker on success
+            # Reset circuit breaker on success (immediately after operation)
             if self._circuit_breaker_initialized:
                 async with self._circuit_breaker_lock:
                     await self._reset_circuit_breaker()
@@ -647,17 +647,44 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             return self._build_response(
                 [], row_count, correlation_id, input_envelope_id
             )
-        except asyncpg.PostgresError as e:
-            # Record circuit failure ONLY for connection/timeout errors
-            if self._circuit_breaker_initialized and isinstance(
-                e, (asyncpg.PostgresConnectionError, asyncpg.QueryCanceledError)
-            ):
+        except asyncpg.QueryCanceledError as e:
+            # Record failure for timeout errors (database overloaded)
+            if self._circuit_breaker_initialized:
                 async with self._circuit_breaker_lock:
                     await self._record_circuit_failure(
                         operation="db.execute",
                         correlation_id=correlation_id,
                     )
-            raise self._map_postgres_error(e, ctx) from e
+            raise InfraTimeoutError(
+                f"Statement timed out after {self._timeout}s",
+                context=ctx,
+                timeout_seconds=self._timeout,
+            ) from e
+        except asyncpg.PostgresConnectionError as e:
+            # Record failure for connection errors (database unavailable)
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="db.execute",
+                        correlation_id=correlation_id,
+                    )
+            raise InfraConnectionError(
+                "Database connection lost during statement execution", context=ctx
+            ) from e
+        except asyncpg.PostgresSyntaxError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(f"SQL syntax error: {e.message}", context=ctx) from e
+        except asyncpg.UndefinedTableError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(f"Table not found: {e.message}", context=ctx) from e
+        except asyncpg.UndefinedColumnError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
+        except asyncpg.PostgresError as e:
+            # Generic PostgreSQL error - do NOT trip circuit (application bug likely)
+            raise RuntimeHostError(
+                f"Database error: {type(e).__name__}", context=ctx
+            ) from e
 
     def _parse_row_count(self, result: str) -> int:
         """Parse row count from asyncpg execute result string.
