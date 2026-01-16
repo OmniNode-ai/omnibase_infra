@@ -327,7 +327,7 @@ class TestCorrelationDatabase:
         # 2. Verify correlation_id appears in log records via log_capture
         # 3. Verify correlation_id is preserved in any error contexts
         # See tests/integration/handlers/conftest.py for db_config and initialized_db_handler patterns
-        pytest.skip("Requires real PostgreSQL - implement when db fixtures available")
+        pytest.xfail("Requires real PostgreSQL - implement when db fixtures available")
 
     @pytest.mark.asyncio
     async def test_correlation_in_db_error_context(
@@ -350,7 +350,7 @@ class TestCorrelationDatabase:
         # 3. Verify error.correlation_id == correlation_id
         # 4. Verify error.model.context contains expected operation details
         # See tests/integration/handlers/conftest.py for fixture patterns
-        pytest.skip("Requires real PostgreSQL - implement when db fixtures available")
+        pytest.xfail("Requires real PostgreSQL - implement when db fixtures available")
 
 
 # =============================================================================
@@ -390,7 +390,7 @@ class TestCorrelationKafka:
         # 4. Verify consumed envelope.correlation_id == original correlation_id
         # 5. Verify X-Correlation-ID header is present in Kafka message headers
         # Note: May need to create kafka fixtures similar to handlers/conftest.py patterns
-        pytest.skip(
+        pytest.xfail(
             "Requires real Kafka/Redpanda - implement when event bus fixtures available"
         )
 
@@ -415,7 +415,7 @@ class TestCorrelationKafka:
         # 3. Verify error.correlation_id == correlation_id
         # 4. Verify error.model.context["transport_type"] == EnumInfraTransportType.KAFKA
         # See TestCorrelationErrorContext for error context verification patterns
-        pytest.skip(
+        pytest.xfail(
             "Requires real Kafka/Redpanda - implement when event bus fixtures available"
         )
 

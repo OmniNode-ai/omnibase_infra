@@ -18,7 +18,7 @@ These tests are designed to run in CI environments without external dependencies
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Coroutine
 from uuid import UUID
 
 import pytest
@@ -26,15 +26,14 @@ import pytest
 from tests.integration.correlation.conftest import (
     MockHandlerA,
     MockHandlerB,
+    MockHandlerBForwarding,
     MockHandlerC,
     assert_correlation_in_logs,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
-    # Type alias for async message handlers
-    AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
+# Type alias for async message handlers - defined at module level for runtime use
+# in SimpleAsyncEventBus._subscribers typing
+AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
 
 
 pytestmark = [
@@ -255,46 +254,7 @@ class TestCorrelationPreservation:
         handler_a = MockHandlerA(event_bus)
         handler_c = MockHandlerC()
 
-        # Create a custom Handler B that forwards to topic-bc
-        class MockHandlerBForwarding:
-            """Mock Handler B variant that forwards to Handler C with correlation."""
-
-            def __init__(self, bus: SimpleAsyncEventBus) -> None:
-                self._bus = bus
-                self._logger = logging.getLogger("omnibase_infra.test.handler_b")
-                self.received_messages: list[dict[str, object]] = []
-
-            async def handle(self, message: dict[str, object]) -> None:
-                """Handle message and forward to next handler."""
-                correlation_id = message.get("correlation_id")
-
-                self._logger.info(
-                    "Handler B received event",
-                    extra={
-                        "correlation_id": str(correlation_id),
-                        "boundary": "handler_b_entry",
-                    },
-                )
-
-                self.received_messages.append(message)
-
-                # Forward to next topic with correlation ID
-                await self._bus.publish(
-                    topic="topic-bc",
-                    message={
-                        "action": "forwarded",
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-
-                self._logger.info(
-                    "Handler B forwarded event",
-                    extra={
-                        "correlation_id": str(correlation_id),
-                        "boundary": "handler_b_exit",
-                    },
-                )
-
+        # Use forwarding handler variant that passes messages to next topic
         handler_b = MockHandlerBForwarding(event_bus)
 
         # Subscribe handlers: A -> B -> C

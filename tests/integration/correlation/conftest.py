@@ -31,20 +31,64 @@ if TYPE_CHECKING:
     from typing import Protocol
 
     class ProtocolTestEventBus(Protocol):
-        """Test protocol for event bus - matches SimpleAsyncEventBus signature.
+        """Test-specific protocol for SimpleAsyncEventBus - NOT interchangeable with production.
 
-        This protocol is defined locally because the production ProtocolEventBusLike
-        uses bytes for publish(topic, key, value) while the test SimpleAsyncEventBus
-        uses dict for publish(topic, message). This test-specific protocol matches
-        the SimpleAsyncEventBus interface used in tests.
+        WHY THIS CANNOT USE PRODUCTION PROTOCOL:
+        -----------------------------------------
+        The production ProtocolEventBusLike (omnibase_infra.protocols) has a different
+        signature optimized for Kafka/binary message passing:
+
+            Production: async def publish(topic: str, key: bytes | None, value: bytes) -> None
+            Test:       async def publish(topic: str, message: dict[str, object]) -> None
+
+        Key differences:
+        1. Production uses bytes (key/value) for Kafka wire format compatibility
+        2. Production requires a 'key' parameter for partitioning (even if None)
+        3. Test uses dict[str, object] for simpler correlation ID verification
+        4. Test omits 'key' as partitioning is irrelevant to correlation testing
+
+        ADAPTER PATTERN CONSIDERATION:
+        ------------------------------
+        An adapter wrapping SimpleAsyncEventBus to implement ProtocolEventBusLike was
+        considered but rejected because:
+        1. It would require JSON serialization/deserialization overhead for no benefit
+        2. The tests specifically verify dict-based message passing (correlation_id as key)
+        3. Production code already has InMemoryEventBus that implements the full protocol
+        4. These tests focus on correlation propagation logic, not message serialization
+
+        RELATION TO PRODUCTION BEHAVIOR:
+        --------------------------------
+        While the interface differs, the semantics tested are identical to production:
+        - Messages published to a topic reach all subscribers (same as Kafka consumer groups)
+        - Messages contain correlation_id that must propagate unchanged
+        - Handler chains (A -> B -> C) preserve correlation context
+
+        The SimpleAsyncEventBus used in tests provides the minimal pub/sub needed to
+        verify correlation propagation without external dependencies (Kafka, InMemoryEventBus
+        lifecycle management).
+
+        See Also:
+            - omnibase_infra.protocols.protocol_event_bus_like.ProtocolEventBusLike
+            - omnibase_infra.event_bus.inmemory_event_bus.InMemoryEventBus
+            - test_correlation_propagation.SimpleAsyncEventBus (the implementation)
         """
 
         async def publish(self, topic: str, message: dict[str, object]) -> None:
-            """Publish a message to a topic."""
+            """Publish a message to a topic.
+
+            Args:
+                topic: Target topic name.
+                message: Message dictionary containing correlation_id and payload.
+            """
             ...
 
         def subscribe(self, topic: str, handler: object) -> None:
-            """Subscribe a handler to a topic."""
+            """Subscribe a handler to a topic.
+
+            Args:
+                topic: Topic name to subscribe to.
+                handler: Async callable that accepts message dict.
+            """
             ...
 
 
@@ -86,7 +130,10 @@ def log_capture() -> list[logging.LogRecord]:
     try:
         yield captured_records
     finally:
-        logger.removeHandler(handler)
+        try:
+            logger.removeHandler(handler)
+        except ValueError:  # Handler already removed
+            pass
         logger.setLevel(original_level)
 
 
@@ -309,6 +356,80 @@ class MockHandlerB:
         )
 
 
+class MockHandlerBForwarding:
+    """Mock handler variant that forwards messages to another topic.
+
+    This handler simulates a service in a chain that receives events and
+    forwards them to downstream handlers. Used for testing correlation ID
+    propagation across three or more handler boundaries (A -> B -> C chains).
+
+    Unlike MockHandlerB which is a terminal handler, this variant takes an
+    event bus and publishes to a downstream topic after processing.
+
+    Attributes:
+        _bus: The event bus implementation for forwarding events.
+        _logger: Logger instance for this handler.
+        received_messages: List of messages received by this handler.
+
+    Example:
+        async def test_handler_chain(event_bus, log_capture, correlation_id):
+            handler_b = MockHandlerBForwarding(event_bus)
+            handler_c = MockHandlerC()
+            event_bus.subscribe("topic-bc", handler_c.handle)
+            await handler_b.handle({"correlation_id": str(correlation_id)})
+            assert len(handler_c.received_messages) == 1
+    """
+
+    def __init__(self, event_bus: ProtocolTestEventBus) -> None:
+        """Initialize handler with event bus dependency.
+
+        Args:
+            event_bus: The event bus to use for forwarding events.
+        """
+        self._bus = event_bus
+        self._logger = logging.getLogger("omnibase_infra.test.handler_b")
+        self.received_messages: list[dict[str, object]] = []
+
+    async def handle(self, message: dict[str, object]) -> None:
+        """Handle message and forward to next handler.
+
+        Extracts correlation_id from the message, logs entry/exit points,
+        and forwards the message to the "topic-bc" downstream topic.
+
+        Args:
+            message: The message to handle. Expected to have a
+                "correlation_id" key with a string UUID value.
+        """
+        correlation_id = message.get("correlation_id")
+
+        self._logger.info(
+            "Handler B received event",
+            extra={
+                "correlation_id": str(correlation_id),
+                "boundary": "handler_b_entry",
+            },
+        )
+
+        self.received_messages.append(message)
+
+        # Forward to next topic with correlation ID
+        await self._bus.publish(
+            topic="topic-bc",
+            message={
+                "action": "forwarded",
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        self._logger.info(
+            "Handler B forwarded event",
+            extra={
+                "correlation_id": str(correlation_id),
+                "boundary": "handler_b_exit",
+            },
+        )
+
+
 class MockHandlerC:
     """Mock handler for third-leg chain testing.
 
@@ -367,6 +488,7 @@ class MockHandlerC:
 __all__ = [
     "MockHandlerA",
     "MockHandlerB",
+    "MockHandlerBForwarding",
     "MockHandlerC",
     "assert_correlation_in_logs",
     "correlation_id",
