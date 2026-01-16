@@ -5,7 +5,7 @@
 Capture outcome enum for corpus capture service.
 
 .. versionadded:: 0.5.0
-    Added for ServiceCorpusCapture (OMN-1203)
+    Added for CorpusCapture (OMN-1203)
 """
 
 from enum import Enum

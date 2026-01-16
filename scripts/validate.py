@@ -377,9 +377,9 @@ def run_localhandler(verbose: bool = False) -> bool:
             )
             # Show violations
             for v in result.violations:
-                print(f"  - {v.file_path}:{v.line_number}: {v.message}")
-                if verbose and v.code_snippet:
-                    print(f"      {v.code_snippet}")
+                print(f"  - {v.file_path}:{v.line_number}: {v.import_line}")
+                if verbose:
+                    print(f"      {v.import_line}")
 
         return result.passed
 

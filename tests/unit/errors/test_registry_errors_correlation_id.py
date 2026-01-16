@@ -280,14 +280,18 @@ class TestMessageTypeRegistryCorrelationId:
         from uuid import uuid4
 
         from omnibase_infra.errors import ModelInfraErrorContext
+        from omnibase_infra.models.errors import ModelMessageTypeRegistryErrorContext
 
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=uuid4(),
             operation="get_handlers",
         )
+        registry_context = ModelMessageTypeRegistryErrorContext(
+            message_type="Unknown",
+        )
         error = MessageTypeRegistryError(
             "Message type not found",
-            message_type="Unknown",
+            registry_context=registry_context,
             context=context,
         )
         assert error.model.correlation_id is not None

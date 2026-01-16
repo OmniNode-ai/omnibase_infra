@@ -148,10 +148,10 @@ class CaptureLifecycleFSM:
 
     Note:
         This is an internal helper class and should not be imported directly.
-        Use ServiceCorpusCapture as the public API.
+        Use CorpusCapture as the public API.
 
     .. versionadded:: 0.5.0
-        Extracted from ServiceCorpusCapture for OMN-1203 refactoring.
+        Extracted from CorpusCapture for OMN-1203 refactoring.
     """
 
     # Valid state transitions map
@@ -216,7 +216,7 @@ class CaptureLifecycleFSM:
 # =============================================================================
 
 
-class ServiceCorpusCapture:
+class CorpusCapture:
     """
     Service for capturing production executions into a corpus.
 
@@ -233,7 +233,7 @@ class ServiceCorpusCapture:
         ...     sample_rate=0.5,
         ...     handler_filter=("compute-handler",),
         ... )
-        >>> service = ServiceCorpusCapture()
+        >>> service = CorpusCapture()
         >>> service.create_corpus(config)
         >>> service.start_capture()
         >>>

@@ -46,20 +46,10 @@ from omnibase_infra.models.validation.model_localhandler_violation import (
 
 logger = logging.getLogger(__name__)
 
-# Regex patterns to detect LocalHandler imports
-# Pattern 1: from ... import LocalHandler (with optional alias)
-_PATTERN_FROM_IMPORT = re.compile(
-    r"^\s*from\s+[\w.]+\s+import\s+.*\bLocalHandler\b",
-    re.MULTILINE,
-)
-
-# Pattern 2: import statement with LocalHandler in path
-_PATTERN_IMPORT = re.compile(
-    r"^\s*import\s+[\w.]*LocalHandler",
-    re.MULTILINE,
-)
-
-# Combined pattern for line-by-line checking (more precise)
+# Regex pattern to detect LocalHandler imports (line-by-line matching)
+# Matches both:
+#   - from ... import LocalHandler (with optional alias)
+#   - import statement with LocalHandler in path
 _PATTERN_LOCALHANDLER_IMPORT = re.compile(
     r"^\s*(?:from\s+[\w.]+\s+import\s+.*\bLocalHandler\b|import\s+[\w.]*LocalHandler)"
 )
@@ -167,9 +157,9 @@ def validate_localhandler(
         ...     print(v.format_human_readable())
     """
     violations: list[ModelLocalHandlerViolation] = []
-    pattern = "**/*.py" if recursive else "*.py"
+    py_files = directory.rglob("*.py") if recursive else directory.glob("*.py")
 
-    for filepath in directory.glob(pattern):
+    for filepath in py_files:
         if filepath.is_file() and not _should_skip_file(filepath):
             # Skip very large files
             try:
@@ -230,10 +220,10 @@ def validate_localhandler_ci(
         ...     sys.exit(1)
     """
     # Count files (excluding skipped patterns and large files)
-    pattern = "**/*.py" if recursive else "*.py"
     files_checked = 0
+    py_files = directory.rglob("*.py") if recursive else directory.glob("*.py")
 
-    for f in directory.glob(pattern):
+    for f in py_files:
         if f.is_file() and not _should_skip_file(f):
             try:
                 if f.stat().st_size <= _MAX_FILE_SIZE_BYTES:
