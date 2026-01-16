@@ -14,8 +14,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType, EnumPolicyType
 
 # Message category or node output type (for routing and validation)
@@ -24,7 +22,9 @@ type MessageOutputCategory = EnumMessageCategory | EnumNodeOutputType
 
 # Filesystem path input flexibility
 # Replaces 11 occurrences of: Path | str
-# Note: Named PathInput (not PathLike) to avoid collision with stdlib os.PathLike
+# Note: Named PathInput (not PathLike) to avoid collision with stdlib os.PathLike Protocol.
+# PathInput represents filesystem path flexibility (Path | str), whereas os.PathLike is
+# a Protocol for objects implementing __fspath__().
 type PathInput = Path | str
 
 # Policy type with string fallback for API flexibility
@@ -35,14 +35,9 @@ type PolicyTypeInput = EnumPolicyType | str
 # Replaces 7 occurrences of: ast.AsyncFunctionDef | ast.FunctionDef
 type ASTFunctionDef = ast.AsyncFunctionDef | ast.FunctionDef
 
-# Version input flexibility
-# Replaces 4 occurrences of: ModelSemVer | str
-type VersionInput = ModelSemVer | str
-
 __all__ = [
     "ASTFunctionDef",
     "MessageOutputCategory",
     "PathInput",
     "PolicyTypeInput",
-    "VersionInput",
 ]

@@ -44,7 +44,6 @@ class TestTypesModuleExports:
             MessageOutputCategory,
             PathInput,
             PolicyTypeInput,
-            VersionInput,
         )
 
         # Type aliases should be defined (not None)
@@ -52,7 +51,6 @@ class TestTypesModuleExports:
         assert MessageOutputCategory is not None
         assert PathInput is not None
         assert PolicyTypeInput is not None
-        assert VersionInput is not None
 
     def test_model_exports_are_accessible(self) -> None:
         """Verify model and TypedDict exports are accessible."""
@@ -117,14 +115,12 @@ class TestTypesModuleSubmoduleAccess:
             MessageOutputCategory,
             PathInput,
             PolicyTypeInput,
-            VersionInput,
         )
 
         assert ASTFunctionDef is not None
         assert MessageOutputCategory is not None
         assert PathInput is not None
         assert PolicyTypeInput is not None
-        assert VersionInput is not None
 
     def test_type_cache_info_direct_import(self) -> None:
         """Verify TypeCacheInfo can be imported from submodule directly."""
@@ -163,7 +159,6 @@ class TestTypesModuleExportConsistency:
         assert types.MessageOutputCategory is type_infra_aliases.MessageOutputCategory
         assert types.PathInput is type_infra_aliases.PathInput
         assert types.PolicyTypeInput is type_infra_aliases.PolicyTypeInput
-        assert types.VersionInput is type_infra_aliases.VersionInput
 
         # Models and TypedDicts should be the same object
         assert types.ModelParsedDSN is type_dsn.ModelParsedDSN
@@ -176,13 +171,12 @@ class TestTypesModuleExportConsistency:
         """Verify the number of exports matches expected count."""
         from omnibase_infra import types
 
-        # 5 type aliases + 3 models/TypedDicts = 8 exports
+        # 4 type aliases + 3 models/TypedDicts = 7 exports
         expected_exports = {
             "ASTFunctionDef",
             "MessageOutputCategory",
             "PathInput",
             "PolicyTypeInput",
-            "VersionInput",
             "ModelParsedDSN",
             "TypeCacheInfo",
             "TypedDictCapabilities",

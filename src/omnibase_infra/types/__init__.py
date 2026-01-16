@@ -15,7 +15,6 @@ Type aliases (from type_infra_aliases):
     - MessageOutputCategory: EnumMessageCategory | EnumNodeOutputType
     - PathInput: Path | str (named to avoid collision with stdlib os.PathLike)
     - PolicyTypeInput: EnumPolicyType | str
-    - VersionInput: ModelSemVer | str
 
 Note on cache-related TypedDicts:
     TypedDictIntrospectionCache and TypedDictPerformanceMetricsCache are NOT
@@ -33,7 +32,6 @@ from omnibase_infra.types.type_infra_aliases import (
     MessageOutputCategory,
     PathInput,
     PolicyTypeInput,
-    VersionInput,
 )
 from omnibase_infra.types.typed_dict_capabilities import TypedDictCapabilities
 
@@ -43,7 +41,6 @@ __all__: list[str] = [
     "MessageOutputCategory",
     "PathInput",
     "PolicyTypeInput",
-    "VersionInput",
     # Models and TypedDicts
     "ModelParsedDSN",
     "TypeCacheInfo",
