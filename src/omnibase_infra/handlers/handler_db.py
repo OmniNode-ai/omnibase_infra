@@ -150,8 +150,21 @@ _POSTGRES_ERROR_PREFIXES: dict[type[asyncpg.PostgresError], str] = {
 #   - Class 42: Syntax Error or Access Rule Violation (bad SQL, undefined table/column)
 #   - Class 28: Invalid Authorization Specification (bad credentials)
 #   - Class 22: Data Exception (division by zero, string data truncation)
-#   - Class 40: Transaction Rollback (serialization failure, deadlock) - arguably transient
-#                but typically indicates application-level retry needed, not infrastructure issue
+#   - Class 40: Transaction Rollback (serialization failure, deadlock detected)
+#
+#     DESIGN DECISION: Classified as PERMANENT despite deadlocks being retry-able.
+#
+#     Rationale:
+#     1. Deadlocks indicate transaction contention, not infrastructure failure
+#     2. The database is healthy - it correctly detected and resolved the deadlock
+#     3. Retrying at application level (with backoff) typically succeeds
+#     4. Tripping the circuit would block ALL queries, not just the conflicting ones
+#     5. High deadlock rates indicate application design issues (lock ordering,
+#        transaction scope) that should be fixed in code, not masked by circuit breaker
+#
+#     Note: If sustained deadlock storms occur, this is a symptom of application
+#     issues or schema contention that monitoring/alerting should surface, but
+#     the circuit breaker is not the right mitigation tool.
 #
 # The key insight: transient errors indicate the DATABASE INFRASTRUCTURE is unhealthy,
 # while permanent errors indicate the QUERY/APPLICATION is invalid. The circuit breaker
@@ -671,10 +684,11 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(sql, *parameters)
 
-            # Reset circuit breaker on success
-            if self._circuit_breaker_initialized:
-                async with self._circuit_breaker_lock:
-                    await self._reset_circuit_breaker()
+                # Reset circuit breaker immediately after successful operation,
+                # within connection context to avoid race conditions
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._reset_circuit_breaker()
 
             return self._build_response(
                 [dict(row) for row in rows],
@@ -791,10 +805,11 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             async with self._pool.acquire() as conn:
                 result = await conn.execute(sql, *parameters)
 
-            # Reset circuit breaker on success (immediately after operation)
-            if self._circuit_breaker_initialized:
-                async with self._circuit_breaker_lock:
-                    await self._reset_circuit_breaker()
+                # Reset circuit breaker immediately after successful operation,
+                # within connection context to avoid race conditions
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._reset_circuit_breaker()
 
             # asyncpg returns string like "INSERT 0 1" or "UPDATE 5"
             row_count = self._parse_row_count(result)
@@ -983,6 +998,21 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                and replay safety. This handler is EFFECT (side-effecting I/O).
 
             The transport type for this handler is DATABASE (PostgreSQL).
+
+        Security Consideration:
+            The circuit_breaker field exposes operational state including failure counts.
+            This information is intended for internal monitoring and observability.
+
+            WARNING: If describe() is exposed via external APIs, failure counts could
+            reveal information useful to attackers (e.g., timing attacks when circuit
+            is about to open). For external exposure, consider:
+
+            1. Restricting describe() to authenticated admin/monitoring endpoints only
+            2. Sanitizing output to show only state (OPEN/CLOSED/HALF_OPEN), not counts
+            3. Rate-limiting describe() calls to prevent information harvesting
+
+            The current implementation assumes describe() is used for internal
+            monitoring dashboards and health checks, not public APIs.
 
         See Also:
             - handler_type property: Full documentation of architectural role
