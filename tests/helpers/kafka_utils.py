@@ -16,6 +16,8 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from aiokafka.admin import AIOKafkaAdminClient
+
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 
 # Module-level logger for diagnostics
@@ -122,7 +124,7 @@ async def wait_for_consumer_ready(
 
 
 async def wait_for_topic_metadata(
-    admin_client: object,
+    admin_client: AIOKafkaAdminClient,
     topic_name: str,
     timeout: float = 10.0,
     expected_partitions: int = 1,
@@ -138,8 +140,7 @@ async def wait_for_topic_metadata(
     - **Dict format** (aiokafka 0.11.0+): `{'topic_name': TopicDescription(error_code=0, ...)}`
 
     Args:
-        admin_client: The AIOKafkaAdminClient instance (typed as object to avoid
-            TYPE_CHECKING imports in callers).
+        admin_client: The AIOKafkaAdminClient instance for broker communication.
         topic_name: The topic to wait for.
         timeout: Maximum time to wait in seconds.
         expected_partitions: Minimum number of partitions to wait for.
@@ -159,8 +160,7 @@ async def wait_for_topic_metadata(
     while (asyncio.get_running_loop().time() - start_time) < timeout:
         try:
             # describe_topics is a coroutine method on AIOKafkaAdminClient
-            # Admin client typed as object to avoid TYPE_CHECKING imports in callers
-            description = await admin_client.describe_topics([topic_name])  # type: ignore[attr-defined]
+            description = await admin_client.describe_topics([topic_name])
 
             if not description:
                 logger.debug("Topic %s: empty describe_topics response", topic_name)

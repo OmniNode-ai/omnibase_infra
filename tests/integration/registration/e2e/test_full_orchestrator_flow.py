@@ -23,10 +23,10 @@ Architecture Notes:
 
     This validates the REAL message flow, not just handler logic.
 
-Infrastructure Requirements:
-    - Kafka: 192.168.86.200:29092
-    - Consul: 192.168.86.200:28500
-    - PostgreSQL: 192.168.86.200:5436
+Infrastructure Requirements (configured via environment variables):
+    - Kafka: KAFKA_BOOTSTRAP_SERVERS (e.g., localhost:29092)
+    - Consul: CONSUL_HTTP_ADDR (e.g., localhost:8500)
+    - PostgreSQL: POSTGRES_HOST, POSTGRES_PORT (e.g., localhost:5432)
 
 Related Tickets:
     - OMN-892: E2E Registration Tests
@@ -125,28 +125,62 @@ TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
 
 
 def coerce_to_node_kind(node_type: str | EnumNodeKind | None) -> EnumNodeKind:
-    """Safely coerce a node type string or enum to EnumNodeKind.
+    """Coerce a node type string or enum to EnumNodeKind.
 
-    Uses Enum-first pattern with type guard for safer runtime behavior:
-    1. If already an enum, return as-is
-    2. If string, validate and convert
-    3. If None or other types, raise appropriate error
+    This function handles the string-to-enum coercion needed when processing
+    deserialized Kafka messages. aiokafka deserializes JSON payloads, which
+    converts enum values to their string representations (e.g., "effect"
+    instead of EnumNodeKind.EFFECT).
+
+    Why This Exists:
+        When Kafka messages are serialized to JSON (via Pydantic's model_dump),
+        enum values become strings. Upon deserialization, these remain as strings
+        rather than being automatically converted back to enum instances. This
+        function provides safe, validated coercion back to EnumNodeKind.
+
+    Use Cases:
+        - Processing deserialized Kafka messages with node_type fields
+        - Handling external API responses where enums are serialized as strings
+        - Converting Pydantic model dumps back to typed enums
+
+    When NOT to Use:
+        - For direct enum construction from known literal values, use
+          EnumNodeKind("effect") directly (simpler, no None handling)
+        - When the value is already guaranteed to be an EnumNodeKind instance
+        - In code paths that don't involve deserialization boundaries
+
+    Implementation Pattern:
+        Uses Enum-first pattern with type guard for safer runtime behavior:
+        1. Handle None explicitly with TypeError
+        2. If already an enum, return as-is (fast path)
+        3. If string, validate against known values and convert
+        4. For other types, raise TypeError with detailed message
 
     Args:
-        node_type: Node type as string literal or enum value.
+        node_type: Either a string representation (e.g., "effect", "compute")
+            or an EnumNodeKind instance. None values raise TypeError.
 
     Returns:
-        EnumNodeKind enum value.
+        EnumNodeKind: The coerced enum value.
 
     Raises:
         TypeError: If node_type is None or not a string/EnumNodeKind.
-        ValueError: If string value is not a valid EnumNodeKind member.
+        ValueError: If the string value doesn't match any EnumNodeKind member.
 
     Example:
+        >>> # From deserialized Kafka message
         >>> coerce_to_node_kind("effect")
         <EnumNodeKind.EFFECT: 'effect'>
+
+        >>> # Pass-through for already-typed values
         >>> coerce_to_node_kind(EnumNodeKind.COMPUTE)
         <EnumNodeKind.COMPUTE: 'compute'>
+
+        >>> # Error handling
+        >>> coerce_to_node_kind(None)
+        TypeError: node_type cannot be None...
+        >>> coerce_to_node_kind("invalid")
+        ValueError: Invalid node_type 'invalid'...
     """
     # Handle None explicitly
     if node_type is None:
@@ -738,7 +772,7 @@ async def ensure_test_topic_exists(
         pytest.fail(
             "KAFKA_BOOTSTRAP_SERVERS environment variable not set.\n"
             "Set it to your Kafka/Redpanda cluster address, e.g.:\n"
-            "  export KAFKA_BOOTSTRAP_SERVERS=192.168.86.200:29092"
+            "  export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
         )
 
     admin_client: AIOKafkaAdminClient | None = None

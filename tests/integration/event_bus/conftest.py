@@ -3,8 +3,8 @@
 """Pytest fixtures for Kafka event bus integration tests.
 
 This module provides fixtures for managing Kafka topics in integration tests.
-The remote Redpanda broker at 192.168.86.200:29092 has topic auto-creation
-disabled, so topics must be created explicitly before use.
+The Redpanda broker (configured via KAFKA_BOOTSTRAP_SERVERS env var) has topic
+auto-creation disabled, so topics must be created explicitly before use.
 
 Fixtures:
     ensure_test_topic: Creates topics via admin API before tests, cleans up after
@@ -39,7 +39,10 @@ if TYPE_CHECKING:
 # Configuration
 # =============================================================================
 
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:29092")
+# KAFKA_BOOTSTRAP_SERVERS must be set via environment variable.
+# No hardcoded default to ensure portability across CI/CD environments.
+# Tests will skip via fixture if not set. Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
 
 
 # =============================================================================
