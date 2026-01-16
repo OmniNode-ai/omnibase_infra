@@ -593,6 +593,16 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         except asyncpg.UndefinedColumnError as e:
             # Application error - do NOT trip circuit
             raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
+        except asyncpg.ForeignKeyViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Foreign key constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.NotNullViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Not null constraint violation: {e.message}", context=ctx
+            ) from e
         except asyncpg.PostgresError as e:
             # Generic PostgreSQL error - do NOT trip circuit (application bug likely)
             raise RuntimeHostError(
@@ -680,6 +690,16 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         except asyncpg.UndefinedColumnError as e:
             # Application error - do NOT trip circuit
             raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
+        except asyncpg.ForeignKeyViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Foreign key constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.NotNullViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Not null constraint violation: {e.message}", context=ctx
+            ) from e
         except asyncpg.PostgresError as e:
             # Generic PostgreSQL error - do NOT trip circuit (application bug likely)
             raise RuntimeHostError(
