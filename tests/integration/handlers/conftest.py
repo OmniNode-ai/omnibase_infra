@@ -113,7 +113,13 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
 
-    from omnibase_infra.handlers import HandlerConsul, HandlerDb, HandlerVault
+    from omnibase_infra.handlers import (
+        HandlerConsul,
+        HandlerDb,
+        HandlerGraph,
+        HandlerQdrant,
+        HandlerVault,
+    )
 
 
 # =============================================================================
@@ -742,6 +748,220 @@ async def initialized_consul_handler(
     except Exception as e:
         logger.warning(
             "Cleanup failed for HandlerConsul shutdown: %s",
+            e,
+            exc_info=True,
+        )
+
+
+# =============================================================================
+# Qdrant Environment Configuration
+# =============================================================================
+
+# Read Qdrant configuration from environment (set via docker-compose or .env)
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+
+# Check if Qdrant is available based on URL being set
+QDRANT_AVAILABLE = QDRANT_URL is not None
+
+
+# =============================================================================
+# Qdrant Handler Fixtures
+# =============================================================================
+
+
+@pytest.fixture(scope="session")
+def qdrant_available() -> bool:
+    """Session-scoped fixture indicating Qdrant availability.
+
+    This fixture enables graceful skip behavior for CI/CD environments
+    where Qdrant infrastructure may not be available.
+
+    Skip Conditions:
+        - Returns False if QDRANT_URL environment variable not set
+
+    Returns:
+        bool: True if Qdrant is available for testing.
+
+    CI/CD Behavior:
+        In CI environments without Qdrant access, this returns False,
+        causing tests to be skipped gracefully without failures.
+    """
+    return QDRANT_AVAILABLE
+
+
+@pytest.fixture
+def qdrant_config() -> dict[str, JsonType]:
+    """Provide Qdrant configuration for HandlerQdrant.
+
+    Returns:
+        Configuration dict for HandlerQdrant.initialize()
+    """
+    config: dict[str, JsonType] = {
+        "url": QDRANT_URL,
+        "timeout_seconds": 30.0,
+        "prefer_grpc": False,
+    }
+
+    if QDRANT_API_KEY:
+        config["api_key"] = QDRANT_API_KEY
+
+    return config
+
+
+@pytest.fixture
+def unique_collection_name() -> str:
+    """Generate unique collection name for test isolation.
+
+    Returns:
+        Unique collection name prefixed with test namespace.
+    """
+    return f"test_collection_{uuid.uuid4().hex[:12]}"
+
+
+@pytest.fixture
+async def initialized_qdrant_handler(
+    qdrant_config: dict[str, JsonType],
+) -> AsyncGenerator[HandlerQdrant, None]:
+    """Provide an initialized HandlerQdrant instance with automatic cleanup.
+
+    Creates a HandlerQdrant, initializes it with the test configuration,
+    yields it for the test, then ensures proper cleanup via shutdown().
+
+    Cleanup Behavior:
+        - Calls handler.shutdown() after test completion
+        - Closes Qdrant client connection
+        - Idempotent: safe to call shutdown() multiple times
+        - Ignores cleanup errors to prevent test pollution
+
+    Args:
+        qdrant_config: Qdrant configuration fixture.
+
+    Yields:
+        Initialized HandlerQdrant ready for vector operations.
+    """
+    from omnibase_infra.handlers import HandlerQdrant
+
+    handler = HandlerQdrant()
+    await handler.initialize(qdrant_config)
+
+    yield handler
+
+    # Cleanup: ensure handler is properly shut down
+    # Idempotent: safe even if test already called shutdown()
+    try:
+        await handler.shutdown()
+    except Exception as e:
+        logger.warning(
+            "Cleanup failed for HandlerQdrant shutdown: %s",
+            e,
+            exc_info=True,
+        )
+
+
+# =============================================================================
+# Graph (Memgraph/Neo4j) Environment Configuration
+# =============================================================================
+
+# Read Graph database configuration from environment (set via docker-compose or .env)
+MEMGRAPH_BOLT_URL = os.getenv("MEMGRAPH_BOLT_URL")
+MEMGRAPH_USERNAME = os.getenv("MEMGRAPH_USERNAME", "")
+MEMGRAPH_PASSWORD = os.getenv("MEMGRAPH_PASSWORD", "")
+MEMGRAPH_DATABASE = os.getenv("MEMGRAPH_DATABASE", "memgraph")
+
+# Check if Graph database is available based on URL being set
+GRAPH_AVAILABLE = MEMGRAPH_BOLT_URL is not None
+
+
+# =============================================================================
+# Graph Handler Fixtures
+# =============================================================================
+
+
+@pytest.fixture(scope="session")
+def graph_available() -> bool:
+    """Session-scoped fixture indicating Graph database availability.
+
+    This fixture enables graceful skip behavior for CI/CD environments
+    where Memgraph/Neo4j infrastructure may not be available.
+
+    Skip Conditions:
+        - Returns False if MEMGRAPH_BOLT_URL environment variable not set
+
+    Returns:
+        bool: True if Graph database is available for testing.
+
+    CI/CD Behavior:
+        In CI environments without Graph database access, this returns False,
+        causing tests to be skipped gracefully without failures.
+    """
+    return GRAPH_AVAILABLE
+
+
+@pytest.fixture
+def graph_config() -> dict[str, JsonType]:
+    """Provide graph database configuration for HandlerGraph.
+
+    Returns:
+        Configuration dict for HandlerGraph.initialize()
+    """
+    config: dict[str, JsonType] = {
+        "uri": MEMGRAPH_BOLT_URL,
+        "username": MEMGRAPH_USERNAME,
+        "password": MEMGRAPH_PASSWORD,
+        "database": MEMGRAPH_DATABASE,
+        "timeout_seconds": 30.0,
+        "max_connection_pool_size": 5,
+    }
+
+    return config
+
+
+@pytest.fixture
+def unique_node_label() -> str:
+    """Generate unique node label for test isolation.
+
+    Returns:
+        Unique label prefixed with test namespace.
+    """
+    return f"TestNode_{uuid.uuid4().hex[:12]}"
+
+
+@pytest.fixture
+async def initialized_graph_handler(
+    graph_config: dict[str, JsonType],
+) -> AsyncGenerator[HandlerGraph, None]:
+    """Provide an initialized HandlerGraph instance with automatic cleanup.
+
+    Creates a HandlerGraph, initializes it with the test configuration,
+    yields it for the test, then ensures proper cleanup via shutdown().
+
+    Cleanup Behavior:
+        - Calls handler.shutdown() after test completion
+        - Closes neo4j driver connection
+        - Idempotent: safe to call shutdown() multiple times
+        - Ignores cleanup errors to prevent test pollution
+
+    Args:
+        graph_config: Graph database configuration fixture.
+
+    Yields:
+        Initialized HandlerGraph ready for graph operations.
+    """
+    from omnibase_infra.handlers import HandlerGraph
+
+    handler = HandlerGraph()
+    await handler.initialize(graph_config)
+
+    yield handler
+
+    # Cleanup: ensure handler is properly shut down
+    # Idempotent: safe even if test already called shutdown()
+    try:
+        await handler.shutdown()
+    except Exception as e:
+        logger.warning(
+            "Cleanup failed for HandlerGraph shutdown: %s",
             e,
             exc_info=True,
         )
