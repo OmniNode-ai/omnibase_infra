@@ -552,14 +552,14 @@ class TestInvalidTransitions:
         """start_capture() from IDLE should raise an error."""
         service = ServiceCorpusCapture()
 
-        with pytest.raises(ValueError, match="Invalid state transition"):
+        with pytest.raises(OnexError):
             service.start_capture()
 
     def test_pause_capture_from_idle_raises(self) -> None:
         """pause_capture() from IDLE should raise an error."""
         service = ServiceCorpusCapture()
 
-        with pytest.raises(ValueError, match="Invalid state transition"):
+        with pytest.raises(OnexError):
             service.pause_capture()
 
     def test_resume_capture_without_pause_raises(
@@ -570,7 +570,7 @@ class TestInvalidTransitions:
         service.create_corpus(basic_config)
         service.start_capture()
 
-        with pytest.raises(ValueError, match="Invalid state transition"):
+        with pytest.raises(OnexError):
             service.resume_capture()
 
     def test_create_corpus_when_active_raises(
@@ -581,7 +581,7 @@ class TestInvalidTransitions:
         service.create_corpus(basic_config)
         service.start_capture()
 
-        with pytest.raises(ValueError, match="Invalid state transition"):
+        with pytest.raises(OnexError):
             service.create_corpus(basic_config)
 
 

@@ -28,6 +28,7 @@ from omnibase_core.models.manifest.model_execution_manifest import (
     ModelExecutionManifest,
 )
 from omnibase_core.models.replay.model_execution_corpus import ModelExecutionCorpus
+from omnibase_core.types import JsonType
 
 from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
 from omnibase_infra.enums.enum_capture_state import EnumCaptureState
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 class ProtocolManifestPersistence(Protocol):
     """Protocol for manifest persistence handlers."""
 
-    async def execute(self, envelope: dict[str, object]) -> object:
+    async def execute(self, envelope: JsonType) -> object:
         """Execute a persistence operation."""
         ...
 
@@ -66,7 +67,7 @@ def _compute_dedupe_hash(
         The hash string, or None if no deduplication.
 
     Raises:
-        ValueError: If strategy is unknown.
+        OnexError: If strategy is unknown (CONFIGURATION_ERROR).
     """
     if strategy == EnumDedupeStrategy.NONE:
         return None
@@ -91,7 +92,10 @@ def _compute_dedupe_hash(
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
     # Explicit error for unknown strategies - fail fast rather than silently returning None
-    raise ValueError(f"Unknown dedupe strategy: {strategy}")
+    raise OnexError(
+        message=f"Unknown dedupe strategy: {strategy}",
+        error_code=EnumCoreErrorCode.CONFIGURATION_ERROR,
+    )
 
 
 def _create_capture_result(
@@ -192,12 +196,13 @@ class CaptureLifecycleFSM:
             target: The target state to transition to.
 
         Raises:
-            ValueError: If the transition is not valid.
+            OnexError: If the transition is not valid (INVALID_STATE).
         """
         valid_targets = self._VALID_TRANSITIONS.get(self._state, set())
         if target not in valid_targets:
-            raise ValueError(
-                f"Invalid state transition: {self._state.value} -> {target.value}"
+            raise OnexError(
+                message=f"Invalid state transition: {self._state.value} -> {target.value}",
+                error_code=EnumCoreErrorCode.INVALID_STATE,
             )
         self._state = target
 
@@ -226,7 +231,7 @@ class ServiceCorpusCapture:
         ...     corpus_display_name="regression-suite-v1",
         ...     max_executions=50,
         ...     sample_rate=0.5,
-        ...     handler_filter=["compute-handler"],
+        ...     handler_filter=("compute-handler",),
         ... )
         >>> service = ServiceCorpusCapture()
         >>> service.create_corpus(config)
@@ -288,7 +293,7 @@ class ServiceCorpusCapture:
             The newly created (empty) corpus.
 
         Raises:
-            ValueError: If not in IDLE state.
+            OnexError: If not in IDLE state (INVALID_STATE).
         """
         with self._sync_lock:
             self._state_machine.transition_to(EnumCaptureState.READY)
@@ -309,7 +314,7 @@ class ServiceCorpusCapture:
         Begin capturing executions.
 
         Raises:
-            ValueError: If not in READY state.
+            OnexError: If not in READY state (INVALID_STATE).
         """
         with self._sync_lock:
             self._state_machine.transition_to(EnumCaptureState.CAPTURING)
@@ -319,7 +324,7 @@ class ServiceCorpusCapture:
         Pause capture without closing corpus.
 
         Raises:
-            ValueError: If not in CAPTURING state.
+            OnexError: If not in CAPTURING state (INVALID_STATE).
         """
         with self._sync_lock:
             self._state_machine.transition_to(EnumCaptureState.PAUSED)
@@ -329,7 +334,7 @@ class ServiceCorpusCapture:
         Resume capture after pause.
 
         Raises:
-            ValueError: If not in PAUSED state.
+            OnexError: If not in PAUSED state (INVALID_STATE).
         """
         with self._sync_lock:
             self._state_machine.transition_to(EnumCaptureState.CAPTURING)
@@ -342,11 +347,14 @@ class ServiceCorpusCapture:
             The finalized corpus.
 
         Raises:
-            ValueError: If no corpus is active.
+            OnexError: If no corpus is active (INVALID_STATE).
         """
         with self._sync_lock:
             if self._corpus is None:
-                raise ValueError("No corpus to close")
+                raise OnexError(
+                    message="No corpus to close",
+                    error_code=EnumCoreErrorCode.INVALID_STATE,
+                )
 
             self._state_machine.transition_to(EnumCaptureState.CLOSED)
 
