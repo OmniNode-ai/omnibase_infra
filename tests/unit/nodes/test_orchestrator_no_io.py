@@ -542,7 +542,8 @@ class TestContractIOOperationsAreEffectNodes:
                 # These should NOT be effect nodes despite keyword matches
                 if node_type == "effect_generic":
                     misclassified_nodes.append(
-                        f"{node_id}: marked as '{node_type}' but performs pure computation (should be compute/reducer type)"
+                        f"{node_id}: listed in non_io_exceptions but marked as '{node_type}' - "
+                        f"nodes in non_io_exceptions perform pure computation and should use compute/reducer type"
                     )
                 continue
 
