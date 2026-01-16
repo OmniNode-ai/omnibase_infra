@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Category match result model for message type detection.
 
-This model replaces the tuple pattern ``tuple[bool, EnumMessageCategory | EnumNodeOutputType | None]``
+This model replaces the tuple pattern ``tuple[bool, MessageOutputCategory | None]``
 that was used for category matching operations in the routing coverage validator.
 By using a structured model, we provide:
 
@@ -48,9 +48,11 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
+from omnibase_infra.types import MessageOutputCategory
 
 # Type alias for the category union - improves readability
-type CategoryType = EnumMessageCategory | EnumNodeOutputType
+# Note: CategoryType is kept for backward compatibility; prefer MessageOutputCategory for new code
+type CategoryType = MessageOutputCategory
 
 
 class ModelCategoryMatchResult(BaseModel):
