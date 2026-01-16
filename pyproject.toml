@@ -26,11 +26,8 @@ python = "^3.12"
 # - Breaking changes are communicated through semver major versions
 # - Internal packages are co-developed with this codebase
 #
-# omnibase-core v0.6.6: Adds handler routing models for OMN-1102.
-# - ModelHandlerRoutingEntry, ModelHandlerRoutingSubcontract (OMN-1295)
-# - Package-level imports recommended for forward compatibility
-# - Fixes circular import bug (OMN-1257)
-omnibase-core = "^0.6.6"
+# omnibase-core v0.7.0: Major breaking changes release
+omnibase-core = "^0.7.0"
 # omnibase-spi v0.4.2: Adds ProtocolCapabilityQuery interface (OMN-1135)
 omnibase-spi = "^0.4.2"
 

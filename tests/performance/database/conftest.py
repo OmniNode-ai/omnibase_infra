@@ -126,9 +126,15 @@ POSTGRES_AVAILABLE = _check_postgres_reachable()
 # =============================================================================
 # Module-Level Markers
 # =============================================================================
+# NOTE: loop_scope="module" is CRITICAL for pytest-asyncio 0.25+ compatibility.
+# This ensures all async fixtures and tests in this module share the same event loop.
+# Without this, module-scoped fixtures like postgres_pool get created on one event loop
+# but function-scoped fixtures try to use them on a different loop, causing:
+# "RuntimeError: Task ... got Future ... attached to a different loop"
 
 pytestmark = [
     pytest.mark.database,
+    pytest.mark.asyncio(loop_scope="module"),
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
         reason=(
@@ -208,7 +214,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     await pool.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="module")
 async def schema_initialized(
     postgres_pool: asyncpg.Pool,
 ) -> asyncpg.Pool:
@@ -250,6 +256,11 @@ async def schema_initialized(
         for migration_file in migration_files:
             filename = migration_file.name
 
+            # Skip validation scripts (not migrations)
+            if filename == "validate_migration_state.sql":
+                _logger.debug("Skipping validation script: %s", filename)
+                continue
+
             # Check if migration was already applied
             already_applied = await conn.fetchval(
                 "SELECT 1 FROM _migration_history WHERE filename = $1",
@@ -263,6 +274,27 @@ async def schema_initialized(
             # Read and apply migration
             try:
                 sql = migration_file.read_text()
+
+                # Skip migrations containing CONCURRENTLY - these are for production
+                # and cannot run inside a transaction block. The non-concurrent
+                # versions (e.g., 003_capability_fields.sql) create the same indexes.
+                if "CONCURRENTLY" in sql.upper():
+                    _logger.debug(
+                        "Skipping %s: contains CREATE INDEX CONCURRENTLY "
+                        "(production-only migration, not compatible with test transactions)",
+                        filename,
+                    )
+                    # Mark as applied so we don't try again
+                    await conn.execute(
+                        """
+                        INSERT INTO _migration_history (filename, checksum)
+                        VALUES ($1, $2)
+                        ON CONFLICT (filename) DO NOTHING
+                        """,
+                        filename,
+                        "skipped-concurrent",
+                    )
+                    continue
 
                 # Calculate simple checksum for tracking
                 checksum = hashlib.md5(sql.encode()).hexdigest()
@@ -294,10 +326,38 @@ async def schema_initialized(
                     f"Migration {filename} failed: {sanitize_error_message(e)}"
                 ) from e
 
+        # Ensure required indexes exist for query performance tests.
+        # This handles cases where:
+        # 1. The migration was marked "applied" but indexes weren't created
+        # 2. The database existed before the migration system
+        # 3. Indexes were dropped
+        _logger.debug("Ensuring required indexes exist...")
+        await conn.execute("""
+            -- Index for time-range audit queries (from 002_updated_at_audit_index.sql)
+            CREATE INDEX IF NOT EXISTS idx_registration_updated_at
+                ON registration_projections (updated_at DESC);
+
+            -- Composite index for state-based audit queries
+            CREATE INDEX IF NOT EXISTS idx_registration_state_updated_at
+                ON registration_projections (current_state, updated_at DESC);
+
+            -- Index for state filtering (from 001_registration_projection.sql)
+            CREATE INDEX IF NOT EXISTS idx_registration_current_state
+                ON registration_projections (current_state);
+
+            -- Index for domain + state filtering
+            CREATE INDEX IF NOT EXISTS idx_registration_domain_state
+                ON registration_projections (domain, current_state);
+        """)
+
+        # Update statistics so PostgreSQL's query planner can use indexes optimally
+        await conn.execute("ANALYZE registration_projections")
+        _logger.debug("Required indexes verified/created and table statistics updated")
+
     return postgres_pool
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="module")
 async def seeded_test_data(
     schema_initialized: asyncpg.Pool,
 ) -> AsyncGenerator[dict[str, list], None]:
@@ -371,6 +431,11 @@ async def seeded_test_data(
                 now,
                 updated_at,
             )
+
+        # Update statistics after seeding test data
+        # This ensures PostgreSQL's query planner has accurate row counts and
+        # data distribution info for choosing optimal query plans.
+        await conn.execute("ANALYZE registration_projections")
 
     yield test_data
 

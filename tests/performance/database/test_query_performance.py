@@ -46,9 +46,15 @@ from tests.performance.database.conftest import QueryAnalyzer
 # NOTE: The 'performance' marker is automatically applied by
 # tests/performance/conftest.py via pytest_collection_modifyitems hook.
 # Only additional markers (like 'database') need to be specified here.
+#
+# CRITICAL: loop_scope="module" is required for pytest-asyncio 0.25+ to ensure
+# all tests in this module share the same event loop as the module-scoped
+# fixtures (postgres_pool, schema_initialized, seeded_test_data). Without this,
+# tests fail with "RuntimeError: Task got Future attached to a different loop".
 
 pytestmark = [
     pytest.mark.database,
+    pytest.mark.asyncio(loop_scope="module"),
 ]
 
 # =============================================================================
@@ -56,7 +62,6 @@ pytestmark = [
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestUpdatedAtIndexUsage:
     """Test that updated_at index is used for audit queries."""
 
@@ -230,7 +235,6 @@ class TestUpdatedAtIndexUsage:
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestExistingIndexUsage:
     """Test that existing indexes are used correctly."""
 
@@ -360,7 +364,6 @@ class TestExistingIndexUsage:
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestQueryPerformanceThresholds:
     """Test that queries meet performance thresholds."""
 
@@ -500,7 +503,6 @@ class TestQueryPerformanceThresholds:
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestQueryPlanAnalysis:
     """Test query plan characteristics for optimization insights."""
 
@@ -580,7 +582,6 @@ class TestQueryPlanAnalysis:
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestQueryPlanStability:
     """Test that query plans remain stable and optimal."""
 
