@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 """
-Integration tests for ServiceCorpusCapture with ManifestGenerator.
+Integration tests for CorpusCapture with ManifestGenerator.
 
-Tests the full pipeline integration: ManifestGenerator callback -> ServiceCorpusCapture.
+Tests the full pipeline integration: ManifestGenerator callback -> CorpusCapture.
 
 .. versionadded:: 0.5.0
     Added for OMN-1203
@@ -28,7 +28,7 @@ from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
 from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.models.corpus.model_capture_config import ModelCaptureConfig
-from omnibase_infra.services.service_corpus_capture import ServiceCorpusCapture
+from omnibase_infra.services.corpus_capture import CorpusCapture
 
 # Check if ManifestGenerator supports callbacks (feature not yet released to PyPI)
 _sig = inspect.signature(ManifestGenerator.__init__)
@@ -44,14 +44,14 @@ class TestManifestGeneratorIntegration:
     """Tests for ManifestGenerator callback integration."""
 
     def test_callback_on_init(self) -> None:
-        """ServiceCorpusCapture can be registered as callback in ManifestGenerator __init__."""
+        """CorpusCapture can be registered as callback in ManifestGenerator __init__."""
         # Setup capture service
         config = ModelCaptureConfig(
             corpus_display_name="callback-test",
             max_executions=10,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        capture_service = ServiceCorpusCapture()
+        capture_service = CorpusCapture()
         capture_service.create_corpus(config)
         capture_service.start_capture()
 
@@ -88,13 +88,13 @@ class TestManifestGeneratorIntegration:
         assert capture_service.get_active_corpus().execution_count == 1
 
     def test_callback_registered_dynamically(self) -> None:
-        """ServiceCorpusCapture can be registered dynamically via register_on_build_callback."""
+        """CorpusCapture can be registered dynamically via register_on_build_callback."""
         # Setup capture service
         config = ModelCaptureConfig(
             corpus_display_name="dynamic-callback-test",
             max_executions=10,
         )
-        capture_service = ServiceCorpusCapture()
+        capture_service = CorpusCapture()
         capture_service.create_corpus(config)
         capture_service.start_capture()
 
@@ -198,7 +198,7 @@ class TestEndToEndCaptureWorkflow:
             max_executions=50,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        capture_service = ServiceCorpusCapture()
+        capture_service = CorpusCapture()
         capture_service.create_corpus(config)
         capture_service.start_capture()
 
@@ -233,7 +233,7 @@ class TestEndToEndCaptureWorkflow:
             handler_filter=["allowed-node"],
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        capture_service = ServiceCorpusCapture()
+        capture_service = CorpusCapture()
         capture_service.create_corpus(config)
         capture_service.start_capture()
 
@@ -281,7 +281,7 @@ class TestEndToEndCaptureWorkflow:
             max_executions=3,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        capture_service = ServiceCorpusCapture()
+        capture_service = CorpusCapture()
         capture_service.create_corpus(config)
         capture_service.start_capture()
 

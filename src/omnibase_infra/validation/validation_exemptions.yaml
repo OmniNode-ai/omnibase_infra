@@ -1263,6 +1263,28 @@ pattern_exemptions:
     documentation:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
     ticket: OMN-1098
+  # LocalHandler validator models - OMN-743
+  # These models validate LocalHandler import restrictions in production code.
+  # The "Handler" in the name refers to the specific LocalHandler class being
+  # validated, not an anti-pattern handler class.
+  - file_pattern: 'model_localhandler_violation\.py'
+    class_pattern: "Class name 'ModelLocalHandlerViolation'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelLocalHandlerViolation is a validation result model for detecting forbidden LocalHandler imports. The "Handler" refers to the omnibase_core.handlers.LocalHandler class being validated against, not an anti-pattern manager class.
+
+    documentation:
+      - CLAUDE.md (LocalHandler dev-only enforcement)
+    ticket: OMN-743
+  - file_pattern: 'model_localhandler_validation_result\.py'
+    class_pattern: "Class name 'ModelLocalHandlerValidationResult'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ModelLocalHandlerValidationResult is the aggregate validation result for LocalHandler import checking. The "Handler" refers to the omnibase_core.handlers.LocalHandler class being validated against, not an anti-pattern manager class.
+
+    documentation:
+      - CLAUDE.md (LocalHandler dev-only enforcement)
+    ticket: OMN-743
   - file_pattern: 'validation_aggregator\.py'
     class_pattern: "Class 'ValidationAggregator'"
     violation_pattern: 'has \d+ methods'
