@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.errors import OnexError
 from omnibase_core.models.manifest.model_contract_identity import ModelContractIdentity
 from omnibase_core.models.manifest.model_execution_manifest import (
     ModelExecutionManifest,
@@ -728,7 +729,7 @@ class TestPersistence:
         service = ServiceCorpusCapture()  # No persistence handler
         service.create_corpus(basic_config)
 
-        with pytest.raises(RuntimeError, match="No persistence handler configured"):
+        with pytest.raises(OnexError, match="No persistence handler configured"):
             await service.flush_to_persistence()
 
     @pytest.mark.asyncio

@@ -22,6 +22,8 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
+from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.errors import OnexError
 from omnibase_core.models.manifest.model_execution_manifest import (
     ModelExecutionManifest,
 )
@@ -584,16 +586,23 @@ class ServiceCorpusCapture:
             Number of manifests successfully persisted.
 
         Raises:
-            RuntimeError: If no persistence handler is configured.
+            OnexError: If no persistence handler is configured.
         """
         if self._persistence is None:
-            raise RuntimeError("No persistence handler configured")
+            raise OnexError(
+                message="No persistence handler configured",
+                error_code=EnumCoreErrorCode.CONFIGURATION_ERROR,
+            )
 
-        if self._corpus is None or self._corpus.execution_count == 0:
-            return 0
+        # Snapshot corpus under lock to prevent race with close_corpus()
+        with self._sync_lock:
+            corpus_snapshot = self._corpus
+            if corpus_snapshot is None or corpus_snapshot.execution_count == 0:
+                return 0
 
+        # Iterate outside lock - corpus_snapshot is now a safe local reference
         persisted_count = 0
-        for manifest in self._corpus.executions:
+        for manifest in corpus_snapshot.executions:
             try:
                 await self._persistence.execute(
                     {
