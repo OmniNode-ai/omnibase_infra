@@ -167,17 +167,51 @@ class MixinMessageTypeRegistration:
                         f"allowed categories.",
                         message_type=message_type,
                     )
-                if (
-                    existing.domain_constraint.owning_domain
-                    != entry.domain_constraint.owning_domain
-                ):
+                if existing.domain_constraint != entry.domain_constraint:
+                    # Build detailed mismatch description
+                    differences: list[str] = []
+                    if (
+                        existing.domain_constraint.owning_domain
+                        != entry.domain_constraint.owning_domain
+                    ):
+                        differences.append(
+                            f"owning_domain: existing="
+                            f"'{existing.domain_constraint.owning_domain}', "
+                            f"new='{entry.domain_constraint.owning_domain}'"
+                        )
+                    if (
+                        existing.domain_constraint.allowed_cross_domains
+                        != entry.domain_constraint.allowed_cross_domains
+                    ):
+                        differences.append(
+                            f"allowed_cross_domains: existing="
+                            f"{set(existing.domain_constraint.allowed_cross_domains)}, "
+                            f"new={set(entry.domain_constraint.allowed_cross_domains)}"
+                        )
+                    if (
+                        existing.domain_constraint.allow_all_domains
+                        != entry.domain_constraint.allow_all_domains
+                    ):
+                        differences.append(
+                            f"allow_all_domains: existing="
+                            f"{existing.domain_constraint.allow_all_domains}, "
+                            f"new={entry.domain_constraint.allow_all_domains}"
+                        )
+                    if (
+                        existing.domain_constraint.require_explicit_opt_in
+                        != entry.domain_constraint.require_explicit_opt_in
+                    ):
+                        differences.append(
+                            f"require_explicit_opt_in: existing="
+                            f"{existing.domain_constraint.require_explicit_opt_in}, "
+                            f"new={entry.domain_constraint.require_explicit_opt_in}"
+                        )
+
                     raise MessageTypeRegistryError(
                         f"Domain constraint mismatch for message type "
-                        f"'{message_type}': existing domain="
-                        f"'{existing.domain_constraint.owning_domain}', "
-                        f"new domain='{entry.domain_constraint.owning_domain}'. "
+                        f"'{message_type}': {'; '.join(differences)}. "
                         f"All registrations for a message type must have the same "
-                        f"owning domain.",
+                        f"domain constraint configuration.",
                         message_type=message_type,
                         domain=entry.domain_constraint.owning_domain,
                     )

@@ -144,6 +144,7 @@ class MixinPolicyValidation:
         self,
         policy_id: str,
         policy_class: type[ProtocolPolicy],
+        policy_type: str | EnumPolicyType | None = None,
     ) -> None:
         """Validate that policy class implements ProtocolPolicy protocol.
 
@@ -153,29 +154,41 @@ class MixinPolicyValidation:
         Validation Order:
             Validations are performed in fail-fast order with cheap checks first:
 
-            1. **Comprehensive check**: If class is missing all required attributes
+            1. **Parameter validation**: Validate policy_id and policy_type
+               parameters individually using shared helpers.
+
+            2. **Comprehensive check**: If class is missing all required attributes
                (policy_id, policy_type, evaluate), raise a comprehensive error
                listing all missing requirements.
 
-            2. **evaluate() existence** (O(1) hasattr check):
+            3. **evaluate() existence** (O(1) hasattr check):
                Verifies policy_class has evaluate() method.
 
-            3. **evaluate() callability** (O(1) callable check):
+            4. **evaluate() callability** (O(1) callable check):
                Verifies evaluate is actually callable.
 
         Args:
             policy_id: Unique identifier for the policy being validated
             policy_class: The policy class to validate
+            policy_type: Optional policy type for error context and validation
 
         Raises:
             PolicyRegistryError: If policy_class does not implement ProtocolPolicy:
                 - policy_id is None or empty
+                - policy_type is invalid (when provided)
                 - Missing all required attributes (comprehensive error)
                 - Missing evaluate() method
                 - evaluate is not callable
         """
+        # Validate policy_type first to get normalized value for error context
+        normalized_policy_type = self._validate_policy_type_param(
+            policy_type, policy_id=policy_id, allow_none=True
+        )
+
         # Validate policy_id parameter individually using shared helper
-        self._validate_policy_id_param(policy_id, policy_class=policy_class)
+        self._validate_policy_id_param(
+            policy_id, policy_class=policy_class, policy_type=normalized_policy_type
+        )
 
         # Check for required attributes
         has_policy_id = hasattr(policy_class, "policy_id")

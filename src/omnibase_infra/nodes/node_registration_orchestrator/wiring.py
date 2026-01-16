@@ -66,8 +66,7 @@ if TYPE_CHECKING:
         HandlerRuntimeTick,
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
-    from omnibase_infra.runtime import MessageDispatchEngine
-    from omnibase_infra.runtime.projector_shell import ProjectorShell
+    from omnibase_infra.runtime import MessageDispatchEngine, ProjectorShell
 
 logger = logging.getLogger(__name__)
 

@@ -173,11 +173,17 @@ class MixinMessageTypeQuery:
         Use this method when you need to look up handlers without
         performing category or domain validation (e.g., for introspection).
 
+        Note:
+            This method returns None for disabled entries as well as
+            unregistered message types. Use get_entry() if you need to
+            distinguish between these cases.
+
         Args:
             message_type: The message type to look up.
 
         Returns:
-            List of handler IDs if registered, None if not found.
+            List of handler IDs if registered and enabled, None if not found
+            or if the entry is disabled.
 
         Raises:
             ModelOnexError: If registry is not frozen (INVALID_STATE)

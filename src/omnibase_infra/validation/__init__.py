@@ -110,6 +110,7 @@ from omnibase_infra.validation.enums.enum_contract_violation_severity import (
 from omnibase_infra.validation.infra_validators import (
     INFRA_MAX_UNIONS,
     get_validation_summary,
+    is_isinstance_union,
     validate_infra_all,
     validate_infra_architecture,
     validate_infra_circular_imports,
@@ -182,7 +183,7 @@ from omnibase_infra.validation.validator_routing_coverage import (
 
 # Runtime shape validation for ONEX 4-node architecture
 # NOTE: RuntimeShapeValidator uses EXECUTION_SHAPE_RULES from validator_execution_shape.py
-# (not a separate definition). See the import section of validator_runtime_shape.py (lines 193-196).
+# (not a separate definition). See the import section of validator_runtime_shape.py.
 from omnibase_infra.validation.validator_runtime_shape import (
     ExecutionShapeViolationError,
     RuntimeShapeValidator,
@@ -260,6 +261,7 @@ __all__: list[str] = [
     "get_execution_shape_rules",  # Get shape rules
     "get_validation_summary",  # Get validation summary
     "has_sensitive_parameters",  # Sensitive parameter check
+    "is_isinstance_union",  # Check if union is in isinstance() call
     "is_sensitive_method_name",  # Sensitive method check
     "lint_contract_file",  # Lint single contract file
     "lint_contracts_ci",  # CI contract linting

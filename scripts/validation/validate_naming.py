@@ -309,18 +309,9 @@ class InfraNamingConventionValidator:
 
     # PERFORMANCE: Pre-compiled regex patterns (compiled once at class load time)
     # This avoids re-compiling the same patterns on every _is_exception_class() call
+    # DRY: Compiled from EXCEPTION_PATTERNS to keep them in sync
     _COMPILED_EXCEPTION_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
-        re.compile(r"^_.*"),
-        re.compile(r".*Test$"),
-        re.compile(r".*TestCase$"),
-        re.compile(r"^Test.*"),
-        re.compile(r".*Error$"),
-        re.compile(r".*Exception$"),
-        re.compile(r"^Exception[A-Z].*"),
-        # Common ONEX suffix patterns
-        re.compile(r".*Config$"),
-        re.compile(r".*Result$"),
-        re.compile(r".*Response$"),
+        re.compile(pattern) for pattern in EXCEPTION_PATTERNS
     ]
 
     # PERFORMANCE: Pre-compiled naming patterns for fast class name validation
@@ -563,6 +554,18 @@ class InfraNamingConventionValidator:
         if file_path not in self._file_cache:
             # Parse the file and extract class definitions
             try:
+                # Defensive size check - files should be pre-filtered but check anyway
+                # to prevent memory issues for direct calls
+                file_size = file_path.stat().st_size
+                if file_size > MAX_FILE_SIZE_BYTES:
+                    size_mb = file_size / (1024 * 1024)
+                    self._file_cache[file_path] = ParsedFileInfo(
+                        file_path=file_path,
+                        ast_tree=None,
+                        parse_error=f"File too large ({size_mb:.2f} MB > {MAX_FILE_SIZE_BYTES / (1024 * 1024):.0f} MB limit)",
+                    )
+                    return self._file_cache[file_path]
+
                 with open(file_path, encoding="utf-8") as f:
                     content = f.read()
 
@@ -712,13 +715,12 @@ class InfraNamingConventionValidator:
         # Validate each unique file once
         # PERFORMANCE: Pre-filter against _validated_file_categories to avoid
         # unnecessary method calls for files already validated in this category.
-        # IMPORTANT: Add to set BEFORE calling method to prevent any edge case
-        # where the same (file, category) could be processed twice.
+        # NOTE: The callee (_validate_class_names_in_file) handles adding to the
+        # set, which also enables deduplication for direct calls (e.g., from tests).
         for file_path in files_to_validate:
             validation_key = (file_path, category)
             if validation_key not in self._validated_file_categories:
-                # Mark as validated BEFORE processing to prevent duplicates
-                self._validated_file_categories.add(validation_key)
+                # Let the callee add to set and perform validation
                 self._validate_class_names_in_file(file_path, category, rules, verbose)
 
     def _validate_class_names_in_file(
@@ -744,12 +746,13 @@ class InfraNamingConventionValidator:
         Note:
             Deduplication is handled at two levels for robustness:
             1. The caller (_validate_category) checks _validated_file_categories before calling
-            2. This method also checks and returns early if already validated
-            This ensures no duplicate validations occur even for direct calls (e.g., from tests).
+            2. This method adds to set first, then validates, ensuring no duplicates
+               even for direct calls (e.g., from tests)
         """
-        # Handle deduplication for direct calls that bypass _validate_category
-        # The caller (_validate_category) adds to set before calling, so this
-        # check will pass for normal flow but catches direct/test invocations
+        # Handle deduplication - add to set first to prevent re-validation
+        # This handles both:
+        # - Normal flow: caller pre-checks but doesn't add, we add here
+        # - Direct calls: we add and validate (subsequent calls return early)
         validation_key = (file_path, category)
         if validation_key in self._validated_file_categories:
             return  # Already validated this file/category combination
@@ -897,11 +900,20 @@ class InfraNamingConventionValidator:
         Returns:
             True if class is architecturally exempt from standard naming rules.
         """
+        # Get repo-relative path to avoid matching directories outside the repo
+        # (e.g., /other_project/runtime/ should not match "runtime/" exemption)
+        try:
+            relative_path = file_path.relative_to(self.repo_path)
+            path_parts = relative_path.parts
+        except ValueError:
+            # File not under repo_path - use absolute path parts as fallback
+            path_parts = file_path.parts
+
         for directory, exempted_patterns in self.ARCHITECTURAL_EXEMPTIONS.items():
             # Check if file is in the exempted directory
             # Use path.parts for reliable directory matching (not string containment)
             dir_name = directory.rstrip("/")
-            if dir_name not in file_path.parts:
+            if dir_name not in path_parts:
                 continue
 
             # Check if class matches any exempted pattern
@@ -1223,7 +1235,9 @@ Class Naming Conventions:
         # Get count of skipped large files
         skipped_files_count = len(validator._skipped_large_files)
 
-        output = {
+        # Type annotation: use object for JSON-compatible mixed-type dict
+        # (avoids Any per codebase standards - see CLAUDE.md)
+        output: dict[str, object] = {
             "path": str(repo_path),
             "errors": errors,
             "warnings": warnings,
@@ -1243,7 +1257,7 @@ Class Naming Conventions:
                 if not args.errors_only or v.severity == "error"
             ],
             # IMPORTANT: 'passed' mirrors the script exit code logic exactly.
-            # The exit code is determined by has_failures (lines 1133-1135):
+            # The exit code is determined by has_failures (see definition above):
             #   has_failures = errors > 0 or ast_count > 0 or
             #                  (args.fail_on_warnings and warnings > 0)
             # Therefore:

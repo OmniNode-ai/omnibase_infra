@@ -251,11 +251,11 @@ Each enum can evolve independently:
 
 ### Key Files Modified
 
-- `src/omnibase_infra/enums/enum_message_category.py` - Reduced to 3 values (EVENT, COMMAND, INTENT)
-- `src/omnibase_infra/enums/enum_node_output_type.py` - New file with 4 values (EVENT, COMMAND, INTENT, PROJECTION)
-- `src/omnibase_infra/validation/validator_execution_shape.py` - Updated to use union types
-- `src/omnibase_infra/validation/validator_runtime_shape.py` - Updated to use union types
-- `src/omnibase_infra/models/validation/model_execution_shape_rule.py` - Uses EnumNodeOutputType for allowed/forbidden types
+- `omnibase_infra/enums/enum_message_category.py` - Reduced to 3 values (EVENT, COMMAND, INTENT)
+- `omnibase_infra/enums/enum_node_output_type.py` - New file with 4 values (EVENT, COMMAND, INTENT, PROJECTION)
+- `omnibase_infra/validation/validator_execution_shape.py` - Updated to use union types
+- `omnibase_infra/validation/validator_runtime_shape.py` - Updated to use union types
+- `omnibase_infra/models/validation/model_execution_shape_rule.py` - Uses EnumNodeOutputType for allowed/forbidden types
 
 ### Migration Pattern
 
@@ -337,8 +337,8 @@ violation = validator.validate_handler_output(params)
 - **PR**: #64 - fix(enums): resolve EnumMessageCategory drift between core and infra
 - **Related ADR**: `docs/decisions/adr-enum-message-category-vs-node-output-type.md` - Companion ADR focusing on routing vs validation distinction
 - **Related Files**:
-  - `src/omnibase_infra/enums/enum_node_output_type.py`
-  - `src/omnibase_infra/enums/enum_message_category.py`
-  - `src/omnibase_infra/validation/validator_execution_shape.py`
-  - `src/omnibase_infra/validation/validator_runtime_shape.py`
-  - `src/omnibase_infra/models/validation/model_execution_shape_rule.py`
+  - `omnibase_infra/enums/enum_node_output_type.py`
+  - `omnibase_infra/enums/enum_message_category.py`
+  - `omnibase_infra/validation/validator_execution_shape.py`
+  - `omnibase_infra/validation/validator_runtime_shape.py`
+  - `omnibase_infra/models/validation/model_execution_shape_rule.py`

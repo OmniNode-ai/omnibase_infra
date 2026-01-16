@@ -1200,12 +1200,12 @@ async def bootstrap() -> int:
             # Subscribe with callback - returns unsubscribe function
             subscribe_start_time = time.time()
             logger.info(
-                "Subscribing to introspection events on Kafka (correlation_id=%s)",
+                "Subscribing to introspection events on event bus (correlation_id=%s)",
                 correlation_id,
                 extra={
                     "topic": config.input_topic,
                     "consumer_group": f"{config.consumer_group}-introspection",
-                    "event_bus_type": "kafka",
+                    "event_bus_type": event_bus_type,
                 },
             )
 
@@ -1224,6 +1224,7 @@ async def bootstrap() -> int:
                     "topic": config.input_topic,
                     "consumer_group": f"{config.consumer_group}-introspection",
                     "subscribe_duration_seconds": subscribe_duration,
+                    "event_bus_type": event_bus_type,
                 },
             )
 

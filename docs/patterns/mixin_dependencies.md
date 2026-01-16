@@ -32,14 +32,16 @@ Use this table to quickly identify mixin requirements and common usage patterns.
 
 ### Key Dependencies Summary
 
-**Mixins requiring `MixinAsyncCircuitBreaker`** (must inherit first):
-- `MixinRetryExecution` - Needs `_circuit_breaker_lock`, `_circuit_breaker_initialized`
-- `MixinConsulInitialization` - Uses `_init_circuit_breaker()` for setup
-- `MixinVaultInitialization` - Uses `_init_circuit_breaker()` for setup
+**Mixins with mixin-based dependencies** (ordering matters - `MixinAsyncCircuitBreaker` must come first):
+- `MixinRetryExecution` - Needs `_circuit_breaker_lock`, `_circuit_breaker_initialized` from `MixinAsyncCircuitBreaker`
+- `MixinConsulInitialization` - Uses `_init_circuit_breaker()` from `MixinAsyncCircuitBreaker`
+- `MixinVaultInitialization` - Uses `_init_circuit_breaker()` from `MixinAsyncCircuitBreaker`
 
-**Protocol-based mixins** (require host class attributes):
-- `MixinKafkaDlq` - Requires `_config`, `_producer`, `_producer_lock`, `_model_headers_to_kafka()`
-- `MixinKafkaBroadcast` - Requires `_environment`, `_group`, `publish()`
+**Protocol-based mixins** (ordering flexible - get attributes from host class, not other mixins):
+- `MixinKafkaDlq` - Requires `_config`, `_producer`, `_producer_lock`, `_model_headers_to_kafka()` from host
+- `MixinKafkaBroadcast` - Requires `_environment`, `_group`, `publish()` from host
+
+**Note**: `EventBusKafka` can have `MixinAsyncCircuitBreaker` last because `MixinKafkaDlq` and `MixinKafkaBroadcast` use Protocol-based dependencies (they get required attributes from the host class `__init__`, not from other mixins in the MRO). See [Correct Inheritance Order](#correct-inheritance-order) for details.
 
 ---
 

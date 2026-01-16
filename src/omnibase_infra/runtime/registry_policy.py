@@ -486,7 +486,8 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         allow_async = registration.allow_async
 
         # Validate protocol implementation (evaluate() method exists and is callable)
-        self._validate_protocol_implementation(policy_id, policy_class)
+        # Pass policy_type for complete parameter validation and error context
+        self._validate_protocol_implementation(policy_id, policy_class, policy_type)
 
         # Validate sync enforcement (pass policy_type for better error context)
         self._validate_sync_enforcement(

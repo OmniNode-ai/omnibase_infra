@@ -12,13 +12,15 @@ Functions:
 
 Example:
     >>> from pathlib import Path
-    >>> from omnibase_infra.runtime.kernel import bootstrap, main, load_runtime_config
+    >>> from omnibase_infra.runtime.kernel import load_runtime_config
     >>>
     >>> # Load configuration from contracts directory
     >>> contracts_dir = Path("./contracts")
     >>> config = load_runtime_config(contracts_dir)
     >>> print(config.input_topic)
     requests
+    >>> print(config.event_bus.type)
+    inmemory
 
 Note:
     This module serves as a stable public API. The implementation resides

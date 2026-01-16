@@ -106,7 +106,7 @@ class ModelParsedDSN(BaseModel):
         description="Additional connection parameters as key-value pairs.",
     )
 
-    model_config = ConfigDict(frozen=True, from_attributes=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     def __repr__(self) -> str:
         """Return string representation with masked password.

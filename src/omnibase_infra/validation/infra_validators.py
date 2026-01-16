@@ -390,6 +390,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #   - Updated validator to exclude isinstance(x, A | B) patterns
 #   - These are runtime checks, not type annotations
 #   - Current breakdown: ~1088 optionals, ~21 isinstance, ~121 threshold unions
+# - 122 (2026-01-16): OMN-1305 PR #151 release ready fixes (+1 union from policy validation)
 #
 # Soft ceiling guidance:
 # - 100-120: Healthy range, minor increments OK for legitimate features
@@ -403,7 +404,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # 4. Consider if a domain-specific type from omnibase_core would be cleaner
 #
 # Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
-INFRA_MAX_UNIONS = 121
+INFRA_MAX_UNIONS = 122
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -1451,6 +1452,7 @@ __all__ = [
     "get_union_exemptions",  # Union exemption loader
     "get_validation_summary",  # Validation summary generator
     # Path utilities
+    "is_isinstance_union",  # Check if union is in isinstance() call
     "is_simple_optional",  # Check if union is X | None
     "is_skip_directory",  # Check if directory should be skipped
     "load_skip_directories_from_yaml",  # Load skip dirs from YAML

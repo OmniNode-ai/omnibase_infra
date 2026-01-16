@@ -227,7 +227,8 @@ class MixinKafkaDlq:
             - Correlation ID included in all log entries for tracing
 
         Args:
-            original_topic: Original topic where message was consumed from
+            original_topic: Original topic where message was consumed from.
+                Must be a non-empty, non-whitespace string.
             failed_message: The message that failed processing
             error: The exception that caused the failure
             correlation_id: Correlation ID for tracking
@@ -236,6 +237,17 @@ class MixinKafkaDlq:
             This method logs errors if DLQ publishing fails but does not raise
             exceptions to prevent cascading failures in the consumer loop.
         """
+        # Validate original_topic - reject whitespace-only values
+        if not original_topic or not original_topic.strip():
+            logger.error(
+                "DLQ publish rejected: original_topic is empty or whitespace-only",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(error).__name__,
+                },
+            )
+            return
+
         # Track timing for metrics
         start_time = datetime.now(UTC)
         error_type = type(error).__name__
@@ -293,8 +305,37 @@ class MixinKafkaDlq:
             timestamp=datetime.now(UTC),
         )
 
-        # Convert DLQ payload to JSON bytes
-        dlq_value = json.dumps(dlq_payload).encode("utf-8")
+        # Convert DLQ payload to JSON bytes with explicit error handling
+        # for non-serializable content
+        try:
+            dlq_value = json.dumps(dlq_payload).encode("utf-8")
+        except (TypeError, ValueError) as json_error:
+            # Handle non-serializable envelope content by falling back to repr
+            logger.warning(
+                "DLQ payload contains non-serializable data, using repr fallback",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "original_topic": original_topic,
+                    "json_error": str(json_error),
+                },
+            )
+            # Create a safe fallback payload with repr of original values
+            fallback_payload = {
+                "original_topic": original_topic,
+                "original_message": {
+                    "key": repr(key_str),
+                    "value": "<non-serializable>",
+                    "offset": failed_message.offset,
+                    "partition": failed_message.partition,
+                },
+                "failure_reason": sanitized_failure_reason,
+                "failure_timestamp": start_time.isoformat(),
+                "correlation_id": str(correlation_id),
+                "retry_count": failed_message.headers.retry_count,
+                "error_type": error_type,
+                "serialization_fallback": True,
+            }
+            dlq_value = json.dumps(fallback_payload).encode("utf-8")
 
         # Variables for event creation
         success = False
@@ -471,7 +512,8 @@ class MixinKafkaDlq:
         ConsumerRecord for DLQ payload construction.
 
         Args:
-            original_topic: Original topic where message was consumed from
+            original_topic: Original topic where message was consumed from.
+                Must be a non-empty, non-whitespace string.
             raw_msg: Raw Kafka ConsumerRecord that failed conversion
             error: The exception that caused the failure
             correlation_id: Correlation ID for tracking
@@ -481,6 +523,18 @@ class MixinKafkaDlq:
             This method logs errors if DLQ publishing fails but does not raise
             exceptions to prevent cascading failures in the consumer loop.
         """
+        # Validate original_topic - reject whitespace-only values
+        if not original_topic or not original_topic.strip():
+            logger.error(
+                "DLQ publish rejected: original_topic is empty or whitespace-only",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(error).__name__,
+                    "failure_type": failure_type,
+                },
+            )
+            return
+
         # Track timing for metrics
         start_time = datetime.now(UTC)
         error_type = type(error).__name__
@@ -546,8 +600,39 @@ class MixinKafkaDlq:
             timestamp=start_time,
         )
 
-        # Convert DLQ payload to JSON bytes
-        dlq_value = json.dumps(dlq_payload).encode("utf-8")
+        # Convert DLQ payload to JSON bytes with explicit error handling
+        # for non-serializable content
+        try:
+            dlq_value = json.dumps(dlq_payload).encode("utf-8")
+        except (TypeError, ValueError) as json_error:
+            # Handle non-serializable envelope content by falling back to repr
+            logger.warning(
+                "DLQ raw payload contains non-serializable data, using repr fallback",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "original_topic": original_topic,
+                    "failure_type": failure_type,
+                    "json_error": str(json_error),
+                },
+            )
+            # Create a safe fallback payload with repr of original values
+            fallback_payload = {
+                "original_topic": original_topic,
+                "original_message": {
+                    "key": repr(key_str),
+                    "value": "<non-serializable>",
+                    "offset": raw_offset,
+                    "partition": raw_partition,
+                },
+                "failure_reason": sanitized_failure_reason,
+                "failure_type": failure_type,
+                "failure_timestamp": start_time.isoformat(),
+                "correlation_id": str(correlation_id),
+                "retry_count": 0,
+                "error_type": error_type,
+                "serialization_fallback": True,
+            }
+            dlq_value = json.dumps(fallback_payload).encode("utf-8")
         dlq_key = raw_key if isinstance(raw_key, bytes) else None
 
         # Variables for event creation

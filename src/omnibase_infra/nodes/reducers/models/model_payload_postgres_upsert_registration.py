@@ -37,7 +37,7 @@ class ModelPayloadPostgresUpsertRegistration(BaseModel):
         record: The registration record to upsert (uses SerializeAsAny for subclass preservation).
     """
 
-    model_config = ConfigDict(frozen=True, from_attributes=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     intent_type: Literal["postgres.upsert_registration"] = Field(
         default="postgres.upsert_registration",

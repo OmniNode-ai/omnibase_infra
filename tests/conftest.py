@@ -382,7 +382,7 @@ def mock_container() -> MagicMock:
         >>> async def test_with_container(mock_container):
         ...     # Configure the mock to return your service
         ...     mock_container.service_registry.resolve_service.return_value = some_service
-        ...     # Call with await (resolve_service is async in this test harness)
+        ...     # Call with await (resolve_service is async in omnibase_core 0.4.x+)
         ...     result = await mock_container.service_registry.resolve_service(SomeType)
         ...     assert result is some_service
     """

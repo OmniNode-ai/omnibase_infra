@@ -64,6 +64,9 @@ def _normalize_metadata(metadata: dict[str, object] | None) -> dict[str, object]
     converts bytes values to strings using UTF-8 decoding to ensure consistent
     string-based metadata handling downstream.
 
+    Uses duck-typing (hasattr check for decode method) instead of isinstance
+    to align with protocol-based design principles.
+
     Args:
         metadata: Optional metadata dictionary with potentially mixed value types.
 
@@ -75,10 +78,11 @@ def _normalize_metadata(metadata: dict[str, object] | None) -> dict[str, object]
 
     normalized: dict[str, object] = {}
     for key, value in metadata.items():
-        if isinstance(value, bytes):
+        # Duck-type: check for decode method (bytes-like) instead of isinstance
+        if hasattr(value, "decode"):
             try:
                 normalized[key] = value.decode("utf-8")
-            except UnicodeDecodeError:
+            except (UnicodeDecodeError, AttributeError):
                 # If decoding fails, use repr as fallback
                 normalized[key] = repr(value)
         else:
@@ -186,8 +190,9 @@ class IntrospectionEventRouter:
         """Return the ONEX service container.
 
         The ModelONEXContainer provides:
-        - service_registry: ServiceRegistry for resolving services by interface type.
-          Use container.service_registry.resolve_service(InterfaceType) to get instances.
+        - get_service_async(ProtocolType): Async service resolution by protocol type.
+        - get_service_sync(ProtocolType): Sync service resolution by protocol type.
+        - get_service_optional(ProtocolType): Returns None if service not found.
         - Configuration and shared state management across the application.
 
         Returns:
@@ -195,10 +200,8 @@ class IntrospectionEventRouter:
 
         Example:
             >>> # Resolve a service from the container (async)
-            >>> from omnibase_infra.runtime.registry_policy import RegistryPolicy
-            >>> registry = await router.container.service_registry.resolve_service(
-            ...     RegistryPolicy
-            ... )
+            >>> from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+            >>> policy_registry = await router.container.get_service_async(ProtocolPolicy)
         """
         return self._container
 
@@ -224,6 +227,9 @@ class IntrospectionEventRouter:
         proper propagation for distributed tracing. Falls back to generating
         a new UUID if no correlation ID is found.
 
+        Uses duck-typing patterns for type detection instead of isinstance checks
+        to align with protocol-based design principles.
+
         Args:
             msg: The incoming event message.
 
@@ -238,42 +244,45 @@ class IntrospectionEventRouter:
                 hasattr(headers, "correlation_id")
                 and headers.correlation_id is not None
             ):
-                # ModelEventHeaders.correlation_id is already a UUID
-                if isinstance(headers.correlation_id, UUID):
-                    return headers.correlation_id
-                # Handle string or bytes if headers come from raw Kafka
+                # Duck-type: normalize correlation_id to UUID
+                # Works uniformly for UUID objects, strings, and bytes
                 try:
-                    if isinstance(headers.correlation_id, bytes):
-                        return UUID(headers.correlation_id.decode("utf-8"))
-                    elif isinstance(headers.correlation_id, str):
-                        return UUID(headers.correlation_id)
-                except (ValueError, TypeError):
+                    correlation_id = headers.correlation_id
+                    # Check for bytes-like (has decode method) - duck typing
+                    if hasattr(correlation_id, "decode"):
+                        correlation_id = correlation_id.decode("utf-8")
+                    # Convert to UUID (handles UUID objects via str() and strings directly)
+                    return UUID(str(correlation_id))
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass  # Fall through to try payload extraction
 
         # If we can peek at the payload, try to extract correlation_id
         # This happens when we can parse the message but before full validation
         try:
             if msg.value is not None:
-                if isinstance(msg.value, bytes):
+                # Duck-type: check for decode method (bytes-like) first
+                if hasattr(msg.value, "decode"):
                     payload_dict = json.loads(msg.value.decode("utf-8"))
-                elif isinstance(msg.value, str):
-                    payload_dict = json.loads(msg.value)
-                elif isinstance(msg.value, dict):
-                    payload_dict = msg.value
                 else:
-                    payload_dict = None
+                    # Try JSON parsing (works for strings)
+                    # Falls back to treating as dict-like if TypeError
+                    try:
+                        payload_dict = json.loads(msg.value)
+                    except TypeError:
+                        # Already a dict or dict-like object
+                        payload_dict = msg.value
 
                 if payload_dict:
                     # Check envelope-level correlation_id first
                     if "correlation_id" in payload_dict:
                         return UUID(str(payload_dict["correlation_id"]))
-                    # Check payload-level correlation_id
-                    if "payload" in payload_dict and isinstance(
-                        payload_dict["payload"], dict
-                    ):
-                        if "correlation_id" in payload_dict["payload"]:
-                            return UUID(str(payload_dict["payload"]["correlation_id"]))
-        except (json.JSONDecodeError, ValueError, TypeError, KeyError):
+                    # Check payload-level correlation_id (duck-type dict check via 'in')
+                    payload_content = payload_dict.get("payload")
+                    if payload_content and hasattr(payload_content, "get"):
+                        nested_corr_id = payload_content.get("correlation_id")
+                        if nested_corr_id is not None:
+                            return UUID(str(nested_corr_id))
+        except (json.JSONDecodeError, ValueError, TypeError, KeyError, AttributeError):
             pass  # Fall through to generate new ID
 
         # Generate new correlation ID as last resort
@@ -317,34 +326,43 @@ class IntrospectionEventRouter:
                 )
                 return
 
-            # Parse raw bytes as JSON
-            if isinstance(msg.value, bytes):
+            # Parse message value using duck-typing patterns
+            # Check for bytes-like (has decode method) first
+            if hasattr(msg.value, "decode"):
                 logger.debug(
-                    "Parsing message value as bytes (correlation_id=%s)",
+                    "Parsing message value as bytes-like (correlation_id=%s)",
                     callback_correlation_id,
                     extra={"value_length": len(msg.value)},
                 )
                 payload_dict = json.loads(msg.value.decode("utf-8"))
-            elif isinstance(msg.value, str):
-                logger.debug(
-                    "Parsing message value as string (correlation_id=%s)",
-                    callback_correlation_id,
-                    extra={"value_length": len(msg.value)},
-                )
-                payload_dict = json.loads(msg.value)
-            elif isinstance(msg.value, dict):
-                logger.debug(
-                    "Message value already dict (correlation_id=%s)",
-                    callback_correlation_id,
-                )
-                payload_dict = msg.value
             else:
-                logger.debug(
-                    "Unexpected message value type: %s (correlation_id=%s)",
-                    type(msg.value).__name__,
-                    callback_correlation_id,
-                )
-                return
+                # Try JSON parsing (works for strings)
+                try:
+                    logger.debug(
+                        "Parsing message value as string-like (correlation_id=%s)",
+                        callback_correlation_id,
+                        extra={
+                            "value_length": len(msg.value)
+                            if hasattr(msg.value, "__len__")
+                            else None
+                        },
+                    )
+                    payload_dict = json.loads(msg.value)
+                except TypeError:
+                    # Already a dict-like object (has keys/items)
+                    if hasattr(msg.value, "keys"):
+                        logger.debug(
+                            "Message value already dict-like (correlation_id=%s)",
+                            callback_correlation_id,
+                        )
+                        payload_dict = msg.value
+                    else:
+                        logger.debug(
+                            "Unexpected message value type: %s (correlation_id=%s)",
+                            type(msg.value).__name__,
+                            callback_correlation_id,
+                        )
+                        return
 
             # Parse as ModelEventEnvelope containing ModelNodeIntrospectionEvent
             logger.debug(

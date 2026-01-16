@@ -116,7 +116,7 @@ def _extract_comment_portion(line: str) -> str | None:
 
 
 def _is_any_exemption_note(text: str) -> bool:
-    """Check if text contains a valid Any type exemption note.
+    """Check if text contains a valid Any exemption note.
 
     A valid exemption note must have:
     1. A comment marker (#)
@@ -129,7 +129,7 @@ def _is_any_exemption_note(text: str) -> bool:
 
     Valid examples:
         - "# NOTE: Any required for Pydantic discriminated union"
-        - "code  # NOTE: Any type needed for dynamic payloads"
+        - "code  # NOTE: Any needed for dynamic payloads"
         - "# NOTE: Any workaround - see ADR-123"
 
     Invalid examples:
@@ -137,21 +137,28 @@ def _is_any_exemption_note(text: str) -> bool:
         - "NOTE: Any required" (no comment marker)
         - "# NOTE: This handles Any input" (no keyword after Any)
         - "# NOTE: Any questions?" (not an exemption)
+        - "# NOTE: Any type is..." (no exemption keyword - "type" is not valid)
         - "x = 'NOTE: Any required'" (NOTE in string, not comment)
 
     Args:
-        text: Text to check (can be single line or multi-line context).
+        text: Text to check. Can be a single line of source code (with or without
+            code before the comment) or a pre-extracted comment portion starting
+            with '#'. The function uses _extract_comment_portion internally to
+            properly handle '#' characters inside string literals.
 
     Returns:
         True if text contains a valid Any exemption note at comment start.
     """
-    # Must contain a comment marker
-    comment_idx = text.find("#")
-    if comment_idx == -1:
+    # Use _extract_comment_portion to properly handle # in string literals
+    # e.g., x = "# not a comment"  # real comment
+    # This prevents false negatives where text.find("#") finds the wrong #
+    comment_portion = _extract_comment_portion(text)
+    if comment_portion is None:
         return False
 
-    # Extract the comment portion (after #) and strip leading whitespace
-    comment = text[comment_idx + 1 :].lstrip()
+    # Extract the text after # and strip leading whitespace
+    # comment_portion is guaranteed to start with #
+    comment = comment_portion[1:].lstrip()
     comment_lower = comment.lower()
 
     # NOTE: must be at the start of the comment (after # and whitespace)
@@ -249,6 +256,15 @@ class MixinAnyTypeExemption:
             if "from typing import" in line and "(" in line and ")" not in line:
                 in_multiline_import = True
                 multiline_import_start = i
+                # Also check if Any is on the same line as the opening parenthesis
+                # e.g., "from typing import (Any,  # NOTE: Any required for..."
+                if "Any" in line:
+                    start = max(0, i - 5)
+                    end = min(len(self.source_lines), i + 6)
+                    for check_line in self.source_lines[start:end]:
+                        comment = _extract_comment_portion(check_line)
+                        if comment and _is_any_exemption_note(comment):
+                            return True
                 continue
 
             # Inside multi-line import block
@@ -355,14 +371,12 @@ class MixinAnyTypeExemption:
             MixinAnyTypeClassification and the main class respectively.
         """
         # Check if value is a Field() call
-        # NOTE: OMN-1305 - _is_field_call is provided by MixinAnyTypeClassification
-        # via multiple inheritance. Mypy cannot verify mixin method availability.
+        # NOTE: OMN-1305 - _is_field_call from MixinAnyTypeClassification (mixin composition)
         if node.value is None or not self._is_field_call(node.value):  # type: ignore[attr-defined]
             return False
 
         # Check if annotation contains Any
-        # NOTE: OMN-1305 - _contains_any is provided by the main AnyTypeDetector
-        # class via multiple inheritance. Mypy cannot verify mixin composition.
+        # NOTE: OMN-1305 - _contains_any from AnyTypeDetector (mixin composition)
         if not self._contains_any(node.annotation):  # type: ignore[attr-defined]
             return False
 
