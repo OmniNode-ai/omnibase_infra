@@ -22,6 +22,7 @@ from omnibase_infra.utils.correlation import (
 from omnibase_infra.utils.util_datetime import (
     ensure_timezone_aware,
     is_timezone_aware,
+    validate_timezone_aware_with_context,
     warn_if_naive_datetime,
 )
 from omnibase_infra.utils.util_dsn_validation import (
@@ -36,8 +37,10 @@ from omnibase_infra.utils.util_error_sanitization import (
     SAFE_ERROR_PATTERNS,
     SENSITIVE_PATTERNS,
     sanitize_backend_error,
+    sanitize_consul_key,
     sanitize_error_message,
     sanitize_error_string,
+    sanitize_secret_path,
 )
 from omnibase_infra.utils.util_pydantic_validators import (
     validate_contract_type_value,
@@ -67,9 +70,11 @@ __all__: list[str] = [
     "parse_env_float",
     "parse_env_int",
     "sanitize_backend_error",
+    "sanitize_consul_key",
     "sanitize_dsn",
     "sanitize_error_message",
     "sanitize_error_string",
+    "sanitize_secret_path",
     "set_correlation_id",
     "validate_contract_type_value",
     "validate_endpoint_urls_dict",
@@ -78,6 +83,7 @@ __all__: list[str] = [
     "validate_semver",
     "validate_timezone_aware_datetime",
     "validate_timezone_aware_datetime_optional",
+    "validate_timezone_aware_with_context",
     "validate_version_lenient",
     "warn_if_naive_datetime",
 ]

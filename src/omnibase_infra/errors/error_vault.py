@@ -5,12 +5,18 @@
 This module defines the InfraVaultError class for Vault-related infrastructure
 errors. It extends InfraConnectionError to provide specialized error handling
 for HashiCorp Vault operations.
+
+Security Note:
+    Secret paths are automatically sanitized when stored in error context
+    to prevent exposure of infrastructure topology and credential organization.
+    Full paths are only logged at DEBUG level if needed for debugging.
 """
 
 from omnibase_infra.errors.error_infra import InfraConnectionError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_secret_path
 
 
 class InfraVaultError(InfraConnectionError):
@@ -30,6 +36,12 @@ class InfraVaultError(InfraConnectionError):
         - Connection retry exhaustion
         - Vault seal/unseal operation errors
 
+    Security:
+        Secret paths passed to this error are automatically sanitized to prevent
+        exposure of infrastructure details in error messages, logs, and metrics.
+        The sanitization masks path segments after the mount point, e.g.,
+        "secret/data/myapp/db/creds" becomes "secret/***/***".
+
     Example:
         >>> from omnibase_infra.enums import EnumInfraTransportType
         >>> context = ModelInfraErrorContext(
@@ -37,10 +49,11 @@ class InfraVaultError(InfraConnectionError):
         ...     operation="read_secret",
         ...     target_name="vault-primary",
         ... )
+        >>> # Secret path will be sanitized to "secret/***/***" in error context
         >>> raise InfraVaultError(
         ...     "Failed to read secret from Vault",
         ...     context=context,
-        ...     secret_path="secret/data/database/credentials",
+        ...     secret_path="secret/data/myapp/credentials",
         ... )
 
         >>> # Token renewal failure
@@ -81,12 +94,22 @@ class InfraVaultError(InfraConnectionError):
         Args:
             message: Human-readable error message
             context: Bundled infrastructure context (should use VAULT transport_type)
-            secret_path: Optional path to the secret that caused the error
+            secret_path: Optional path to the secret that caused the error.
+                This path is automatically sanitized to mask sensitive segments
+                (e.g., "secret/data/myapp/creds" -> "secret/***/***").
             **extra_context: Additional context information (e.g., host, port, retry_count)
+
+        Security:
+            The secret_path is sanitized before being stored in extra_context
+            to prevent exposure of infrastructure topology in error messages,
+            logs, and metrics. Only the mount point is preserved.
         """
-        # Include secret_path in extra_context if provided
+        # Include sanitized secret_path in extra_context if provided
+        # This prevents exposure of full secret paths in error messages/logs
         if secret_path is not None:
-            extra_context["secret_path"] = secret_path
+            sanitized_path = sanitize_secret_path(secret_path)
+            if sanitized_path:
+                extra_context["secret_path"] = sanitized_path
 
         super().__init__(
             message=message,

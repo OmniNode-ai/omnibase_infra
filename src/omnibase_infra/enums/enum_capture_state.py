@@ -7,7 +7,7 @@ Corpus capture state enum.
 Defines the lifecycle states for corpus capture operations.
 
 .. versionadded:: 0.5.0
-    Added for ServiceCorpusCapture (OMN-1203)
+    Added for CorpusCaptureEngine (OMN-1203)
 """
 
 from enum import Enum
@@ -32,7 +32,7 @@ class EnumCaptureState(str, Enum):
         READY ──close_corpus()──> CLOSED
 
     .. versionadded:: 0.5.0
-        Added for ServiceCorpusCapture (OMN-1203)
+        Added for CorpusCaptureEngine (OMN-1203)
     """
 
     IDLE = "idle"

@@ -74,7 +74,10 @@ class TestInfraVaultError:
         assert error.model.context["target_name"] == "vault-primary"
 
     def test_with_secret_path_parameter(self) -> None:
-        """Test InfraVaultError with secret_path parameter."""
+        """Test InfraVaultError with secret_path parameter.
+
+        Note: Secret paths are sanitized to prevent exposure of infrastructure details.
+        """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.VAULT,
             operation="read_secret",
@@ -85,15 +88,17 @@ class TestInfraVaultError:
             context=context,
             secret_path="secret/data/database/credentials",  # noqa: S106
         )
-        assert error.model.context["secret_path"] == "secret/data/database/credentials"
+        # Path is sanitized to mask sensitive segments
+        assert error.model.context["secret_path"] == "secret/***/***"
 
     def test_secret_path_included_in_extra_context(self) -> None:
-        """Test that secret_path is added to extra_context."""
+        """Test that sanitized secret_path is added to extra_context."""
         error = InfraVaultError(
             "Secret not found",
             secret_path="secret/data/api-key",  # noqa: S106
         )
-        assert error.model.context["secret_path"] == "secret/data/api-key"
+        # Path is sanitized to mask sensitive segments
+        assert error.model.context["secret_path"] == "secret/***/***"
 
     def test_with_extra_context_kwargs(self) -> None:
         """Test InfraVaultError with additional extra_context kwargs."""
@@ -169,7 +174,7 @@ class TestInfraVaultError:
         assert isinstance(error.model.correlation_id, UUID)
 
     def test_secret_path_with_other_extra_context(self) -> None:
-        """Test that secret_path combines correctly with other extra_context."""
+        """Test that sanitized secret_path combines correctly with other extra_context."""
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.VAULT,
             operation="get_secret",
@@ -181,7 +186,8 @@ class TestInfraVaultError:
             vault_namespace="production",
             retry_count=2,
         )
-        assert error.model.context["secret_path"] == "secret/data/db/password"
+        # Path is sanitized to mask sensitive segments
+        assert error.model.context["secret_path"] == "secret/***/***"
         assert error.model.context["vault_namespace"] == "production"
         assert error.model.context["retry_count"] == 2
 
@@ -237,7 +243,10 @@ class TestInfraConsulError:
         assert error.model.context["target_name"] == "consul-primary"
 
     def test_with_consul_key_parameter(self) -> None:
-        """Test InfraConsulError with consul_key parameter."""
+        """Test InfraConsulError with consul_key parameter.
+
+        Note: Consul keys are sanitized to prevent exposure of infrastructure details.
+        """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.CONSUL,
             operation="kv_get",
@@ -248,7 +257,8 @@ class TestInfraConsulError:
             context=context,
             consul_key="config/database/connection",
         )
-        assert error.model.context["consul_key"] == "config/database/connection"
+        # Key is sanitized to mask sensitive segments
+        assert error.model.context["consul_key"] == "config/***/***"
 
     def test_with_service_name_parameter(self) -> None:
         """Test InfraConsulError with service_name parameter."""
@@ -265,12 +275,13 @@ class TestInfraConsulError:
         assert error.model.context["service_name"] == "api-gateway"
 
     def test_consul_key_included_in_extra_context(self) -> None:
-        """Test that consul_key is added to extra_context."""
+        """Test that sanitized consul_key is added to extra_context."""
         error = InfraConsulError(
             "Key not found",
             consul_key="config/api/endpoint",
         )
-        assert error.model.context["consul_key"] == "config/api/endpoint"
+        # Key is sanitized to mask sensitive segments
+        assert error.model.context["consul_key"] == "config/***/***"
 
     def test_service_name_included_in_extra_context(self) -> None:
         """Test that service_name is added to extra_context."""
@@ -293,7 +304,8 @@ class TestInfraConsulError:
             consul_key="service/health/my-service",
             service_name="my-service",
         )
-        assert error.model.context["consul_key"] == "service/health/my-service"
+        # Key is sanitized to mask sensitive segments
+        assert error.model.context["consul_key"] == "service/***/***"
         assert error.model.context["service_name"] == "my-service"
 
     def test_with_extra_context_kwargs(self) -> None:
@@ -408,7 +420,8 @@ class TestInfraConsulError:
         assert error.model.context["transport_type"] == EnumInfraTransportType.CONSUL
         assert error.model.context["operation"] == "kv_put"
         assert error.model.context["target_name"] == "consul-cluster"
-        assert error.model.context["consul_key"] == "config/app/settings"
+        # Key is sanitized to mask sensitive segments
+        assert error.model.context["consul_key"] == "config/***/***"
         assert error.model.context["service_name"] == "config-writer"
         assert error.model.context["host"] == "consul.example.com"
         assert error.model.context["port"] == 8500
@@ -550,7 +563,8 @@ class TestServiceErrorsRealWorldScenarios:
             retry_count=3,
             vault_address="https://vault.example.com:8200",
         )
-        assert error.model.context["secret_path"] == "secret/data/database/credentials"
+        # Path is sanitized to mask sensitive segments
+        assert error.model.context["secret_path"] == "secret/***/***"
         assert error.model.context["retry_count"] == 3
         assert error.model.context["vault_address"] == "https://vault.example.com:8200"
 
@@ -604,10 +618,8 @@ class TestServiceErrorsRealWorldScenarios:
             datacenter="us-west-2",
             consistency_mode="consistent",
         )
-        assert (
-            error.model.context["consul_key"]
-            == "config/app/database/connection_pool_size"
-        )
+        # Key is sanitized to mask sensitive segments
+        assert error.model.context["consul_key"] == "config/***/***"
         assert error.model.context["datacenter"] == "us-west-2"
         assert error.model.context["consistency_mode"] == "consistent"
 

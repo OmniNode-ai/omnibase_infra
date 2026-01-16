@@ -301,10 +301,20 @@ def run_unions(verbose: bool = False) -> bool:
                 print(f"  - {e}")
             if hasattr(result, "metadata") and result.metadata:
                 meta = result.metadata
-                if hasattr(meta, "total_unions"):
+                # Show non-optional count (what threshold checks) not total
+                non_opt = getattr(meta, "non_optional_unions", None)
+                total = getattr(meta, "total_unions", None)
+                if non_opt is not None:
                     print(
-                        f"  Total unions: {meta.total_unions}, max allowed: {INFRA_MAX_UNIONS}"
+                        f"  Non-optional unions: {non_opt}, max allowed: {INFRA_MAX_UNIONS}"
                     )
+                    if total is not None:
+                        excluded = total - non_opt
+                        print(
+                            f"  (Total: {total}, X|None optionals excluded: {excluded})"
+                        )
+                elif total is not None:
+                    print(f"  Total unions: {total}, max allowed: {INFRA_MAX_UNIONS}")
         return bool(result.is_valid)
     except ImportError as e:
         print(f"Skipping union validation: {e}")

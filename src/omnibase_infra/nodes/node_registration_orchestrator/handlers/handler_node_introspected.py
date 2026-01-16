@@ -78,7 +78,10 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
-from omnibase_infra.utils import sanitize_error_message
+from omnibase_infra.utils import (
+    sanitize_error_message,
+    validate_timezone_aware_with_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,18 +275,13 @@ class HandlerNodeIntrospected:
         correlation_id: UUID = envelope.correlation_id or uuid4()
 
         # Validate timezone-awareness for time injection pattern
-        if now.tzinfo is None:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="handle_introspection_event",
-                target_name="handler.node_introspected",
-                correlation_id=correlation_id,
-            )
-            raise ProtocolConfigurationError(
-                "envelope_timestamp must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime.",
-                context=ctx,
-            )
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="handle_introspection_event",
+            target_name="handler.node_introspected",
+            correlation_id=correlation_id,
+        )
+        validate_timezone_aware_with_context(now, ctx)
 
         node_id = event.node_id
 

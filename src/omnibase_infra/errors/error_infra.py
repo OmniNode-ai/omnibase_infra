@@ -195,16 +195,21 @@ class SecretResolutionError(RuntimeHostError):
     Used for Vault connection failures, missing secrets, expired credentials,
     or permission issues accessing secret stores.
 
+    Security:
+        Do NOT include full secret paths in error messages or extra_context.
+        Use generic descriptions like "database credential" instead of
+        revealing path structure like "database/postgres/password".
+
     Example:
         >>> context = ModelInfraErrorContext(
         ...     transport_type=EnumInfraTransportType.VAULT,
         ...     operation="get_secret",
         ...     target_name="vault-primary",
         ... )
+        >>> # Use generic description, not the actual path
         >>> raise SecretResolutionError(
-        ...     "Secret not found in Vault",
+        ...     "Database credential not found in Vault",
         ...     context=context,
-        ...     secret_key="database/postgres/password",
         ... )
     """
 

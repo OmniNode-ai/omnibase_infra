@@ -5,7 +5,7 @@
 Corpus capture models.
 
 .. versionadded:: 0.5.0
-    Added for ServiceCorpusCapture (OMN-1203)
+    Added for CorpusCaptureEngine (OMN-1203)
 """
 
 from omnibase_infra.models.corpus.model_capture_config import ModelCaptureConfig

@@ -2,13 +2,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 """
-TDD tests for ServiceCorpusCapture.
+TDD tests for CorpusCaptureEngine.
 
 Tests filtering, deduplication, and lifecycle state transitions.
 Written test-first per OMN-1203 requirements.
 
 .. versionadded:: 0.5.0
-    Added for ServiceCorpusCapture (OMN-1203)
+    Added for CorpusCaptureEngine (OMN-1203)
 """
 
 import random
@@ -33,9 +33,9 @@ from omnibase_infra.models.corpus import ModelCaptureConfig
 
 # Import will fail until service is implemented - that's expected for TDD
 try:
-    from omnibase_infra.services.service_corpus_capture import ServiceCorpusCapture
+    from omnibase_infra.services.corpus_capture_engine import CorpusCaptureEngine
 except ImportError:
-    ServiceCorpusCapture = None  # type: ignore[misc, assignment]
+    CorpusCaptureEngine = None  # type: ignore[misc, assignment]
 
 
 # === Test Fixtures ===
@@ -101,7 +101,7 @@ def basic_config() -> ModelCaptureConfig:
 # === Filtering Logic Tests ===
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestHandlerFiltering:
     """Tests for handler whitelist filtering."""
 
@@ -113,7 +113,7 @@ class TestHandlerFiltering:
             corpus_display_name="test-corpus",
             handler_filter=None,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -128,7 +128,7 @@ class TestHandlerFiltering:
             corpus_display_name="test-corpus",
             handler_filter=["handler-a", "handler-b", "handler-c"],
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -144,7 +144,7 @@ class TestHandlerFiltering:
             corpus_display_name="test-corpus",
             handler_filter=["handler-a", "handler-b"],
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -155,7 +155,7 @@ class TestHandlerFiltering:
         assert result.outcome == EnumCaptureOutcome.SKIPPED_HANDLER_FILTER
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestTimeWindowFiltering:
     """Tests for time window filtering."""
 
@@ -168,7 +168,7 @@ class TestTimeWindowFiltering:
             time_window_start=None,
             time_window_end=None,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -184,7 +184,7 @@ class TestTimeWindowFiltering:
             time_window_start=now - timedelta(hours=1),
             time_window_end=now + timedelta(hours=1),
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -201,7 +201,7 @@ class TestTimeWindowFiltering:
             time_window_start=now,
             time_window_end=now + timedelta(hours=1),
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -221,7 +221,7 @@ class TestTimeWindowFiltering:
             time_window_start=now - timedelta(hours=1),
             time_window_end=now,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -234,7 +234,7 @@ class TestTimeWindowFiltering:
         assert result.outcome == EnumCaptureOutcome.SKIPPED_TIME_WINDOW
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestSampleRateFiltering:
     """Tests for sample rate filtering."""
 
@@ -245,7 +245,7 @@ class TestSampleRateFiltering:
             sample_rate=1.0,
             max_executions=100,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -264,7 +264,7 @@ class TestSampleRateFiltering:
             corpus_display_name="test-corpus",
             sample_rate=0.0,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -284,7 +284,7 @@ class TestSampleRateFiltering:
             sample_rate=0.5,
             max_executions=200,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -305,7 +305,7 @@ class TestSampleRateFiltering:
 # === Deduplication Tests ===
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestDeduplication:
     """Tests for deduplication strategies."""
 
@@ -316,7 +316,7 @@ class TestDeduplication:
             dedupe_strategy=EnumDedupeStrategy.NONE,
             max_executions=100,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -335,7 +335,7 @@ class TestDeduplication:
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.INPUT_HASH,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -356,7 +356,7 @@ class TestDeduplication:
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.INPUT_HASH,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -379,7 +379,7 @@ class TestDeduplication:
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.FULL_MANIFEST_HASH,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -401,7 +401,7 @@ class TestDeduplication:
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.FULL_MANIFEST_HASH,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -420,20 +420,20 @@ class TestDeduplication:
 # === Lifecycle State Transition Tests ===
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestLifecycleTransitions:
     """Tests for corpus lifecycle state transitions."""
 
     def test_initial_state_is_idle(self) -> None:
         """Service should start in IDLE state."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         assert service.state == EnumCaptureState.IDLE
 
     def test_create_corpus_transitions_to_ready(
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """create_corpus() should transition from IDLE to READY."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         assert service.state == EnumCaptureState.IDLE
 
         service.create_corpus(basic_config)
@@ -444,7 +444,7 @@ class TestLifecycleTransitions:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """start_capture() should transition from READY to CAPTURING."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
 
         service.start_capture()
@@ -455,7 +455,7 @@ class TestLifecycleTransitions:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """pause_capture() should transition from CAPTURING to PAUSED."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -467,7 +467,7 @@ class TestLifecycleTransitions:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """resume_capture() should transition from PAUSED to CAPTURING."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
         service.pause_capture()
@@ -480,7 +480,7 @@ class TestLifecycleTransitions:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """close_corpus() should transition to CLOSED from any active state."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -496,7 +496,7 @@ class TestLifecycleTransitions:
             max_executions=3,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -511,7 +511,7 @@ class TestLifecycleTransitions:
         self, sample_manifest: ModelExecutionManifest, basic_config: ModelCaptureConfig
     ) -> None:
         """Capture should be skipped when not in CAPTURING state."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         # Note: NOT calling start_capture()
 
@@ -527,7 +527,7 @@ class TestLifecycleTransitions:
             max_executions=2,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -544,20 +544,20 @@ class TestLifecycleTransitions:
         assert result.outcome == EnumCaptureOutcome.SKIPPED_CORPUS_FULL
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestInvalidTransitions:
     """Tests for invalid state transitions (should raise errors)."""
 
     def test_start_capture_from_idle_raises(self) -> None:
         """start_capture() from IDLE should raise an error."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
 
         with pytest.raises(OnexError):
             service.start_capture()
 
     def test_pause_capture_from_idle_raises(self) -> None:
         """pause_capture() from IDLE should raise an error."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
 
         with pytest.raises(OnexError):
             service.pause_capture()
@@ -566,7 +566,7 @@ class TestInvalidTransitions:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """resume_capture() without prior pause should raise an error."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -577,7 +577,7 @@ class TestInvalidTransitions:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """create_corpus() when already active should raise an error."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -588,7 +588,7 @@ class TestInvalidTransitions:
 # === Max Executions and Eviction Tests ===
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestMaxExecutionsEnforcement:
     """Tests for max_executions hard cap and eviction."""
 
@@ -599,7 +599,7 @@ class TestMaxExecutionsEnforcement:
             max_executions=5,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -615,7 +615,7 @@ class TestMaxExecutionsEnforcement:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """get_active_corpus() should return the active corpus."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
 
         corpus = service.get_active_corpus()
@@ -627,7 +627,7 @@ class TestMaxExecutionsEnforcement:
 # === Async Capture Tests ===
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestAsyncCapture:
     """Tests for async capture with timeout."""
 
@@ -636,7 +636,7 @@ class TestAsyncCapture:
         self, sample_manifest: ModelExecutionManifest, basic_config: ModelCaptureConfig
     ) -> None:
         """capture_async() should successfully capture manifests."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -654,7 +654,7 @@ class TestAsyncCapture:
             corpus_display_name="test-corpus",
             capture_timeout_ms=100.0,
         )
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(config)
         service.start_capture()
 
@@ -667,7 +667,7 @@ class TestAsyncCapture:
         self, sample_manifest: ModelExecutionManifest, basic_config: ModelCaptureConfig
     ) -> None:
         """capture_async() should respect explicit timeout parameter."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -680,7 +680,7 @@ class TestAsyncCapture:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """capture_async() should track capture metrics."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -697,7 +697,7 @@ class TestAsyncCapture:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """get_metrics() should return all counter values."""
-        service = ServiceCorpusCapture()
+        service = CorpusCaptureEngine()
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -717,7 +717,7 @@ class TestAsyncCapture:
 # === Persistence Tests ===
 
 
-@pytest.mark.skipif(ServiceCorpusCapture is None, reason="Service not yet implemented")
+@pytest.mark.skipif(CorpusCaptureEngine is None, reason="Service not yet implemented")
 class TestPersistence:
     """Tests for persistence flush functionality."""
 
@@ -726,7 +726,7 @@ class TestPersistence:
         self, basic_config: ModelCaptureConfig
     ) -> None:
         """flush_to_persistence() should raise if no handler configured."""
-        service = ServiceCorpusCapture()  # No persistence handler
+        service = CorpusCaptureEngine()  # No persistence handler
         service.create_corpus(basic_config)
 
         with pytest.raises(OnexError, match="No persistence handler configured"):
@@ -745,7 +745,7 @@ class TestPersistence:
         mock_persistence = MagicMock()
         mock_persistence.execute = mock_execute
 
-        service = ServiceCorpusCapture(persistence=mock_persistence)
+        service = CorpusCaptureEngine(persistence=mock_persistence)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -771,7 +771,7 @@ class TestPersistence:
         mock_persistence = MagicMock()
         mock_persistence.execute = mock_execute
 
-        service = ServiceCorpusCapture(persistence=mock_persistence)
+        service = CorpusCaptureEngine(persistence=mock_persistence)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -796,7 +796,7 @@ class TestPersistence:
         mock_persistence = MagicMock()
         mock_persistence.execute = mock_execute
 
-        service = ServiceCorpusCapture(persistence=mock_persistence)
+        service = CorpusCaptureEngine(persistence=mock_persistence)
         service.create_corpus(basic_config)
         service.start_capture()
 

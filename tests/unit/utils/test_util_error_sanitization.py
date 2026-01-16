@@ -12,7 +12,12 @@ See Also:
 
 from __future__ import annotations
 
-from omnibase_infra.utils import SENSITIVE_PATTERNS, sanitize_error_message
+from omnibase_infra.utils import (
+    SENSITIVE_PATTERNS,
+    sanitize_consul_key,
+    sanitize_error_message,
+    sanitize_secret_path,
+)
 
 
 class TestSanitizeErrorMessage:
@@ -263,3 +268,144 @@ class TestDLQIntegration:
 
         assert "REDACTED" in result
         assert "hvs.CAES" not in result
+
+
+class TestSanitizeSecretPath:
+    """Tests for sanitize_secret_path function."""
+
+    def test_none_returns_none(self) -> None:
+        """None input should return None."""
+        assert sanitize_secret_path(None) is None
+
+    def test_empty_string_returns_empty(self) -> None:
+        """Empty string should return empty string."""
+        assert sanitize_secret_path("") == ""
+
+    def test_single_segment_unchanged(self) -> None:
+        """Single segment paths should be unchanged."""
+        assert sanitize_secret_path("secret") == "secret"
+        assert sanitize_secret_path("kv") == "kv"
+
+    def test_multi_segment_path_sanitized(self) -> None:
+        """Multi-segment paths should be sanitized."""
+        result = sanitize_secret_path("secret/data/myapp/database/credentials")
+        assert result == "secret/***/***"
+        assert "myapp" not in result
+        assert "database" not in result
+        assert "credentials" not in result
+
+    def test_two_segment_path_sanitized(self) -> None:
+        """Two-segment paths should be sanitized."""
+        result = sanitize_secret_path("secret/data")
+        assert result == "secret/***/***"
+        assert "data" not in result
+
+    def test_different_mount_points(self) -> None:
+        """Different mount points should be preserved."""
+        assert sanitize_secret_path("kv/production/api-keys") == "kv/***/***"
+        assert sanitize_secret_path("pki/issue/my-role") == "pki/***/***"
+        assert sanitize_secret_path("transit/encrypt/my-key") == "transit/***/***"
+
+    def test_preserves_mount_point_only(self) -> None:
+        """Only mount point should be visible in sanitized path."""
+        result = sanitize_secret_path(
+            "secret/data/production/database/postgres/password"
+        )
+        assert result.startswith("secret/")
+        assert "production" not in result
+        assert "postgres" not in result
+        assert "password" not in result
+
+
+class TestSanitizeConsulKey:
+    """Tests for sanitize_consul_key function."""
+
+    def test_none_returns_none(self) -> None:
+        """None input should return None."""
+        assert sanitize_consul_key(None) is None
+
+    def test_empty_string_returns_empty(self) -> None:
+        """Empty string should return empty string."""
+        assert sanitize_consul_key("") == ""
+
+    def test_single_segment_unchanged(self) -> None:
+        """Single segment keys should be unchanged."""
+        assert sanitize_consul_key("config") == "config"
+        assert sanitize_consul_key("services") == "services"
+
+    def test_multi_segment_key_sanitized(self) -> None:
+        """Multi-segment keys should be sanitized."""
+        result = sanitize_consul_key("config/database/connection")
+        assert result == "config/***/***"
+        assert "database" not in result
+        assert "connection" not in result
+
+    def test_two_segment_key_sanitized(self) -> None:
+        """Two-segment keys should be sanitized."""
+        result = sanitize_consul_key("config/myapp")
+        assert result == "config/***/***"
+        assert "myapp" not in result
+
+    def test_service_keys_sanitized(self) -> None:
+        """Service registry keys should be sanitized."""
+        result = sanitize_consul_key("services/api-gateway/endpoints")
+        assert result == "services/***/***"
+        assert "api-gateway" not in result
+        assert "endpoints" not in result
+
+    def test_preserves_prefix_only(self) -> None:
+        """Only the first segment should be visible in sanitized key."""
+        result = sanitize_consul_key("config/production/api/internal/database/primary")
+        assert result.startswith("config/")
+        assert "production" not in result
+        assert "internal" not in result
+        assert "primary" not in result
+
+
+class TestErrorClassSanitization:
+    """Tests verifying error classes sanitize paths correctly."""
+
+    def test_infra_vault_error_sanitizes_secret_path(self) -> None:
+        """InfraVaultError should sanitize secret_path in extra_context."""
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import InfraVaultError, ModelInfraErrorContext
+
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.VAULT,
+            operation="read_secret",
+            target_name="vault-primary",
+        )
+
+        error = InfraVaultError(
+            "Failed to read secret",
+            context=context,
+            secret_path="secret/data/myapp/database/credentials",  # noqa: S106
+        )
+
+        # The error should have sanitized secret_path
+        error_str = str(error)
+        # Full path should not be in the string representation
+        assert "myapp" not in error_str or "***" in error_str
+        assert "database/credentials" not in error_str
+
+    def test_infra_consul_error_sanitizes_consul_key(self) -> None:
+        """InfraConsulError should sanitize consul_key in extra_context."""
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import InfraConsulError, ModelInfraErrorContext
+
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="kv_get",
+            target_name="consul-primary",
+        )
+
+        error = InfraConsulError(
+            "Failed to read key",
+            context=context,
+            consul_key="config/database/connection",
+        )
+
+        # The error should have sanitized consul_key
+        error_str = str(error)
+        # Full path should not be in the string representation
+        assert "database/connection" not in error_str

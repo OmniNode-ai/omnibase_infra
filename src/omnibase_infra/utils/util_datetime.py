@@ -41,7 +41,11 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+if TYPE_CHECKING:
+    from omnibase_infra.errors import ModelInfraErrorContext
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +189,83 @@ def is_timezone_aware(dt: datetime) -> bool:
     return dt.tzinfo is not None and dt.utcoffset() is not None
 
 
+def validate_timezone_aware_with_context(
+    dt: datetime,
+    context: ModelInfraErrorContext,
+    *,
+    field_name: str = "envelope_timestamp",
+) -> datetime:
+    """Validate that a datetime is timezone-aware, raising ProtocolConfigurationError if not.
+
+    This is the SINGLE SOURCE OF TRUTH for handler-level timezone validation.
+    Use this function when you need to validate datetime values in handlers
+    and raise structured errors with context information.
+
+    For Pydantic field validators, use :func:`validate_timezone_aware_datetime`
+    from ``util_pydantic_validators.py`` instead.
+
+    Args:
+        dt: The datetime to validate.
+        context: A ModelInfraErrorContext instance for error reporting.
+            The context provides transport_type, operation, target_name,
+            and correlation_id for the error.
+        field_name: Name of the field being validated, used in error message.
+            Defaults to "envelope_timestamp".
+
+    Returns:
+        The validated datetime (unchanged if valid).
+
+    Raises:
+        ProtocolConfigurationError: If datetime is naive (no timezone info).
+
+    Example:
+        >>> from datetime import datetime, UTC
+        >>> from uuid import uuid4
+        >>> from omnibase_infra.enums import EnumInfraTransportType
+        >>> from omnibase_infra.errors import ModelInfraErrorContext
+        >>> from omnibase_infra.utils import validate_timezone_aware_with_context
+        >>>
+        >>> ctx = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.RUNTIME,
+        ...     operation="handle_event",
+        ...     target_name="my_handler",
+        ...     correlation_id=uuid4(),
+        ... )
+        >>>
+        >>> # Valid: timezone-aware datetime passes through
+        >>> aware = datetime.now(UTC)
+        >>> validate_timezone_aware_with_context(aware, ctx) == aware
+        True
+        >>>
+        >>> # Invalid: naive datetime raises ProtocolConfigurationError
+        >>> naive = datetime.now()
+        >>> validate_timezone_aware_with_context(naive, ctx)  # doctest: +ELLIPSIS
+        Traceback (most recent call last):
+        ...
+        omnibase_infra.errors...ProtocolConfigurationError: envelope_timestamp must be timezone-aware...
+
+    Related:
+        - OMN-1181: Replace RuntimeError with structured errors
+        - PR #158: Consolidate duplicate validation functions
+
+    .. versionadded:: 0.9.1
+        Created to consolidate duplicate timezone validation in handlers.
+    """
+    if dt.tzinfo is not None and dt.utcoffset() is not None:
+        return dt
+
+    # Lazy imports to avoid circular dependency (utils -> errors -> models -> utils)
+    from omnibase_infra.errors import ProtocolConfigurationError
+
+    raise ProtocolConfigurationError(
+        f"{field_name} must be timezone-aware. Use datetime.now(UTC) or "
+        "datetime(..., tzinfo=timezone.utc) instead of naive datetime.",
+        context=context,
+        parameter=field_name,
+        value=dt.isoformat(),
+    )
+
+
 def warn_if_naive_datetime(
     dt: datetime,
     *,
@@ -286,5 +367,6 @@ def warn_if_naive_datetime(
 __all__: list[str] = [
     "ensure_timezone_aware",
     "is_timezone_aware",
+    "validate_timezone_aware_with_context",
     "warn_if_naive_datetime",
 ]
