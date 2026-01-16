@@ -46,6 +46,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
+from omnibase_infra.types import MessageOutputCategory
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ TOPIC_CATEGORY_PATTERNS: dict[EnumMessageCategory, re.Pattern[str]] = {
 # Topic suffix mapping for each message category
 # Note: PROJECTION uses EnumNodeOutputType because it's a node output type, not a message category.
 # Projections are internal state outputs from REDUCER nodes, not routed messages on Kafka topics.
-TOPIC_SUFFIXES: dict[EnumMessageCategory | EnumNodeOutputType, str] = {
+TOPIC_SUFFIXES: dict[MessageOutputCategory, str] = {
     EnumMessageCategory.EVENT: "events",
     EnumMessageCategory.COMMAND: "commands",
     EnumMessageCategory.INTENT: "intents",
@@ -98,7 +99,7 @@ TOPIC_SUFFIXES: dict[EnumMessageCategory | EnumNodeOutputType, str] = {
 # 2. OUTPUT VALIDATION: Which output types each node archetype can PRODUCE
 #    (e.g., REDUCER can produce PROJECTION outputs)
 #
-# Why the union type (EnumMessageCategory | EnumNodeOutputType)?
+# Why the union type (MessageOutputCategory)?
 # - EnumMessageCategory values (EVENT, COMMAND, INTENT) are for message routing
 # - EnumNodeOutputType values (including PROJECTION) are for node output validation
 # - REDUCER is unique: it consumes EVENTs (message category) and produces PROJECTIONs
@@ -106,7 +107,7 @@ TOPIC_SUFFIXES: dict[EnumMessageCategory | EnumNodeOutputType, str] = {
 #
 # See ADR: docs/decisions/adr-enum-message-category-vs-node-output-type.md
 NODE_ARCHETYPE_EXPECTED_CATEGORIES: dict[
-    EnumNodeArchetype, list[EnumMessageCategory | EnumNodeOutputType]
+    EnumNodeArchetype, list[MessageOutputCategory]
 ] = {
     EnumNodeArchetype.EFFECT: [
         EnumMessageCategory.COMMAND,
@@ -168,7 +169,7 @@ class TopicCategoryValidator:
 
     def validate_message_topic(
         self,
-        message_category: EnumMessageCategory | EnumNodeOutputType,
+        message_category: MessageOutputCategory,
         topic_name: str,
     ) -> ModelExecutionShapeViolationResult | None:
         """Validate that a message category matches its topic pattern.
@@ -244,7 +245,7 @@ class TopicCategoryValidator:
         self,
         node_archetype: EnumNodeArchetype,
         subscribed_topics: list[str],
-        expected_categories: list[EnumMessageCategory | EnumNodeOutputType],
+        expected_categories: list[MessageOutputCategory],
     ) -> list[ModelExecutionShapeViolationResult]:
         """Validate that handler subscriptions match expected message types.
 
@@ -360,7 +361,7 @@ class TopicCategoryValidator:
 
     def get_expected_topic_suffix(
         self,
-        category: EnumMessageCategory | EnumNodeOutputType,
+        category: MessageOutputCategory,
     ) -> str:
         """Get the expected topic suffix for a message category or node output type.
 
@@ -1008,7 +1009,7 @@ def validate_topic_categories_in_file(
 def validate_message_on_topic(
     message: object,
     topic: str,
-    message_category: EnumMessageCategory | EnumNodeOutputType,
+    message_category: MessageOutputCategory,
 ) -> ModelExecutionShapeViolationResult | None:
     """Runtime validation that message category matches topic.
 

@@ -144,6 +144,7 @@ from uuid import UUID, uuid4
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.types import PrimitiveValue
 from pydantic import ValidationError
 
 from omnibase_infra.enums import (
@@ -765,7 +766,7 @@ class MessageDispatchEngine:
 
     def _build_log_context(
         self, **kwargs: Unpack[ModelLogContextKwargs]
-    ) -> dict[str, str | int | float]:
+    ) -> dict[str, PrimitiveValue]:
         """
         Build structured log context dictionary.
 

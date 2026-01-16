@@ -71,6 +71,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.enums import EnumValidationSeverity
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
+from omnibase_infra.types import PathInput
 
 # Module-level logger
 logger = logging.getLogger(__name__)
@@ -926,7 +927,7 @@ class ContractLinter:
 
 
 def lint_contract_file(
-    file_path: str | Path,
+    file_path: PathInput,
     *,
     check_imports: bool = True,
     strict_mode: bool = False,
@@ -949,7 +950,7 @@ def lint_contract_file(
 
 
 def lint_contracts_in_directory(
-    directory: str | Path,
+    directory: PathInput,
     *,
     recursive: bool = True,
     check_imports: bool = True,
@@ -974,7 +975,7 @@ def lint_contracts_in_directory(
 
 
 def lint_contracts_ci(
-    directory: str | Path = "src/omnibase_infra/nodes/",
+    directory: PathInput = "src/omnibase_infra/nodes/",
     *,
     check_imports: bool = True,
     strict_mode: bool = False,

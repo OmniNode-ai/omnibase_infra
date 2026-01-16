@@ -32,6 +32,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.types import PrimitiveValue
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumMessageCategory
@@ -43,7 +44,7 @@ _SENTINEL_FLOAT: float = -1.0
 _SENTINEL_UUID: UUID = UUID(int=0)  # Nil UUID (00000000-0000-0000-0000-000000000000)
 
 # Type alias for log context dict values (reduces union count)
-type LogContextDict = dict[str, str | int | float]
+type LogContextDict = dict[str, PrimitiveValue]
 
 
 class ModelDispatchLogContext(BaseModel):

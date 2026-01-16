@@ -23,7 +23,6 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraVaultError,
     ModelInfraErrorContext,
-    RuntimeHostError,
 )
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
@@ -151,7 +150,7 @@ class MixinVaultToken:
             correlation_id: Correlation ID for tracing
 
         Raises:
-            RuntimeHostError: If handler not initialized
+            InfraVaultError: If handler not initialized
         """
         if self._client is None or self._config is None:
             ctx = ModelInfraErrorContext(
@@ -161,7 +160,7 @@ class MixinVaultToken:
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
-            raise RuntimeHostError(
+            raise InfraVaultError(
                 "HandlerVault not initialized",
                 context=ctx,
             )
