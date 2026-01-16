@@ -148,6 +148,7 @@ class TestCorrelationPreservation:
         assert len(handler_b.received_messages) == 1
 
         # Assert - Correlation ID was preserved
+        # Messages serialize correlation_id as string for wire transport (JSON/Kafka)
         received_correlation_id = handler_b.received_messages[0].get("correlation_id")
         assert received_correlation_id == str(correlation_id)
 
@@ -225,7 +226,8 @@ class TestCorrelationPreservation:
             assert_correlation_in_logs(log_capture, correlation_id, boundary)
 
         # Additional verification: check that we have log records with
-        # the correlation_id attribute set
+        # the correlation_id attribute set.
+        # Log records store correlation_id as string for consistent serialization.
         records_with_correlation = [
             r
             for r in log_capture
@@ -269,6 +271,7 @@ class TestCorrelationPreservation:
         assert len(handler_c.received_messages) == 1
 
         # Assert - Correlation ID preserved through all handlers
+        # Messages serialize correlation_id as string for wire transport (JSON/Kafka)
         b_correlation = handler_b.received_messages[0].get("correlation_id")
         c_correlation = handler_c.received_messages[0].get("correlation_id")
         assert b_correlation == str(correlation_id)

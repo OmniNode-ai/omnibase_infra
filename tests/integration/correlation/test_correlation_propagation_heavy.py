@@ -42,13 +42,15 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
 )
 
-# Check if pytest-httpserver is available for HTTP boundary tests
+# Check if pytest-httpserver and httpx are available for HTTP boundary tests
 try:
+    import httpx
     from pytest_httpserver import HTTPServer
 
     HTTPSERVER_AVAILABLE = True
 except ImportError:
     HTTPSERVER_AVAILABLE = False
+    httpx = None  # type: ignore[assignment]
 
     class HTTPServer:  # type: ignore[no-redef]
         """Placeholder class when pytest-httpserver is not available."""
@@ -80,7 +82,7 @@ pytestmark = [
 
 @pytest.mark.skipif(
     not HTTPSERVER_AVAILABLE,
-    reason="pytest-httpserver not installed - pip install pytest-httpserver",
+    reason="pytest-httpserver or httpx not installed - pip install pytest-httpserver httpx",
 )
 class TestCorrelationHttpBoundary:
     """Tests for correlation ID propagation through HTTP boundaries."""
@@ -101,8 +103,6 @@ class TestCorrelationHttpBoundary:
             httpserver: pytest-httpserver fixture providing mock HTTP server
             correlation_id: Test correlation ID from conftest fixture
         """
-        import httpx
-
         # Configure mock server to expect correlation ID header
         httpserver.expect_request(
             "/test-correlation",
@@ -120,6 +120,7 @@ class TestCorrelationHttpBoundary:
 
         assert response.status_code == 200
         response_data = response.json()
+        # HTTP responses serialize correlation_id as string for wire transport (JSON body)
         assert response_data["correlation_id"] == str(correlation_id)
         # pytest-httpserver will fail the test if expected header wasn't present
 
@@ -138,8 +139,6 @@ class TestCorrelationHttpBoundary:
             httpserver: pytest-httpserver fixture providing mock HTTP server
             correlation_id: Test correlation ID from conftest fixture
         """
-        import httpx
-
         # Configure mock server to echo correlation ID in response headers
         httpserver.expect_request(
             "/echo-correlation",
@@ -155,6 +154,7 @@ class TestCorrelationHttpBoundary:
             )
 
         assert response.status_code == 200
+        # HTTP headers are strings; correlation_id serialized for wire transport
         assert response.headers.get("X-Correlation-ID") == str(correlation_id)
 
 
@@ -289,7 +289,7 @@ class TestCorrelationErrorContext:
         # The error's model dump should contain the correlation ID
         error_dump = error.model_dump()
         assert str(correlation_id) in str(error_dump)
-        # model_dump returns UUID objects, not strings
+        # model_dump() returns UUID objects; convert both sides to string for comparison
         assert str(error_dump["correlation_id"]) == str(correlation_id)
 
 

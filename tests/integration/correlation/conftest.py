@@ -21,7 +21,9 @@ Mock Handlers:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -98,7 +100,7 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def log_capture() -> list[logging.LogRecord]:
+async def log_capture() -> AsyncGenerator[list[logging.LogRecord], None]:
     """Capture structured log records for correlation ID assertion.
 
     This fixture sets up a custom logging handler that captures all log records
@@ -110,7 +112,7 @@ def log_capture() -> list[logging.LogRecord]:
         correlation_id attributes and message content.
 
     Example:
-        def test_correlation_logging(log_capture):
+        async def test_correlation_logging(log_capture):
             # ... perform operations that log with correlation_id ...
             assert any(
                 hasattr(r, 'correlation_id') for r in log_capture
@@ -130,6 +132,7 @@ def log_capture() -> list[logging.LogRecord]:
     try:
         yield captured_records
     finally:
+        await asyncio.sleep(0)  # Flush pending async logs
         try:
             logger.removeHandler(handler)
         except ValueError:  # Handler already removed
@@ -187,6 +190,8 @@ def assert_correlation_in_logs(
                 log_capture, correlation_id, "handler_a_entry"
             )
     """
+    # Log records store correlation_id as string for consistent serialization;
+    # compare as strings to handle both UUID and string attribute values.
     matching = [
         r
         for r in records
