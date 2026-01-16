@@ -124,13 +124,13 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
             execution_graph:
               nodes:
                 - node_id: "compute_intents"
-                  node_type: reducer
+                  node_type: REDUCER_GENERIC
                   description: "Compute registration intents"
                 - node_id: "execute_consul"
-                  node_type: effect
+                  node_type: EFFECT_GENERIC
                   description: "Register with Consul"
                 - node_id: "execute_postgres"
-                  node_type: effect
+                  node_type: EFFECT_GENERIC
                   description: "Register in PostgreSQL"
 
             coordination_rules:

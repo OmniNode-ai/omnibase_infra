@@ -35,6 +35,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from tests.infrastructure_config import DEFAULT_POSTGRES_PORT, REMOTE_INFRA_HOST
 
@@ -47,12 +48,55 @@ logger = logging.getLogger(__name__)
 
 # Regex pattern to match CONCURRENTLY DDL statements that cannot run in transactions.
 # These migrations are production-only and should be skipped in test environments.
-# Uses regex to match specific DDL patterns to avoid false positives from
-# "CONCURRENTLY" appearing in comments or string literals.
+#
+# Pattern matches:
+#   - CREATE INDEX CONCURRENTLY
+#   - CREATE UNIQUE INDEX CONCURRENTLY
+#   - REINDEX ... CONCURRENTLY (any REINDEX variant with CONCURRENTLY)
+#
+# The pattern uses word boundaries (\b) to avoid partial matches.
+# Note: Comment/string stripping is handled by _strip_sql_comments() before matching.
 CONCURRENT_DDL_PATTERN = re.compile(
     r"\b(CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY|REINDEX\s+.*CONCURRENTLY)\b",
     re.IGNORECASE,
 )
+
+# Pattern to match SQL single-line comments (-- to end of line)
+_SQL_LINE_COMMENT_PATTERN = re.compile(r"--[^\n]*")
+
+# Pattern to match SQL block comments (/* ... */)
+# Uses non-greedy matching to handle multiple block comments correctly
+_SQL_BLOCK_COMMENT_PATTERN = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def _strip_sql_comments(sql: str) -> str:
+    """Strip SQL comments from a string before pattern matching.
+
+    Removes both single-line (--) and block (/* */) comments to avoid
+    false positives when detecting CONCURRENTLY DDL statements.
+
+    Args:
+        sql: Raw SQL content potentially containing comments.
+
+    Returns:
+        SQL with comments replaced by spaces (preserves position info for debugging).
+
+    Note:
+        This function does NOT strip string literals. While theoretically a string
+        literal could contain DDL syntax, this is extremely rare in migration files
+        and the complexity of handling escape sequences is not justified.
+
+    Examples:
+        >>> _strip_sql_comments("SELECT 1; -- comment")
+        'SELECT 1;  '
+        >>> _strip_sql_comments("SELECT /* inline */ 1;")
+        'SELECT   1;'
+    """
+    # Replace block comments first (they can span multiple lines)
+    result = _SQL_BLOCK_COMMENT_PATTERN.sub(" ", sql)
+    # Then replace line comments
+    result = _SQL_LINE_COMMENT_PATTERN.sub(" ", result)
+    return result
 
 
 def should_skip_migration(sql: str) -> bool:
@@ -62,21 +106,46 @@ def should_skip_migration(sql: str) -> bool:
     transaction block, which is required for test isolation. These migrations
     are typically production-only for online schema changes.
 
+    This function strips SQL comments before matching to avoid false positives
+    from CONCURRENTLY appearing in comments.
+
     Args:
         sql: The SQL content of the migration file.
 
     Returns:
         True if the migration should be skipped, False otherwise.
 
-    Example:
-        >>> sql = "CREATE INDEX CONCURRENTLY idx_foo ON bar(baz);"
-        >>> should_skip_migration(sql)
+    Examples - Statements that WILL be skipped (returns True):
+        >>> should_skip_migration("CREATE INDEX CONCURRENTLY idx ON tbl(col);")
         True
-        >>> sql = "CREATE INDEX idx_foo ON bar(baz);"
-        >>> should_skip_migration(sql)
+        >>> should_skip_migration("CREATE UNIQUE INDEX CONCURRENTLY idx ON tbl(col);")
+        True
+        >>> should_skip_migration("REINDEX TABLE CONCURRENTLY my_table;")
+        True
+        >>> should_skip_migration("REINDEX INDEX CONCURRENTLY my_index;")
+        True
+
+    Examples - Statements that will NOT be skipped (returns False):
+        >>> should_skip_migration("CREATE INDEX idx ON tbl(col);")
         False
+        >>> should_skip_migration("-- CREATE INDEX CONCURRENTLY idx ON tbl(col);")
+        False
+        >>> should_skip_migration("/* CREATE INDEX CONCURRENTLY */ CREATE INDEX idx ON t(c);")
+        False
+        >>> should_skip_migration("-- Note: use CREATE INDEX CONCURRENTLY in production")
+        False
+
+    Edge case - String literals (NOT handled, but rare in migrations):
+        The pattern may still match CONCURRENTLY in string literals like:
+        "SELECT 'CREATE INDEX CONCURRENTLY' AS example;"
+        This is acceptable because:
+        1. Migrations rarely contain DDL syntax in string literals
+        2. Handling escape sequences adds significant complexity
+        3. A false positive (skipping a safe migration) is harmless in tests
     """
-    return bool(CONCURRENT_DDL_PATTERN.search(sql))
+    # Strip comments before matching to avoid false positives
+    sql_without_comments = _strip_sql_comments(sql)
+    return bool(CONCURRENT_DDL_PATTERN.search(sql_without_comments))
 
 
 # =============================================================================
@@ -171,6 +240,10 @@ class PostgresConfig:
     def build_dsn(self) -> str:
         """Build PostgreSQL DSN from configuration.
 
+        Credentials (user and password) are URL-encoded to handle special
+        characters like @, :, #, %, etc. that would otherwise break the DSN
+        format.
+
         Returns:
             PostgreSQL connection string in standard format.
 
@@ -182,6 +255,10 @@ class PostgresConfig:
             ...     database="test", user="postgres", password="secret")
             >>> config.build_dsn()
             'postgresql://postgres:secret@localhost:5432/test'
+            >>> config = PostgresConfig(host="localhost", port=5432,
+            ...     database="test", user="user@domain", password="p@ss:word#123")
+            >>> config.build_dsn()
+            'postgresql://user%40domain:p%40ss%3Aword%23123@localhost:5432/test'
         """
         if not self.is_configured:
             missing = []
@@ -193,8 +270,12 @@ class PostgresConfig:
                 f"PostgreSQL configuration incomplete. Missing: {', '.join(missing)}"
             )
 
+        # URL-encode credentials to handle special characters (@, :, #, %, etc.)
+        encoded_user = quote(self.user, safe="")
+        encoded_password = quote(self.password, safe="")
+
         return (
-            f"postgresql://{self.user}:{self.password}"
+            f"postgresql://{encoded_user}:{encoded_password}"
             f"@{self.host}:{self.port}/{self.database}"
         )
 
@@ -211,6 +292,10 @@ def build_postgres_dsn(
     This is a standalone function for cases where a full PostgresConfig
     is not needed.
 
+    Credentials (user and password) are URL-encoded to handle special
+    characters like @, :, #, %, etc. that would otherwise break the DSN
+    format.
+
     Args:
         host: PostgreSQL server hostname.
         port: PostgreSQL server port.
@@ -224,8 +309,14 @@ def build_postgres_dsn(
     Example:
         >>> build_postgres_dsn("localhost", 5432, "test", "postgres", "secret")
         'postgresql://postgres:secret@localhost:5432/test'
+        >>> build_postgres_dsn("localhost", 5432, "test", "user@domain", "p@ss:word#123")
+        'postgresql://user%40domain:p%40ss%3Aword%23123@localhost:5432/test'
     """
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    # URL-encode credentials to handle special characters (@, :, #, %, etc.)
+    encoded_user = quote(user, safe="")
+    encoded_password = quote(password, safe="")
+
+    return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
 
 
 def check_postgres_reachable(

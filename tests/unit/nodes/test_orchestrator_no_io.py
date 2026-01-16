@@ -521,7 +521,7 @@ class TestContractIOOperationsAreEffectNodes:
 
         for node in execution_graph:
             node_id = node["node_id"]
-            node_type = node["node_type"]
+            node_type = node["node_type"].lower()  # Normalize case for comparison
             description = node.get("description", "").lower()
 
             # Check if node_id or description suggests I/O
@@ -575,7 +575,7 @@ class TestContractIOOperationsAreEffectNodes:
         ]["nodes"]
 
         effect_nodes = [
-            n for n in execution_graph if n["node_type"] == "effect_generic"
+            n for n in execution_graph if n["node_type"].lower() == "effect_generic"
         ]
         effect_node_ids = {n["node_id"] for n in effect_nodes}
 
@@ -602,14 +602,14 @@ class TestContractIOOperationsAreEffectNodes:
         ]["nodes"]
 
         non_effect_nodes = [
-            n for n in execution_graph if n["node_type"] != "effect_generic"
+            n for n in execution_graph if n["node_type"].lower() != "effect_generic"
         ]
 
         # Pure node types
         pure_types = {"compute_generic", "reducer_generic"}
 
         for node in non_effect_nodes:
-            node_type = node["node_type"]
+            node_type = node["node_type"].lower()  # Normalize case for comparison
             assert node_type in pure_types, (
                 f"Node '{node['node_id']}' has type '{node_type}' which is not a pure type.\n"
                 f"Non-effect nodes must be 'compute' or 'reducer'."

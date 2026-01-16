@@ -10,6 +10,19 @@ Available Utilities:
     - wait_for_topic_metadata: Wait for topic metadata propagation after creation
     - KafkaTopicManager: Async context manager for topic lifecycle management
     - parse_bootstrap_servers: Parse bootstrap servers string into (host, port) tuple
+    - validate_bootstrap_servers: Validate configuration with skip reasons for tests
+
+Configuration Validation:
+    Use validate_bootstrap_servers() to check configuration before running tests:
+
+    >>> result = validate_bootstrap_servers(os.getenv("KAFKA_BOOTSTRAP_SERVERS", ""))
+    >>> if not result:
+    ...     pytest.skip(result.skip_reason)
+
+    This handles:
+    - Empty/whitespace-only values
+    - Malformed port numbers (non-numeric, out of range)
+    - Clear skip reasons for test output
 
 Topic Management Pattern:
     Use KafkaTopicManager for consistent topic creation and cleanup in tests:
@@ -132,6 +145,157 @@ def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
     )
 
 
+class KafkaConfigValidationResult:
+    """Result of KAFKA_BOOTSTRAP_SERVERS validation.
+
+    Attributes:
+        is_valid: True if the configuration is valid and usable.
+        host: Parsed host (or "<not set>" if invalid).
+        port: Parsed port (or "29092" default if not specified).
+        error_message: Human-readable error message if invalid, None if valid.
+        skip_reason: Pytest skip reason if tests should be skipped, None if valid.
+    """
+
+    __slots__ = ("error_message", "host", "is_valid", "port", "skip_reason")
+
+    def __init__(
+        self,
+        *,
+        is_valid: bool,
+        host: str,
+        port: str,
+        error_message: str | None = None,
+        skip_reason: str | None = None,
+    ) -> None:
+        self.is_valid = is_valid
+        self.host = host
+        self.port = port
+        self.error_message = error_message
+        self.skip_reason = skip_reason
+
+    def __bool__(self) -> bool:
+        """Return True if configuration is valid."""
+        return self.is_valid
+
+
+def validate_bootstrap_servers(
+    bootstrap_servers: str | None,
+) -> KafkaConfigValidationResult:
+    """Validate KAFKA_BOOTSTRAP_SERVERS and return detailed result.
+
+    Performs comprehensive validation of the bootstrap servers string:
+    - Checks for empty/whitespace-only values
+    - Validates host:port format
+    - Validates port is numeric and in valid range (1-65535)
+    - Returns structured result with skip reason for tests
+
+    Args:
+        bootstrap_servers: The KAFKA_BOOTSTRAP_SERVERS value from environment.
+
+    Returns:
+        KafkaConfigValidationResult with validation status and details.
+
+    Example:
+        >>> result = validate_bootstrap_servers("")
+        >>> if not result:
+        ...     pytest.skip(result.skip_reason)
+
+        >>> result = validate_bootstrap_servers("localhost:9092")
+        >>> assert result.is_valid
+        >>> assert result.host == "localhost"
+        >>> assert result.port == "9092"
+    """
+    # Handle None (defensive)
+    if bootstrap_servers is None:
+        return KafkaConfigValidationResult(
+            is_valid=False,
+            host="<not set>",
+            port="29092",
+            error_message="KAFKA_BOOTSTRAP_SERVERS is not set (None)",
+            skip_reason=(
+                "KAFKA_BOOTSTRAP_SERVERS not configured. "
+                "Set environment variable to enable Kafka integration tests. "
+                "Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
+            ),
+        )
+
+    # Handle empty/whitespace-only
+    if not bootstrap_servers or not bootstrap_servers.strip():
+        return KafkaConfigValidationResult(
+            is_valid=False,
+            host="<not set>",
+            port="29092",
+            error_message="KAFKA_BOOTSTRAP_SERVERS is empty or whitespace-only",
+            skip_reason=(
+                "KAFKA_BOOTSTRAP_SERVERS is empty or not set. "
+                "Set environment variable to enable Kafka integration tests. "
+                "Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
+            ),
+        )
+
+    stripped = bootstrap_servers.strip()
+
+    # Parse host and port
+    host, port = parse_bootstrap_servers(stripped)
+
+    # Validate port is numeric (when explicitly provided)
+    if ":" in stripped:
+        # Extract port part for validation
+        if stripped.startswith("["):
+            # IPv6 format: [::1]:9092
+            bracket_close = stripped.rfind("]")
+            if bracket_close != -1 and bracket_close < len(stripped) - 1:
+                port_str = stripped[bracket_close + 2 :]
+            else:
+                port_str = ""
+        else:
+            # Standard format: host:port
+            port_str = stripped.rsplit(":", 1)[-1] if ":" in stripped else ""
+
+        if port_str and not port_str.isdigit():
+            return KafkaConfigValidationResult(
+                is_valid=False,
+                host=host,
+                port=port_str,
+                error_message=(
+                    f"KAFKA_BOOTSTRAP_SERVERS has invalid port: '{port_str}' "
+                    f"(must be numeric)"
+                ),
+                skip_reason=(
+                    f"KAFKA_BOOTSTRAP_SERVERS has invalid port: '{port_str}'. "
+                    f"Port must be a number. "
+                    f"Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
+                ),
+            )
+
+        if port_str:
+            port_num = int(port_str)
+            if port_num < 1 or port_num > 65535:
+                return KafkaConfigValidationResult(
+                    is_valid=False,
+                    host=host,
+                    port=port_str,
+                    error_message=(
+                        f"KAFKA_BOOTSTRAP_SERVERS has invalid port: {port_num} "
+                        f"(must be 1-65535)"
+                    ),
+                    skip_reason=(
+                        f"KAFKA_BOOTSTRAP_SERVERS has invalid port: {port_num}. "
+                        f"Port must be between 1 and 65535. "
+                        f"Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
+                    ),
+                )
+
+    # Valid configuration
+    return KafkaConfigValidationResult(
+        is_valid=True,
+        host=host,
+        port=port,
+        error_message=None,
+        skip_reason=None,
+    )
+
+
 def parse_bootstrap_servers(bootstrap_servers: str) -> tuple[str, str]:
     """Parse KAFKA_BOOTSTRAP_SERVERS into (host, port) tuple for error messages.
 
@@ -141,6 +305,10 @@ def parse_bootstrap_servers(bootstrap_servers: str) -> tuple[str, str]:
     - "hostname" (no port): Returns ("hostname", "29092")
     - "[::1]:9092" (IPv6): Returns ("[::1]", "9092")
     - IPv6 without brackets: Returns (address, "29092") - malformed but tolerated
+
+    Note:
+        This function is primarily for error message generation. For validation
+        with skip reasons, use validate_bootstrap_servers() instead.
 
     Args:
         bootstrap_servers: The KAFKA_BOOTSTRAP_SERVERS value.
@@ -532,6 +700,9 @@ class KafkaTopicManager:
             )
 
             # Check for errors in the response
+            # Handle both aiokafka response formats for version compatibility:
+            # - topic_errors: List of (topic, error_code, error_message) tuples (newer versions)
+            # - topic_error_codes: Dict mapping topic to error_code (older versions)
             if hasattr(response, "topic_errors") and response.topic_errors:
                 for topic_error in response.topic_errors:
                     _, error_code, error_message = topic_error
@@ -541,6 +712,16 @@ class KafkaTopicManager:
                         raise RuntimeError(
                             f"Failed to create topic '{topic_name}': "
                             f"{get_kafka_error_hint(error_code, error_message)}"
+                        )
+            elif hasattr(response, "topic_error_codes") and response.topic_error_codes:
+                # Older aiokafka format: dict mapping topic name to error code
+                for topic, error_code in response.topic_error_codes.items():
+                    if error_code != 0:
+                        if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
+                            raise TopicAlreadyExistsError
+                        raise RuntimeError(
+                            f"Failed to create topic '{topic}': "
+                            f"{get_kafka_error_hint(error_code)}"
                         )
 
             self.created_topics.append(topic_name)
@@ -617,4 +798,7 @@ __all__ = [
     "get_kafka_error_hint",
     # Utilities
     "parse_bootstrap_servers",
+    # Validation
+    "validate_bootstrap_servers",
+    "KafkaConfigValidationResult",
 ]

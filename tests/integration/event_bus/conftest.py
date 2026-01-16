@@ -57,9 +57,11 @@ from tests.helpers.util_kafka import (
     KAFKA_ERROR_INVALID_PARTITIONS,
     KAFKA_ERROR_REMEDIATION_HINTS,
     KAFKA_ERROR_TOPIC_ALREADY_EXISTS,
+    KafkaConfigValidationResult,
     KafkaTopicManager,
     get_kafka_error_hint,
     parse_bootstrap_servers,
+    validate_bootstrap_servers,
     wait_for_consumer_ready,
     wait_for_topic_metadata,
 )
@@ -70,11 +72,21 @@ __all__ = [
     "wait_for_topic_metadata",
     "KafkaTopicManager",
     "parse_bootstrap_servers",
+    "validate_bootstrap_servers",
+    "KafkaConfigValidationResult",
     "get_kafka_error_hint",
     "KAFKA_ERROR_REMEDIATION_HINTS",
     "KAFKA_ERROR_TOPIC_ALREADY_EXISTS",
     "KAFKA_ERROR_INVALID_PARTITIONS",
 ]
+
+# =============================================================================
+# Configuration Validation
+# =============================================================================
+# Validate KAFKA_BOOTSTRAP_SERVERS at module load time to provide clear
+# skip reasons when configuration is missing or malformed.
+
+_kafka_config_validation = validate_bootstrap_servers(KAFKA_BOOTSTRAP_SERVERS)
 
 
 # =============================================================================
@@ -99,6 +111,10 @@ async def ensure_test_topic() -> AsyncGenerator[
         Uses KafkaTopicManager from tests.helpers.util_kafka for centralized
         topic lifecycle management and error handling.
 
+    Skips:
+        When KAFKA_BOOTSTRAP_SERVERS is empty, whitespace-only, or malformed.
+        The skip reason provides actionable guidance for configuration.
+
     Yields:
         Async function that creates a topic with the given name and partition count.
         Returns the topic name for convenience.
@@ -108,6 +124,10 @@ async def ensure_test_topic() -> AsyncGenerator[
             topic = await ensure_test_topic(f"test.integration.{uuid4().hex[:12]}")
             # Topic now exists and can be used for produce/consume
     """
+    # Skip if Kafka is not properly configured
+    if not _kafka_config_validation:
+        pytest.skip(_kafka_config_validation.skip_reason)
+
     # Use the shared KafkaTopicManager for topic lifecycle management
     async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
 
@@ -195,6 +215,10 @@ async def topic_factory() -> AsyncGenerator[
         Uses KafkaTopicManager from tests.helpers.util_kafka for centralized
         topic lifecycle management and error handling.
 
+    Skips:
+        When KAFKA_BOOTSTRAP_SERVERS is empty, whitespace-only, or malformed.
+        The skip reason provides actionable guidance for configuration.
+
     Yields:
         Async function that creates a topic with custom settings.
 
@@ -202,6 +226,10 @@ async def topic_factory() -> AsyncGenerator[
         async def test_replicated_topic(topic_factory):
             topic = await topic_factory("my.topic", partitions=3, replication=1)
     """
+    # Skip if Kafka is not properly configured
+    if not _kafka_config_validation:
+        pytest.skip(_kafka_config_validation.skip_reason)
+
     # Use the shared KafkaTopicManager for topic lifecycle management
     async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
 
