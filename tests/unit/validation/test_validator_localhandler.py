@@ -42,8 +42,47 @@ def _create_test_file(temp_dir: Path, content: str, filename: str = "test.py") -
         Path to created file.
     """
     filepath = temp_dir / filename
-    filepath.write_text(dedent(content))
+    filepath.write_text(dedent(content), encoding="utf-8")
     return filepath
+
+
+@pytest.fixture
+def clean_code() -> str:
+    """Fixture providing clean Python code with no LocalHandler imports."""
+    return """
+    import os
+    from pathlib import Path
+    """
+
+
+@pytest.fixture
+def localhandler_import_code() -> str:
+    """Fixture providing code with standard LocalHandler import."""
+    return """
+    from omnibase_core.handlers import LocalHandler
+
+    handler = LocalHandler()
+    """
+
+
+@pytest.fixture
+def aliased_import_code() -> str:
+    """Fixture providing code with aliased LocalHandler import."""
+    return """
+    from omnibase_core.handlers import LocalHandler as LH
+
+    handler = LH()
+    """
+
+
+@pytest.fixture
+def direct_import_code() -> str:
+    """Fixture providing code with direct module LocalHandler import."""
+    return """
+    from omnibase_core.handlers.handler_local import LocalHandler
+
+    handler = LocalHandler()
+    """
 
 
 # =============================================================================
@@ -691,13 +730,16 @@ class TestEdgeCases:
     def test_non_python_files_ignored(self, tmp_path: Path) -> None:
         """Non-Python files should be ignored."""
         (tmp_path / "readme.md").write_text(
-            "from omnibase_core.handlers import LocalHandler"
+            "from omnibase_core.handlers import LocalHandler",
+            encoding="utf-8",
         )
         (tmp_path / "config.yaml").write_text(
-            "handler: omnibase_core.handlers.LocalHandler"
+            "handler: omnibase_core.handlers.LocalHandler",
+            encoding="utf-8",
         )
         (tmp_path / "data.json").write_text(
-            '{"import": "from omnibase_core.handlers import LocalHandler"}'
+            '{"import": "from omnibase_core.handlers import LocalHandler"}',
+            encoding="utf-8",
         )
 
         result = validate_localhandler_ci(tmp_path)

@@ -76,6 +76,10 @@ def _should_skip_file(filepath: Path) -> bool:
 
     Uses exact parent directory matching to prevent false positives.
 
+    Note:
+        __init__.py files are NOT skipped because they can contain
+        LocalHandler imports that must be validated.
+
     Args:
         filepath: Path to check.
 
@@ -89,8 +93,10 @@ def _should_skip_file(filepath: Path) -> bool:
         if part in _SKIP_DIRECTORIES:
             return True
 
-    # Skip files starting with underscore (private modules, test fixtures)
-    if filepath.name.startswith("_"):
+    # Skip private modules (underscore prefix) but NOT __init__.py
+    # __init__.py files CAN contain LocalHandler imports and must be validated
+    filename = filepath.name
+    if filename.startswith("_") and filename != "__init__.py":
         return True
 
     return False
@@ -136,27 +142,23 @@ def validate_localhandler_in_file(filepath: Path) -> list[ModelLocalHandlerViola
     return violations
 
 
-def validate_localhandler(
+def _validate_localhandler_with_count(
     directory: Path,
     recursive: bool = True,
-) -> list[ModelLocalHandlerViolation]:
-    """Validate all Python files in a directory for LocalHandler import violations.
+) -> tuple[list[ModelLocalHandlerViolation], int]:
+    """Internal function to validate files and count them in a single traversal.
 
-    This is the main entry point for batch validation.
+    This avoids double traversal by combining file counting with validation.
 
     Args:
         directory: Path to the directory to validate.
         recursive: If True, recursively validate subdirectories.
 
     Returns:
-        List of all detected violations across all files.
-
-    Example:
-        >>> violations = validate_localhandler(Path("src/omnibase_infra"))
-        >>> for v in violations:
-        ...     print(v.format_human_readable())
+        Tuple of (violations list, files_checked count).
     """
     violations: list[ModelLocalHandlerViolation] = []
+    files_checked = 0
     py_files = directory.rglob("*.py") if recursive else directory.glob("*.py")
 
     for filepath in py_files:
@@ -177,6 +179,9 @@ def validate_localhandler(
                 )
                 continue
 
+            # Count this file as checked
+            files_checked += 1
+
             try:
                 file_violations = validate_localhandler_in_file(filepath)
                 violations.extend(file_violations)
@@ -191,6 +196,30 @@ def validate_localhandler(
                 )
                 continue
 
+    return violations, files_checked
+
+
+def validate_localhandler(
+    directory: Path,
+    recursive: bool = True,
+) -> list[ModelLocalHandlerViolation]:
+    """Validate all Python files in a directory for LocalHandler import violations.
+
+    This is the main entry point for batch validation.
+
+    Args:
+        directory: Path to the directory to validate.
+        recursive: If True, recursively validate subdirectories.
+
+    Returns:
+        List of all detected violations across all files.
+
+    Example:
+        >>> violations = validate_localhandler(Path("src/omnibase_infra"))
+        >>> for v in violations:
+        ...     print(v.format_human_readable())
+    """
+    violations, _ = _validate_localhandler_with_count(directory, recursive)
     return violations
 
 
@@ -219,33 +248,8 @@ def validate_localhandler_ci(
         ...         print(line)
         ...     sys.exit(1)
     """
-    # Count files (excluding skipped patterns and large files)
-    files_checked = 0
-    py_files = directory.rglob("*.py") if recursive else directory.glob("*.py")
-
-    for f in py_files:
-        if f.is_file() and not _should_skip_file(f):
-            try:
-                if f.stat().st_size <= _MAX_FILE_SIZE_BYTES:
-                    files_checked += 1
-            except OSError:
-                continue
-
-    violations = validate_localhandler(directory, recursive=recursive)
+    violations, files_checked = _validate_localhandler_with_count(directory, recursive)
     return ModelLocalHandlerValidationResult.from_violations(violations, files_checked)
-
-
-def _print_fix_instructions() -> None:
-    """Print instructions for fixing LocalHandler violations."""
-    print("\nHow to fix LocalHandler violations:")
-    print("   1. Remove the LocalHandler import from production code")
-    print("   2. LocalHandler is ONLY for test code (tests/ directory)")
-    print("   3. For production handlers, use appropriate protocol implementations")
-    print("")
-    print("   Why LocalHandler is test-only:")
-    print("   - LocalHandler is a simple echo handler for testing")
-    print("   - It bypasses production handler resolution")
-    print("   - Production code must use proper handler types")
 
 
 __all__ = [
