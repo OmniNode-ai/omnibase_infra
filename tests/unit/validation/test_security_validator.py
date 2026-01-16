@@ -10,7 +10,7 @@ import pytest
 from omnibase_infra.enums import EnumHandlerErrorType
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
-from omnibase_infra.validation.security_validator import (
+from omnibase_infra.validation.validator_security import (
     SecurityRuleId,
     has_sensitive_parameters,
     is_sensitive_method_name,

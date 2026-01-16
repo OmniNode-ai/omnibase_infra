@@ -10,6 +10,7 @@ from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.types import PolicyTypeInput
 
 
 class PolicyRegistryError(RuntimeHostError):
@@ -73,7 +74,7 @@ class PolicyRegistryError(RuntimeHostError):
         self,
         message: str,
         policy_id: str | None = None,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
         context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:

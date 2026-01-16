@@ -44,7 +44,7 @@ from uuid import uuid4
 import pytest
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -357,7 +357,7 @@ class TestDeduplicationReplayPerformance:
         Measures the overhead of check_and_record operations during
         replay with duplicates.
         """
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         event_count = 1000
         duplicate_rate = 0.5
 
@@ -424,7 +424,7 @@ class TestChaosReplayPerformance:
         Simulates a real-world scenario where some operations fail
         and need to be retried. Measures total time including retries.
         """
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         event_count = 500
         failure_rate = 0.1  # 10% failure rate
 
@@ -678,7 +678,7 @@ class TestMemoryUsagePerformance:
         Validates that the in-memory store's memory growth is reasonable
         for large numbers of records.
         """
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
 
         # Initialize memory tracker
         tracker = MemoryTracker()

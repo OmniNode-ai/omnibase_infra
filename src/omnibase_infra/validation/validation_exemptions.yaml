@@ -89,30 +89,31 @@ skip_directories:
 # These handle method count, parameter count, naming, and style violations
 pattern_exemptions:
   # ==========================================================================
-  # KafkaEventBus Exemptions (OMN-934, PR #61)
+  # EventBusKafka Exemptions (OMN-934, OMN-1305)
   # ==========================================================================
   # Event bus pattern requires many methods for lifecycle (start/stop/health),
   # pub/sub (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility.
-  # See: kafka_event_bus.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
-  - file_pattern: 'kafka_event_bus\.py'
-    class_pattern: "Class 'KafkaEventBus'"
+  # Complexity managed through mixin composition (MixinKafkaDlq, MixinKafkaBroadcast).
+  # See: event_bus_kafka.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
+  - file_pattern: 'event_bus_kafka\.py'
+    class_pattern: "Class 'EventBusKafka'"
     violation_pattern: 'has \d+ methods'
     reason: >
-      Event bus pattern requires lifecycle (start/stop/health), pub/sub (subscribe/unsubscribe/publish), circuit breaker, and protocol compatibility methods. Threshold: 10 methods, KafkaEventBus has 14+.
+      Event bus pattern requires lifecycle (start/stop/health), pub/sub (subscribe/unsubscribe/publish), circuit breaker, and protocol compatibility methods. DLQ and broadcast methods extracted to mixins. Core class has 12+ methods for protocol compliance.
 
     documentation:
-      - CLAUDE.md (Accepted Pattern Exceptions - KafkaEventBus Complexity)
+      - CLAUDE.md (Accepted Pattern Exceptions - EventBusKafka Complexity)
       - docs/patterns/circuit_breaker_implementation.md
-    ticket: OMN-934
-  - file_pattern: 'kafka_event_bus\.py'
+    ticket: OMN-1305
+  - file_pattern: 'event_bus_kafka\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
-      Configuration migration from direct parameters to ModelKafkaConfig object. Threshold: 5 params, KafkaEventBus has 10+ due to flexible configuration requirements.
+      Configuration managed via ModelKafkaEventBusConfig. Init requires config model parameter.
 
     documentation:
-      - CLAUDE.md (Accepted Pattern Exceptions - KafkaEventBus Complexity)
-    ticket: OMN-934
+      - CLAUDE.md (Accepted Pattern Exceptions - EventBusKafka Complexity)
+    ticket: OMN-1305
   # ==========================================================================
   # Protocol Plugin Architecture Exemptions
   # ==========================================================================
@@ -139,7 +140,7 @@ pattern_exemptions:
   # - Message handling (_on_message, _handle_envelope)
   # - Graceful shutdown (shutdown_ready, drain logic)
   # - Handler management (register_handler, get_handler)
-  - file_pattern: 'runtime_host_process\.py'
+  - file_pattern: 'service_runtime_host_process\.py'
     class_pattern: "Class 'RuntimeHostProcess'"
     violation_pattern: 'has \d+ methods'
     reason: >
@@ -149,7 +150,7 @@ pattern_exemptions:
       - docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
       - docs/adr/ADR-001-graceful-shutdown-drain-period.md
     ticket: OMN-756
-  - file_pattern: 'runtime_host_process\.py'
+  - file_pattern: 'service_runtime_host_process\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -173,13 +174,22 @@ pattern_exemptions:
       - docs/patterns/container_dependency_injection.md (Registry patterns)
       - CLAUDE.md (Container-Based Dependency Injection section)
     ticket: null
-  - file_pattern: 'policy_registry\.py'
+  - file_pattern: 'registry_policy\.py'
     method_pattern: "Function 'register_policy'"
     violation_pattern: 'has \d+ parameters'
-    reason: Policy registration requires multiple fields for complete policy definition.
+    reason: Policy registration requires multiple fields for complete policy definition. ModelPolicyRegistration is available as the preferred API for new code.
     documentation:
       - docs/patterns/container_dependency_injection.md
     ticket: null
+  - file_pattern: 'registry_policy\.py'
+    class_pattern: "Class 'RegistryPolicy'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Registry pattern after mixin extraction (MixinPolicyValidation, MixinSemverCache). Core class has 12 methods for CRUD, query, and lifecycle operations. This is at the threshold and acceptable per CLAUDE.md registry patterns.
+
+    documentation:
+      - docs/patterns/container_dependency_injection.md
+    ticket: OMN-1305
   # ==========================================================================
   # Policy ID Exemptions (OMN-812)
   # ==========================================================================
@@ -250,7 +260,7 @@ pattern_exemptions:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
       - CLAUDE.md (ONEX Architecture - Handler Classification)
     ticket: OMN-1092
-  - file_pattern: 'execution_shape_validator\.py'
+  - file_pattern: 'validator_execution_shape\.py'
     class_pattern: "Class name 'ModelDetectedNodeInfo'"
     violation_pattern: "contains anti-pattern 'Model'"
     reason: >
@@ -259,7 +269,7 @@ pattern_exemptions:
     documentation:
       - docs/validation/validator_reference.md
     ticket: OMN-958
-  - file_pattern: 'execution_shape_validator\.py'
+  - file_pattern: 'validator_execution_shape\.py'
     class_pattern: "Class 'ExecutionShapeValidator'"
     violation_pattern: 'has \d+ methods'
     reason: >
@@ -274,11 +284,11 @@ pattern_exemptions:
   # ==========================================================================
   # AST-based validator for Any type usage enforcement. The class requires
   # multiple visitor methods and helper methods for comprehensive detection.
-  - file_pattern: 'any_type_validator\.py'
+  - file_pattern: 'validator_any_type\.py'
     class_pattern: "Class 'AnyTypeDetector'"
     violation_pattern: 'has \d+ methods'
     reason: >
-      AST visitor class requires multiple methods for comprehensive Any type detection: visit methods (ClassDef, FunctionDef, AsyncFunctionDef, AnnAssign, Assign, Subscript), helper methods (_check_annotation_for_any, _check_subscript_for_any, _is_field_call, _is_field_with_note, _contains_any, _add_violation), and exemption handling (_has_allow_decorator, _allow_all_lines_in_node). Standard AST visitor pattern.
+      AST visitor class after mixin extraction (MixinAnyTypeClassification, MixinAnyTypeExemption, MixinAnyTypeReporting). Core class has 12 methods for visit methods and annotation checking. This is at the threshold and acceptable per standard AST visitor pattern.
 
     documentation:
       - docs/decisions/adr-any-type-pydantic-workaround.md
@@ -304,7 +314,7 @@ pattern_exemptions:
   # - validator_no_handler_publishing.py
   # - validator_no_direct_dispatch.py
   # - validator_no_orchestrator_fsm.py
-  # - any_type_validator.py (OMN-1276)
+  # - validator_any_type.py (OMN-1276)
   #
   # Common AST visitor methods:
   # - visit_ClassDef, visit_FunctionDef, visit_AsyncFunctionDef
@@ -427,7 +437,7 @@ pattern_exemptions:
   # RuntimeShapeValidator Exemptions
   # ==========================================================================
   # Design Doc: docs/patterns/error_handling_patterns.md - Validation error patterns
-  - file_pattern: 'runtime_shape_validator\.py'
+  - file_pattern: 'validator_runtime_shape\.py'
     method_pattern: "Function 'validate_handler_output'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -437,7 +447,7 @@ pattern_exemptions:
       - docs/patterns/error_handling_patterns.md (Validation error hierarchy)
       - CLAUDE.md (ONEX Architecture - Contract-Driven section)
     ticket: null
-  - file_pattern: 'runtime_shape_validator\.py'
+  - file_pattern: 'validator_runtime_shape\.py'
     method_pattern: "Function 'validate_and_raise'"
     violation_pattern: 'has \d+ parameters'
     reason: Same rationale as validate_handler_output - requires distinct context params.
@@ -470,7 +480,7 @@ pattern_exemptions:
   # Message Dispatch Engine Exemptions (OMN-934, OMN-983)
   # ==========================================================================
   # Central dispatch coordinator pattern requires comprehensive routing capabilities.
-  - file_pattern: 'message_dispatch_engine\.py'
+  - file_pattern: 'service_message_dispatch_engine\.py'
     class_pattern: "Class 'MessageDispatchEngine'"
     violation_pattern: 'has \d+ methods'
     reason: >
@@ -480,7 +490,7 @@ pattern_exemptions:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
       - docs/as_is/05_RUNTIME_DISPATCH_SHAPES.md
     ticket: OMN-934
-  - file_pattern: 'message_dispatch_engine\.py'
+  - file_pattern: 'service_message_dispatch_engine\.py'
     method_pattern: "Function '_build_log_context'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -489,7 +499,7 @@ pattern_exemptions:
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
     ticket: OMN-934
-  - file_pattern: 'message_dispatch_engine\.py'
+  - file_pattern: 'service_message_dispatch_engine\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -498,7 +508,7 @@ pattern_exemptions:
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
     ticket: OMN-990
-  - file_pattern: 'message_dispatch_engine\.py'
+  - file_pattern: 'service_message_dispatch_engine\.py'
     method_pattern: "Function 'register_dispatcher'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -716,10 +726,10 @@ pattern_exemptions:
   # MessageTypeRegistry Exemptions (OMN-983)
   # ==========================================================================
   - file_pattern: 'registry_message_type\.py'
-    class_pattern: "Class 'MessageTypeRegistry'"
+    class_pattern: "Class 'RegistryMessageType'"
     violation_pattern: 'has \d+ methods'
     reason: >
-      Domain registry pattern requires comprehensive message type management: CRUD operations (register, unregister, get), query operations (list, filter, search by topic/domain), validation operations (validate_topic, resolve_type), and statistics (get_statistics). This is an established domain registry pattern.
+      Domain registry pattern after mixin extraction (MixinMessageTypeRegistration, MixinMessageTypeQuery). Core class has 11 methods for domain registry operations. This is below the threshold and acceptable per established domain registry pattern.
 
     documentation:
       - docs/architecture/MESSAGE_DISPATCH_ENGINE.md
@@ -885,6 +895,20 @@ pattern_exemptions:
     documentation:
       - Model Context Protocol Specification (https://modelcontextprotocol.io/)
     ticket: OMN-1288
+  # ==========================================================================
+  # Corpus Capture Model Exemptions (OMN-1203)
+  # ==========================================================================
+  # corpus_display_name in ModelCaptureConfig is a user-provided label for the
+  # corpus (e.g., "regression-suite-v1"). It is NOT an entity reference - it's
+  # simply a human-readable display name for configuration.
+  - file_pattern: 'model_capture_config\.py'
+    violation_pattern: "Field 'corpus_display_name' might reference an entity"
+    reason: >
+      corpus_display_name is a user-provided display label for the corpus (e.g., "regression-suite-v1"). This is a configuration display name, not an entity reference requiring UUID + display_name pattern.
+
+    documentation:
+      - src/omnibase_infra/models/corpus/model_capture_config.py (class docstring)
+    ticket: OMN-1203
   # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================
@@ -1248,7 +1272,7 @@ pattern_exemptions:
     documentation:
       - docs/patterns/error_handling_patterns.md
     ticket: OMN-1091
-  - file_pattern: 'security_validator\.py'
+  - file_pattern: 'validator_security\.py'
     method_pattern: "Function 'convert_to_validation_error'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -1330,32 +1354,25 @@ pattern_exemptions:
       RegistryInfraServiceDiscovery is the DI registry for service discovery handlers. "Service" is the canonical domain term.
 
     ticket: OMN-1131
-  - file_pattern: 'node_service_discovery_effect/protocols/protocol_service_discovery_handler\.py'
-    class_pattern: "Class name 'ProtocolServiceDiscoveryHandler'"
-    violation_pattern: "contains anti-pattern 'Handler'"
-    reason: >
-      ProtocolServiceDiscoveryHandler defines the handler protocol for service discovery backends. "Handler" describes the protocol role in the pluggable handler architecture.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-    ticket: OMN-1131
-  - file_pattern: 'node_service_discovery_effect/protocols/protocol_service_discovery_handler\.py'
-    class_pattern: "Class name 'ProtocolServiceDiscoveryHandler'"
+  - file_pattern: 'node_service_discovery_effect/protocols/protocol_discovery_operations\.py'
+    class_pattern: "Class name 'ProtocolDiscoveryOperations'"
     violation_pattern: "contains anti-pattern 'Service'"
     reason: >
-      ProtocolServiceDiscoveryHandler defines the protocol for service discovery backends. "Service" is the canonical domain term.
-
-    ticket: OMN-1131
-  - file_pattern: 'node_registration_storage_effect/protocols/protocol_registration_storage_handler\.py'
-    class_pattern: "Class name 'ProtocolRegistrationStorageHandler'"
-    violation_pattern: "contains anti-pattern 'Handler'"
-    reason: >
-      ProtocolRegistrationStorageHandler defines the handler protocol for registration storage backends (PostgreSQL, Mock). "Handler" describes the protocol role in the pluggable handler architecture.
+      ProtocolDiscoveryOperations defines the protocol for service discovery backends. "Service" is the canonical domain term from HashiCorp Consul and Kubernetes APIs.
 
     documentation:
       - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
     ticket: OMN-1131
-  - file_pattern: 'handlers/registration_storage/handler_postgres_registration_storage\.py'
+  - file_pattern: 'node_registration_storage_effect/protocols/protocol_registration_persistence\.py'
+    class_pattern: "Class name 'ProtocolRegistrationPersistence'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      ProtocolRegistrationPersistence defines the persistence protocol for registration storage backends (PostgreSQL, Mock). This follows the pluggable handler architecture.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+    ticket: OMN-1131
+  - file_pattern: 'handlers/registration_storage/handler_registration_storage_postgres\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -1364,7 +1381,7 @@ pattern_exemptions:
     documentation:
       - asyncpg Pool Configuration (https://magicstack.github.io/asyncpg/current/api/index.html#connection-pools)
     ticket: OMN-1131
-  - file_pattern: 'handlers/service_discovery/handler_consul_service_discovery\.py'
+  - file_pattern: 'handlers/service_discovery/handler_service_discovery_consul\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -1602,10 +1619,10 @@ architecture_exemptions:
   # ==========================================================================
   # Contract Linter Models Exemption (PR #57)
   # ==========================================================================
-  # contract_linter.py contains domain-grouped validation models and enums
+  # linter_contract.py contains domain-grouped validation models and enums
   # that are cohesive and always used together. These define the complete
   # interface for contract linting results.
-  - file_pattern: 'validation/contract_linter\.py'
+  - file_pattern: 'validation/linter_contract\.py'
     violation_pattern: '\d+ models in one file'
     reason: >
       Domain-grouped validation result models for contract linting. ModelContractViolation and ModelContractLintResult define the complete interface for contract validation results. Per CLAUDE.md domain-grouping convention for cohesive models that are always used together.
@@ -1614,7 +1631,7 @@ architecture_exemptions:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
       - docs/validation/validator_reference.md
     ticket: PR-57
-  - file_pattern: 'validation/contract_linter\.py'
+  - file_pattern: 'validation/linter_contract\.py'
     violation_pattern: 'Mixed types in one file'
     reason: >
       Contract linter module contains cohesive types (enum + models) for validation results. EnumContractViolationSeverity is tightly coupled with ModelContractViolation and ModelContractLintResult.

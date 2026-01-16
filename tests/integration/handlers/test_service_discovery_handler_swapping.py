@@ -17,8 +17,8 @@ implements the required protocol. This enables:
 - Environment-specific handler selection (dev vs prod)
 
 Handlers Tested:
-    - MockServiceDiscoveryHandler: In-memory mock for testing
-    - ConsulServiceDiscoveryHandler: Consul backend (requires Consul)
+    - HandlerServiceDiscoveryMock: In-memory mock for testing
+    - HandlerServiceDiscoveryConsul: Consul backend (requires Consul)
 
 CI/CD Graceful Skip Behavior
 ----------------------------
@@ -28,7 +28,7 @@ without service discovery infrastructure access.
 
 Related:
     - OMN-1131: Capability-oriented node architecture
-    - ProtocolServiceDiscoveryHandler: Protocol definition
+    - ProtocolDiscoveryOperations: Protocol definition
     - NodeServiceDiscoveryEffect: Effect node that uses these handlers
     - PR #119: Test coverage for handler swapping
 """
@@ -43,14 +43,14 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.handlers.service_discovery.handler_mock_service_discovery import (
-    MockServiceDiscoveryHandler,
+from omnibase_infra.handlers.service_discovery.handler_service_discovery_mock import (
+    HandlerServiceDiscoveryMock,
 )
 from omnibase_infra.handlers.service_discovery.models import (
     ModelServiceInfo,
 )
-from omnibase_infra.handlers.service_discovery.protocol_service_discovery_handler import (
-    ProtocolServiceDiscoveryHandler,
+from omnibase_infra.handlers.service_discovery.protocol_discovery_operations import (
+    ProtocolDiscoveryOperations,
 )
 from omnibase_infra.nodes.node_service_discovery_effect.models import (
     ModelDiscoveryQuery,
@@ -92,9 +92,9 @@ CONSUL_AVAILABLE = _check_consul_reachable()
 
 
 @pytest.fixture
-def mock_handler() -> MockServiceDiscoveryHandler:
-    """Create a MockServiceDiscoveryHandler for testing."""
-    return MockServiceDiscoveryHandler()
+def mock_handler() -> HandlerServiceDiscoveryMock:
+    """Create a HandlerServiceDiscoveryMock for testing."""
+    return HandlerServiceDiscoveryMock()
 
 
 @pytest.fixture
@@ -154,22 +154,22 @@ class BaseHandlerSwappingTests:
     """
 
     @pytest.fixture
-    def handler(self) -> ProtocolServiceDiscoveryHandler:
+    def handler(self) -> ProtocolDiscoveryOperations:
         """Override in subclass to provide the handler to test."""
         pytest.skip("Subclasses must implement handler fixture")
 
     async def test_handler_conforms_to_protocol(
         self,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolDiscoveryOperations,
     ) -> None:
-        """Handler is an instance of ProtocolServiceDiscoveryHandler."""
-        assert isinstance(handler, ProtocolServiceDiscoveryHandler), (
-            f"{type(handler).__name__} must implement ProtocolServiceDiscoveryHandler"
+        """Handler is an instance of ProtocolDiscoveryOperations."""
+        assert isinstance(handler, ProtocolDiscoveryOperations), (
+            f"{type(handler).__name__} must implement ProtocolDiscoveryOperations"
         )
 
     async def test_handler_has_handler_type(
         self,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolDiscoveryOperations,
     ) -> None:
         """Handler has handler_type property returning non-empty string."""
         handler_type = handler.handler_type
@@ -178,7 +178,7 @@ class BaseHandlerSwappingTests:
 
     async def test_register_and_discover_roundtrip(
         self,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolDiscoveryOperations,
         sample_service_info: ModelServiceInfo,
     ) -> None:
         """Services can be registered and discovered correctly."""
@@ -217,7 +217,7 @@ class BaseHandlerSwappingTests:
 
     async def test_deregister_service(
         self,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolDiscoveryOperations,
         sample_service_info: ModelServiceInfo,
     ) -> None:
         """Services can be deregistered correctly."""
@@ -250,7 +250,7 @@ class BaseHandlerSwappingTests:
 
     async def test_health_check_returns_status(
         self,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolDiscoveryOperations,
     ) -> None:
         """Health check returns valid status information."""
         correlation_id = uuid4()
@@ -274,7 +274,7 @@ class BaseHandlerSwappingTests:
 
 
 class TestMockHandlerSwapping(BaseHandlerSwappingTests):
-    """Test handler swapping with MockServiceDiscoveryHandler.
+    """Test handler swapping with HandlerServiceDiscoveryMock.
 
     These tests verify that the mock handler can be used as a drop-in
     replacement for any other handler implementing the protocol.
@@ -282,15 +282,15 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
 
     @pytest.fixture
     def handler(
-        self, mock_handler: MockServiceDiscoveryHandler
-    ) -> MockServiceDiscoveryHandler:
-        """Provide MockServiceDiscoveryHandler for testing."""
+        self, mock_handler: HandlerServiceDiscoveryMock
+    ) -> HandlerServiceDiscoveryMock:
+        """Provide HandlerServiceDiscoveryMock for testing."""
         return mock_handler
 
     @pytest.mark.asyncio
     async def test_mock_handler_register_and_discover(
         self,
-        handler: MockServiceDiscoveryHandler,
+        handler: HandlerServiceDiscoveryMock,
         sample_service_info: ModelServiceInfo,
     ) -> None:
         """Mock handler can register and discover services."""
@@ -299,7 +299,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_deregister(
         self,
-        handler: MockServiceDiscoveryHandler,
+        handler: HandlerServiceDiscoveryMock,
         sample_service_info: ModelServiceInfo,
     ) -> None:
         """Mock handler can deregister services."""
@@ -308,7 +308,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_health_check(
         self,
-        handler: MockServiceDiscoveryHandler,
+        handler: HandlerServiceDiscoveryMock,
     ) -> None:
         """Mock handler health check works."""
         await self.test_health_check_returns_status(handler)
@@ -316,7 +316,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_multiple_services(
         self,
-        handler: MockServiceDiscoveryHandler,
+        handler: HandlerServiceDiscoveryMock,
         multiple_service_infos: list[ModelServiceInfo],
     ) -> None:
         """Mock handler can register and discover multiple services."""
@@ -344,7 +344,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_tag_filtering(
         self,
-        handler: MockServiceDiscoveryHandler,
+        handler: HandlerServiceDiscoveryMock,
         multiple_service_infos: list[ModelServiceInfo],
     ) -> None:
         """Mock handler supports tag-based filtering."""
@@ -388,7 +388,7 @@ class TestMockHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_mock_handler_idempotent_deregister(
         self,
-        handler: MockServiceDiscoveryHandler,
+        handler: HandlerServiceDiscoveryMock,
         sample_service_info: ModelServiceInfo,
     ) -> None:
         """Deregistering a non-existent service does not raise error."""
@@ -419,9 +419,7 @@ class TestHandlerFactoryPattern:
     should work with any handler implementing the protocol.
     """
 
-    def create_handler_by_type(
-        self, handler_type: str
-    ) -> ProtocolServiceDiscoveryHandler:
+    def create_handler_by_type(self, handler_type: str) -> ProtocolDiscoveryOperations:
         """Factory method to create handlers by type identifier.
 
         In production code, this pattern would be used to select handlers
@@ -431,19 +429,19 @@ class TestHandlerFactoryPattern:
             handler_type: Type identifier ("mock", "consul")
 
         Returns:
-            Handler instance implementing ProtocolServiceDiscoveryHandler
+            Handler instance implementing ProtocolDiscoveryOperations
 
         Raises:
             ValueError: If handler_type is not recognized
         """
         if handler_type == "mock":
-            return MockServiceDiscoveryHandler()
+            return HandlerServiceDiscoveryMock()
         elif handler_type == "consul":
-            from omnibase_infra.handlers.service_discovery.handler_consul_service_discovery import (
-                ConsulServiceDiscoveryHandler,
+            from omnibase_infra.handlers.service_discovery.handler_service_discovery_consul import (
+                HandlerServiceDiscoveryConsul,
             )
 
-            return ConsulServiceDiscoveryHandler(
+            return HandlerServiceDiscoveryConsul(
                 consul_host=os.getenv("CONSUL_HOST", "localhost"),
                 consul_port=int(os.getenv("CONSUL_PORT", "8500")),
                 consul_scheme=os.getenv("CONSUL_SCHEME", "http"),
@@ -452,11 +450,11 @@ class TestHandlerFactoryPattern:
             raise ValueError(f"Unknown handler type: {handler_type}")
 
     def test_factory_creates_mock_handler(self) -> None:
-        """Factory creates MockServiceDiscoveryHandler for 'mock' type."""
+        """Factory creates HandlerServiceDiscoveryMock for 'mock' type."""
         handler = self.create_handler_by_type("mock")
 
-        assert isinstance(handler, MockServiceDiscoveryHandler)
-        assert isinstance(handler, ProtocolServiceDiscoveryHandler)
+        assert isinstance(handler, HandlerServiceDiscoveryMock)
+        assert isinstance(handler, ProtocolDiscoveryOperations)
         assert handler.handler_type == "mock"
 
     @pytest.mark.skipif(
@@ -464,15 +462,15 @@ class TestHandlerFactoryPattern:
         reason="Consul not available (CONSUL_HOST not set or not reachable)",
     )
     def test_factory_creates_consul_handler(self) -> None:
-        """Factory creates ConsulServiceDiscoveryHandler for 'consul' type."""
+        """Factory creates HandlerServiceDiscoveryConsul for 'consul' type."""
         handler = self.create_handler_by_type("consul")
 
-        from omnibase_infra.handlers.service_discovery.handler_consul_service_discovery import (
-            ConsulServiceDiscoveryHandler,
+        from omnibase_infra.handlers.service_discovery.handler_service_discovery_consul import (
+            HandlerServiceDiscoveryConsul,
         )
 
-        assert isinstance(handler, ConsulServiceDiscoveryHandler)
-        assert isinstance(handler, ProtocolServiceDiscoveryHandler)
+        assert isinstance(handler, HandlerServiceDiscoveryConsul)
+        assert isinstance(handler, ProtocolDiscoveryOperations)
         assert handler.handler_type == "consul"
 
     def test_factory_raises_for_unknown_type(self) -> None:
@@ -548,14 +546,14 @@ class TestRuntimeHandlerSwapping:
         )
 
         # Start with mock handler
-        current_handler: ProtocolServiceDiscoveryHandler = MockServiceDiscoveryHandler()
+        current_handler: ProtocolDiscoveryOperations = HandlerServiceDiscoveryMock()
 
         # Register service with first handler
         result = await current_handler.register_service(service_info, correlation_id)
         assert result.success
 
         # Swap to a new mock handler (simulating handler switch)
-        new_handler = MockServiceDiscoveryHandler()
+        new_handler = HandlerServiceDiscoveryMock()
 
         # Register same service in new handler
         result2 = await new_handler.register_service(service_info, correlation_id)
@@ -574,7 +572,7 @@ class TestRuntimeHandlerSwapping:
         """
 
         async def perform_operations(
-            handler: ProtocolServiceDiscoveryHandler,
+            handler: ProtocolDiscoveryOperations,
         ) -> tuple[bool, bool]:
             """Perform a series of operations using only protocol methods."""
             correlation_id = uuid4()
@@ -606,7 +604,7 @@ class TestRuntimeHandlerSwapping:
             return (register_result.success, discover_result.success)
 
         # Test with mock handler
-        mock = MockServiceDiscoveryHandler()
+        mock = HandlerServiceDiscoveryMock()
         register_ok, discover_ok = await perform_operations(mock)
 
         assert register_ok, "Mock handler registration failed"
@@ -623,7 +621,7 @@ class TestRuntimeHandlerSwapping:
     reason="Consul not available (CONSUL_HOST not set or not reachable)",
 )
 class TestConsulHandlerSwapping(BaseHandlerSwappingTests):
-    """Test handler swapping with ConsulServiceDiscoveryHandler.
+    """Test handler swapping with HandlerServiceDiscoveryConsul.
 
     These tests require a running Consul instance and are skipped
     in CI environments without Consul access.
@@ -632,13 +630,13 @@ class TestConsulHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.fixture
     async def handler(
         self,
-    ) -> AsyncGenerator[ProtocolServiceDiscoveryHandler, None]:
-        """Provide ConsulServiceDiscoveryHandler for testing."""
-        from omnibase_infra.handlers.service_discovery.handler_consul_service_discovery import (
-            ConsulServiceDiscoveryHandler,
+    ) -> AsyncGenerator[ProtocolDiscoveryOperations, None]:
+        """Provide HandlerServiceDiscoveryConsul for testing."""
+        from omnibase_infra.handlers.service_discovery.handler_service_discovery_consul import (
+            HandlerServiceDiscoveryConsul,
         )
 
-        handler = ConsulServiceDiscoveryHandler(
+        handler = HandlerServiceDiscoveryConsul(
             consul_host=os.getenv("CONSUL_HOST", "localhost"),
             consul_port=int(os.getenv("CONSUL_PORT", "8500")),
             consul_scheme=os.getenv("CONSUL_SCHEME", "http"),
@@ -668,7 +666,7 @@ class TestConsulHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_consul_handler_register_and_discover(
         self,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolDiscoveryOperations,
         sample_service_info: ModelServiceInfo,
     ) -> None:
         """Consul handler can register and discover services."""
@@ -695,7 +693,7 @@ class TestConsulHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.mark.asyncio
     async def test_consul_handler_health_check(
         self,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolDiscoveryOperations,
     ) -> None:
         """Consul handler health check works."""
         await self.test_health_check_returns_status(handler)

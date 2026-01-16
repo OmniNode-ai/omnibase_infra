@@ -250,7 +250,7 @@ class TestProtocolValidationAgainstRealHandlers:
 
     # Real handler class paths to validate
     REAL_HANDLERS = [
-        "omnibase_infra.handlers.handler_http.HttpRestHandler",
+        "omnibase_infra.handlers.handler_http.HandlerHttpRest",
         "omnibase_infra.handlers.handler_db.HandlerDb",
         "omnibase_infra.handlers.handler_vault.HandlerVault",
         "omnibase_infra.handlers.handler_consul.HandlerConsul",

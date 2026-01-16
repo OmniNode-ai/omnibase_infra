@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for InMemoryEventBus.
+"""Unit tests for EventBusInmemory.
 
 Comprehensive test suite covering all public methods, edge cases,
 error handling, and concurrent operation scenarios.
@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel
 
 from omnibase_infra.errors import InfraUnavailableError
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
 
@@ -24,12 +24,12 @@ class TestInMemoryEventBusLifecycle:
     """Test suite for event bus lifecycle management."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture with test configuration."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_start_and_close(self, event_bus: InMemoryEventBus) -> None:
+    async def test_start_and_close(self, event_bus: EventBusInmemory) -> None:
         """Test bus lifecycle - start and close operations."""
         # Initially not started
         health = await event_bus.health_check()
@@ -49,7 +49,7 @@ class TestInMemoryEventBusLifecycle:
         assert health["started"] is False
 
     @pytest.mark.asyncio
-    async def test_multiple_start_calls(self, event_bus: InMemoryEventBus) -> None:
+    async def test_multiple_start_calls(self, event_bus: EventBusInmemory) -> None:
         """Test that multiple start calls are safe."""
         await event_bus.start()
         await event_bus.start()  # Second start should be idempotent
@@ -60,7 +60,7 @@ class TestInMemoryEventBusLifecycle:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_multiple_close_calls(self, event_bus: InMemoryEventBus) -> None:
+    async def test_multiple_close_calls(self, event_bus: EventBusInmemory) -> None:
         """Test that multiple close calls are safe."""
         await event_bus.start()
         await event_bus.close()
@@ -70,7 +70,7 @@ class TestInMemoryEventBusLifecycle:
         assert health["started"] is False
 
     @pytest.mark.asyncio
-    async def test_shutdown_alias(self, event_bus: InMemoryEventBus) -> None:
+    async def test_shutdown_alias(self, event_bus: EventBusInmemory) -> None:
         """Test shutdown() is an alias for close()."""
         await event_bus.start()
         await event_bus.shutdown()
@@ -81,7 +81,7 @@ class TestInMemoryEventBusLifecycle:
     @pytest.mark.asyncio
     async def test_initialize_with_config(self) -> None:
         """Test initialize() method with configuration override."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.initialize(
             {
                 "environment": "production",
@@ -103,14 +103,14 @@ class TestInMemoryEventBusProperties:
 
     def test_default_properties(self) -> None:
         """Test default property values."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         assert event_bus.environment == "local"
         assert event_bus.group == "default"
         assert event_bus.adapter is event_bus
 
     def test_custom_properties(self) -> None:
         """Test custom property values."""
-        event_bus = InMemoryEventBus(
+        event_bus = EventBusInmemory(
             environment="staging",
             group="worker-group",
             max_history=2000,
@@ -124,18 +124,18 @@ class TestInMemoryEventBusPublish:
     """Test suite for publish operations."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_publish_requires_start(self, event_bus: InMemoryEventBus) -> None:
+    async def test_publish_requires_start(self, event_bus: EventBusInmemory) -> None:
         """Test that publish fails if bus not started."""
         with pytest.raises(InfraUnavailableError, match="not started"):
             await event_bus.publish("test-topic", None, b"test")
 
     @pytest.mark.asyncio
-    async def test_publish_basic(self, event_bus: InMemoryEventBus) -> None:
+    async def test_publish_basic(self, event_bus: EventBusInmemory) -> None:
         """Test basic publish operation."""
         await event_bus.start()
 
@@ -150,7 +150,7 @@ class TestInMemoryEventBusPublish:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_publish_with_none_key(self, event_bus: InMemoryEventBus) -> None:
+    async def test_publish_with_none_key(self, event_bus: EventBusInmemory) -> None:
         """Test publish with None key."""
         await event_bus.start()
 
@@ -164,7 +164,7 @@ class TestInMemoryEventBusPublish:
 
     @pytest.mark.asyncio
     async def test_publish_with_custom_headers(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test publish with custom headers."""
         await event_bus.start()
@@ -187,7 +187,7 @@ class TestInMemoryEventBusPublish:
 
     @pytest.mark.asyncio
     async def test_publish_auto_generates_headers(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test that publish auto-generates headers when not provided."""
         await event_bus.start()
@@ -202,7 +202,7 @@ class TestInMemoryEventBusPublish:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_publish_offset_increments(self, event_bus: InMemoryEventBus) -> None:
+    async def test_publish_offset_increments(self, event_bus: EventBusInmemory) -> None:
         """Test that publish increments topic offset."""
         await event_bus.start()
 
@@ -228,13 +228,13 @@ class TestInMemoryEventBusSubscribe:
     """Test suite for subscribe operations."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
     async def test_subscribe_receives_published_message(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test basic publish/subscribe flow - subscriber receives published message."""
         await event_bus.start()
@@ -258,7 +258,7 @@ class TestInMemoryEventBusSubscribe:
 
     @pytest.mark.asyncio
     async def test_multiple_subscribers_same_topic(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test multiple subscribers receive messages."""
         await event_bus.start()
@@ -284,7 +284,7 @@ class TestInMemoryEventBusSubscribe:
 
     @pytest.mark.asyncio
     async def test_multiple_subscribers_different_topics(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test subscribers only receive messages for their topics."""
         await event_bus.start()
@@ -312,7 +312,7 @@ class TestInMemoryEventBusSubscribe:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_unsubscribe(self, event_bus: InMemoryEventBus) -> None:
+    async def test_unsubscribe(self, event_bus: EventBusInmemory) -> None:
         """Test unsubscribe removes handler."""
         await event_bus.start()
 
@@ -332,7 +332,7 @@ class TestInMemoryEventBusSubscribe:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_double_unsubscribe_safe(self, event_bus: InMemoryEventBus) -> None:
+    async def test_double_unsubscribe_safe(self, event_bus: EventBusInmemory) -> None:
         """Test that double unsubscribe is safe."""
         await event_bus.start()
 
@@ -346,7 +346,7 @@ class TestInMemoryEventBusSubscribe:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_subscriber_error_handling(self, event_bus: InMemoryEventBus) -> None:
+    async def test_subscriber_error_handling(self, event_bus: EventBusInmemory) -> None:
         """Test that subscriber errors don't affect other subscribers."""
         await event_bus.start()
 
@@ -369,7 +369,7 @@ class TestInMemoryEventBusSubscribe:
 
     @pytest.mark.asyncio
     async def test_same_handler_multiple_groups(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test same handler subscribed under different groups."""
         await event_bus.start()
@@ -395,12 +395,12 @@ class TestInMemoryEventBusHistory:
     """Test suite for event history operations."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_event_history_basic(self, event_bus: InMemoryEventBus) -> None:
+    async def test_event_history_basic(self, event_bus: EventBusInmemory) -> None:
         """Test basic event history tracking."""
         await event_bus.start()
 
@@ -416,7 +416,7 @@ class TestInMemoryEventBusHistory:
 
     @pytest.mark.asyncio
     async def test_event_history_filter_by_topic(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test event history filtering by topic."""
         await event_bus.start()
@@ -434,7 +434,7 @@ class TestInMemoryEventBusHistory:
 
     @pytest.mark.asyncio
     async def test_event_history_filter_applied_before_limit(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test that topic filter is applied BEFORE limit.
 
@@ -470,7 +470,7 @@ class TestInMemoryEventBusHistory:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_event_history_limit(self, event_bus: InMemoryEventBus) -> None:
+    async def test_event_history_limit(self, event_bus: EventBusInmemory) -> None:
         """Test event history limit parameter."""
         await event_bus.start()
 
@@ -486,7 +486,7 @@ class TestInMemoryEventBusHistory:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_clear_event_history(self, event_bus: InMemoryEventBus) -> None:
+    async def test_clear_event_history(self, event_bus: EventBusInmemory) -> None:
         """Test clearing event history."""
         await event_bus.start()
 
@@ -503,7 +503,7 @@ class TestInMemoryEventBusHistory:
     @pytest.mark.asyncio
     async def test_max_history_limit(self) -> None:
         """Test history is limited to max_history."""
-        event_bus = InMemoryEventBus(max_history=5)
+        event_bus = EventBusInmemory(max_history=5)
         await event_bus.start()
 
         for i in range(10):
@@ -518,7 +518,7 @@ class TestInMemoryEventBusHistory:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_history_empty_on_new_bus(self, event_bus: InMemoryEventBus) -> None:
+    async def test_history_empty_on_new_bus(self, event_bus: EventBusInmemory) -> None:
         """Test that new bus has empty history."""
         await event_bus.start()
 
@@ -532,12 +532,12 @@ class TestInMemoryEventBusSubscriberCount:
     """Test suite for subscriber count operations."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_subscriber_count_initial(self, event_bus: InMemoryEventBus) -> None:
+    async def test_subscriber_count_initial(self, event_bus: EventBusInmemory) -> None:
         """Test subscriber count is zero initially."""
         await event_bus.start()
 
@@ -548,7 +548,7 @@ class TestInMemoryEventBusSubscriberCount:
 
     @pytest.mark.asyncio
     async def test_subscriber_count_increments(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test subscriber count increments on subscribe."""
         await event_bus.start()
@@ -568,7 +568,7 @@ class TestInMemoryEventBusSubscriberCount:
 
     @pytest.mark.asyncio
     async def test_subscriber_count_filter_by_topic(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test subscriber count filtering by topic."""
         await event_bus.start()
@@ -589,7 +589,7 @@ class TestInMemoryEventBusSubscriberCount:
 
     @pytest.mark.asyncio
     async def test_subscriber_count_decrements_on_unsubscribe(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test subscriber count decrements on unsubscribe."""
         await event_bus.start()
@@ -615,12 +615,12 @@ class TestInMemoryEventBusTopics:
     """Test suite for topic listing operations."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_get_topics_empty(self, event_bus: InMemoryEventBus) -> None:
+    async def test_get_topics_empty(self, event_bus: EventBusInmemory) -> None:
         """Test get_topics returns empty list initially."""
         await event_bus.start()
 
@@ -631,7 +631,7 @@ class TestInMemoryEventBusTopics:
 
     @pytest.mark.asyncio
     async def test_get_topics_with_subscribers(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test get_topics returns topics with active subscribers."""
         await event_bus.start()
@@ -649,7 +649,7 @@ class TestInMemoryEventBusTopics:
 
     @pytest.mark.asyncio
     async def test_get_topics_excludes_empty_topics(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test get_topics excludes topics with no subscribers."""
         await event_bus.start()
@@ -674,12 +674,12 @@ class TestInMemoryEventBusBroadcast:
     """Test suite for broadcast and group send operations."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_broadcast_to_environment(self, event_bus: InMemoryEventBus) -> None:
+    async def test_broadcast_to_environment(self, event_bus: EventBusInmemory) -> None:
         """Test broadcast_to_environment."""
         await event_bus.start()
 
@@ -701,7 +701,7 @@ class TestInMemoryEventBusBroadcast:
 
     @pytest.mark.asyncio
     async def test_broadcast_to_specific_environment(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test broadcast to a specific target environment."""
         await event_bus.start()
@@ -722,7 +722,7 @@ class TestInMemoryEventBusBroadcast:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_send_to_group(self, event_bus: InMemoryEventBus) -> None:
+    async def test_send_to_group(self, event_bus: EventBusInmemory) -> None:
         """Test send_to_group."""
         await event_bus.start()
 
@@ -747,13 +747,13 @@ class TestInMemoryEventBusPublishEnvelope:
     """Test suite for publish_envelope operation."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
     async def test_publish_envelope_with_pydantic_model(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test publish_envelope with a Pydantic model."""
         await event_bus.start()
@@ -775,7 +775,7 @@ class TestInMemoryEventBusPublishEnvelope:
 
     @pytest.mark.asyncio
     async def test_publish_envelope_with_dict(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test publish_envelope with a plain dict."""
         await event_bus.start()
@@ -791,17 +791,44 @@ class TestInMemoryEventBusPublishEnvelope:
 
         await event_bus.close()
 
+    @pytest.mark.asyncio
+    async def test_publish_envelope_non_serializable_raises_explicit_error(
+        self, event_bus: EventBusInmemory
+    ) -> None:
+        """Test publish_envelope raises explicit error for non-serializable envelopes.
+
+        This test verifies that non-JSON-serializable objects produce a clear
+        ProtocolConfigurationError instead of a raw TypeError, providing better
+        diagnostics for debugging serialization issues.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        await event_bus.start()
+
+        # Create an object that cannot be JSON-serialized (lambda is not serializable)
+        non_serializable = {"callback": lambda x: x, "data": "test"}
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await event_bus.publish_envelope(non_serializable, "test-topic")
+
+        # Verify error message is helpful and contains diagnostic information
+        error_msg = str(exc_info.value)
+        assert "not JSON-serializable" in error_msg
+        assert "dict" in error_msg or "envelope" in error_msg.lower()
+
+        await event_bus.close()
+
 
 class TestInMemoryEventBusHealthCheck:
     """Test suite for health check operations."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_health_check_not_started(self, event_bus: InMemoryEventBus) -> None:
+    async def test_health_check_not_started(self, event_bus: EventBusInmemory) -> None:
         """Test health check when not started."""
         health = await event_bus.health_check()
 
@@ -814,7 +841,7 @@ class TestInMemoryEventBusHealthCheck:
         assert health["history_size"] == 0
 
     @pytest.mark.asyncio
-    async def test_health_check_started(self, event_bus: InMemoryEventBus) -> None:
+    async def test_health_check_started(self, event_bus: EventBusInmemory) -> None:
         """Test health check when started."""
         await event_bus.start()
         health = await event_bus.health_check()
@@ -826,7 +853,7 @@ class TestInMemoryEventBusHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_with_activity(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test health check reflects activity."""
         await event_bus.start()
@@ -852,13 +879,13 @@ class TestInMemoryEventBusConsumingLoop:
     """Test suite for start_consuming operation."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
     async def test_start_consuming_auto_starts(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test that start_consuming auto-starts the bus."""
 
@@ -877,7 +904,7 @@ class TestInMemoryEventBusConsumingLoop:
 
     @pytest.mark.asyncio
     async def test_start_consuming_exits_on_shutdown(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test that start_consuming exits when shutdown is called."""
         await event_bus.start()
@@ -905,12 +932,12 @@ class TestInMemoryEventBusConcurrency:
     """Test suite for concurrent operations."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_concurrent_publish(self, event_bus: InMemoryEventBus) -> None:
+    async def test_concurrent_publish(self, event_bus: EventBusInmemory) -> None:
         """Test concurrent publish operations."""
         await event_bus.start()
 
@@ -932,7 +959,7 @@ class TestInMemoryEventBusConcurrency:
 
     @pytest.mark.asyncio
     async def test_concurrent_subscribe_unsubscribe(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test concurrent subscribe and unsubscribe operations."""
         await event_bus.start()
@@ -956,7 +983,7 @@ class TestInMemoryEventBusConcurrency:
 
     @pytest.mark.asyncio
     async def test_concurrent_publish_subscribe(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test concurrent publish and subscribe operations."""
         await event_bus.start()
@@ -989,7 +1016,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_empty_value_publish(self) -> None:
         """Test publishing empty bytes."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.start()
 
         await event_bus.publish("test", None, b"")
@@ -1003,7 +1030,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_large_value_publish(self) -> None:
         """Test publishing large values."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.start()
 
         large_value = b"x" * 1_000_000  # 1MB
@@ -1018,7 +1045,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_topic_name_with_special_characters(self) -> None:
         """Test topics with special characters (hyphens)."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.start()
 
         received: list[ModelEventMessage] = []
@@ -1037,7 +1064,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_unicode_topic_name(self) -> None:
         """Test topics with unicode characters (Japanese, Chinese, emoji)."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.start()
 
         received: list[ModelEventMessage] = []
@@ -1058,7 +1085,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_special_characters_in_group_id(self) -> None:
         """Test group IDs with special characters."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.start()
 
         received: list[ModelEventMessage] = []
@@ -1076,7 +1103,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_get_topic_offset_nonexistent(self) -> None:
         """Test get_topic_offset for nonexistent topic."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.start()
 
         offset = await event_bus.get_topic_offset("nonexistent")
@@ -1087,7 +1114,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_max_history_zero(self) -> None:
         """Test max_history of 0 (edge case)."""
-        event_bus = InMemoryEventBus(max_history=0)
+        event_bus = EventBusInmemory(max_history=0)
         await event_bus.start()
 
         await event_bus.publish("test", None, b"msg1")
@@ -1102,7 +1129,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_close_clears_subscribers(self) -> None:
         """Test that close clears all subscribers."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.start()
 
         async def handler(msg: ModelEventMessage) -> None:
@@ -1122,7 +1149,7 @@ class TestInMemoryEventBusEdgeCases:
     @pytest.mark.asyncio
     async def test_publish_after_close_fails(self) -> None:
         """Test that publish after close fails."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         await event_bus.start()
         await event_bus.close()
 
@@ -1134,23 +1161,23 @@ class TestInMemoryEventBusCircuitBreaker:
     """Test suite for circuit breaker functionality."""
 
     @pytest.fixture
-    def event_bus(self) -> InMemoryEventBus:
+    def event_bus(self) -> EventBusInmemory:
         """Create event bus fixture."""
-        return InMemoryEventBus(environment="test", group="test-group")
+        return EventBusInmemory(environment="test", group="test-group")
 
     def test_circuit_breaker_threshold_validation(self) -> None:
         """Test that invalid circuit_breaker_threshold raises ProtocolConfigurationError."""
         from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="positive integer"):
-            InMemoryEventBus(circuit_breaker_threshold=0)
+            EventBusInmemory(circuit_breaker_threshold=0)
 
         with pytest.raises(ProtocolConfigurationError, match="positive integer"):
-            InMemoryEventBus(circuit_breaker_threshold=-1)
+            EventBusInmemory(circuit_breaker_threshold=-1)
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_opens_after_failures(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test circuit breaker opens after consecutive failures."""
         await event_bus.start()
@@ -1169,7 +1196,7 @@ class TestInMemoryEventBusCircuitBreaker:
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_resets_on_success(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test circuit breaker resets after successful callback."""
         await event_bus.start()
@@ -1195,7 +1222,7 @@ class TestInMemoryEventBusCircuitBreaker:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_reset_subscriber_circuit(self, event_bus: InMemoryEventBus) -> None:
+    async def test_reset_subscriber_circuit(self, event_bus: EventBusInmemory) -> None:
         """Test manual circuit breaker reset."""
         await event_bus.start()
         call_count = 0
@@ -1217,7 +1244,7 @@ class TestInMemoryEventBusCircuitBreaker:
 
     @pytest.mark.asyncio
     async def test_get_circuit_breaker_status(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test getting circuit breaker status."""
         await event_bus.start()
@@ -1238,7 +1265,7 @@ class TestInMemoryEventBusCircuitBreaker:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_reset_nonexistent_circuit(self, event_bus: InMemoryEventBus) -> None:
+    async def test_reset_nonexistent_circuit(self, event_bus: EventBusInmemory) -> None:
         """Test resetting a circuit that doesn't exist returns False."""
         await event_bus.start()
         reset = await event_bus.reset_subscriber_circuit("nonexistent", "group")
@@ -1247,7 +1274,7 @@ class TestInMemoryEventBusCircuitBreaker:
 
     @pytest.mark.asyncio
     async def test_close_clears_circuit_breaker_state(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test that closing the bus clears circuit breaker failure tracking."""
         await event_bus.start()

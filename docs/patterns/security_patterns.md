@@ -1544,7 +1544,7 @@ if __name__ == "__main__":
 
 **Related**:
 - [ModelHandlerValidationError](../../src/omnibase_infra/models/errors/model_handler_validation_error.py) - Error model implementation
-- [SecurityRuleId](../../src/omnibase_infra/validation/security_validator.py) - Rule ID definitions
+- [SecurityRuleId](../../src/omnibase_infra/validation/validator_security.py) - Rule ID definitions
 - [Contract Linter](../../src/omnibase_infra/validation/contract_linter.py) - Similar integration pattern
 
 ---

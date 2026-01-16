@@ -39,7 +39,7 @@ class ModelQueryMetadata(BaseModel):
         cached: Whether the result was served from cache.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     backend_type: str = Field(
         ...,

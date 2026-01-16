@@ -68,8 +68,7 @@ class ModelOutputComparison:
     """Structured result from comparing two reducer outputs.
 
     Provides a clear, typed representation of comparison results
-    instead of a bare tuple. Supports backwards-compatible tuple
-    unpacking via __iter__.
+    instead of a bare tuple. Supports tuple unpacking via __iter__.
 
     Attributes:
         are_equal: True if outputs are identical, False otherwise.
@@ -85,7 +84,7 @@ class ModelOutputComparison:
         >>> if not result.are_equal:
         ...     for diff in result.differences:
         ...         print(f"Difference: {diff}")
-        >>> # Backwards-compatible tuple unpacking:
+        >>> # Tuple unpacking:
         >>> are_equal, differences = compare_outputs(output1, output2)
     """
 
@@ -101,7 +100,7 @@ class ModelOutputComparison:
         return self.are_equal
 
     def __iter__(self) -> Iterator[bool | tuple[str, ...]]:
-        """Support backwards-compatible tuple unpacking.
+        """Support tuple unpacking.
 
         Yields:
             are_equal: Boolean indicating if outputs are identical.
@@ -141,7 +140,7 @@ def compare_outputs(
         >>> output2 = reducer.reduce(state, event)
         >>> result = compare_outputs(output1, output2)
         >>> assert result, f"Outputs differ: {result.differences}"
-        >>> # Or with destructuring for backwards compatibility:
+        >>> # Or access the are_equal field directly:
         >>> assert result.are_equal, f"Outputs differ: {result.differences}"
     """
     differences: list[str] = []

@@ -70,7 +70,7 @@ from tests.integration.registration.e2e.conftest import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
 # Module-level logger
@@ -292,7 +292,7 @@ class TestRuntimeE2EFlow:
     )
     async def test_introspection_event_processed_by_runtime(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         projection_reader: ProjectionReaderRegistration,
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,
@@ -349,7 +349,7 @@ class TestRuntimeE2EFlow:
     )
     async def test_runtime_handles_multiple_events_sequentially(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         projection_reader: ProjectionReaderRegistration,
     ) -> None:
         """Test runtime correctly processes multiple events in order."""
@@ -422,7 +422,7 @@ class TestRuntimeE2EFlow:
     )
     async def test_runtime_publishes_completion_event(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,
     ) -> None:
@@ -499,7 +499,7 @@ class TestRuntimeE2EFlow:
     )
     async def test_runtime_dual_registration_creates_consul_entry(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,
     ) -> None:
@@ -561,7 +561,7 @@ class TestRuntimeErrorHandling:
     @pytest.mark.asyncio
     async def test_runtime_handles_malformed_message(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
     ) -> None:
         """Test runtime doesn't crash on malformed messages."""
         # Publish malformed JSON
@@ -617,7 +617,7 @@ class TestRuntimeErrorHandling:
     @pytest.mark.asyncio
     async def test_runtime_handles_missing_fields(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
     ) -> None:
         """Test runtime handles events with missing required fields."""
         # Publish event missing required fields
@@ -687,7 +687,7 @@ class TestRuntimePerformance:
     )
     async def test_runtime_processes_event_within_sla(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         projection_reader: ProjectionReaderRegistration,
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,

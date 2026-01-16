@@ -19,7 +19,7 @@ Memory Characteristics:
 Production Note:
     This in-memory store does NOT persist across restarts and does NOT
     support distributed scenarios. For production use:
-    - Use PostgresIdempotencyStore from omnibase_infra.idempotency
+    - Use StoreIdempotencyPostgres from omnibase_infra.idempotency
     - Or implement a Redis/Valkey-backed store
     - Consider the existing ProtocolIdempotencyStore for full persistence
 
@@ -86,7 +86,7 @@ class ModelEffectIdempotencyConfig(BaseModel):
         description="Minimum interval between TTL cleanup passes.",
     )
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
 
 __all__ = ["ModelEffectIdempotencyConfig"]

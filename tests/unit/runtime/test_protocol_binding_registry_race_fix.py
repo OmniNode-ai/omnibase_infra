@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Test for ProtocolBindingRegistry.get() race condition fix (PR #129).
+"""Test for RegistryProtocolBinding.get() race condition fix (PR #129).
 
 This module specifically tests the race condition that was fixed where:
 1. Thread A acquires lock, checks handler_cls is None, releases lock
@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.registry.registry_protocol_binding import RegistryError
 
 
@@ -30,15 +30,15 @@ class MockHandler:
 
 
 class TestProtocolBindingRegistryGetRaceConditionFix:
-    """Tests for PR #129 race condition fix in ProtocolBindingRegistry.get()."""
+    """Tests for PR #129 race condition fix in RegistryProtocolBinding.get()."""
 
     @pytest.fixture
-    def registry(self) -> ProtocolBindingRegistry:
-        """Provide a fresh ProtocolBindingRegistry instance."""
-        return ProtocolBindingRegistry()
+    def registry(self) -> RegistryProtocolBinding:
+        """Provide a fresh RegistryProtocolBinding instance."""
+        return RegistryProtocolBinding()
 
     def test_get_raises_error_atomically_within_lock(
-        self, registry: ProtocolBindingRegistry
+        self, registry: RegistryProtocolBinding
     ) -> None:
         """Test that get() checks and raises error atomically within lock.
 
@@ -117,7 +117,7 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
             pytest.fail(f"Unexpected errors: {errors}")
 
     def test_concurrent_get_and_register_no_incorrect_errors(
-        self, registry: ProtocolBindingRegistry
+        self, registry: RegistryProtocolBinding
     ) -> None:
         """Test that concurrent get() and register() don't produce incorrect errors.
 
@@ -203,7 +203,7 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
         )
 
     def test_list_protocols_not_called_after_lock_release(
-        self, registry: ProtocolBindingRegistry
+        self, registry: RegistryProtocolBinding
     ) -> None:
         """Test that list_protocols() is not called after lock is released.
 
@@ -238,7 +238,7 @@ class TestProtocolBindingRegistryGetRaceConditionFix:
             assert "missing-protocol-2" in str(e)
 
     def test_get_check_and_error_are_atomic(
-        self, registry: ProtocolBindingRegistry
+        self, registry: RegistryProtocolBinding
     ) -> None:
         """Test that the None check and error raising are atomic operations.
 

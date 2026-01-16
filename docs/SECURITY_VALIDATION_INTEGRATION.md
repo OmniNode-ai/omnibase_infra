@@ -52,7 +52,7 @@ From analyzing `MixinNodeIntrospection` and security documentation, key security
 
 ### 1. Security Validator Module
 
-**File**: `src/omnibase_infra/validation/security_validator.py`
+**File**: `src/omnibase_infra/validation/validator_security.py`
 
 **Purpose**: Provides security validation functions that emit `ModelHandlerValidationError` for security violations.
 
@@ -137,7 +137,7 @@ from omnibase_infra.validation import (
 
 ### 4. Test Suite
 
-**File**: `tests/unit/validation/test_security_validator.py`
+**File**: `tests/unit/validation/test_validator_security.py`
 
 **Coverage**:
 - ✅ 23 tests, all passing
@@ -484,8 +484,8 @@ SENSITIVE_PARAMETER_NAMES = frozenset({
 
 ### New Files Created
 
-- `src/omnibase_infra/validation/security_validator.py` - Security validation module
-- `tests/unit/validation/test_security_validator.py` - Test suite
+- `src/omnibase_infra/validation/validator_security.py` - Security validation module
+- `tests/unit/validation/test_validator_security.py` - Test suite
 - `docs/SECURITY_VALIDATION_INTEGRATION.md` - This document
 
 ### Modified Files
@@ -505,7 +505,7 @@ SENSITIVE_PARAMETER_NAMES = frozenset({
 ✅ **All success criteria from task description have been met:**
 
 1. ✅ Security validation paths identified (found: none exist yet)
-2. ✅ Integration pattern created (security_validator.py)
+2. ✅ Integration pattern created (validator_security.py)
 3. ✅ Rule IDs defined for security errors (SECURITY-001 through SECURITY-202)
 4. ✅ All security errors have actionable remediation hints
 5. ✅ Pattern documented for future use (security_patterns.md)

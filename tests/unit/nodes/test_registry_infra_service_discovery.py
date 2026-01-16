@@ -25,8 +25,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from omnibase_infra.errors import ProtocolConfigurationError
-from omnibase_infra.handlers.service_discovery.handler_mock_service_discovery import (
-    MockServiceDiscoveryHandler,
+from omnibase_infra.handlers.service_discovery.handler_service_discovery_mock import (
+    HandlerServiceDiscoveryMock,
 )
 from omnibase_infra.nodes.node_service_discovery_effect.registry import (
     RegistryInfraServiceDiscovery,
@@ -47,9 +47,9 @@ def mock_container() -> MagicMock:
 
 
 @pytest.fixture
-def mock_handler() -> MockServiceDiscoveryHandler:
-    """Create a MockServiceDiscoveryHandler for testing."""
-    return MockServiceDiscoveryHandler()
+def mock_handler() -> HandlerServiceDiscoveryMock:
+    """Create a HandlerServiceDiscoveryMock for testing."""
+    return HandlerServiceDiscoveryMock()
 
 
 @pytest.fixture
@@ -60,10 +60,10 @@ def mock_consul_handler() -> MagicMock:
     the @runtime_checkable protocol.
     """
     from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-        ProtocolServiceDiscoveryHandler,
+        ProtocolDiscoveryOperations,
     )
 
-    handler = MagicMock(spec=ProtocolServiceDiscoveryHandler)
+    handler = MagicMock(spec=ProtocolDiscoveryOperations)
     handler.handler_type = "consul"
     return handler
 
@@ -88,10 +88,10 @@ class TestRegistryInfraServiceDiscoveryRegister:
 
         # First argument should be the protocol type
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
         )
 
-        assert call_args[0][0] is ProtocolServiceDiscoveryHandler
+        assert call_args[0][0] is ProtocolDiscoveryOperations
 
     def test_register_factory_function_is_create_handler_from_config(
         self, mock_container: MagicMock
@@ -118,7 +118,7 @@ class TestRegistryInfraServiceDiscoveryRegisterWithHandler:
     def test_register_with_handler_calls_register_instance(
         self,
         mock_container: MagicMock,
-        mock_handler: MockServiceDiscoveryHandler,
+        mock_handler: HandlerServiceDiscoveryMock,
     ) -> None:
         """register_with_handler() calls container.register_instance."""
         RegistryInfraServiceDiscovery.register_with_handler(
@@ -130,7 +130,7 @@ class TestRegistryInfraServiceDiscoveryRegisterWithHandler:
     def test_register_with_handler_passes_protocol_and_handler(
         self,
         mock_container: MagicMock,
-        mock_handler: MockServiceDiscoveryHandler,
+        mock_handler: HandlerServiceDiscoveryMock,
     ) -> None:
         """register_with_handler() passes protocol type and handler instance."""
         RegistryInfraServiceDiscovery.register_with_handler(
@@ -141,10 +141,10 @@ class TestRegistryInfraServiceDiscoveryRegisterWithHandler:
         assert call_args is not None
 
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
         )
 
-        assert call_args[0][0] is ProtocolServiceDiscoveryHandler
+        assert call_args[0][0] is ProtocolDiscoveryOperations
         assert call_args[0][1] is mock_handler
 
     def test_register_with_handler_accepts_any_protocol_implementation(
@@ -207,7 +207,7 @@ class TestRegistryHandlerSwapping:
     def test_register_with_handler_allows_swapping(
         self,
         mock_container: MagicMock,
-        mock_handler: MockServiceDiscoveryHandler,
+        mock_handler: HandlerServiceDiscoveryMock,
         mock_consul_handler: MagicMock,
     ) -> None:
         """Multiple calls to register_with_handler() swap handlers."""
@@ -256,9 +256,9 @@ class TestProtocolTypeUsage:
     def test_register_uses_correct_protocol_type(
         self, mock_container: MagicMock
     ) -> None:
-        """register() uses ProtocolServiceDiscoveryHandler type."""
+        """register() uses ProtocolDiscoveryOperations type."""
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
         )
 
         RegistryInfraServiceDiscovery.register(mock_container)
@@ -266,16 +266,16 @@ class TestProtocolTypeUsage:
         call_args = mock_container.register_factory.call_args[0]
         registered_type = call_args[0]
 
-        assert registered_type is ProtocolServiceDiscoveryHandler
+        assert registered_type is ProtocolDiscoveryOperations
 
     def test_register_with_handler_uses_correct_protocol_type(
         self,
         mock_container: MagicMock,
-        mock_handler: MockServiceDiscoveryHandler,
+        mock_handler: HandlerServiceDiscoveryMock,
     ) -> None:
-        """register_with_handler() uses ProtocolServiceDiscoveryHandler type."""
+        """register_with_handler() uses ProtocolDiscoveryOperations type."""
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
         )
 
         RegistryInfraServiceDiscovery.register_with_handler(
@@ -285,7 +285,7 @@ class TestProtocolTypeUsage:
         call_args = mock_container.register_instance.call_args[0]
         registered_type = call_args[0]
 
-        assert registered_type is ProtocolServiceDiscoveryHandler
+        assert registered_type is ProtocolDiscoveryOperations
 
 
 # =============================================================================
@@ -297,19 +297,19 @@ class TestRegistryEdgeCases:
     """Edge case tests for registry behavior."""
 
     def test_mock_handler_isinstance_protocol(
-        self, mock_handler: MockServiceDiscoveryHandler
+        self, mock_handler: HandlerServiceDiscoveryMock
     ) -> None:
-        """MockServiceDiscoveryHandler is an instance of the protocol."""
+        """HandlerServiceDiscoveryMock is an instance of the protocol."""
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
         )
 
-        assert isinstance(mock_handler, ProtocolServiceDiscoveryHandler)
+        assert isinstance(mock_handler, ProtocolDiscoveryOperations)
 
     def test_mock_handler_has_handler_type(
-        self, mock_handler: MockServiceDiscoveryHandler
+        self, mock_handler: HandlerServiceDiscoveryMock
     ) -> None:
-        """MockServiceDiscoveryHandler has handler_type property."""
+        """HandlerServiceDiscoveryMock has handler_type property."""
         assert hasattr(mock_handler, "handler_type")
         assert mock_handler.handler_type == "mock"
 

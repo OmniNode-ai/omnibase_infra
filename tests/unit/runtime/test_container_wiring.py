@@ -9,12 +9,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from omnibase_infra.enums import EnumPolicyType
-from omnibase_infra.runtime.container_wiring import (
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
+from omnibase_infra.runtime.util_container_wiring import (
     get_or_create_policy_registry,
     get_policy_registry_from_container,
     wire_infrastructure_services,
 )
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
 
 class TestWireInfrastructureServices:
@@ -26,9 +26,9 @@ class TestWireInfrastructureServices:
         """Test that wire_infrastructure_services registers all infrastructure services."""
         summary = await wire_infrastructure_services(mock_container)
 
-        # Verify PolicyRegistry, ProtocolBindingRegistry, and RegistryCompute were registered
-        assert "PolicyRegistry" in summary["services"]
-        assert "ProtocolBindingRegistry" in summary["services"]
+        # Verify RegistryPolicy, RegistryProtocolBinding, and RegistryCompute were registered
+        assert "RegistryPolicy" in summary["services"]
+        assert "RegistryProtocolBinding" in summary["services"]
         assert "RegistryCompute" in summary["services"]
 
         # Verify register_instance was called three times (once for each registry)
@@ -44,25 +44,25 @@ class TestWireInfrastructureServices:
         assert isinstance(summary["services"], list)
         assert (
             len(summary["services"]) >= 3
-        )  # PolicyRegistry, ProtocolBindingRegistry, and RegistryCompute
+        )  # RegistryPolicy, RegistryProtocolBinding, and RegistryCompute
 
 
 class TestGetPolicyRegistryFromContainer:
     """Test get_policy_registry_from_container() function."""
 
     async def test_resolve_policy_registry_from_container(
-        self, container_with_policy_registry: PolicyRegistry, mock_container: MagicMock
+        self, container_with_policy_registry: RegistryPolicy, mock_container: MagicMock
     ) -> None:
-        """Test resolving PolicyRegistry from container."""
+        """Test resolving RegistryPolicy from container."""
         registry = await get_policy_registry_from_container(mock_container)
 
         assert registry is container_with_policy_registry
-        assert isinstance(registry, PolicyRegistry)
+        assert isinstance(registry, RegistryPolicy)
 
     async def test_resolve_raises_error_if_not_registered(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that resolve raises RuntimeError if PolicyRegistry not registered."""
+        """Test that resolve raises RuntimeError if RegistryPolicy not registered."""
         # Configure mock to raise exception (not side_effect which would return coroutine)
         mock_container.service_registry.resolve_service.return_value = None
 
@@ -71,26 +71,26 @@ class TestGetPolicyRegistryFromContainer:
 
         mock_container.service_registry.resolve_service = raise_error
 
-        with pytest.raises(RuntimeError, match="PolicyRegistry not registered"):
+        with pytest.raises(RuntimeError, match="RegistryPolicy not registered"):
             await get_policy_registry_from_container(mock_container)
 
 
-class TestGetOrCreatePolicyRegistry:
+class TestGetOrCreateRegistryPolicy:
     """Test get_or_create_policy_registry() function."""
 
     async def test_returns_existing_registry_if_found(
-        self, container_with_policy_registry: PolicyRegistry, mock_container: MagicMock
+        self, container_with_policy_registry: RegistryPolicy, mock_container: MagicMock
     ) -> None:
-        """Test that existing PolicyRegistry is returned if found."""
+        """Test that existing RegistryPolicy is returned if found."""
         registry = await get_or_create_policy_registry(mock_container)
 
         assert registry is container_with_policy_registry
-        assert isinstance(registry, PolicyRegistry)
+        assert isinstance(registry, RegistryPolicy)
 
     async def test_creates_and_registers_if_not_found(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that PolicyRegistry is created and registered if not found."""
+        """Test that RegistryPolicy is created and registered if not found."""
         # Configure mock to raise exception first, then return None
         mock_container.service_registry.resolve_service.side_effect = ValueError(
             "Service not registered"
@@ -99,12 +99,12 @@ class TestGetOrCreatePolicyRegistry:
         registry = await get_or_create_policy_registry(mock_container)
 
         # Verify registry was created
-        assert isinstance(registry, PolicyRegistry)
+        assert isinstance(registry, RegistryPolicy)
 
         # Verify register_instance was called
         mock_container.service_registry.register_instance.assert_called_once()
         call_kwargs = mock_container.service_registry.register_instance.call_args[1]
-        assert call_kwargs["interface"] == PolicyRegistry
+        assert call_kwargs["interface"] == RegistryPolicy
         assert call_kwargs["instance"] is registry
         assert call_kwargs["scope"] == "global"
         assert call_kwargs["metadata"]["auto_registered"] is True
@@ -122,7 +122,7 @@ class TestGetOrCreatePolicyRegistry:
         )
 
         with pytest.raises(
-            RuntimeError, match="Failed to create and register PolicyRegistry"
+            RuntimeError, match="Failed to create and register RegistryPolicy"
         ):
             await get_or_create_policy_registry(mock_container)
 
@@ -131,7 +131,7 @@ class TestContainerBasedPolicyUsage:
     """Integration tests demonstrating container-based policy usage."""
 
     async def test_full_container_based_workflow(
-        self, container_with_policy_registry: PolicyRegistry, mock_container: MagicMock
+        self, container_with_policy_registry: RegistryPolicy, mock_container: MagicMock
     ) -> None:
         """Test full workflow: wire -> resolve -> register -> retrieve policy."""
 
@@ -205,8 +205,8 @@ class TestContainerBasedPolicyUsage:
 
         # Verify they are different instances
         assert registry1 is not registry2
-        assert isinstance(registry1, PolicyRegistry)
-        assert isinstance(registry2, PolicyRegistry)
+        assert isinstance(registry1, RegistryPolicy)
+        assert isinstance(registry2, RegistryPolicy)
 
 
 class TestAnalyzeAttributeError:
@@ -221,7 +221,9 @@ class TestAnalyzeAttributeError:
         This test verifies the fallback behavior for service_registry when it
         somehow reaches _analyze_attribute_error (returns generic hint).
         """
-        from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
+        from omnibase_infra.runtime.util_container_wiring import (
+            _analyze_attribute_error,
+        )
 
         error_str = "'MockContainer' object has no attribute 'service_registry'"
         missing_attr, hint = _analyze_attribute_error(error_str)
@@ -233,7 +235,9 @@ class TestAnalyzeAttributeError:
 
     def test_register_instance_missing(self) -> None:
         """Test detection of missing register_instance method."""
-        from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
+        from omnibase_infra.runtime.util_container_wiring import (
+            _analyze_attribute_error,
+        )
 
         error_str = "'MockRegistry' object has no attribute 'register_instance'"
         _missing_attr, hint = _analyze_attribute_error(error_str)
@@ -243,7 +247,9 @@ class TestAnalyzeAttributeError:
 
     def test_unknown_attribute(self) -> None:
         """Test handling of unknown missing attribute."""
-        from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
+        from omnibase_infra.runtime.util_container_wiring import (
+            _analyze_attribute_error,
+        )
 
         error_str = "'MockContainer' object has no attribute 'unknown_attr'"
         missing_attr, hint = _analyze_attribute_error(error_str)
@@ -253,7 +259,9 @@ class TestAnalyzeAttributeError:
 
     def test_no_quotes_in_error(self) -> None:
         """Test handling of error without quotes."""
-        from omnibase_infra.runtime.container_wiring import _analyze_attribute_error
+        from omnibase_infra.runtime.util_container_wiring import (
+            _analyze_attribute_error,
+        )
 
         error_str = "Some attribute error without quotes"
         missing_attr, _hint = _analyze_attribute_error(error_str)
@@ -266,7 +274,7 @@ class TestAnalyzeTypeError:
 
     def test_interface_argument_error(self) -> None:
         """Test detection of interface argument issues."""
-        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+        from omnibase_infra.runtime.util_container_wiring import _analyze_type_error
 
         error_str = "interface argument must be a type"
         invalid_arg, hint = _analyze_type_error(error_str)
@@ -276,7 +284,7 @@ class TestAnalyzeTypeError:
 
     def test_instance_argument_error(self) -> None:
         """Test detection of instance argument issues."""
-        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+        from omnibase_infra.runtime.util_container_wiring import _analyze_type_error
 
         # Note: error string must not contain "interface" since that's checked first
         error_str = "instance must be an object of the correct type"
@@ -287,7 +295,7 @@ class TestAnalyzeTypeError:
 
     def test_scope_argument_error(self) -> None:
         """Test detection of scope argument issues."""
-        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+        from omnibase_infra.runtime.util_container_wiring import _analyze_type_error
 
         error_str = "scope must be one of: global, request, transient"
         invalid_arg, hint = _analyze_type_error(error_str)
@@ -297,7 +305,7 @@ class TestAnalyzeTypeError:
 
     def test_metadata_argument_error(self) -> None:
         """Test detection of metadata argument issues."""
-        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+        from omnibase_infra.runtime.util_container_wiring import _analyze_type_error
 
         error_str = "metadata must be a dict"
         invalid_arg, hint = _analyze_type_error(error_str)
@@ -307,7 +315,7 @@ class TestAnalyzeTypeError:
 
     def test_positional_argument_error(self) -> None:
         """Test detection of positional argument mismatch."""
-        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+        from omnibase_infra.runtime.util_container_wiring import _analyze_type_error
 
         # Note: error string must not contain other keywords like 'instance'
         error_str = "function() takes 2 positional args but 4 were given"
@@ -318,7 +326,7 @@ class TestAnalyzeTypeError:
 
     def test_argument_keyword_error(self) -> None:
         """Test detection of argument keyword errors."""
-        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+        from omnibase_infra.runtime.util_container_wiring import _analyze_type_error
 
         error_str = "got an unexpected keyword argument 'invalid_arg'"
         invalid_arg, hint = _analyze_type_error(error_str)
@@ -328,7 +336,7 @@ class TestAnalyzeTypeError:
 
     def test_unknown_type_error(self) -> None:
         """Test handling of unknown type errors."""
-        from omnibase_infra.runtime.container_wiring import _analyze_type_error
+        from omnibase_infra.runtime.util_container_wiring import _analyze_type_error
 
         error_str = "some unexpected type error"
         invalid_arg, hint = _analyze_type_error(error_str)

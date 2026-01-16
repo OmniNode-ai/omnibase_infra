@@ -25,7 +25,7 @@ from uuid import UUID, uuid4
 import pytest
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -83,13 +83,13 @@ def large_cache_effect_store() -> InMemoryEffectIdempotencyStore:
 
 
 @pytest.fixture
-def inmemory_idempotency_store() -> InMemoryIdempotencyStore:
-    """Create InMemoryIdempotencyStore for domain-based idempotency testing.
+def inmemory_idempotency_store() -> StoreIdempotencyInmemory:
+    """Create StoreIdempotencyInmemory for domain-based idempotency testing.
 
     Returns:
-        InMemoryIdempotencyStore for general idempotency tests.
+        StoreIdempotencyInmemory for general idempotency tests.
     """
-    return InMemoryIdempotencyStore()
+    return StoreIdempotencyInmemory()
 
 
 # -----------------------------------------------------------------------------

@@ -64,8 +64,8 @@ class ServiceRegistrationError(ContainerWiringError):
         ...     operation="register_service",
         ... )
         >>> raise ServiceRegistrationError(
-        ...     "Failed to register PolicyRegistry",
-        ...     service_name="PolicyRegistry",
+        ...     "Failed to register RegistryPolicy",
+        ...     service_name="RegistryPolicy",
         ...     context=context,
         ... )
     """
@@ -107,8 +107,8 @@ class ServiceResolutionError(ContainerWiringError):
         ...     operation="resolve_service",
         ... )
         >>> raise ServiceResolutionError(
-        ...     "PolicyRegistry not found in container",
-        ...     service_name="PolicyRegistry",
+        ...     "RegistryPolicy not found in container",
+        ...     service_name="RegistryPolicy",
         ...     context=context,
         ... )
     """
@@ -191,7 +191,7 @@ class ServiceRegistryUnavailableError(ContainerValidationError):
     Example:
         >>> raise ServiceRegistryUnavailableError(
         ...     "Container service_registry is None",
-        ...     operation="register PolicyRegistry",
+        ...     operation="register RegistryPolicy",
         ...     hint="Check that enable_service_registry=True",
         ... )
     """

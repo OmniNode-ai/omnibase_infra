@@ -21,8 +21,8 @@ Thread Safety:
 
 Related:
     - docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md: Circuit breaker patterns
-    - KafkaEventBus: Production implementation with circuit breaker integration
-    - InMemoryEventBus: Simple implementation for testing
+    - EventBusKafka: Production implementation with circuit breaker integration
+    - EventBusInmemory: Simple implementation for testing
 
 .. versionadded:: 0.4.0
 """

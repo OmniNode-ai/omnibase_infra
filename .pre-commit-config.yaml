@@ -124,6 +124,16 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
+      # Naming convention validation - file and class naming [OMN-1305]
+      # Validates Handler*, Dispatcher*, Store*, Adapter*, etc. naming patterns
+      # Runtime: <3s (single pass with caching)
+      - id: onex-validate-naming
+        name: ONEX Naming Convention Validation
+        entry: poetry run python scripts/validation/validate_naming.py src/omnibase_infra --errors-only
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
       # Union usage validation
       # TECH DEBT: Baseline increased to 108 violations (OMN-871)
       # Target: Reduce to 30 incrementally after PR #37 merges

@@ -29,7 +29,7 @@ from omnibase_infra.enums import EnumAnyTypeViolation, EnumValidationSeverity
 from omnibase_infra.models.validation.model_any_type_violation import (
     ModelAnyTypeViolation,
 )
-from omnibase_infra.validation.any_type_validator import (
+from omnibase_infra.validation.validator_any_type import (
     AnyTypeDetector,
     ModelAnyTypeValidationResult,
     validate_any_types_in_file,
@@ -482,13 +482,13 @@ class TestPydanticFieldWithNote:
     """Test Pydantic Field() with NOTE comment (should be allowed)."""
 
     def test_field_with_inline_note_allowed(self, temp_dir: Path) -> None:
-        """Field with inline NOTE comment should be allowed."""
+        """Field with inline NOTE comment with OMN ticket should be allowed."""
         code = """
         from typing import Any
         from pydantic import BaseModel, Field
 
         class MyModel(BaseModel):
-            data: Any = Field(...)  # NOTE: Using Any for JSON payload
+            data: Any = Field(...)  # NOTE: OMN-1234 - Required for JSON payload
         """
         filepath = _create_test_file(temp_dir, code)
         violations = validate_any_types_in_file(filepath)
@@ -496,13 +496,13 @@ class TestPydanticFieldWithNote:
         assert len(violations) == 0
 
     def test_field_with_preceding_note_comment_allowed(self, temp_dir: Path) -> None:
-        """Field with NOTE comment in preceding line should be allowed."""
+        """Field with NOTE comment with OMN ticket in preceding line should be allowed."""
         code = """
         from typing import Any
         from pydantic import BaseModel, Field
 
         class MyModel(BaseModel):
-            # NOTE: Using Any because JSON schema requires dynamic typing
+            # NOTE: OMN-1234 - Required for JSON schema dynamic typing
             data: Any = Field(...)
         """
         filepath = _create_test_file(temp_dir, code)
@@ -511,14 +511,14 @@ class TestPydanticFieldWithNote:
         assert len(violations) == 0
 
     def test_field_with_note_block_comment_allowed(self, temp_dir: Path) -> None:
-        """Field with NOTE comment within lookback range should be allowed."""
+        """Field with NOTE comment with OMN ticket within lookback range should be allowed."""
         code = """
         from typing import Any
         from pydantic import BaseModel, Field
 
         class MyModel(BaseModel):
             # This field stores arbitrary JSON data
-            # NOTE: Any is required for JSON compatibility
+            # NOTE: OMN-5678 - Required for JSON compatibility
             # The validator handles type coercion
             data: Any = Field(...)
         """
@@ -602,9 +602,9 @@ class TestFileLevelNoteComment:
     """Test file-level NOTE comment near Any import."""
 
     def test_file_level_note_exempts_all_fields(self, temp_dir: Path) -> None:
-        """File-level NOTE comment near import exempts all Field() usages."""
+        """File-level NOTE comment with OMN ticket near import exempts all Field() usages."""
         code = """
-        from typing import Any  # NOTE: Any used for JSON payload fields in this model
+        from typing import Any  # NOTE: OMN-1234 - JSON payload fields in this model
 
         from pydantic import BaseModel, Field
 
@@ -620,9 +620,9 @@ class TestFileLevelNoteComment:
         assert len(violations) == 0
 
     def test_file_level_note_above_import(self, temp_dir: Path) -> None:
-        """File-level NOTE comment above import should work."""
+        """File-level NOTE comment with OMN ticket above import should work."""
         code = """
-        # NOTE: This module uses Any for JSON compatibility
+        # NOTE: OMN-1234 - Required for JSON compatibility
         from typing import Any
 
         from pydantic import BaseModel, Field
@@ -636,10 +636,10 @@ class TestFileLevelNoteComment:
         assert len(violations) == 0
 
     def test_file_level_note_below_import(self, temp_dir: Path) -> None:
-        """File-level NOTE comment below import should work."""
+        """File-level NOTE comment with OMN ticket below import should work."""
         code = """
         from typing import Any
-        # NOTE: Any is used for dynamic JSON payloads
+        # NOTE: OMN-5678 - Dynamic JSON payloads
 
         from pydantic import BaseModel, Field
 
@@ -654,7 +654,7 @@ class TestFileLevelNoteComment:
     def test_file_level_note_does_not_exempt_non_field(self, temp_dir: Path) -> None:
         """File-level NOTE should not exempt non-Field() Any usages."""
         code = """
-        from typing import Any  # NOTE: Any used for JSON payload fields
+        from typing import Any  # NOTE: OMN-1234 - JSON payload fields
 
         from pydantic import BaseModel, Field
 
@@ -1539,9 +1539,9 @@ class TestAnyTypeDetectorInternals:
         assert detector._is_likely_type_alias_name("") is False
 
     def test_check_file_level_note_found(self) -> None:
-        """File-level NOTE near import is detected."""
+        """File-level NOTE with OMN ticket near import is detected."""
         source_lines = [
-            "from typing import Any  # NOTE: For JSON compatibility",
+            "from typing import Any  # NOTE: OMN-1234 - Required for JSON compatibility",
             "",
             "class Model:",
             "    pass",
@@ -1563,9 +1563,9 @@ class TestAnyTypeDetectorInternals:
         assert detector.has_file_level_note is False
 
     def test_check_file_level_note_import_typing(self) -> None:
-        """File-level NOTE with 'import typing' is detected."""
+        """File-level NOTE with OMN ticket with 'import typing' is detected."""
         source_lines = [
-            "import typing  # NOTE: typing.Any used for JSON",
+            "import typing  # NOTE: OMN-1234 - Required for JSON compatibility",
             "",
             "class Model:",
             "    pass",
@@ -1573,6 +1573,19 @@ class TestAnyTypeDetectorInternals:
         detector = AnyTypeDetector("test.py", source_lines)
 
         assert detector.has_file_level_note is True
+
+    def test_check_file_level_note_without_ticket_not_valid(self) -> None:
+        """File-level NOTE without OMN ticket is NOT valid."""
+        source_lines = [
+            "from typing import Any  # NOTE: Any required for JSON compatibility",
+            "",
+            "class Model:",
+            "    pass",
+        ]
+        detector = AnyTypeDetector("test.py", source_lines)
+
+        # Old format without OMN ticket should NOT be accepted
+        assert detector.has_file_level_note is False
 
 
 # =============================================================================
@@ -1585,7 +1598,7 @@ class TestValidateAnyTypesDirectory:
 
     def test_validate_any_types_recursive(self, temp_dir: Path) -> None:
         """Validate recursively finds violations in subdirectories."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         # Create subdirectory with file
         subdir = temp_dir / "subdir"
@@ -1605,7 +1618,7 @@ class TestValidateAnyTypesDirectory:
 
     def test_validate_any_types_non_recursive(self, temp_dir: Path) -> None:
         """Non-recursive validation only checks immediate directory."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         # Create file in root
         code_root = """
@@ -1635,7 +1648,7 @@ class TestValidateAnyTypesDirectory:
 
     def test_validate_any_types_ci(self, temp_dir: Path) -> None:
         """CI validation returns structured result."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types_ci
+        from omnibase_infra.validation.validator_any_type import validate_any_types_ci
 
         code = """
         from typing import Any
@@ -1654,7 +1667,7 @@ class TestValidateAnyTypesDirectory:
 
     def test_validate_any_types_ci_no_violations(self, temp_dir: Path) -> None:
         """CI validation with no violations returns passed result."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types_ci
+        from omnibase_infra.validation.validator_any_type import validate_any_types_ci
 
         code = """
         def process(data: object) -> str:
@@ -1674,7 +1687,7 @@ class TestFileSkipping:
 
     def test_skip_test_files(self, temp_dir: Path) -> None:
         """Files in tests/ directories are skipped."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         # Create tests directory with violation file
         tests_dir = temp_dir / "tests"
@@ -1694,7 +1707,7 @@ class TestFileSkipping:
 
     def test_skip_underscore_prefixed_files(self, temp_dir: Path) -> None:
         """Files starting with underscore are skipped."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         code = """
         from typing import Any
@@ -1711,7 +1724,7 @@ class TestFileSkipping:
 
     def test_skip_archive_directory(self, temp_dir: Path) -> None:
         """Files in archive/ directories are skipped."""
-        from omnibase_infra.validation.any_type_validator import validate_any_types
+        from omnibase_infra.validation.validator_any_type import validate_any_types
 
         # Create archive directory with violation file
         archive_dir = temp_dir / "archive"
@@ -1739,13 +1752,13 @@ class TestPydanticFieldAttribute:
     """Test pydantic.Field attribute access pattern."""
 
     def test_pydantic_field_attribute_with_note(self, temp_dir: Path) -> None:
-        """pydantic.Field attribute access with NOTE is allowed."""
+        """pydantic.Field attribute access with NOTE and OMN ticket is allowed."""
         code = """
         from typing import Any
         import pydantic
 
         class MyModel(pydantic.BaseModel):
-            # NOTE: Using Any for JSON payload
+            # NOTE: OMN-1234 - Required for JSON payload
             data: Any = pydantic.Field(...)
         """
         filepath = _create_test_file(temp_dir, code)
@@ -1877,3 +1890,187 @@ class TestMultipleImportStyles:
             v.violation_type == EnumAnyTypeViolation.GENERIC_ARGUMENT
             for v in violations
         )
+
+
+# =============================================================================
+# Multi-line Import Tests
+# =============================================================================
+
+
+class TestMultiLineImports:
+    """Test handling of multi-line import statements."""
+
+    def test_multiline_parenthesized_import_with_note(self, temp_dir: Path) -> None:
+        """Multi-line parenthesized import with NOTE should work."""
+        code = """
+        # NOTE: OMN-1234 - JSON payload fields
+        from typing import (
+            Any,
+            Dict,
+            List,
+        )
+
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            data: Any = Field(...)
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        assert len(violations) == 0
+
+    def test_multiline_import_any_on_separate_line(self, temp_dir: Path) -> None:
+        """Multi-line import with Any on separate line and NOTE should work."""
+        code = """
+        from typing import (
+            Dict,
+            Any,  # NOTE: OMN-5678 - Dynamic payloads
+            List,
+        )
+
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            data: Any = Field(...)
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        assert len(violations) == 0
+
+    def test_multiline_import_without_note_fails(self, temp_dir: Path) -> None:
+        """Multi-line import without NOTE should still require field-level NOTE."""
+        code = """
+        from typing import (
+            Any,
+            Dict,
+        )
+
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            data: Any = Field(...)
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        assert len(violations) == 1
+        assert violations[0].violation_type == EnumAnyTypeViolation.FIELD_MISSING_NOTE
+
+
+class TestOmnTicketValidation:
+    """Test that NOTE comments require OMN ticket codes."""
+
+    def test_note_without_omn_ticket_rejected(self, temp_dir: Path) -> None:
+        """NOTE comment without OMN ticket should be rejected."""
+        code = """
+        from typing import Any
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            # NOTE: Any required for JSON payload (missing OMN ticket)
+            data: Any = Field(...)
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        assert len(violations) == 1
+        assert violations[0].violation_type == EnumAnyTypeViolation.FIELD_MISSING_NOTE
+
+    def test_note_with_lowercase_omn_ticket_accepted(self, temp_dir: Path) -> None:
+        """NOTE comment with lowercase omn ticket should be accepted (case-insensitive)."""
+        code = """
+        from typing import Any
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            # NOTE: omn-1234 - Required for JSON payload
+            data: Any = Field(...)
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        assert len(violations) == 0
+
+    def test_note_with_mixed_case_omn_ticket_accepted(self, temp_dir: Path) -> None:
+        """NOTE comment with mixed case OMN ticket should be accepted."""
+        code = """
+        from typing import Any
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            # NOTE: Omn-1234 - Required for JSON payload
+            data: Any = Field(...)
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        assert len(violations) == 0
+
+    def test_note_with_long_omn_ticket_accepted(self, temp_dir: Path) -> None:
+        """NOTE comment with long OMN ticket number should be accepted."""
+        code = """
+        from typing import Any
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            # NOTE: OMN-12345 - Required for JSON payload
+            data: Any = Field(...)
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        assert len(violations) == 0
+
+
+class TestInlineCommentExtractionPrevention:
+    """Test that NOTE matching only inspects the comment portion."""
+
+    def test_note_in_string_literal_not_matched(self, temp_dir: Path) -> None:
+        """NOTE in string literal should not be matched."""
+        code = """
+        from typing import Any
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            data: Any = Field(default="NOTE: OMN-1234 - not a real comment")
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        # Should fail because the NOTE is in a string, not a comment
+        assert len(violations) == 1
+        assert violations[0].violation_type == EnumAnyTypeViolation.FIELD_MISSING_NOTE
+
+    def test_note_in_code_not_matched(self, temp_dir: Path) -> None:
+        """NOTE in code (not comment) should not be matched."""
+        code = """
+        from typing import Any
+        from pydantic import BaseModel, Field
+
+        NOTE = "OMN-1234 - this is a variable, not a comment"
+
+        class MyModel(BaseModel):
+            data: Any = Field(...)
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        # Should fail because the NOTE is in code, not a comment
+        assert len(violations) == 1
+        assert violations[0].violation_type == EnumAnyTypeViolation.FIELD_MISSING_NOTE
+
+    def test_note_in_real_comment_matched(self, temp_dir: Path) -> None:
+        """NOTE in actual comment (after code) should be matched."""
+        code = """
+        from typing import Any
+        from pydantic import BaseModel, Field
+
+        class MyModel(BaseModel):
+            data: Any = Field(default="value")  # NOTE: OMN-1234 - JSON payload
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = validate_any_types_in_file(filepath)
+
+        assert len(violations) == 0

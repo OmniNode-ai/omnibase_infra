@@ -734,8 +734,9 @@ class PluginRegistration:
             )
 
         try:
-            # Create event router
+            # Create event router with container-based DI pattern
             introspection_event_router = IntrospectionEventRouter(
+                container=config.container,
                 dispatcher=self._introspection_dispatcher,
                 event_bus=config.event_bus,
                 output_topic=config.output_topic,

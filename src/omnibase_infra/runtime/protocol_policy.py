@@ -3,7 +3,7 @@
 """Protocol interface for policy plugins in ONEX Infrastructure.
 
 This module defines the ProtocolPolicy interface for implementing pure decision
-logic plugins that can be registered with the PolicyRegistry. Policy plugins are
+logic plugins that can be registered with the RegistryPolicy. Policy plugins are
 the cornerstone of ONEX's extensible decision-making architecture.
 
 **CRITICAL: Policy plugins are PURE decision logic only.**
@@ -88,12 +88,12 @@ Example Usage:
     result = policy.evaluate(context)
     ```
 
-Integration with PolicyRegistry:
+Integration with RegistryPolicy:
     ```python
-    from omnibase_infra.runtime.policy_registry import PolicyRegistry
+    from omnibase_infra.runtime.registry_policy import RegistryPolicy
     from omnibase_infra.enums import EnumPolicyType
 
-    registry = PolicyRegistry()
+    registry = RegistryPolicy()
     registry.register_policy(
         policy_id="exponential_backoff_v1",
         policy_class=ExponentialBackoffPolicy,
@@ -108,7 +108,7 @@ Integration with PolicyRegistry:
     ```
 
 See Also:
-    - PolicyRegistry: Registry for managing policy plugins (SINGLE SOURCE OF TRUTH)
+    - RegistryPolicy: Registry for managing policy plugins (SINGLE SOURCE OF TRUTH)
     - ProtocolHandler: Protocol for I/O handlers (contrast with pure policies)
     - ModelPolicyContext: Structured context model for policy evaluation
 """
@@ -340,7 +340,7 @@ class ProtocolPolicy(Protocol):
         This method is semantically identical to evaluate().
 
         **NOTE: This method is optional.** If your policy only implements evaluate(),
-        the PolicyRegistry will work correctly. The decide() method is provided as
+        the RegistryPolicy will work correctly. The decide() method is provided as
         a convenience for policies that prefer this semantic naming.
 
         Args:

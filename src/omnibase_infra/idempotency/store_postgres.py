@@ -76,6 +76,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
@@ -95,7 +96,7 @@ logger = logging.getLogger(__name__)
 _TABLE_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
-class PostgresIdempotencyStore(ProtocolIdempotencyStore):
+class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
     """PostgreSQL-based idempotency store using asyncpg connection pool.
 
     This implementation provides exactly-once semantics by using PostgreSQL's
@@ -136,7 +137,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         ...     dsn="postgresql://user:pass@localhost:5432/mydb",
         ...     table_name="idempotency_records",
         ... )
-        >>> store = PostgresIdempotencyStore(config)
+        >>> store = StoreIdempotencyPostgres(config)
         >>> await store.initialize()
         >>> try:
         ...     is_new = await store.check_and_record(
@@ -264,7 +265,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
 
             self._initialized = True
             logger.info(
-                "PostgresIdempotencyStore initialized",
+                "StoreIdempotencyPostgres initialized",
                 extra={
                     "table_name": self._config.table_name,
                     "pool_min_size": self._config.pool_min_size,
@@ -372,7 +373,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             await self._pool.close()
             self._pool = None
         self._initialized = False
-        logger.info("PostgresIdempotencyStore shutdown complete")
+        logger.info("StoreIdempotencyPostgres shutdown complete")
 
     async def check_and_record(
         self,
@@ -471,8 +472,13 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             metrics_updated = True
             raise InfraTimeoutError(
                 f"Check and record timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._config.command_timeout,
+                ),
             ) from e
         except asyncpg.PostgresConnectionError as e:
             async with self._metrics_lock:
@@ -550,13 +556,18 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
 
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
-                f"is_processed query timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                f"Processed check query timed out after {self._config.command_timeout}s",
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._config.command_timeout,
+                ),
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
-                "Database connection lost during is_processed query",
+                "Database connection lost during processed check query",
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
@@ -650,13 +661,18 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
 
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
-                f"mark_processed timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                f"Mark processed timed out after {self._config.command_timeout}s",
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._config.command_timeout,
+                ),
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
-                "Database connection lost during mark_processed",
+                "Database connection lost during mark processed",
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
@@ -837,8 +853,13 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
                 f"Cleanup timed out after {self._config.command_timeout}s",
-                context=context,
-                timeout_seconds=self._config.command_timeout,
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._config.command_timeout,
+                ),
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
@@ -898,4 +919,4 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             )
 
 
-__all__: list[str] = ["PostgresIdempotencyStore"]
+__all__: list[str] = ["StoreIdempotencyPostgres"]

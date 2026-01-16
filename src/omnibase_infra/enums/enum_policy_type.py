@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Policy Type Enumeration.
 
-Defines the canonical policy types for the PolicyRegistry plugin system.
+Defines the canonical policy types for the RegistryPolicy plugin system.
 Used to classify and route policies for orchestrator and reducer nodes.
 """
 
@@ -10,7 +10,7 @@ from enum import Enum
 
 
 class EnumPolicyType(str, Enum):
-    """Policy types for PolicyRegistry plugin classification.
+    """Policy types for RegistryPolicy plugin classification.
 
     These represent the two primary policy categories in the ONEX
     4-node architecture: orchestrator policies and reducer policies.

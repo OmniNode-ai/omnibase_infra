@@ -32,7 +32,8 @@ _SKIP_REASON = (
     "service_registry is None due to circular import bug in omnibase_core 0.6.2. "
     "Upgrade to omnibase_core >= 0.6.3 to run these tests."
 )
-from omnibase_infra.runtime.kernel import (
+from omnibase_infra.runtime.models import ModelRuntimeConfig
+from omnibase_infra.runtime.service_kernel import (
     DEFAULT_GROUP_ID,
     DEFAULT_INPUT_TOPIC,
     DEFAULT_OUTPUT_TOPIC,
@@ -43,7 +44,6 @@ from omnibase_infra.runtime.kernel import (
     load_runtime_config,
     main,
 )
-from omnibase_infra.runtime.models import ModelRuntimeConfig
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -264,7 +264,9 @@ class TestBootstrap:
         async def noop_stop() -> None:
             """Async no-op for stop that completes immediately."""
 
-        with patch("omnibase_infra.runtime.kernel.RuntimeHostProcess") as mock_cls:
+        with patch(
+            "omnibase_infra.runtime.service_kernel.RuntimeHostProcess"
+        ) as mock_cls:
             mock_instance = MagicMock()
             mock_instance.start = AsyncMock(side_effect=noop_start)
             mock_instance.stop = AsyncMock(side_effect=noop_stop)
@@ -275,8 +277,10 @@ class TestBootstrap:
 
     @pytest.fixture
     def mock_event_bus(self) -> Generator[MagicMock, None, None]:
-        """Create a mock InMemoryEventBus."""
-        with patch("omnibase_infra.runtime.kernel.InMemoryEventBus") as mock_cls:
+        """Create a mock EventBusInmemory."""
+        with patch(
+            "omnibase_infra.runtime.service_kernel.EventBusInmemory"
+        ) as mock_cls:
             mock_instance = MagicMock()
             mock_cls.return_value = mock_instance
             yield mock_cls
@@ -317,7 +321,9 @@ class TestBootstrap:
         # Create a task that will set shutdown after a short delay
         async def delayed_shutdown() -> int:
             # Create a patched bootstrap that returns quickly
-            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            with patch(
+                "omnibase_infra.runtime.service_kernel.asyncio.Event"
+            ) as mock_event:
                 event_instance = MagicMock()
                 # Make wait() return immediately
                 event_instance.wait = AsyncMock(return_value=None)
@@ -345,7 +351,7 @@ class TestBootstrap:
         mock_instance.start = AsyncMock(side_effect=Exception("Test error"))
 
         # Patch the shutdown event wait to avoid hanging
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -366,7 +372,7 @@ class TestBootstrap:
         """Test that bootstrap returns 1 on ProtocolConfigurationError."""
         # Force config load to raise ProtocolConfigurationError
         with patch(
-            "omnibase_infra.runtime.kernel.load_runtime_config",
+            "omnibase_infra.runtime.service_kernel.load_runtime_config",
             side_effect=ProtocolConfigurationError("Config error"),
         ):
             exit_code = await bootstrap()
@@ -385,9 +391,9 @@ class TestBootstrap:
     ) -> None:
         """Test that bootstrap creates event bus with correct environment."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
-        # Ensure InMemoryEventBus is used by unsetting KAFKA_BOOTSTRAP_SERVERS
+        # Ensure EventBusInmemory is used by unsetting KAFKA_BOOTSTRAP_SERVERS
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -406,16 +412,18 @@ class TestBootstrap:
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Test that bootstrap creates KafkaEventBus when KAFKA_BOOTSTRAP_SERVERS is set."""
+        """Test that bootstrap creates EventBusKafka when KAFKA_BOOTSTRAP_SERVERS is set."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 
         with (
-            patch("omnibase_infra.runtime.kernel.KafkaEventBus") as mock_kafka_bus,
             patch(
-                "omnibase_infra.runtime.kernel.InMemoryEventBus"
+                "omnibase_infra.runtime.service_kernel.EventBusKafka"
+            ) as mock_kafka_bus,
+            patch(
+                "omnibase_infra.runtime.service_kernel.EventBusInmemory"
             ) as mock_inmemory_bus,
-            patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event,
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
         ):
             mock_kafka_instance = MagicMock()
             mock_kafka_bus.return_value = mock_kafka_instance
@@ -426,7 +434,7 @@ class TestBootstrap:
 
             await bootstrap()
 
-        # Verify KafkaEventBus was created, not InMemoryEventBus
+        # Verify EventBusKafka was created, not EventBusInmemory
         mock_kafka_bus.assert_called_once()
         mock_inmemory_bus.assert_not_called()
 
@@ -435,6 +443,54 @@ class TestBootstrap:
         config = call_kwargs["config"]
         assert config.bootstrap_servers == "kafka:9092"
         assert config.environment == "test-env"
+
+    async def test_bootstrap_fails_when_kafka_configured_without_bootstrap_servers(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that bootstrap returns error when kafka is configured but KAFKA_BOOTSTRAP_SERVERS is not set.
+
+        This prevents implicit localhost:9092 fallback which can cause confusing behavior
+        when someone configures event_bus.type='kafka' but forgets to set the env var.
+
+        Note: bootstrap() catches ProtocolConfigurationError and returns exit code 1,
+        so we verify via return value and logged error message.
+        """
+        # Clear KAFKA_BOOTSTRAP_SERVERS to ensure it's not set
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
+
+        # Create config that requests kafka event bus
+        runtime_config_dir = tmp_path / "runtime"
+        runtime_config_dir.mkdir()
+        config_file = runtime_config_dir / "runtime_config.yaml"
+        config_file.write_text(
+            """
+input_topic: requests
+output_topic: responses
+consumer_group: onex-runtime
+event_bus:
+  type: kafka
+  environment: test
+  circuit_breaker_threshold: 5
+shutdown:
+  grace_period_seconds: 30
+"""
+        )
+
+        # Bootstrap should return error exit code (1)
+        exit_code = await bootstrap()
+        assert exit_code == 1, "Expected exit code 1 for configuration error"
+
+        # Verify error message was logged with helpful information
+        assert "KAFKA_BOOTSTRAP_SERVERS" in caplog.text
+        assert "kafka" in caplog.text.lower()
 
     async def test_bootstrap_uses_contracts_dir_from_env(
         self,
@@ -450,7 +506,7 @@ class TestBootstrap:
         Uses pytest's tmp_path fixture for automatic temporary directory cleanup.
         """
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -469,9 +525,13 @@ class TestBootstrap:
         """Test that bootstrap sets up signal handlers on Windows."""
         import signal
 
-        with patch("omnibase_infra.runtime.kernel.sys.platform", "win32"):
-            with patch("omnibase_infra.runtime.kernel.signal.signal") as mock_signal:
-                with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.sys.platform", "win32"):
+            with patch(
+                "omnibase_infra.runtime.service_kernel.signal.signal"
+            ) as mock_signal:
+                with patch(
+                    "omnibase_infra.runtime.service_kernel.asyncio.Event"
+                ) as mock_event:
                     event_instance = MagicMock()
                     event_instance.wait = AsyncMock(return_value=None)
                     mock_event.return_value = event_instance
@@ -515,15 +575,19 @@ class TestBootstrap:
         )
 
         with patch(
-            "omnibase_infra.runtime.kernel.load_runtime_config",
+            "omnibase_infra.runtime.service_kernel.load_runtime_config",
             return_value=test_config,
         ):
-            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            with patch(
+                "omnibase_infra.runtime.service_kernel.asyncio.Event"
+            ) as mock_event:
                 event_instance = MagicMock()
                 event_instance.wait = AsyncMock(return_value=None)
                 mock_event.return_value = event_instance
 
-                with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+                with patch(
+                    "omnibase_infra.runtime.service_kernel.logger"
+                ) as mock_logger:
                     exit_code = await bootstrap()
 
         # Should still exit successfully despite timeout
@@ -565,16 +629,18 @@ class TestBootstrap:
             coro.close()  # Close the coroutine to prevent RuntimeWarning
 
         with patch(
-            "omnibase_infra.runtime.kernel.load_runtime_config",
+            "omnibase_infra.runtime.service_kernel.load_runtime_config",
             return_value=test_config,
         ):
-            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            with patch(
+                "omnibase_infra.runtime.service_kernel.asyncio.Event"
+            ) as mock_event:
                 event_instance = MagicMock()
                 event_instance.wait = AsyncMock(return_value=None)
                 mock_event.return_value = event_instance
 
                 with patch(
-                    "omnibase_infra.runtime.kernel.asyncio.wait_for",
+                    "omnibase_infra.runtime.service_kernel.asyncio.wait_for",
                     side_effect=mock_wait_for_impl,
                 ) as mock_wait_for:
                     exit_code = await bootstrap()
@@ -606,7 +672,7 @@ class TestBootstrap:
         Verifies that the ModelONEXContainer instance created during bootstrap
         is correctly passed to the ServiceHealth constructor.
         """
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -637,10 +703,10 @@ class TestBootstrap:
         Verifies that container, runtime, port, and version are all passed
         to the ServiceHealth constructor.
         """
-        from omnibase_infra.runtime.kernel import KERNEL_VERSION
+        from omnibase_infra.runtime.service_kernel import KERNEL_VERSION
         from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -702,9 +768,9 @@ class TestMain:
             coro.close()  # Close the coroutine to prevent RuntimeWarning
             return 0
 
-        with patch("omnibase_infra.runtime.kernel.configure_logging"):
+        with patch("omnibase_infra.runtime.service_kernel.configure_logging"):
             with patch(
-                "omnibase_infra.runtime.kernel.asyncio.run",
+                "omnibase_infra.runtime.service_kernel.asyncio.run",
                 side_effect=mock_asyncio_run,
             ):
                 with pytest.raises(SystemExit) as exc_info:
@@ -720,9 +786,9 @@ class TestMain:
             coro.close()  # Close the coroutine to prevent RuntimeWarning
             return 1
 
-        with patch("omnibase_infra.runtime.kernel.configure_logging"):
+        with patch("omnibase_infra.runtime.service_kernel.configure_logging"):
             with patch(
-                "omnibase_infra.runtime.kernel.asyncio.run",
+                "omnibase_infra.runtime.service_kernel.asyncio.run",
                 side_effect=mock_asyncio_run,
             ):
                 with pytest.raises(SystemExit) as exc_info:
@@ -741,7 +807,7 @@ class TestIntegration:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """Test bootstrap with real InMemoryEventBus but mocked wait and health server.
+        """Test bootstrap with real EventBusInmemory but mocked wait and health server.
 
         Uses pytest's tmp_path fixture for automatic temporary directory cleanup.
         This test uses real components except for the shutdown wait and health server.
@@ -755,7 +821,7 @@ class TestIntegration:
             yaml.dump(
                 {
                     "name": "handler-http",
-                    "handler_class": "omnibase_infra.handlers.handler_http.HttpRestHandler",
+                    "handler_class": "omnibase_infra.handlers.handler_http.HandlerHttpRest",
                     "handler_type": "effect",
                     "tags": ["http", "test"],
                 }
@@ -771,7 +837,9 @@ class TestIntegration:
             mock_health_instance.stop = AsyncMock()
             mock_health.return_value = mock_health_instance
 
-            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            with patch(
+                "omnibase_infra.runtime.service_kernel.asyncio.Event"
+            ) as mock_event:
                 event_instance = MagicMock()
                 event_instance.wait = AsyncMock(return_value=None)
                 event_instance.set = MagicMock()
@@ -786,7 +854,7 @@ class TestIntegration:
     ) -> None:
         """Integration test verifying container is passed to ServiceHealth.
 
-        This test uses real components (InMemoryEventBus, RuntimeHostProcess)
+        This test uses real components (EventBusInmemory, RuntimeHostProcess)
         but mocks ServiceHealth to verify the container injection.
         """
         # Create a minimal handler contract in tmp_path for discovery
@@ -797,7 +865,7 @@ class TestIntegration:
             yaml.dump(
                 {
                     "name": "handler-http",
-                    "handler_class": "omnibase_infra.handlers.handler_http.HttpRestHandler",
+                    "handler_class": "omnibase_infra.handlers.handler_http.HandlerHttpRest",
                     "handler_type": "effect",
                     "tags": ["http", "test"],
                 }
@@ -813,7 +881,9 @@ class TestIntegration:
             mock_health_instance.stop = AsyncMock()
             mock_health.return_value = mock_health_instance
 
-            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            with patch(
+                "omnibase_infra.runtime.service_kernel.asyncio.Event"
+            ) as mock_event:
                 event_instance = MagicMock()
                 event_instance.wait = AsyncMock(return_value=None)
                 event_instance.set = MagicMock()
@@ -856,7 +926,9 @@ class TestHttpPortValidation:
         async def noop_stop() -> None:
             """Async no-op for stop that completes immediately."""
 
-        with patch("omnibase_infra.runtime.kernel.RuntimeHostProcess") as mock_cls:
+        with patch(
+            "omnibase_infra.runtime.service_kernel.RuntimeHostProcess"
+        ) as mock_cls:
             mock_instance = MagicMock()
             mock_instance.start = AsyncMock(side_effect=noop_start)
             mock_instance.stop = AsyncMock(side_effect=noop_stop)
@@ -867,8 +939,10 @@ class TestHttpPortValidation:
 
     @pytest.fixture
     def mock_event_bus(self) -> Generator[MagicMock, None, None]:
-        """Create a mock InMemoryEventBus."""
-        with patch("omnibase_infra.runtime.kernel.InMemoryEventBus") as mock_cls:
+        """Create a mock EventBusInmemory."""
+        with patch(
+            "omnibase_infra.runtime.service_kernel.EventBusInmemory"
+        ) as mock_cls:
             mock_instance = MagicMock()
             mock_cls.return_value = mock_instance
             yield mock_cls
@@ -913,12 +987,12 @@ class TestHttpPortValidation:
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "0")
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
 
-            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+            with patch("omnibase_infra.runtime.service_kernel.logger") as mock_logger:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
@@ -948,12 +1022,12 @@ class TestHttpPortValidation:
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "65536")
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
 
-            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+            with patch("omnibase_infra.runtime.service_kernel.logger") as mock_logger:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
@@ -981,7 +1055,7 @@ class TestHttpPortValidation:
         """Test that port 1 (MIN_PORT) is accepted."""
         monkeypatch.setenv("ONEX_HTTP_PORT", "1")
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -1005,7 +1079,7 @@ class TestHttpPortValidation:
         """Test that port 65535 (MAX_PORT) is accepted."""
         monkeypatch.setenv("ONEX_HTTP_PORT", "65535")
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -1031,12 +1105,12 @@ class TestHttpPortValidation:
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "-1")
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
 
-            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+            with patch("omnibase_infra.runtime.service_kernel.logger") as mock_logger:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
@@ -1066,7 +1140,7 @@ class TestHttpPortValidation:
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "100000")
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -1092,12 +1166,12 @@ class TestHttpPortValidation:
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "not_a_number")
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
 
-            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+            with patch("omnibase_infra.runtime.service_kernel.logger") as mock_logger:
                 exit_code = await bootstrap()
 
         assert exit_code == 0
@@ -1148,12 +1222,12 @@ class TestHttpPortValidation:
 
         monkeypatch.setenv("ONEX_HTTP_PORT", invalid_port_value)
 
-        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
 
-            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+            with patch("omnibase_infra.runtime.service_kernel.logger") as mock_logger:
                 exit_code = await bootstrap()
 
         assert exit_code == 0, f"Expected success for {description}"

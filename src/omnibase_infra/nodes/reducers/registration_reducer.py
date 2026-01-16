@@ -454,7 +454,7 @@ class ModelValidationResult(BaseModel):
         Refactored to use sentinel values for string fields (OMN-1004).
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     is_valid: bool
     error_code: ValidationErrorCode | None = None

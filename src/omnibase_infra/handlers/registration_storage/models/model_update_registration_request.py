@@ -56,7 +56,7 @@ class ModelUpdateRegistrationRequest(BaseModel):
         ... )
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     node_id: UUID = Field(
         description="ID of the node to update",

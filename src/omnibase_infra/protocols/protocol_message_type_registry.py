@@ -14,7 +14,7 @@ Design Principles:
 
 Related:
     - OMN-937: Central Message Type Registry implementation
-    - MessageTypeRegistry: Primary implementation of this protocol
+    - RegistryMessageType: Primary implementation of this protocol
 
 .. versionadded:: 0.5.0
 """
@@ -71,7 +71,7 @@ class ProtocolMessageTypeRegistry(Protocol):
             registry: ProtocolMessageTypeRegistry = MyRegistry()
 
     See Also:
-        - :class:`MessageTypeRegistry`: Primary implementation
+        - :class:`RegistryMessageType`: Primary implementation
 
     .. versionadded:: 0.5.0
     """

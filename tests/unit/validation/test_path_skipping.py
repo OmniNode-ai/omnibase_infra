@@ -263,7 +263,7 @@ class TestPathSkippingIntegration:
         source_files = [
             Path("src/omnibase_infra/validation/infra_validators.py"),
             Path("src/omnibase_infra/models/model_foo.py"),
-            Path("src/omnibase_infra/event_bus/kafka_event_bus.py"),
+            Path("src/omnibase_infra/event_bus/event_bus_kafka.py"),
             Path("tests/unit/validation/test_path_skipping.py"),
         ]
         for path in source_files:

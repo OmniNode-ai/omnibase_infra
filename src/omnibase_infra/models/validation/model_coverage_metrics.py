@@ -225,7 +225,7 @@ class ModelCoverageMetrics(BaseModel):
             raise ProtocolConfigurationError(
                 "unmapped_types must be list[str]", context=context
             )
-        if not isinstance(coverage_percent, (int, float)):
+        if not isinstance(coverage_percent, int | float):
             raise ProtocolConfigurationError(
                 "coverage_percent must be int or float", context=context
             )
