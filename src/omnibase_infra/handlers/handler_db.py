@@ -135,6 +135,29 @@ _POSTGRES_ERROR_PREFIXES: dict[type[asyncpg.PostgresError], str] = {
     asyncpg.CheckViolationError: "Check constraint violation",
 }
 
+# PostgreSQL SQLSTATE class codes for error classification
+# See: https://www.postgresql.org/docs/current/errcodes-appendix.html
+#
+# TRANSIENT errors (should trip circuit breaker):
+#   - Class 08: Connection Exception (database unreachable, connection lost)
+#   - Class 53: Insufficient Resources (out of memory, disk full, too many connections)
+#   - Class 57: Operator Intervention (admin shutdown, crash recovery, cannot connect now)
+#   - Class 58: System Error (I/O error, undefined file, duplicate file)
+#
+# PERMANENT errors (should NOT trip circuit breaker):
+#   - Class 23: Integrity Constraint Violation (FK, NOT NULL, unique, check)
+#   - Class 42: Syntax Error or Access Rule Violation (bad SQL, undefined table/column)
+#   - Class 28: Invalid Authorization Specification (bad credentials)
+#   - Class 22: Data Exception (division by zero, string data truncation)
+#   - Class 40: Transaction Rollback (serialization failure, deadlock) - arguably transient
+#                but typically indicates application-level retry needed, not infrastructure issue
+#
+# The key insight: transient errors indicate the DATABASE INFRASTRUCTURE is unhealthy,
+# while permanent errors indicate the QUERY/APPLICATION is invalid. The circuit breaker
+# protects against infrastructure failures, not application bugs.
+_TRANSIENT_SQLSTATE_CLASSES: frozenset[str] = frozenset({"08", "53", "57", "58"})
+_PERMANENT_SQLSTATE_CLASSES: frozenset[str] = frozenset({"22", "23", "28", "42"})
+
 
 class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     """PostgreSQL database handler using asyncpg connection pool (MVP: query, execute only).
@@ -511,6 +534,106 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             "Invalid 'parameters' in payload - must be a list", context=ctx
         )
 
+    def _is_transient_error(self, error: asyncpg.PostgresError) -> bool:
+        """Determine if a PostgreSQL error is transient (should trip circuit breaker).
+
+        Transient errors indicate infrastructure issues where retrying later may succeed:
+        - Connection failures (Class 08)
+        - Resource exhaustion (Class 53)
+        - Server shutdown/restart (Class 57)
+        - System I/O errors (Class 58)
+
+        Permanent errors indicate application/query bugs that won't be fixed by retrying:
+        - Constraint violations (Class 23): FK, NOT NULL, unique, check
+        - Syntax errors (Class 42): bad SQL, undefined table/column
+        - Authorization failures (Class 28): invalid credentials
+        - Data exceptions (Class 22): division by zero, truncation
+
+        The circuit breaker ONLY trips on transient errors because:
+        1. Transient errors suggest the database infrastructure is unhealthy
+        2. Opening the circuit prevents cascading failures and gives the DB time to recover
+        3. Permanent errors are application bugs that should be fixed in code, not retried
+
+        Args:
+            error: The asyncpg PostgresError exception to classify.
+
+        Returns:
+            True if the error is transient (should increment circuit breaker failure count),
+            False if the error is permanent (should NOT affect circuit breaker state).
+
+        Examples:
+            >>> # Connection lost - transient, should trip circuit
+            >>> handler._is_transient_error(asyncpg.PostgresConnectionError())
+            True
+
+            >>> # FK violation - permanent, should NOT trip circuit
+            >>> handler._is_transient_error(asyncpg.ForeignKeyViolationError())
+            False
+        """
+        # Get SQLSTATE code from exception (5-character code like '23503')
+        sqlstate = getattr(error, "sqlstate", None)
+
+        if sqlstate is None:
+            # No SQLSTATE available - fall back to exception type classification
+            # Connection-related errors are always transient
+            if isinstance(error, asyncpg.PostgresConnectionError):
+                return True
+            # Query canceled (timeout) is transient - indicates server overload
+            if isinstance(error, asyncpg.QueryCanceledError):
+                return True
+            # Default: assume permanent (don't trip circuit for unknown errors)
+            # This is conservative - we'd rather miss a transient error than
+            # incorrectly trip the circuit on application bugs
+            logger.debug(
+                "No SQLSTATE for PostgreSQL error, defaulting to permanent classification",
+                extra={
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+            )
+            return False
+
+        # Extract class code (first 2 characters of SQLSTATE)
+        # e.g., '23503' -> '23' (Integrity Constraint Violation)
+        sqlstate_class = sqlstate[:2]
+
+        # Check if class is explicitly transient
+        if sqlstate_class in _TRANSIENT_SQLSTATE_CLASSES:
+            logger.debug(
+                "Classified PostgreSQL error as TRANSIENT (will trip circuit)",
+                extra={
+                    "sqlstate": sqlstate,
+                    "sqlstate_class": sqlstate_class,
+                    "error_type": type(error).__name__,
+                },
+            )
+            return True
+
+        # Check if class is explicitly permanent
+        if sqlstate_class in _PERMANENT_SQLSTATE_CLASSES:
+            logger.debug(
+                "Classified PostgreSQL error as PERMANENT (will NOT trip circuit)",
+                extra={
+                    "sqlstate": sqlstate,
+                    "sqlstate_class": sqlstate_class,
+                    "error_type": type(error).__name__,
+                },
+            )
+            return False
+
+        # Unknown class - log warning and default to permanent (conservative)
+        # Unknown errors are more likely to be application bugs than infrastructure issues
+        logger.warning(
+            "Unknown PostgreSQL SQLSTATE class, defaulting to permanent classification",
+            extra={
+                "sqlstate": sqlstate,
+                "sqlstate_class": sqlstate_class,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+            },
+        )
+        return False
+
     async def _execute_query(
         self,
         sql: str,
@@ -604,7 +727,18 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 f"Not null constraint violation: {e.message}", context=ctx
             ) from e
         except asyncpg.PostgresError as e:
-            # Generic PostgreSQL error - do NOT trip circuit (application bug likely)
+            # Generic PostgreSQL error - use intelligent classification based on SQLSTATE
+            # to determine if this is a transient infrastructure issue or permanent app bug
+            if self._is_transient_error(e):
+                # Transient error (e.g., resource exhaustion, system error)
+                # Record failure to potentially trip circuit breaker
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._record_circuit_failure(
+                            operation="db.query",
+                            correlation_id=correlation_id,
+                        )
+            # Re-raise as RuntimeHostError regardless of classification
             raise RuntimeHostError(
                 f"Database error: {type(e).__name__}", context=ctx
             ) from e
@@ -701,7 +835,18 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 f"Not null constraint violation: {e.message}", context=ctx
             ) from e
         except asyncpg.PostgresError as e:
-            # Generic PostgreSQL error - do NOT trip circuit (application bug likely)
+            # Generic PostgreSQL error - use intelligent classification based on SQLSTATE
+            # to determine if this is a transient infrastructure issue or permanent app bug
+            if self._is_transient_error(e):
+                # Transient error (e.g., resource exhaustion, system error)
+                # Record failure to potentially trip circuit breaker
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._record_circuit_failure(
+                            operation="db.execute",
+                            correlation_id=correlation_id,
+                        )
+            # Re-raise as RuntimeHostError regardless of classification
             raise RuntimeHostError(
                 f"Database error: {type(e).__name__}", context=ctx
             ) from e

@@ -1465,6 +1465,449 @@ class TestHandlerDbMapPostgresError:
         assert "PostgresError" in str(result)
 
 
+class TestHandlerDbTransientErrorClassification:
+    """Test suite for intelligent error classification (_is_transient_error).
+
+    The circuit breaker should only trip on TRANSIENT errors (infrastructure issues)
+    and NOT on PERMANENT errors (application bugs like constraint violations).
+
+    PostgreSQL SQLSTATE class codes:
+    - Transient (should trip circuit): 08, 53, 57, 58
+    - Permanent (should NOT trip circuit): 22, 23, 28, 42
+    """
+
+    @pytest.fixture
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
+
+    # --- Transient error tests (should return True) ---
+
+    def test_connection_error_is_transient(self, handler: HandlerDb) -> None:
+        """Test PostgresConnectionError is classified as transient."""
+        error = asyncpg.PostgresConnectionError("connection lost")
+        assert handler._is_transient_error(error) is True
+
+    def test_query_canceled_is_transient(self, handler: HandlerDb) -> None:
+        """Test QueryCanceledError (timeout) is classified as transient."""
+        error = asyncpg.QueryCanceledError("query timeout")
+        assert handler._is_transient_error(error) is True
+
+    def test_class_08_connection_exception_is_transient(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test Class 08 (Connection Exception) is classified as transient."""
+        # Create error with SQLSTATE 08000 (connection_exception)
+        error = asyncpg.PostgresError("connection exception")
+        error.sqlstate = "08000"
+        assert handler._is_transient_error(error) is True
+
+        # Test 08003 (connection_does_not_exist)
+        error.sqlstate = "08003"
+        assert handler._is_transient_error(error) is True
+
+        # Test 08006 (connection_failure)
+        error.sqlstate = "08006"
+        assert handler._is_transient_error(error) is True
+
+    def test_class_53_insufficient_resources_is_transient(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test Class 53 (Insufficient Resources) is classified as transient."""
+        error = asyncpg.PostgresError("out of memory")
+        # 53000 (insufficient_resources)
+        error.sqlstate = "53000"
+        assert handler._is_transient_error(error) is True
+
+        # 53100 (disk_full)
+        error.sqlstate = "53100"
+        assert handler._is_transient_error(error) is True
+
+        # 53200 (out_of_memory)
+        error.sqlstate = "53200"
+        assert handler._is_transient_error(error) is True
+
+        # 53300 (too_many_connections)
+        error.sqlstate = "53300"
+        assert handler._is_transient_error(error) is True
+
+    def test_class_57_operator_intervention_is_transient(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test Class 57 (Operator Intervention) is classified as transient."""
+        error = asyncpg.PostgresError("server shutdown")
+        # 57000 (operator_intervention)
+        error.sqlstate = "57000"
+        assert handler._is_transient_error(error) is True
+
+        # 57014 (query_canceled)
+        error.sqlstate = "57014"
+        assert handler._is_transient_error(error) is True
+
+        # 57P01 (admin_shutdown)
+        error.sqlstate = "57P01"
+        assert handler._is_transient_error(error) is True
+
+        # 57P02 (crash_shutdown)
+        error.sqlstate = "57P02"
+        assert handler._is_transient_error(error) is True
+
+        # 57P03 (cannot_connect_now)
+        error.sqlstate = "57P03"
+        assert handler._is_transient_error(error) is True
+
+    def test_class_58_system_error_is_transient(self, handler: HandlerDb) -> None:
+        """Test Class 58 (System Error) is classified as transient."""
+        error = asyncpg.PostgresError("I/O error")
+        # 58000 (system_error)
+        error.sqlstate = "58000"
+        assert handler._is_transient_error(error) is True
+
+        # 58030 (io_error)
+        error.sqlstate = "58030"
+        assert handler._is_transient_error(error) is True
+
+    # --- Permanent error tests (should return False) ---
+
+    def test_class_23_integrity_constraint_is_permanent(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test Class 23 (Integrity Constraint Violation) is classified as permanent."""
+        error = asyncpg.PostgresError("constraint violation")
+        # 23000 (integrity_constraint_violation)
+        error.sqlstate = "23000"
+        assert handler._is_transient_error(error) is False
+
+        # 23502 (not_null_violation)
+        error.sqlstate = "23502"
+        assert handler._is_transient_error(error) is False
+
+        # 23503 (foreign_key_violation)
+        error.sqlstate = "23503"
+        assert handler._is_transient_error(error) is False
+
+        # 23505 (unique_violation)
+        error.sqlstate = "23505"
+        assert handler._is_transient_error(error) is False
+
+        # 23514 (check_violation)
+        error.sqlstate = "23514"
+        assert handler._is_transient_error(error) is False
+
+    def test_class_42_syntax_error_is_permanent(self, handler: HandlerDb) -> None:
+        """Test Class 42 (Syntax Error or Access Rule Violation) is permanent."""
+        error = asyncpg.PostgresError("syntax error")
+        # 42000 (syntax_error_or_access_rule_violation)
+        error.sqlstate = "42000"
+        assert handler._is_transient_error(error) is False
+
+        # 42601 (syntax_error)
+        error.sqlstate = "42601"
+        assert handler._is_transient_error(error) is False
+
+        # 42P01 (undefined_table)
+        error.sqlstate = "42P01"
+        assert handler._is_transient_error(error) is False
+
+        # 42703 (undefined_column)
+        error.sqlstate = "42703"
+        assert handler._is_transient_error(error) is False
+
+    def test_class_28_invalid_authorization_is_permanent(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test Class 28 (Invalid Authorization Specification) is permanent."""
+        error = asyncpg.PostgresError("invalid authorization")
+        # 28000 (invalid_authorization_specification)
+        error.sqlstate = "28000"
+        assert handler._is_transient_error(error) is False
+
+        # 28P01 (invalid_password)
+        error.sqlstate = "28P01"
+        assert handler._is_transient_error(error) is False
+
+    def test_class_22_data_exception_is_permanent(self, handler: HandlerDb) -> None:
+        """Test Class 22 (Data Exception) is classified as permanent."""
+        error = asyncpg.PostgresError("data exception")
+        # 22000 (data_exception)
+        error.sqlstate = "22000"
+        assert handler._is_transient_error(error) is False
+
+        # 22012 (division_by_zero)
+        error.sqlstate = "22012"
+        assert handler._is_transient_error(error) is False
+
+        # 22001 (string_data_right_truncation)
+        error.sqlstate = "22001"
+        assert handler._is_transient_error(error) is False
+
+    def test_foreign_key_violation_exception_is_permanent(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test ForeignKeyViolationError (specific exception type) is permanent."""
+        error = asyncpg.ForeignKeyViolationError("FK violation")
+        error.sqlstate = "23503"
+        assert handler._is_transient_error(error) is False
+
+    def test_not_null_violation_exception_is_permanent(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test NotNullViolationError (specific exception type) is permanent."""
+        error = asyncpg.NotNullViolationError("NOT NULL violation")
+        error.sqlstate = "23502"
+        assert handler._is_transient_error(error) is False
+
+    def test_syntax_error_exception_is_permanent(self, handler: HandlerDb) -> None:
+        """Test PostgresSyntaxError (specific exception type) is permanent."""
+        error = asyncpg.PostgresSyntaxError("syntax error")
+        error.sqlstate = "42601"
+        assert handler._is_transient_error(error) is False
+
+    def test_undefined_table_exception_is_permanent(self, handler: HandlerDb) -> None:
+        """Test UndefinedTableError (specific exception type) is permanent."""
+        error = asyncpg.UndefinedTableError("table not found")
+        error.sqlstate = "42P01"
+        assert handler._is_transient_error(error) is False
+
+    # --- Edge cases ---
+
+    def test_error_without_sqlstate_falls_back_to_type_check(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test errors without sqlstate fall back to exception type classification.
+
+        Note: asyncpg exception types like PostgresConnectionError have a default
+        sqlstate (e.g., '08000' for connection errors). This test verifies that
+        even with a mock generic error that has no sqlstate, the fallback logic
+        works correctly for known exception types.
+        """
+        # PostgresConnectionError is always transient, regardless of sqlstate
+        # (it has default sqlstate='08000' which is also transient)
+        conn_error = asyncpg.PostgresConnectionError("connection lost")
+        assert handler._is_transient_error(conn_error) is True
+
+        # QueryCanceledError is always transient
+        # (it has default sqlstate='57014' which is also transient)
+        timeout_error = asyncpg.QueryCanceledError("timeout")
+        assert handler._is_transient_error(timeout_error) is True
+
+        # Test a generic PostgresError with sqlstate explicitly set to None
+        # to verify fallback behavior
+        generic_error = asyncpg.PostgresError("generic error")
+        # Generic error without sqlstate defaults to permanent (conservative)
+        assert handler._is_transient_error(generic_error) is False
+
+    def test_unknown_error_without_sqlstate_defaults_to_permanent(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test unknown errors without sqlstate default to permanent (conservative)."""
+        error = asyncpg.PostgresError("unknown error")
+        # No sqlstate set
+        assert handler._is_transient_error(error) is False
+
+    def test_unknown_sqlstate_class_defaults_to_permanent(
+        self, handler: HandlerDb
+    ) -> None:
+        """Test unknown SQLSTATE class defaults to permanent (conservative)."""
+        error = asyncpg.PostgresError("unknown error")
+        # Class XX is not in our known transient or permanent lists
+        error.sqlstate = "XX123"
+        assert handler._is_transient_error(error) is False
+
+
+class TestHandlerDbCircuitBreakerErrorClassification:
+    """Test suite for circuit breaker behavior with intelligent error classification.
+
+    Verifies that only transient errors (infrastructure issues) trip the circuit
+    breaker, while permanent errors (application bugs) do NOT affect circuit state.
+    """
+
+    @pytest.fixture
+    def handler(self) -> HandlerDb:
+        """Create HandlerDb fixture."""
+        return HandlerDb()
+
+    @pytest.fixture
+    def mock_pool(self) -> MagicMock:
+        """Create mock asyncpg pool fixture."""
+        pool = MagicMock(spec=asyncpg.Pool)
+        pool.close = AsyncMock()
+        return pool
+
+    @pytest.mark.asyncio
+    async def test_transient_error_trips_circuit_breaker(
+        self, handler: HandlerDb, mock_pool: MagicMock
+    ) -> None:
+        """Test that transient errors (connection, timeout) trip circuit breaker."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.PostgresConnectionError("connection lost")
+        )
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await handler.initialize({"dsn": "postgresql://localhost/db"})
+
+            # Circuit breaker should start at 0 failures
+            assert handler._circuit_breaker_failures == 0
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT 1"},
+            }
+
+            with pytest.raises(InfraConnectionError):
+                await handler.execute(envelope)
+
+            # Circuit breaker failure count should increase
+            assert handler._circuit_breaker_failures == 1
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_permanent_error_does_not_trip_circuit_breaker(
+        self, handler: HandlerDb, mock_pool: MagicMock
+    ) -> None:
+        """Test that permanent errors (FK, NOT NULL) do NOT trip circuit breaker."""
+        mock_conn = AsyncMock()
+        fk_error = asyncpg.ForeignKeyViolationError("FK violation")
+        fk_error.message = "violates foreign key constraint"
+        fk_error.sqlstate = "23503"  # FK violation
+        mock_conn.execute = AsyncMock(side_effect=fk_error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await handler.initialize({"dsn": "postgresql://localhost/db"})
+
+            # Circuit breaker should start at 0 failures
+            assert handler._circuit_breaker_failures == 0
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "INSERT INTO orders (user_id) VALUES ($1)",
+                    "parameters": [99999],
+                },
+            }
+
+            with pytest.raises(RuntimeHostError):
+                await handler.execute(envelope)
+
+            # Circuit breaker failure count should NOT increase for FK violation
+            assert handler._circuit_breaker_failures == 0
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_not_null_violation_does_not_trip_circuit_breaker(
+        self, handler: HandlerDb, mock_pool: MagicMock
+    ) -> None:
+        """Test that NOT NULL violation does NOT trip circuit breaker."""
+        mock_conn = AsyncMock()
+        nn_error = asyncpg.NotNullViolationError("NOT NULL violation")
+        nn_error.message = "null value violates not-null constraint"
+        nn_error.sqlstate = "23502"  # NOT NULL violation
+        mock_conn.execute = AsyncMock(side_effect=nn_error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await handler.initialize({"dsn": "postgresql://localhost/db"})
+            assert handler._circuit_breaker_failures == 0
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "INSERT INTO users (name) VALUES ($1)",
+                    "parameters": [None],
+                },
+            }
+
+            with pytest.raises(RuntimeHostError):
+                await handler.execute(envelope)
+
+            # Circuit breaker failure count should NOT increase
+            assert handler._circuit_breaker_failures == 0
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_syntax_error_does_not_trip_circuit_breaker(
+        self, handler: HandlerDb, mock_pool: MagicMock
+    ) -> None:
+        """Test that syntax error does NOT trip circuit breaker."""
+        mock_conn = AsyncMock()
+        syntax_error = asyncpg.PostgresSyntaxError("syntax error")
+        syntax_error.message = "syntax error at or near 'SELEKT'"
+        syntax_error.sqlstate = "42601"  # Syntax error
+        mock_conn.fetch = AsyncMock(side_effect=syntax_error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await handler.initialize({"dsn": "postgresql://localhost/db"})
+            assert handler._circuit_breaker_failures == 0
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELEKT * FROM users"},
+            }
+
+            with pytest.raises(RuntimeHostError):
+                await handler.execute(envelope)
+
+            # Circuit breaker failure count should NOT increase
+            assert handler._circuit_breaker_failures == 0
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_resource_exhaustion_trips_circuit_breaker(
+        self, handler: HandlerDb, mock_pool: MagicMock
+    ) -> None:
+        """Test that resource exhaustion (Class 53) trips circuit breaker."""
+        mock_conn = AsyncMock()
+        resource_error = asyncpg.PostgresError("out of memory")
+        resource_error.sqlstate = "53200"  # Out of memory
+        mock_conn.fetch = AsyncMock(side_effect=resource_error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await handler.initialize({"dsn": "postgresql://localhost/db"})
+            assert handler._circuit_breaker_failures == 0
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT * FROM huge_table"},
+            }
+
+            with pytest.raises(RuntimeHostError):
+                await handler.execute(envelope)
+
+            # Circuit breaker failure count SHOULD increase for resource exhaustion
+            assert handler._circuit_breaker_failures == 1
+
+            await handler.shutdown()
+
+
 __all__: list[str] = [
     "TestHandlerDbInitialization",
     "TestHandlerDbQueryOperations",
@@ -1477,4 +1920,6 @@ __all__: list[str] = [
     "TestHandlerDbRowCountParsing",
     "TestHandlerDbLogWarnings",
     "TestHandlerDbMapPostgresError",
+    "TestHandlerDbTransientErrorClassification",
+    "TestHandlerDbCircuitBreakerErrorClassification",
 ]
