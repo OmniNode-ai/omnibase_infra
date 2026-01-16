@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-01-16
 **Related Tickets**: OMN-1306, OMN-1350
-**Follow-up Tickets**: To be created for validator implementation (`correlation_patterns` validator)
+**Follow-up Tickets**: OMN-1363 (validator), OMN-1362 (migration)
 
 ## Context
 
@@ -248,6 +248,39 @@ def validate_correlation_patterns(file_path: Path) -> list[Violation]:
     return violations
 ```
 
+### Validator Limitations
+
+The AST-based validator has inherent limitations:
+
+**What IS Detected** (will trigger violations):
+- Direct `uuid4()` as `correlation_id` kwarg value
+- `x or uuid4()` pattern as `correlation_id` kwarg value
+- `ModelInfraErrorContext()` constructor calls without `correlation_id` kwarg
+
+**What is NOT Detected** (validator limitations):
+1. **Indirect uuid4 calls**: When `uuid4()` result is assigned to variable first:
+   ```python
+   new_id = uuid4()  # Assigned to variable
+   context = ModelInfraErrorContext(correlation_id=new_id)  # NOT detected
+   ```
+
+2. **Factory functions returning uuid4**: When helper functions wrap uuid4:
+   ```python
+   def get_id() -> UUID:
+       return uuid4()
+   context = ModelInfraErrorContext(correlation_id=get_id())  # NOT detected
+   ```
+
+3. **Dynamic attribute access**: When class/method names are computed at runtime:
+   ```python
+   cls = get_context_class()  # Returns ModelInfraErrorContext
+   context = cls(...)  # NOT detected - name resolved at runtime
+   ```
+
+4. **String-based imports**: `importlib.import_module` patterns are not traced.
+
+**Design Rationale**: The validator prioritizes low false-positive rates over complete detection. The common anti-patterns (direct `uuid4()` in kwarg) are detected, while edge cases require code review.
+
 ### Exemption Mechanism
 
 For legitimate cases requiring direct constructor:
@@ -271,11 +304,11 @@ from omnibase_infra.models.errors import ModelInfraErrorContext
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.enums import EnumInfraTransportType
 
-def connect_to_database(host: str) -> None:
+def connect_to_database(host: str, connection_pool: ConnectionPool) -> None:
     """Attempt database connection with proper error context."""
     try:
-        # Attempt connection
-        establish_connection(host)
+        # Attempt connection using injected pool
+        connection_pool.get_connection(host)
     except ConnectionRefusedError as e:
         # Factory auto-generates correlation_id
         context = ModelInfraErrorContext.with_correlation(
@@ -420,20 +453,32 @@ This requires broader architectural consensus and is tracked separately.
 
 ### Finding Direct Constructor Usage
 
-These are quick manual checks for ad-hoc verification. The `correlation_patterns` validator (when implemented) provides robust AST-based detection with proper exemption handling.
+These are quick manual checks for ad-hoc verification. The `correlation_patterns` validator ([OMN-1363](https://linear.app/omninode/issue/OMN-1363)) provides robust AST-based detection with proper exemption handling.
 
 ```bash
 # Quick check: Find potential violations (direct constructor without with_correlation)
-grep -rn "ModelInfraErrorContext(" src/ --include="*.py" | grep -v "with_correlation" | grep -v "__pycache__"
+# Excludes: factory method definition, test files, __pycache__
+grep -rn "ModelInfraErrorContext(" src/ --include="*.py" \
+    | grep -v "with_correlation" \
+    | grep -v "__pycache__" \
+    | grep -v "def with_correlation" \
+    | grep -v "# Example" \
+    | grep -v '"""'
 
 # Quick check: Find manual uuid4() in correlation_id
-grep -rn "correlation_id=uuid4()" src/ --include="*.py" | grep -v "__pycache__" | grep -v "with_correlation"
+# Excludes: factory method implementation, comments
+grep -rn "correlation_id=uuid4()" src/ --include="*.py" \
+    | grep -v "__pycache__" \
+    | grep -v "model_infra_error_context.py" \
+    | grep -v "# "
 
 # Quick check: Find or-pattern
-grep -rn "correlation_id.*or.*uuid4()" src/ --include="*.py" | grep -v "__pycache__" | grep -v "with_correlation"
+grep -rn "correlation_id.*or.*uuid4()" src/ --include="*.py" \
+    | grep -v "__pycache__" \
+    | grep -v "model_infra_error_context.py"
 ```
 
-**Note**: These grep commands are for quick manual verification only. They may produce false positives (e.g., comments, string literals) and miss complex patterns. Use the AST-based validator for authoritative enforcement.
+**Note**: These grep commands are for quick manual verification only. They may produce false positives (e.g., comments, string literals, docstrings) and miss complex patterns (e.g., multiline expressions, indirect variable assignment). Use the AST-based validator for authoritative enforcement once [OMN-1363](https://linear.app/omninode/issue/OMN-1363) is implemented.
 
 ### Code Review Checklist
 
@@ -451,7 +496,10 @@ When reviewing code with `ModelInfraErrorContext`:
 - `scripts/validate.py` - Existing validator framework
 - [OMN-1306](https://linear.app/omninode/issue/OMN-1306) - Infrastructure error context refactoring
 - [OMN-1350](https://linear.app/omninode/issue/OMN-1350) - Document factory pattern in ADR
+- [OMN-1363](https://linear.app/omninode/issue/OMN-1363) - Validator implementation (follow-up)
+- [OMN-1362](https://linear.app/omninode/issue/OMN-1362) - Migration to factory pattern (follow-up)
 
 ### Planned Follow-up Work
 
-- **Validator Implementation**: Create Linear ticket for implementing `scripts/validate.py correlation_patterns` validator with pre-commit and CI integration (see "Lint/Validator Enforcement" section above)
+- **Validator Implementation** ([OMN-1363](https://linear.app/omninode/issue/OMN-1363)): Implement `scripts/validate.py correlation_patterns` validator with pre-commit and CI integration (see "Lint/Validator Enforcement" section above)
+- **Migration** ([OMN-1362](https://linear.app/omninode/issue/OMN-1362)): Migrate existing codebase to use `with_correlation()` factory pattern consistently
