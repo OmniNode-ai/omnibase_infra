@@ -30,7 +30,13 @@ from uuid import UUID, uuid4
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
     from typing import Protocol
+
+    # Type alias for async message handlers (must match test_correlation_propagation.py)
+    _AsyncMessageHandler = Callable[
+        [dict[str, object]], Coroutine[object, object, None]
+    ]
 
     class ProtocolTestEventBus(Protocol):
         """Test-specific protocol for SimpleAsyncEventBus - NOT interchangeable with production.
@@ -84,12 +90,12 @@ if TYPE_CHECKING:
             """
             ...
 
-        def subscribe(self, topic: str, handler: object) -> None:
+        def subscribe(self, topic: str, handler: _AsyncMessageHandler) -> None:
             """Subscribe a handler to a topic.
 
             Args:
                 topic: Topic name to subscribe to.
-                handler: Async callable that accepts message dict.
+                handler: Async callable that accepts message dict and returns None.
             """
             ...
 
@@ -132,7 +138,12 @@ async def log_capture() -> AsyncGenerator[list[logging.LogRecord], None]:
     try:
         yield captured_records
     finally:
-        await asyncio.sleep(0)  # Flush pending async logs
+        # Small delay (10ms) for reliable log flushing in CI environments.
+        # asyncio.sleep(0) only yields once; 0.01s provides margin for:
+        # - High CPU load in CI runners
+        # - Multiple event loop iterations for pending log operations
+        # - Containerized environments with timing variations
+        await asyncio.sleep(0.01)
         try:
             logger.removeHandler(handler)
         except ValueError:  # Handler already removed
