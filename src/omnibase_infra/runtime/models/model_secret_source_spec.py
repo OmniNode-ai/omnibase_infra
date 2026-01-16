@@ -12,6 +12,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Canonical type alias for secret source types.
+# Reuse this type across all secret-related models for consistency.
+SecretSourceType = Literal["env", "vault", "file"]
+
 
 class ModelSecretSourceSpec(BaseModel):
     """Source specification for a single secret.
@@ -46,7 +50,7 @@ class ModelSecretSourceSpec(BaseModel):
         from_attributes=True,
     )
 
-    source_type: Literal["env", "vault", "file"] = Field(
+    source_type: SecretSourceType = Field(
         ...,
         description="Type of secret source: 'env' for environment variables, "
         "'vault' for HashiCorp Vault, 'file' for file-based secrets.",
@@ -59,4 +63,4 @@ class ModelSecretSourceSpec(BaseModel):
     )
 
 
-__all__: list[str] = ["ModelSecretSourceSpec"]
+__all__: list[str] = ["ModelSecretSourceSpec", "SecretSourceType"]

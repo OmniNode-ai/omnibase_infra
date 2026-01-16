@@ -9,9 +9,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.runtime.models.model_secret_source_spec import SecretSourceType
 
 
 class ModelSecretSourceInfo(BaseModel):
@@ -49,7 +50,7 @@ class ModelSecretSourceInfo(BaseModel):
         min_length=1,
         description="The logical name of the secret.",
     )
-    source_type: Literal["env", "vault", "file"] = Field(
+    source_type: SecretSourceType = Field(
         ...,
         description="The source type from which the secret is resolved.",
     )

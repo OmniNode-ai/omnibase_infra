@@ -22,12 +22,28 @@ import re
 import sys
 from pathlib import Path
 
-# Patterns to detect
+# Patterns to detect - fully qualified os.* usage
 FORBIDDEN_PATTERNS = [
     re.compile(r"os\.getenv\s*\("),
     re.compile(r"os\.environ\s*\["),
     re.compile(r"os\.environ\.get\s*\("),
     re.compile(r"os\.environ\.setdefault\s*\("),
+    re.compile(r"os\.environ\.pop\s*\("),  # Mutation: removes env var
+    re.compile(r"os\.environ\.clear\s*\("),  # Mutation: removes all env vars
+    re.compile(r"os\.environ\.update\s*\("),  # Mutation: bulk updates env vars
+    # Alias-agnostic patterns: catch `from os import environ` or `from os import getenv`
+    # These use word boundary (\b) + negative lookbehind to:
+    # 1. Match only standalone `environ` (not `process_environ` or `myenviron`)
+    # 2. Avoid double-matching when `os.environ` is used (handled by os.* patterns above)
+    re.compile(r"(?<!os\.)\benviron\s*\["),  # environ["VAR"] without os. prefix
+    re.compile(
+        r"(?<!os\.)\benviron\.get\s*\("
+    ),  # environ.get("VAR") without os. prefix
+    re.compile(r"(?<!os\.)\benviron\.setdefault\s*\("),
+    re.compile(r"(?<!os\.)\benviron\.pop\s*\("),
+    re.compile(r"(?<!os\.)\benviron\.clear\s*\("),
+    re.compile(r"(?<!os\.)\benviron\.update\s*\("),
+    re.compile(r"(?<!os\.)\bgetenv\s*\("),  # getenv("VAR") - bare function call
 ]
 
 # Production paths to scan (relative to repo root)
@@ -39,14 +55,28 @@ SCAN_PATHS = [
     "src/omnibase_infra/event_bus/",
 ]
 
-# Paths to always exclude
-EXCLUDE_PATHS = [
-    "__pycache__",
-    ".pyc",
-    "test_",
-    "_test.py",
-    "conftest.py",
-]
+# Exclusion patterns - evaluated by _matches_exclusion_pattern()
+# Each pattern is checked against path components or filename to prevent substring false positives.
+# For example, "test_" only matches filenames starting with "test_", not paths like "contest_helper/".
+EXCLUDE_PATTERNS = {
+    # Directory component patterns (must be exact path component)
+    "directory_components": [
+        "__pycache__",  # Matches __pycache__ as a directory in path
+    ],
+    # Filename prefix patterns (filename must start with this)
+    "filename_prefixes": [
+        "test_",  # Matches test_foo.py, not contest_foo.py
+    ],
+    # Filename suffix patterns (filename must end with this)
+    "filename_suffixes": [
+        "_test.py",  # Matches foo_test.py, not foo_test_data.py
+        ".pyc",  # Matches compiled Python files
+    ],
+    # Exact filename matches (filename must be exactly this)
+    "exact_filenames": [
+        "conftest.py",  # Pytest configuration files
+    ],
+}
 
 # Bootstrap exception - these files may use os.getenv for Vault bootstrap only
 # Uses exact relative paths to prevent overly broad exemptions
@@ -55,6 +85,48 @@ BOOTSTRAP_EXCEPTION_PATHS = [
 ]
 
 ALLOWLIST_FILE = ".secretresolver_allowlist"
+
+# Inline exclusion marker pattern - must be in a comment context
+# Pattern: # followed by optional whitespace, then ONEX_EXCLUDE: secret_resolver
+# This is stricter than substring matching to avoid false positives from string literals
+INLINE_EXCLUSION_PATTERN = re.compile(r"#\s*ONEX_EXCLUDE:\s*secret_resolver\b")
+
+
+def _has_inline_exclusion_marker(line: str) -> bool:
+    """Check if line has a valid inline exclusion marker in a comment.
+
+    The marker must appear after a # character that is likely a comment (not in a string).
+    This uses a heuristic: if the # appears after the last quote character on the line,
+    it's likely a comment. This isn't perfect but handles common cases.
+
+    Args:
+        line: The source code line to check.
+
+    Returns:
+        True if the line has a valid inline exclusion marker.
+    """
+    # Find the marker pattern in the line
+    match = INLINE_EXCLUSION_PATTERN.search(line)
+    if not match:
+        return False
+
+    # Get position of the # that starts the marker
+    marker_start = match.start()
+
+    # Heuristic: check if the # is likely in a comment context
+    # Count quotes before the # - if unbalanced, the # might be in a string
+    prefix = line[:marker_start]
+
+    # Simple heuristic: if there's an odd number of quotes before the #,
+    # the # is likely inside a string literal
+    single_quotes = prefix.count("'") - prefix.count("\\'")
+    double_quotes = prefix.count('"') - prefix.count('\\"')
+
+    # If either quote count is odd, the # is likely inside a string
+    if single_quotes % 2 != 0 or double_quotes % 2 != 0:
+        return False
+
+    return True
 
 
 class Violation:
@@ -148,14 +220,63 @@ def find_repo_root() -> Path:
     return Path.cwd()
 
 
+def _matches_exclusion_pattern(filepath: Path, relative_path: str) -> bool:
+    """Check if file matches any exclusion pattern.
+
+    Uses path-component aware matching to prevent false positives from substring matches.
+
+    Args:
+        filepath: The file path being checked.
+        relative_path: The relative path string from repo root.
+
+    Returns:
+        True if the file should be excluded (matches an exclusion pattern).
+    """
+    filename = filepath.name
+    path_parts = Path(relative_path).parts
+
+    # Check directory component patterns (must be exact path component)
+    for pattern in EXCLUDE_PATTERNS["directory_components"]:
+        if pattern in path_parts:
+            return True
+
+    # Check filename prefix patterns
+    for pattern in EXCLUDE_PATTERNS["filename_prefixes"]:
+        if filename.startswith(pattern):
+            return True
+
+    # Check filename suffix patterns
+    for pattern in EXCLUDE_PATTERNS["filename_suffixes"]:
+        if filename.endswith(pattern):
+            return True
+
+    # Check exact filename matches
+    for pattern in EXCLUDE_PATTERNS["exact_filenames"]:
+        if filename == pattern:
+            return True
+
+    return False
+
+
 def should_scan_file(filepath: Path, repo_root: Path) -> bool:
-    """Check if file should be scanned."""
+    """Check if file should be scanned.
+
+    Uses path-component aware exclusion matching to prevent false positives.
+    For example, "test_" only excludes files named "test_*.py", not paths
+    containing "contest_" or similar substrings.
+
+    Args:
+        filepath: The file path being checked.
+        repo_root: Repository root for computing relative path.
+
+    Returns:
+        True if the file should be scanned for violations.
+    """
     relative = str(filepath.relative_to(repo_root))
 
-    # Check exclusions
-    for exclude in EXCLUDE_PATHS:
-        if exclude in relative:
-            return False
+    # Check exclusions using path-component aware matching
+    if _matches_exclusion_pattern(filepath, relative):
+        return False
 
     # Must be a Python file
     if filepath.suffix != ".py":
@@ -182,15 +303,28 @@ def is_bootstrap_exception(filepath: Path, repo_root: Path) -> bool:
     return relative in BOOTSTRAP_EXCEPTION_PATHS
 
 
-def scan_file(filepath: Path, repo_root: Path) -> list[Violation]:
-    """Scan a single file for violations."""
+def scan_file(
+    filepath: Path, repo_root: Path, verbose: bool = False
+) -> list[Violation]:
+    """Scan a single file for violations.
+
+    Args:
+        filepath: The file path to scan.
+        repo_root: Repository root for computing relative path.
+        verbose: If True, log warnings for file read errors.
+
+    Returns:
+        List of violations found in the file.
+    """
     violations: list[Violation] = []
     relative_path = str(filepath.relative_to(repo_root))
 
     try:
         content = filepath.read_text()
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError) as e:
         # File unreadable (permissions, encoding) - skip without failing
+        if verbose:
+            print(f"WARNING: Could not read {relative_path}: {e}")
         return violations
 
     for line_number, line in enumerate(content.splitlines(), start=1):
@@ -199,8 +333,10 @@ def scan_file(filepath: Path, repo_root: Path) -> list[Violation]:
         if stripped.startswith("#"):
             continue
 
-        # Skip if has inline allowlist marker
-        if "# ONEX_EXCLUDE: secret_resolver" in line:
+        # Skip if has inline allowlist marker in a comment
+        # Pattern requires: # followed by optional whitespace, then exactly ONEX_EXCLUDE: secret_resolver
+        # This prevents matching string literals like: s = "# ONEX_EXCLUDE: secret_resolver"
+        if _has_inline_exclusion_marker(line):
             continue
 
         for pattern in FORBIDDEN_PATTERNS:
@@ -218,8 +354,19 @@ def scan_file(filepath: Path, repo_root: Path) -> list[Violation]:
     return violations
 
 
-def scan_directory(scan_path: Path, repo_root: Path) -> list[Violation]:
-    """Scan directory recursively for violations."""
+def scan_directory(
+    scan_path: Path, repo_root: Path, verbose: bool = False
+) -> list[Violation]:
+    """Scan directory recursively for violations.
+
+    Args:
+        scan_path: Directory path to scan.
+        repo_root: Repository root for computing relative paths.
+        verbose: If True, log warnings for file read errors.
+
+    Returns:
+        List of violations found in the directory.
+    """
     violations: list[Violation] = []
 
     if not scan_path.exists():
@@ -232,7 +379,7 @@ def scan_directory(scan_path: Path, repo_root: Path) -> list[Violation]:
         if is_bootstrap_exception(filepath, repo_root):
             continue
 
-        violations.extend(scan_file(filepath, repo_root))
+        violations.extend(scan_file(filepath, repo_root, verbose=verbose))
 
     return violations
 
@@ -279,7 +426,7 @@ def main() -> int:
 
     for scan_path_str in SCAN_PATHS:
         scan_path = repo_root / scan_path_str
-        violations = scan_directory(scan_path, repo_root)
+        violations = scan_directory(scan_path, repo_root, verbose=args.verbose)
         all_violations.extend(violations)
 
     # Filter out allowlisted violations

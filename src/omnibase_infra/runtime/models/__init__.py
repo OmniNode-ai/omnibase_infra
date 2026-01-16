@@ -36,6 +36,7 @@ Exports:
     ModelHealthCheckResponse: HTTP response model for health check endpoints
     ModelProjectorPluginLoaderConfig: Projector plugin loader configuration model
     ModelSecretSourceSpec: Source specification for a single secret
+    SecretSourceType: Type alias for secret source types (env, vault, file)
     ModelSecretMapping: Mapping from logical name to source specification
     ModelSecretResolverConfig: Configuration for SecretResolver
     ModelCachedSecret: Cached secret with TTL tracking
@@ -107,7 +108,10 @@ from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
 from omnibase_infra.runtime.models.model_secret_source_info import ModelSecretSourceInfo
-from omnibase_infra.runtime.models.model_secret_source_spec import ModelSecretSourceSpec
+from omnibase_infra.runtime.models.model_secret_source_spec import (
+    ModelSecretSourceSpec,
+    SecretSourceType,
+)
 from omnibase_infra.runtime.models.model_shutdown_batch_result import (
     ModelShutdownBatchResult,
 )
@@ -147,6 +151,7 @@ __all__: list[str] = [
     "ModelSecretResolverConfig",
     "ModelSecretSourceInfo",
     "ModelSecretSourceSpec",
+    "SecretSourceType",
     "ModelShutdownBatchResult",
     "ModelShutdownConfig",
 ]

@@ -41,9 +41,10 @@ import asyncio
 import logging
 import os
 import threading
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import SecretStr
 
@@ -55,15 +56,15 @@ from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
 from omnibase_infra.runtime.models.model_secret_source_info import ModelSecretSourceInfo
-from omnibase_infra.runtime.models.model_secret_source_spec import ModelSecretSourceSpec
+from omnibase_infra.runtime.models.model_secret_source_spec import (
+    ModelSecretSourceSpec,
+    SecretSourceType,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers.handler_vault import HandlerVault
 
 logger = logging.getLogger(__name__)
-
-# Type alias for secret source types
-SourceType = Literal["env", "vault", "file"]
 
 
 class SecretResolver:
@@ -119,9 +120,10 @@ class SecretResolver:
         self._misses = 0
         self._expired_evictions = 0
         self._refreshes = 0
-        self._hit_counts: dict[str, int] = {}  # Track hit counts per logical_name
+        self._hit_counts: defaultdict[str, int] = defaultdict(int)  # per logical_name
         self._lock = threading.Lock()
-        self._async_lock: asyncio.Lock | None = None
+        # Eager initialization is safe in Python 3.10+ (no running loop required)
+        self._async_lock = asyncio.Lock()
 
         # Build lookup table from mappings
         self._mappings: dict[str, ModelSecretSourceSpec] = {
@@ -236,11 +238,7 @@ class SecretResolver:
                 return cached
 
         # Use async lock to serialize resolution (prevents duplicate fetches)
-        if self._async_lock is None:
-            with self._lock:
-                if self._async_lock is None:
-                    self._async_lock = asyncio.Lock()
-
+        # _async_lock is eagerly initialized in __init__, so no lazy init needed
         async with self._async_lock:
             # Double-check cache after acquiring async lock - another coroutine may
             # have resolved this secret while we were waiting on the lock
@@ -390,7 +388,7 @@ class SecretResolver:
             return None
 
         # Track hits using internal counter (model is frozen)
-        self._hit_counts[logical_name] = self._hit_counts.get(logical_name, 0) + 1
+        self._hit_counts[logical_name] += 1
         self._hits += 1
         return cached.value
 
@@ -514,6 +512,10 @@ class SecretResolver:
     def _read_file_secret(self, path: str) -> str | None:
         """Read secret from file.
 
+        Thread Safety:
+            This method avoids TOCTOU race conditions by catching exceptions
+            during the read operation rather than pre-checking file existence.
+
         Args:
             path: Path to the secret file (absolute or relative to secrets_dir)
 
@@ -526,17 +528,41 @@ class SecretResolver:
         if not secret_path.is_absolute():
             secret_path = self._config.secrets_dir / path
 
-        if not secret_path.exists() or not secret_path.is_file():
-            return None
-
+        # Avoid TOCTOU race: catch exceptions during read instead of pre-checking
         try:
             return secret_path.read_text().strip()
+        except FileNotFoundError:
+            # File does not exist - this is expected for optional secrets
+            logger.debug(
+                "Secret file not found: %s",
+                secret_path,
+                extra={"path": str(secret_path)},
+            )
+            return None
+        except IsADirectoryError:
+            # Path exists but is a directory, not a file
+            logger.warning(
+                "Secret path is a directory, not a file: %s",
+                secret_path,
+                extra={"path": str(secret_path)},
+            )
+            return None
         except PermissionError:
-            # Treat permission errors as "not found" - the secret is not accessible
+            # Permission denied - log at warning level since this may indicate
+            # a configuration issue (file exists but is not readable)
             logger.warning(
                 "Permission denied reading secret file: %s",
                 secret_path,
                 extra={"path": str(secret_path)},
+            )
+            return None
+        except OSError as e:
+            # Catch other OS-level errors (e.g., too many open files, I/O errors)
+            logger.warning(
+                "OS error reading secret file %s: %s",
+                secret_path,
+                e,
+                extra={"path": str(secret_path), "error": str(e)},
             )
             return None
 
@@ -628,7 +654,7 @@ class SecretResolver:
         self,
         logical_name: str,
         value: SecretStr,
-        source_type: SourceType,
+        source_type: SecretSourceType,
     ) -> None:
         """Cache a resolved secret with appropriate TTL.
 
@@ -648,7 +674,7 @@ class SecretResolver:
             expires_at=now + timedelta(seconds=ttl_seconds),
         )
 
-    def _get_ttl(self, logical_name: str, source_type: SourceType) -> int:
+    def _get_ttl(self, logical_name: str, source_type: SecretSourceType) -> int:
         """Get TTL for a secret based on source type or override.
 
         Args:
@@ -698,4 +724,4 @@ class SecretResolver:
         return "***"
 
 
-__all__: list[str] = ["SecretResolver", "SourceType"]
+__all__: list[str] = ["SecretResolver", "SecretSourceType"]

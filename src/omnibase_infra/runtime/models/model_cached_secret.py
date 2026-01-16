@@ -8,10 +8,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Literal
+from datetime import UTC, datetime, timezone
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+
+from omnibase_infra.runtime.models.model_secret_source_spec import SecretSourceType
 
 
 class ModelCachedSecret(BaseModel):
@@ -54,7 +55,7 @@ class ModelCachedSecret(BaseModel):
         ...,
         description="The cached secret value. Automatically masked in logs and repr.",
     )
-    source_type: Literal["env", "vault", "file"] = Field(
+    source_type: SecretSourceType = Field(
         ...,
         description="The source type from which this secret was resolved.",
     )
@@ -77,6 +78,34 @@ class ModelCachedSecret(BaseModel):
         description="Number of cache hits for this entry since caching.",
     )
 
+    @field_validator("cached_at", "expires_at", mode="before")
+    @classmethod
+    def ensure_utc_aware(cls, v: datetime) -> datetime:
+        """Ensure datetime fields are timezone-aware (UTC).
+
+        This validator prevents naive/aware datetime comparison errors in
+        is_expired() by ensuring all datetime fields are UTC-aware.
+
+        Args:
+            v: The datetime value to validate.
+
+        Returns:
+            UTC-aware datetime. Naive datetimes are treated as UTC.
+
+        Note:
+            Non-UTC timezones are converted to UTC to ensure consistent
+            comparison behavior.
+        """
+        if not isinstance(v, datetime):
+            return v  # Let Pydantic handle type validation
+        if v.tzinfo is None:
+            # Treat naive datetime as UTC
+            return v.replace(tzinfo=UTC)
+        if v.tzinfo != UTC and v.tzinfo != UTC:
+            # Convert non-UTC timezone to UTC
+            return v.astimezone(UTC)
+        return v
+
     def is_expired(self) -> bool:
         """Check if this cached entry has expired.
 
@@ -84,8 +113,8 @@ class ModelCachedSecret(BaseModel):
             True if the current UTC time is past the expiration time.
 
         Note:
-            This method handles both timezone-aware and timezone-naive
-            datetimes. Naive datetimes are treated as UTC.
+            The field validator ensures expires_at is always UTC-aware,
+            so this comparison is always safe.
 
         Example:
             >>> cached = ModelCachedSecret(...)
@@ -93,12 +122,8 @@ class ModelCachedSecret(BaseModel):
             ...     # Refresh the secret
             ...     pass
         """
-        now = datetime.now(UTC)
-        expires = self.expires_at
-        if expires.tzinfo is None:
-            # Treat naive datetime as UTC
-            expires = expires.replace(tzinfo=UTC)
-        return now > expires
+        # expires_at is guaranteed UTC-aware by field validator
+        return datetime.now(UTC) > self.expires_at
 
 
 __all__: list[str] = ["ModelCachedSecret"]

@@ -531,14 +531,30 @@ password = resolver.get_secret("database.postgres.password")
 For bootstrap secrets or legacy code migration, add to `.secretresolver_allowlist`:
 
 ```text
-# .secretresolver_allowlist
-# Format: filepath:line_number # ticket reason
+# SecretResolver Migration Allowlist
+# OMN-764: Centralized secret resolution
+#
+# Format: filepath:line_number # ticket VARIABLE_NAME (optional context)
+# Remove entries as files are migrated to use SecretResolver
+#
+# ==============================================================================
+# Runtime - Service Kernel
+# ==============================================================================
+src/omnibase_infra/runtime/service_kernel.py:157 # OMN-764 ONEX_CONTRACTS_DIR
+src/omnibase_infra/runtime/service_kernel.py:630 # OMN-764 POSTGRES_HOST
+src/omnibase_infra/runtime/service_kernel.py:635 # OMN-764 POSTGRES_USER
 
-src/bootstrap.py:15 # OMN-764 VAULT_TOKEN bootstrap
+# ==============================================================================
+# Legacy - Pending Migration
+# ==============================================================================
 src/legacy/adapter.py:42 # OMN-999 LEGACY_API_KEY migration pending
 ```
 
-**Note**: Allowlisted entries should include a ticket reference and be reviewed periodically.
+**Allowlist Conventions**:
+- Group entries by logical section using `# ===` delimiters
+- Use relative paths from repository root
+- Include ticket reference (e.g., `OMN-764`) and variable name
+- Remove entries as files are migrated to use SecretResolver
 
 ---
 
