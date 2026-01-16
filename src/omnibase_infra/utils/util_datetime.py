@@ -118,7 +118,7 @@ def ensure_timezone_aware(
         - PR #146: Datetime validation improvements
     """
     # Check if datetime is already timezone-aware
-    if dt.tzinfo is not None and dt.utcoffset() is not None:
+    if is_timezone_aware(dt):
         return dt
 
     # Handle naive datetime
@@ -251,7 +251,7 @@ def validate_timezone_aware_with_context(
     .. versionadded:: 0.9.1
         Created to consolidate duplicate timezone validation in handlers.
     """
-    if dt.tzinfo is not None and dt.utcoffset() is not None:
+    if is_timezone_aware(dt):
         return dt
 
     # Lazy imports to avoid circular dependency (utils -> errors -> models -> utils)
@@ -334,7 +334,7 @@ def warn_if_naive_datetime(
     log = logger if logger is not None else globals()["logger"]
 
     # Check if datetime is timezone-aware - if so, nothing to warn about
-    if dt.tzinfo is not None and dt.utcoffset() is not None:
+    if is_timezone_aware(dt):
         return
 
     # Build context-aware message parts

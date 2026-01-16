@@ -88,6 +88,7 @@ from omnibase_infra.idempotency.models import (
 from omnibase_infra.idempotency.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
+from omnibase_infra.utils.util_datetime import is_timezone_aware
 
 logger = logging.getLogger(__name__)
 
@@ -618,7 +619,7 @@ class StoreIdempotencyPostgres(ProtocolIdempotencyStore):
         # Validate timezone awareness - fail fast on naive datetime
         # Note: This guards against external callers passing naive datetimes.
         # Our internal datetime.now(UTC) is always timezone-aware.
-        if processed_at is not None and processed_at.tzinfo is None:
+        if processed_at is not None and not is_timezone_aware(processed_at):
             raise RuntimeHostError(
                 "processed_at must be timezone-aware (got naive datetime)",
                 context=context,

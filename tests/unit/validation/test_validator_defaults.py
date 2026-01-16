@@ -71,11 +71,13 @@ class TestInfraValidatorConstants:
           - Reduced non-optional unions from 122 to 70
         - 81 (2026-01-16): OMN-1305 PR #151 merge with main - combined changes
         - 83 (2026-01-16): OMN-1181 structured errors merge with main
+        - 82 (2026-01-16): OMN-1181 fix PolicyTypeInput validator coercion
+                          (-1 union: changed return type from str | EnumPolicyType to EnumPolicyType)
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 83, (
-            "INFRA_MAX_UNIONS should be 83 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 82, (
+            "INFRA_MAX_UNIONS should be 82 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

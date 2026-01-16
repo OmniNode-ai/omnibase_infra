@@ -486,7 +486,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
 
         Example:
             >>> from omnibase_infra.enums import EnumPolicyType
-            >>> registry = PolicyRegistry()
+            >>> registry = RegistryPolicy()
             >>> # Enum to string
             >>> registry._normalize_policy_type(EnumPolicyType.ORCHESTRATOR)
             'orchestrator'
@@ -521,7 +521,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         SINGLE SOURCE OF TRUTH for version normalization in omnibase_infra.
 
         This method wraps the shared utility to convert ValueError to
-        ProtocolConfigurationError for PolicyRegistry's error contract.
+        ProtocolConfigurationError for RegistryPolicy's error contract.
 
         Normalization rules:
             1. Strip leading/trailing whitespace
@@ -882,12 +882,12 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
                      Each entry uses ~100 bytes.
 
         Raises:
-            RuntimeError: If cache already initialized (first parse already occurred)
+            ProtocolConfigurationError: If cache already initialized (first parse already occurred)
 
         Example:
             >>> # Configure before any registry operations
-            >>> PolicyRegistry.configure_semver_cache(maxsize=256)
-            >>> registry = PolicyRegistry()
+            >>> RegistryPolicy.configure_semver_cache(maxsize=256)
+            >>> registry = RegistryPolicy()
 
         Note:
             For testing purposes, use _reset_semver_cache() to clear the cache
@@ -897,7 +897,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
             if cls._semver_cache is not None:
                 raise ProtocolConfigurationError(
                     "Cannot reconfigure semver cache after first use. "
-                    "Set PolicyRegistry.SEMVER_CACHE_SIZE before creating any "
+                    "Set RegistryPolicy.SEMVER_CACHE_SIZE before creating any "
                     "registry instances, or use _reset_semver_cache() for testing."
                 )
             cls.SEMVER_CACHE_SIZE = maxsize
@@ -933,8 +933,8 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
 
         Example:
             >>> # In test fixture
-            >>> PolicyRegistry._reset_semver_cache()
-            >>> PolicyRegistry.SEMVER_CACHE_SIZE = 64
+            >>> RegistryPolicy._reset_semver_cache()
+            >>> RegistryPolicy.SEMVER_CACHE_SIZE = 64
             >>> # Now cache will be initialized with size 64 on next use
         """
         with cls._semver_cache_lock:
@@ -1095,7 +1095,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
 
             Cache Size Configuration:
                 For large deployments, configure before first use:
-                    PolicyRegistry.configure_semver_cache(maxsize=256)
+                    RegistryPolicy.configure_semver_cache(maxsize=256)
 
             Cache Size Rationale (default 128):
                 - Typical registry: 10-50 unique policy versions
@@ -1117,18 +1117,18 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
             ProtocolConfigurationError: If version format is invalid
 
         Examples:
-            >>> PolicyRegistry._parse_semver("1.9.0")
+            >>> RegistryPolicy._parse_semver("1.9.0")
             ModelSemVer(major=1, minor=9, patch=0, prerelease='')
-            >>> PolicyRegistry._parse_semver("1.10.0")
+            >>> RegistryPolicy._parse_semver("1.10.0")
             ModelSemVer(major=1, minor=10, patch=0, prerelease='')
-            >>> PolicyRegistry._parse_semver("1.10.0") > PolicyRegistry._parse_semver("1.9.0")
+            >>> RegistryPolicy._parse_semver("1.10.0") > RegistryPolicy._parse_semver("1.9.0")
             True
-            >>> PolicyRegistry._parse_semver("10.0.0") > PolicyRegistry._parse_semver("2.0.0")
+            >>> RegistryPolicy._parse_semver("10.0.0") > RegistryPolicy._parse_semver("2.0.0")
             True
-            >>> PolicyRegistry._parse_semver("1.0.0-alpha")
+            >>> RegistryPolicy._parse_semver("1.0.0-alpha")
             ModelSemVer(major=1, minor=0, patch=0, prerelease='alpha')
             >>> # Prerelease is parsed but NOT used in comparisons:
-            >>> PolicyRegistry._parse_semver("1.0.0-alpha") == PolicyRegistry._parse_semver("1.0.0")
+            >>> RegistryPolicy._parse_semver("1.0.0-alpha") == RegistryPolicy._parse_semver("1.0.0")
             True  # Same major.minor.patch, prerelease ignored
         """
         parser = cls._get_semver_parser()
@@ -1147,13 +1147,13 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
             or None if cache not yet initialized.
 
         Example:
-            >>> PolicyRegistry._reset_semver_cache()
-            >>> PolicyRegistry._parse_semver("1.0.0")
-            >>> info = PolicyRegistry._get_semver_cache_info()
+            >>> RegistryPolicy._reset_semver_cache()
+            >>> RegistryPolicy._parse_semver("1.0.0")
+            >>> info = RegistryPolicy._get_semver_cache_info()
             >>> info.misses  # First call is a miss
             1
-            >>> PolicyRegistry._parse_semver("1.0.0")
-            >>> info = PolicyRegistry._get_semver_cache_info()
+            >>> RegistryPolicy._parse_semver("1.0.0")
+            >>> info = RegistryPolicy._get_semver_cache_info()
             >>> info.hits  # Second call is a hit
             1
         """

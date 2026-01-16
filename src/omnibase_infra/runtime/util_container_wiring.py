@@ -53,7 +53,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from omnibase_core.models.primitives import ModelSemVer
 
@@ -317,10 +316,9 @@ async def wire_infrastructure_services(
                 "hint": hint,
             },
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="wire_infrastructure_services",
-            correlation_id=uuid4(),
         )
         raise ServiceRegistrationError(
             f"Container wiring failed - {hint}",
@@ -343,10 +341,9 @@ async def wire_infrastructure_services(
                 "hint": hint,
             },
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="wire_infrastructure_services",
-            correlation_id=uuid4(),
         )
         raise ServiceRegistrationError(
             f"Container wiring failed - {hint}",
@@ -361,10 +358,9 @@ async def wire_infrastructure_services(
             "Failed to register infrastructure services",
             extra={"error": str(e), "error_type": type(e).__name__},
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="wire_infrastructure_services",
-            correlation_id=uuid4(),
         )
         raise ServiceRegistrationError(
             f"Failed to wire infrastructure services: {e}",
@@ -447,10 +443,9 @@ async def get_policy_registry_from_container(
                 "hint": hint,
             },
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="resolve_policy_registry",
-            correlation_id=uuid4(),
         )
         raise ServiceResolutionError(
             f"Failed to resolve RegistryPolicy - {hint}",
@@ -468,10 +463,9 @@ async def get_policy_registry_from_container(
                 "service_type": "RegistryPolicy",
             },
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="resolve_policy_registry",
-            correlation_id=uuid4(),
         )
         raise ServiceResolutionError(
             "RegistryPolicy not registered in container",
@@ -552,10 +546,9 @@ async def get_or_create_policy_registry(
                 "Failed to auto-register RegistryPolicy",
                 extra={"error": str(e), "error_type": type(e).__name__},
             )
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="auto_register_policy_registry",
-                correlation_id=uuid4(),
             )
             raise ServiceRegistrationError(
                 "Failed to create and register RegistryPolicy",
@@ -628,10 +621,9 @@ async def get_handler_registry_from_container(
                 "hint": hint,
             },
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="resolve_handler_registry",
-            correlation_id=uuid4(),
         )
         raise ServiceResolutionError(
             f"Failed to resolve RegistryProtocolBinding - {hint}",
@@ -649,10 +641,9 @@ async def get_handler_registry_from_container(
                 "service_type": "RegistryProtocolBinding",
             },
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="resolve_handler_registry",
-            correlation_id=uuid4(),
         )
         raise ServiceResolutionError(
             "RegistryProtocolBinding not registered in container",
@@ -726,10 +717,9 @@ async def get_compute_registry_from_container(
                 "hint": hint,
             },
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="resolve_compute_registry",
-            correlation_id=uuid4(),
         )
         raise ServiceResolutionError(
             f"Failed to resolve RegistryCompute - {hint}",
@@ -747,10 +737,9 @@ async def get_compute_registry_from_container(
                 "service_type": "RegistryCompute",
             },
         )
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="resolve_compute_registry",
-            correlation_id=uuid4(),
         )
         raise ServiceResolutionError(
             "RegistryCompute not registered in container",
@@ -831,10 +820,9 @@ async def get_or_create_compute_registry(
                 "Failed to auto-register RegistryCompute",
                 extra={"error": str(e), "error_type": type(e).__name__},
             )
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="auto_register_compute_registry",
-                correlation_id=uuid4(),
             )
             raise ServiceRegistrationError(
                 "Failed to create and register RegistryCompute",

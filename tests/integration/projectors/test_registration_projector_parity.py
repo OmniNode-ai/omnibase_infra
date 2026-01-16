@@ -51,6 +51,7 @@ from omnibase_infra.models.projection import (
 from omnibase_infra.models.registration import ModelNodeCapabilities
 from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
 from omnibase_infra.runtime.projector_shell import ProjectorShell
+from omnibase_infra.utils.util_datetime import is_timezone_aware
 
 if TYPE_CHECKING:
     # Type stub for deleted ProjectorRegistration - used only for type hints
@@ -295,7 +296,7 @@ def normalize_value(value: object, column_name: str) -> object:
     if isinstance(value, datetime):
         # Validate timezone-awareness for datetime values
         # All datetimes should be tz-aware before persisting to database
-        if value.tzinfo is None:
+        if not is_timezone_aware(value):
             raise ValueError(
                 f"Naive datetime detected in column '{column_name}'. "
                 "All datetimes must be timezone-aware. Use datetime.now(UTC) or "

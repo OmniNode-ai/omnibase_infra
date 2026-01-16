@@ -269,10 +269,10 @@ class PluginRegistration:
             # Validate pool creation succeeded - asyncpg.create_pool() can return None
             # in edge cases (e.g., connection issues during pool warmup)
             if self._pool is None:
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.DATABASE,
                     operation="create_postgres_pool",
-                    correlation_id=correlation_id,
                 )
                 raise ContainerWiringError(
                     "PostgreSQL pool creation returned None - connection may have failed",

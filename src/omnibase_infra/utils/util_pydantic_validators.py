@@ -37,6 +37,8 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from omnibase_infra.utils.util_datetime import is_timezone_aware
+
 if TYPE_CHECKING:
     from omnibase_infra.enums import EnumPolicyType
 
@@ -90,7 +92,7 @@ def validate_timezone_aware_datetime(
             return dt  # type: ignore[return-value]
         raise ValueError("timestamp cannot be None")
 
-    if dt.tzinfo is None:
+    if not is_timezone_aware(dt):
         raise ValueError(
             "timestamp must be timezone-aware. Use datetime.now(UTC) or "
             "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
