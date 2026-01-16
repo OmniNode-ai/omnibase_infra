@@ -274,6 +274,7 @@ markers = [
     "e2e: End-to-end tests requiring full infrastructure (Kafka + Consul + PostgreSQL)",
     "runtime: Tests requiring the ONEX runtime container to be running",
     "serial: Tests that must run serially (not in parallel with pytest-xdist) due to resource intensity",
+    "heavy: Heavy integration tests requiring real infrastructure (Kafka, PostgreSQL, HTTP servers). Skipped by default, run with RUN_HEAVY_TESTS=1",
 ]
 addopts = [
     "--strict-markers",
