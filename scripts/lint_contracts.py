@@ -84,7 +84,7 @@ def main() -> int:
 
     try:
         # Import after path setup
-        from omnibase_infra.validation.contract_linter import (
+        from omnibase_infra.validation.linter_contract import (
             ContractLinter,
             EnumContractViolationSeverity,
         )

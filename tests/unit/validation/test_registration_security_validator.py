@@ -36,7 +36,7 @@ from omnibase_infra.models.security import (
 )
 
 # Registration security validator
-from omnibase_infra.validation.registration_security_validator import (
+from omnibase_infra.validation.validator_registration_security import (
     RegistrationSecurityValidator,
     validate_handler_registration,
 )

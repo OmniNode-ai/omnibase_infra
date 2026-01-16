@@ -35,6 +35,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
@@ -104,7 +105,7 @@ def _categorize_size(size: int) -> str:
         return "very_large"
 
 
-class HttpRestHandler(MixinEnvelopeExtraction):
+class HandlerHttpRest(MixinEnvelopeExtraction):
     """HTTP REST protocol handler using httpx async client (MVP: GET, POST only).
 
     Security Features:
@@ -114,7 +115,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
     """
 
     def __init__(self) -> None:
-        """Initialize HttpRestHandler in uninitialized state."""
+        """Initialize HandlerHttpRest in uninitialized state."""
         self._client: httpx.AsyncClient | None = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._max_request_size: int = _DEFAULT_MAX_REQUEST_SIZE
@@ -294,7 +295,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
             await self._client.aclose()
             self._client = None
         self._initialized = False
-        logger.info("HttpRestHandler shutdown complete")
+        logger.info("HandlerHttpRest shutdown complete")
 
     async def execute(
         self, envelope: dict[str, object]
@@ -326,7 +327,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestHandler not initialized. Call initialize() first.", context=ctx
+                "HandlerHttpRest not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -726,7 +727,7 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpRestHandler not initialized - call initialize() first", context=ctx
+                "HandlerHttpRest not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -767,10 +768,16 @@ class HttpRestHandler(MixinEnvelopeExtraction):
                 )
 
         except httpx.TimeoutException as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation=f"http.{method.lower()}",
+                target_name=url,
+                correlation_id=correlation_id,
+                timeout_seconds=self._timeout,
+            )
             raise InfraTimeoutError(
                 f"HTTP {method} request timed out after {self._timeout}s",
-                context=ctx,
-                timeout_seconds=self._timeout,
+                context=timeout_ctx,
             ) from e
         except httpx.ConnectError as e:
             raise InfraConnectionError(
@@ -910,4 +917,4 @@ class HttpRestHandler(MixinEnvelopeExtraction):
         }
 
 
-__all__: list[str] = ["HttpRestHandler"]
+__all__: list[str] = ["HandlerHttpRest"]

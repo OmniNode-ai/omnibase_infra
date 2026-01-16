@@ -71,7 +71,7 @@ class ModelSampleMessagePayload(BaseModel):
     explicit types rather than `Any`.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     data: str = Field(description="Test data string")
     value: int = Field(description="Test numeric value")
@@ -84,7 +84,7 @@ class ModelSampleMessage(BaseModel):
     in DLQ tests. All fields are explicitly typed per ONEX requirements.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_id: str = Field(description="Unique event identifier")
     event_type: str = Field(description="Event type identifier")

@@ -8,7 +8,7 @@ that equivalent version strings (e.g., "1.0", "1.0.0", "v1.0.0") all
 resolve to the same canonical format.
 
 This is the SINGLE SOURCE OF TRUTH for version normalization in the
-runtime package, eliminating code duplication across PolicyRegistry,
+runtime package, eliminating code duplication across RegistryPolicy,
 ModelPolicyKey, and ModelPolicyRegistration.
 """
 
@@ -25,7 +25,7 @@ def normalize_version(version: str) -> str:
     where "1.0.0" and "1.0" might be treated as different versions.
 
     This is the SINGLE SOURCE OF TRUTH for version normalization, used by:
-        - PolicyRegistry._normalize_version()
+        - RegistryPolicy._normalize_version()
         - ModelPolicyKey.validate_and_normalize_version()
         - ModelPolicyRegistration.validate_and_normalize_version()
 

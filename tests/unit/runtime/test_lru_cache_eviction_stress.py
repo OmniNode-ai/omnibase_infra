@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""LRU cache eviction stress tests for PolicyRegistry._parse_semver().
+"""LRU cache eviction stress tests for RegistryPolicy._parse_semver().
 
 This module contains comprehensive stress tests to verify correct LRU (Least Recently Used)
 cache eviction behavior under various load conditions. The tests target the semver parsing
-cache used by PolicyRegistry to optimize version string parsing.
+cache used by RegistryPolicy to optimize version string parsing.
 
 Key behaviors tested:
 1. Cache at max capacity - Verify size limits are enforced
@@ -36,7 +36,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
 
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
 # =============================================================================
 # Test Fixtures
@@ -50,11 +50,11 @@ def reset_cache_state() -> None:
     This ensures each test starts with a clean cache state and
     restores the original cache size after the test completes.
     """
-    original_size = PolicyRegistry.SEMVER_CACHE_SIZE
-    PolicyRegistry._reset_semver_cache()
+    original_size = RegistryPolicy.SEMVER_CACHE_SIZE
+    RegistryPolicy._reset_semver_cache()
     yield
-    PolicyRegistry._reset_semver_cache()
-    PolicyRegistry.SEMVER_CACHE_SIZE = original_size
+    RegistryPolicy._reset_semver_cache()
+    RegistryPolicy.SEMVER_CACHE_SIZE = original_size
 
 
 # =============================================================================
@@ -72,17 +72,17 @@ class TestCacheMaxCapacity:
         cache size never exceeds the configured maximum.
         """
         cache_size = 64
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Generate 10x more versions than cache can hold
         num_versions = cache_size * 10
 
         for i in range(num_versions):
             version = f"{i}.{i % 100}.{i % 50}"
-            PolicyRegistry._parse_semver(version)
+            RegistryPolicy._parse_semver(version)
 
             # Verify cache size after every insertion
-            info = PolicyRegistry._get_semver_cache_info()
+            info = RegistryPolicy._get_semver_cache_info()
             assert info.currsize <= cache_size, (
                 f"Cache size {info.currsize} exceeded max {cache_size} "
                 f"after inserting version {version}"
@@ -95,28 +95,28 @@ class TestCacheMaxCapacity:
         under continuous operation without memory growth.
         """
         cache_size = 32
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Fill cache to capacity
         for i in range(cache_size):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
-        info_at_capacity = PolicyRegistry._get_semver_cache_info()
+        info_at_capacity = RegistryPolicy._get_semver_cache_info()
         assert info_at_capacity.currsize == cache_size
 
         # Continue with 1000 more unique versions
         for i in range(cache_size, cache_size + 1000):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
             # Periodically verify size
             if i % 100 == 0:
-                info = PolicyRegistry._get_semver_cache_info()
+                info = RegistryPolicy._get_semver_cache_info()
                 assert info.currsize == cache_size, (
                     f"Cache size {info.currsize} deviated from max {cache_size}"
                 )
 
         # Final verification
-        info_final = PolicyRegistry._get_semver_cache_info()
+        info_final = RegistryPolicy._get_semver_cache_info()
         assert info_final.currsize == cache_size
 
     def test_cache_size_stability_with_mixed_operations(self) -> None:
@@ -126,12 +126,12 @@ class TestCacheMaxCapacity:
         and cache misses (new versions) to verify size stability.
         """
         cache_size = 16
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Pre-populate with base versions
         base_versions = [f"{i}.0.0" for i in range(cache_size)]
         for v in base_versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
         # Mixed operations: 50% hits, 50% new insertions
         for iteration in range(500):
@@ -142,10 +142,10 @@ class TestCacheMaxCapacity:
                 # Cache miss - new version
                 version = f"{1000 + iteration}.0.0"
 
-            PolicyRegistry._parse_semver(version)
+            RegistryPolicy._parse_semver(version)
 
             # Verify size constraint
-            info = PolicyRegistry._get_semver_cache_info()
+            info = RegistryPolicy._get_semver_cache_info()
             assert info.currsize <= cache_size
 
 
@@ -164,23 +164,23 @@ class TestLRUEvictionOrdering:
         which entries are evicted to verify LRU ordering.
         """
         cache_size = 8
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Fill cache with versions 0-7
         initial_versions = [f"{i}.0.0" for i in range(cache_size)]
         for v in initial_versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         assert info.currsize == cache_size
 
         # Add new version - should evict "0.0.0" (oldest)
-        PolicyRegistry._parse_semver("100.0.0")
+        RegistryPolicy._parse_semver("100.0.0")
 
         # Access "0.0.0" - should be a miss (was evicted)
-        info_before = PolicyRegistry._get_semver_cache_info()
-        PolicyRegistry._parse_semver("0.0.0")
-        info_after = PolicyRegistry._get_semver_cache_info()
+        info_before = RegistryPolicy._get_semver_cache_info()
+        RegistryPolicy._parse_semver("0.0.0")
+        info_after = RegistryPolicy._get_semver_cache_info()
 
         # If "0.0.0" was evicted, accessing it should cause a miss
         assert info_after.misses > info_before.misses, (
@@ -194,25 +194,25 @@ class TestLRUEvictionOrdering:
         they survive when new entries trigger eviction.
         """
         cache_size = 8
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Fill cache with versions 0-7
         for i in range(cache_size):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
         # Access "0.0.0" to make it recently used
-        PolicyRegistry._parse_semver("0.0.0")
+        RegistryPolicy._parse_semver("0.0.0")
 
         # Add enough new entries to evict all original entries except recently used ones
         for i in range(cache_size - 1):
-            PolicyRegistry._parse_semver(f"{100 + i}.0.0")
+            RegistryPolicy._parse_semver(f"{100 + i}.0.0")
 
-        hits_before = PolicyRegistry._get_semver_cache_info().hits
+        hits_before = RegistryPolicy._get_semver_cache_info().hits
 
         # "0.0.0" should still be in cache (was recently accessed)
-        PolicyRegistry._parse_semver("0.0.0")
+        RegistryPolicy._parse_semver("0.0.0")
 
-        hits_after = PolicyRegistry._get_semver_cache_info().hits
+        hits_after = RegistryPolicy._get_semver_cache_info().hits
         assert hits_after > hits_before, (
             "Recently accessed entry 0.0.0 was evicted when it should have been preserved"
         )
@@ -224,25 +224,25 @@ class TestLRUEvictionOrdering:
         not just insertion order.
         """
         cache_size = 4
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Fill cache: 0.0.0, 1.0.0, 2.0.0, 3.0.0 (in order)
         versions = [f"{i}.0.0" for i in range(cache_size)]
         for v in versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
         # Access in reverse order: 3, 2, 1, 0 (making 0.0.0 most recently used)
         for v in reversed(versions):
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
         # Now 3.0.0 is least recently used, should be evicted first
-        PolicyRegistry._parse_semver("100.0.0")
+        RegistryPolicy._parse_semver("100.0.0")
 
-        hits_before = PolicyRegistry._get_semver_cache_info().hits
+        hits_before = RegistryPolicy._get_semver_cache_info().hits
 
         # 3.0.0 should have been evicted
-        PolicyRegistry._parse_semver("3.0.0")
-        hits_after = PolicyRegistry._get_semver_cache_info().hits
+        RegistryPolicy._parse_semver("3.0.0")
+        hits_after = RegistryPolicy._get_semver_cache_info().hits
 
         # If 3.0.0 was evicted (as expected), this should be a miss (no new hits)
         assert hits_after == hits_before, (
@@ -256,14 +256,14 @@ class TestLRUEvictionOrdering:
         that the LRU ordering is maintained correctly.
         """
         cache_size = 16
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Track versions we've added
         active_versions: list[str] = []
 
         for i in range(200):
             version = f"{i}.0.0"
-            PolicyRegistry._parse_semver(version)
+            RegistryPolicy._parse_semver(version)
             active_versions.append(version)
 
             # Only keep track of most recent cache_size versions
@@ -271,11 +271,11 @@ class TestLRUEvictionOrdering:
                 active_versions.pop(0)  # Remove oldest
 
         # Verify all recently added versions are in cache (should be hits)
-        initial_hits = PolicyRegistry._get_semver_cache_info().hits
+        initial_hits = RegistryPolicy._get_semver_cache_info().hits
         for v in active_versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
-        final_hits = PolicyRegistry._get_semver_cache_info().hits
+        final_hits = RegistryPolicy._get_semver_cache_info().hits
         expected_hits = len(active_versions)
         actual_new_hits = final_hits - initial_hits
 
@@ -300,7 +300,7 @@ class TestRapidInsertEvictCycles:
         under high insertion rate.
         """
         cache_size = 64
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         start_time = time.perf_counter()
 
@@ -308,11 +308,11 @@ class TestRapidInsertEvictCycles:
             major = i % 1000
             minor = (i // 1000) % 100
             patch = i % 100
-            PolicyRegistry._parse_semver(f"{major}.{minor}.{patch}")
+            RegistryPolicy._parse_semver(f"{major}.{minor}.{patch}")
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
 
         # Verify cache integrity
         assert info.currsize <= cache_size, (
@@ -334,21 +334,21 @@ class TestRapidInsertEvictCycles:
         exactly one eviction.
         """
         cache_size = 32
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Fill cache to capacity
         for i in range(cache_size):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
-        info_at_capacity = PolicyRegistry._get_semver_cache_info()
+        info_at_capacity = RegistryPolicy._get_semver_cache_info()
         assert info_at_capacity.currsize == cache_size
 
         # Add 500 more unique versions
         num_new_versions = 500
         for i in range(cache_size, cache_size + num_new_versions):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
-        info_after = PolicyRegistry._get_semver_cache_info()
+        info_after = RegistryPolicy._get_semver_cache_info()
 
         # Cache size should remain at max
         assert info_after.currsize == cache_size
@@ -366,18 +366,18 @@ class TestRapidInsertEvictCycles:
         verifying cache remains stable.
         """
         cache_size = 16
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         version_counter = 0
 
         for burst in range(10):
             # Burst of 100 insertions
             for _ in range(100):
-                PolicyRegistry._parse_semver(f"{version_counter}.0.0")
+                RegistryPolicy._parse_semver(f"{version_counter}.0.0")
                 version_counter += 1
 
             # Verify cache integrity after each burst
-            info = PolicyRegistry._get_semver_cache_info()
+            info = RegistryPolicy._get_semver_cache_info()
             assert info.currsize <= cache_size, (
                 f"Cache exceeded limit after burst {burst}"
             )
@@ -392,24 +392,24 @@ class TestRapidInsertEvictCycles:
         to verify cache handles mixed workloads correctly.
         """
         cache_size = 8
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Use valid semver format: major.minor.patch where all are integers
         base_versions = [f"900.{i}.0" for i in range(cache_size // 2)]
         for v in base_versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
         # Alternate: insert new, access base, insert new, access base...
         for i in range(200):
             if i % 2 == 0:
                 # Insert new version (use high major number to distinguish)
-                PolicyRegistry._parse_semver(f"800.{i}.0")
+                RegistryPolicy._parse_semver(f"800.{i}.0")
             else:
                 # Access base version
-                PolicyRegistry._parse_semver(base_versions[i % len(base_versions)])
+                RegistryPolicy._parse_semver(base_versions[i % len(base_versions)])
 
             # Verify size constraint
-            info = PolicyRegistry._get_semver_cache_info()
+            info = RegistryPolicy._get_semver_cache_info()
             assert info.currsize <= cache_size
 
 
@@ -428,10 +428,10 @@ class TestConcurrentCacheAccess:
         threads simultaneously insert new entries.
         """
         cache_size = 64
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Ensure cache is initialized before threads start
-        PolicyRegistry._parse_semver("0.0.0")
+        RegistryPolicy._parse_semver("0.0.0")
 
         errors: list[Exception] = []
         size_violations: list[int] = []
@@ -441,11 +441,11 @@ class TestConcurrentCacheAccess:
             try:
                 for i in range(num_versions):
                     version = f"{thread_id}.{i}.0"
-                    PolicyRegistry._parse_semver(version)
+                    RegistryPolicy._parse_semver(version)
 
                     # Periodically check size (not on every iteration for performance)
                     if i % 50 == 0:
-                        info = PolicyRegistry._get_semver_cache_info()
+                        info = RegistryPolicy._get_semver_cache_info()
                         if info.currsize > cache_size:
                             with lock:
                                 size_violations.append(info.currsize)
@@ -469,7 +469,7 @@ class TestConcurrentCacheAccess:
         )
 
         # Final size check
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         assert info.currsize <= cache_size
 
     def test_concurrent_reads_and_writes_stability(self) -> None:
@@ -479,12 +479,12 @@ class TestConcurrentCacheAccess:
         while others primarily write (new insertions).
         """
         cache_size = 32
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Pre-populate cache with valid semver format
         base_versions = [f"900.{i}.0" for i in range(cache_size)]
         for v in base_versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
         errors: list[Exception] = []
         read_results: list[tuple[int, int, int]] = []  # (hits, misses, size)
@@ -495,8 +495,8 @@ class TestConcurrentCacheAccess:
             try:
                 for _ in range(200):
                     version = base_versions[thread_id % len(base_versions)]
-                    PolicyRegistry._parse_semver(version)
-                info = PolicyRegistry._get_semver_cache_info()
+                    RegistryPolicy._parse_semver(version)
+                info = RegistryPolicy._get_semver_cache_info()
                 with lock:
                     read_results.append((info.hits, info.misses, info.currsize))
             except Exception as e:
@@ -509,8 +509,8 @@ class TestConcurrentCacheAccess:
                 for i in range(100):
                     # Use valid semver format: thread_id * 100 + i creates unique major versions
                     version = f"{thread_id * 100 + i}.{thread_id}.{i}"
-                    PolicyRegistry._parse_semver(version)
-                info = PolicyRegistry._get_semver_cache_info()
+                    RegistryPolicy._parse_semver(version)
+                info = RegistryPolicy._get_semver_cache_info()
                 with lock:
                     read_results.append((info.hits, info.misses, info.currsize))
             except Exception as e:
@@ -541,7 +541,7 @@ class TestConcurrentCacheAccess:
         correct LRU behavior and all operations complete successfully.
         """
         cache_size = 16
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Using ThreadPoolExecutor for better error handling
         errors: list[Exception] = []
@@ -552,7 +552,7 @@ class TestConcurrentCacheAccess:
             success_count = 0
             for i in range(start, start + count):
                 try:
-                    PolicyRegistry._parse_semver(f"{i}.0.0")
+                    RegistryPolicy._parse_semver(f"{i}.0.0")
                     success_count += 1
                 except Exception as e:
                     errors.append(e)
@@ -573,7 +573,7 @@ class TestConcurrentCacheAccess:
         assert all(results), "Some threads failed to complete all operations"
 
         # Verify final cache state
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         assert info.currsize == cache_size  # Should be at capacity
         assert info.misses >= 1000 - cache_size  # Most should be misses
 
@@ -584,7 +584,7 @@ class TestConcurrentCacheAccess:
         access overlapping version sets.
         """
         cache_size = 8
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Small set of shared versions with valid semver format
         shared_versions = [f"999.{i}.0" for i in range(cache_size * 2)]
@@ -598,7 +598,7 @@ class TestConcurrentCacheAccess:
                 for _ in range(500):
                     # Randomly access from shared pool
                     version = random.choice(shared_versions)
-                    PolicyRegistry._parse_semver(version)
+                    RegistryPolicy._parse_semver(version)
                     with lock:
                         access_counts[version] += 1
             except Exception as e:
@@ -640,23 +640,23 @@ class TestCacheHitMissRatios:
         all accesses should be cache hits.
         """
         cache_size = 64
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Working set of 32 versions (half of cache size) with valid semver format
         working_set = [f"800.{i}.0" for i in range(32)]
 
         # Populate cache
         for v in working_set:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
-        hits_after_warmup = PolicyRegistry._get_semver_cache_info().hits
+        hits_after_warmup = RegistryPolicy._get_semver_cache_info().hits
 
         # Access working set 1000 times
         for _ in range(1000):
             for v in working_set:
-                PolicyRegistry._parse_semver(v)
+                RegistryPolicy._parse_semver(v)
 
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         new_hits = info.hits - hits_after_warmup
         expected_hits = 1000 * len(working_set)
 
@@ -678,16 +678,16 @@ class TestCacheHitMissRatios:
         This tests the "thrashing" behavior when working set > cache size.
         """
         cache_size = 16
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Working set 4x larger than cache with valid semver format
         working_set = [f"700.{i}.0" for i in range(cache_size * 4)]
 
         # Access each version once
         for v in working_set:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
-        info_after_first_pass = PolicyRegistry._get_semver_cache_info()
+        info_after_first_pass = RegistryPolicy._get_semver_cache_info()
 
         # All first accesses should be misses
         assert info_after_first_pass.misses == len(working_set), (
@@ -697,9 +697,9 @@ class TestCacheHitMissRatios:
         # Second pass in SAME order - this demonstrates "thrashing"
         # When accessing in same order, each entry gets evicted before reuse
         for v in working_set:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
-        info_after_second_pass = PolicyRegistry._get_semver_cache_info()
+        info_after_second_pass = RegistryPolicy._get_semver_cache_info()
         second_pass_misses = (
             info_after_second_pass.misses - info_after_first_pass.misses
         )
@@ -715,11 +715,11 @@ class TestCacheHitMissRatios:
         # Now test with REVERSE order - should get some hits
         # The cache currently has entries 48-63 (last cache_size entries from second pass)
         # Accessing in reverse order: 63, 62, ... will hit those cached entries
-        info_before_reverse = PolicyRegistry._get_semver_cache_info()
+        info_before_reverse = RegistryPolicy._get_semver_cache_info()
         for v in reversed(working_set):
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
-        info_after_reverse = PolicyRegistry._get_semver_cache_info()
+        info_after_reverse = RegistryPolicy._get_semver_cache_info()
         reverse_hits = info_after_reverse.hits - info_before_reverse.hits
 
         # Should get at least some hits when accessing in reverse
@@ -735,24 +735,24 @@ class TestCacheHitMissRatios:
         caching provides actual benefit.
         """
         cache_size = 128
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Generate test versions that fit in cache
         test_versions = [f"{i}.{i % 10}.{i % 5}" for i in range(cache_size)]
 
         # Cold cache timing
-        PolicyRegistry._reset_semver_cache()
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy._reset_semver_cache()
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
         cold_start = time.perf_counter()
         for v in test_versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
         cold_time = time.perf_counter() - cold_start
 
         # Warm cache timing (10 iterations)
         warm_start = time.perf_counter()
         for _ in range(10):
             for v in test_versions:
-                PolicyRegistry._parse_semver(v)
+                RegistryPolicy._parse_semver(v)
         warm_time = time.perf_counter() - warm_start
 
         # Warm should be faster per iteration than cold
@@ -782,20 +782,20 @@ class TestCacheEdgeCases:
         Tests the minimum viable cache size, where each new entry
         evicts the previous one.
         """
-        PolicyRegistry.SEMVER_CACHE_SIZE = 1
+        RegistryPolicy.SEMVER_CACHE_SIZE = 1
 
         # First entry
-        PolicyRegistry._parse_semver("1.0.0")
-        assert PolicyRegistry._get_semver_cache_info().currsize == 1
+        RegistryPolicy._parse_semver("1.0.0")
+        assert RegistryPolicy._get_semver_cache_info().currsize == 1
 
         # Second entry should evict first
-        PolicyRegistry._parse_semver("2.0.0")
-        assert PolicyRegistry._get_semver_cache_info().currsize == 1
+        RegistryPolicy._parse_semver("2.0.0")
+        assert RegistryPolicy._get_semver_cache_info().currsize == 1
 
         # Access first entry - should be a miss (was evicted)
-        info_before = PolicyRegistry._get_semver_cache_info()
-        PolicyRegistry._parse_semver("1.0.0")
-        info_after = PolicyRegistry._get_semver_cache_info()
+        info_before = RegistryPolicy._get_semver_cache_info()
+        RegistryPolicy._parse_semver("1.0.0")
+        info_after = RegistryPolicy._get_semver_cache_info()
 
         assert info_after.misses > info_before.misses, (
             "1.0.0 should have been evicted from size=1 cache"
@@ -806,17 +806,17 @@ class TestCacheEdgeCases:
 
         Stress test with minimum cache size to verify no edge case bugs.
         """
-        PolicyRegistry.SEMVER_CACHE_SIZE = 1
+        RegistryPolicy.SEMVER_CACHE_SIZE = 1
 
         for i in range(1000):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
-            info = PolicyRegistry._get_semver_cache_info()
+            RegistryPolicy._parse_semver(f"{i}.0.0")
+            info = RegistryPolicy._get_semver_cache_info()
             assert info.currsize == 1, (
                 f"Cache size {info.currsize} != 1 after {i} insertions"
             )
 
         # All should be misses (no hits possible with size=1 and unique versions)
-        final_info = PolicyRegistry._get_semver_cache_info()
+        final_info = RegistryPolicy._get_semver_cache_info()
         assert final_info.misses == 1000
         assert final_info.hits == 0
 
@@ -827,21 +827,21 @@ class TestCacheEdgeCases:
         and one more entry is added.
         """
         cache_size = 8
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Fill to exact capacity
         for i in range(cache_size):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         assert info.currsize == cache_size
         assert info.hits == 0
         assert info.misses == cache_size
 
         # Add one more - triggers eviction (use valid semver)
-        PolicyRegistry._parse_semver("999.0.0")
+        RegistryPolicy._parse_semver("999.0.0")
 
-        info_after = PolicyRegistry._get_semver_cache_info()
+        info_after = RegistryPolicy._get_semver_cache_info()
         assert info_after.currsize == cache_size  # Still at capacity
         assert info_after.misses == cache_size + 1  # One more miss
 
@@ -851,20 +851,20 @@ class TestCacheEdgeCases:
         Verifies that accessing the same entry repeatedly doesn't
         cause any unusual behavior.
         """
-        PolicyRegistry.SEMVER_CACHE_SIZE = 8
+        RegistryPolicy.SEMVER_CACHE_SIZE = 8
 
         # First access - miss
-        PolicyRegistry._parse_semver("1.0.0")
+        RegistryPolicy._parse_semver("1.0.0")
 
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         assert info.misses == 1
         assert info.hits == 0
 
         # Repeated accesses - all hits
         for _ in range(1000):
-            PolicyRegistry._parse_semver("1.0.0")
+            RegistryPolicy._parse_semver("1.0.0")
 
-        info_after = PolicyRegistry._get_semver_cache_info()
+        info_after = RegistryPolicy._get_semver_cache_info()
         assert info_after.misses == 1  # Still only the initial miss
         assert info_after.hits == 1000  # All subsequent were hits
 
@@ -876,7 +876,7 @@ class TestCacheEdgeCases:
         versions (different major/minor/patch or prerelease) are
         cached separately.
         """
-        PolicyRegistry.SEMVER_CACHE_SIZE = 16
+        RegistryPolicy.SEMVER_CACHE_SIZE = 16
 
         # These versions are semantically distinct and will each have their own cache entry
         distinct_versions = [
@@ -891,17 +891,17 @@ class TestCacheEdgeCases:
         # All versions in distinct_versions are valid semver and should parse successfully
         # Do not swallow exceptions - if parsing fails, the test should fail
         for v in distinct_versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
 
         # All distinct versions should be cached separately
         assert info.currsize == len(distinct_versions)
 
         # Verify that equivalent versions share the same cache entry (normalization)
-        info_before = PolicyRegistry._get_semver_cache_info()
-        PolicyRegistry._parse_semver("1.0.0")  # Already cached
-        info_after = PolicyRegistry._get_semver_cache_info()
+        info_before = RegistryPolicy._get_semver_cache_info()
+        RegistryPolicy._parse_semver("1.0.0")  # Already cached
+        info_after = RegistryPolicy._get_semver_cache_info()
 
         # Should be a cache hit, not a new entry
         assert info_after.hits > info_before.hits
@@ -913,24 +913,24 @@ class TestCacheEdgeCases:
         Verify that after reset, the cache is empty and
         behaves as if freshly initialized.
         """
-        PolicyRegistry.SEMVER_CACHE_SIZE = 16
+        RegistryPolicy.SEMVER_CACHE_SIZE = 16
 
         # Populate cache
         for i in range(16):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
-        assert PolicyRegistry._get_semver_cache_info().currsize == 16
+        assert RegistryPolicy._get_semver_cache_info().currsize == 16
 
         # Reset cache
-        PolicyRegistry._reset_semver_cache()
-        PolicyRegistry.SEMVER_CACHE_SIZE = 16
+        RegistryPolicy._reset_semver_cache()
+        RegistryPolicy.SEMVER_CACHE_SIZE = 16
 
         # Cache should be empty (None until reinitialized)
-        assert PolicyRegistry._semver_cache is None
+        assert RegistryPolicy._semver_cache is None
 
         # First access reinitializes (use valid semver)
-        PolicyRegistry._parse_semver("999.0.0")
-        new_info = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._parse_semver("999.0.0")
+        new_info = RegistryPolicy._get_semver_cache_info()
 
         assert new_info.currsize == 1
         assert new_info.misses == 1
@@ -943,7 +943,7 @@ class TestCacheEdgeCases:
         any special behavior in the cache.
         """
         cache_size = 4
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Fill with prerelease versions
         prerelease_versions = [
@@ -954,17 +954,17 @@ class TestCacheEdgeCases:
         ]
 
         for v in prerelease_versions:
-            PolicyRegistry._parse_semver(v)
+            RegistryPolicy._parse_semver(v)
 
-        assert PolicyRegistry._get_semver_cache_info().currsize == cache_size
+        assert RegistryPolicy._get_semver_cache_info().currsize == cache_size
 
         # Add one more - should evict alpha (oldest)
-        PolicyRegistry._parse_semver("1.0.0")
+        RegistryPolicy._parse_semver("1.0.0")
 
         # Check alpha was evicted
-        info_before = PolicyRegistry._get_semver_cache_info()
-        PolicyRegistry._parse_semver("1.0.0-alpha")
-        info_after = PolicyRegistry._get_semver_cache_info()
+        info_before = RegistryPolicy._get_semver_cache_info()
+        RegistryPolicy._parse_semver("1.0.0-alpha")
+        info_after = RegistryPolicy._get_semver_cache_info()
 
         assert info_after.misses > info_before.misses, (
             "Expected 1.0.0-alpha to be evicted"
@@ -986,18 +986,18 @@ class TestCachePerformanceUnderStress:
         and experiencing continuous eviction.
         """
         cache_size = 64
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Fill cache and keep adding (continuous eviction)
         for i in range(cache_size * 2):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
         # Measure lookup latency under continuous churn
         latencies: list[float] = []
 
         for i in range(cache_size * 2, cache_size * 2 + 1000):
             start = time.perf_counter()
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
             latencies.append((time.perf_counter() - start) * 1000)  # ms
 
         # Calculate statistics
@@ -1018,13 +1018,13 @@ class TestCachePerformanceUnderStress:
         operation is a miss causing eviction.
         """
         cache_size = 1  # Maximum eviction rate
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         num_operations = 10_000
         start = time.perf_counter()
 
         for i in range(num_operations):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         ops_per_sec = num_operations / (elapsed_ms / 1000)
@@ -1041,20 +1041,20 @@ class TestCachePerformanceUnderStress:
         continuous eviction.
         """
         cache_size = 32
-        PolicyRegistry.SEMVER_CACHE_SIZE = cache_size
+        RegistryPolicy.SEMVER_CACHE_SIZE = cache_size
 
         # Perform many operations
         for i in range(50_000):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
             # Periodically verify cache state
             if i % 10_000 == 0 and i > 0:
-                info = PolicyRegistry._get_semver_cache_info()
+                info = RegistryPolicy._get_semver_cache_info()
                 assert info.currsize == cache_size, (
                     f"Cache size drifted to {info.currsize} at iteration {i}"
                 )
 
         # Final verification
-        final_info = PolicyRegistry._get_semver_cache_info()
+        final_info = RegistryPolicy._get_semver_cache_info()
         assert final_info.currsize == cache_size
         assert final_info.misses == 50_000  # All unique versions

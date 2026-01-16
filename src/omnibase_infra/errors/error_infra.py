@@ -77,6 +77,9 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.models.errors.model_timeout_error_context import (
+    ModelTimeoutErrorContext,
+)
 
 
 class RuntimeHostError(ModelOnexError):
@@ -285,6 +288,7 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.VAULT: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.VALKEY: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.RUNTIME: EnumCoreErrorCode.OPERATION_FAILED,
+        EnumInfraTransportType.INMEMORY: EnumCoreErrorCode.OPERATION_FAILED,
         EnumInfraTransportType.FILESYSTEM: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.MCP: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         None: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
@@ -345,36 +349,78 @@ class InfraTimeoutError(RuntimeHostError):
     Used for database query timeouts, HTTP request timeouts,
     message broker operation timeouts, or call deadlines.
 
+    Typing Requirements:
+        Context is REQUIRED for timeout errors using ModelTimeoutErrorContext.
+        This model enforces stricter typing with required correlation_id.
+
+        ModelTimeoutErrorContext guarantees:
+        - transport_type: Required (identifies the transport layer)
+        - operation: Required (identifies the operation that timed out)
+        - correlation_id: Required (auto-generated via default_factory if not provided)
+        - target_name: Optional (target resource name)
+        - timeout_seconds: Optional (the timeout value that was exceeded)
+
     Example:
-        >>> context = ModelInfraErrorContext(
+        >>> context = ModelTimeoutErrorContext(
         ...     transport_type=EnumInfraTransportType.DATABASE,
         ...     operation="execute_query",
         ...     target_name="postgresql-primary",
+        ...     correlation_id=request.correlation_id,
+        ...     timeout_seconds=30.0,
         ... )
         >>> raise InfraTimeoutError(
         ...     "Database query exceeded timeout",
         ...     context=context,
-        ...     timeout_seconds=30,
         ... )
+
+        >>> # Auto-generated correlation_id (via default_factory)
+        >>> context = ModelTimeoutErrorContext(
+        ...     transport_type=EnumInfraTransportType.HTTP,
+        ...     operation="fetch_resource",
+        ...     timeout_seconds=10.0,
+        ... )
+        >>> raise InfraTimeoutError("Request timed out", context=context)
     """
 
     def __init__(
         self,
         message: str,
-        context: ModelInfraErrorContext | None = None,
+        context: ModelTimeoutErrorContext,
         **extra_context: object,
     ) -> None:
-        """Initialize InfraTimeoutError.
+        """Initialize InfraTimeoutError with required ModelTimeoutErrorContext.
 
         Args:
             message: Human-readable error message
-            context: Bundled infrastructure context
-            **extra_context: Additional context information (e.g., timeout_seconds)
+            context: Required timeout error context. ModelTimeoutErrorContext
+                guarantees correlation_id is always present (auto-generated
+                via default_factory if not explicitly provided).
+            **extra_context: Additional context information
+
+        Note:
+            Context uses ModelTimeoutErrorContext which guarantees correlation_id
+            at type-check time via its default_factory=uuid4. This provides
+            compile-time safety that correlation_id is always present.
         """
+        # Convert ModelTimeoutErrorContext to ModelInfraErrorContext for base class
+        # This preserves all fields while maintaining compatibility with RuntimeHostError
+        infra_context = ModelInfraErrorContext(
+            transport_type=context.transport_type,
+            operation=context.operation,
+            target_name=context.target_name,
+            correlation_id=context.correlation_id,
+        )
+        # Include timeout_seconds in extra_context if present
+        if context.timeout_seconds is not None:
+            extra_context = {
+                "timeout_seconds": context.timeout_seconds,
+                **extra_context,
+            }
+
         super().__init__(
             message=message,
             error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
-            context=context,
+            context=infra_context,
             **extra_context,
         )
 

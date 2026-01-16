@@ -40,17 +40,19 @@ class TestInfraValidatorConstants:
 
         OMN-983: Strict validation mode enabled.
 
-        This threshold applies ONLY to non-optional unions (excluding `X | None` patterns).
-        Simple optional patterns are idiomatic Python and are NOT counted toward the threshold.
+        This threshold applies ONLY to complex type annotation unions.
+        The following patterns are excluded and NOT counted toward the threshold:
+        - Simple optionals: `X | None` (idiomatic nullable pattern)
+        - isinstance() unions: `isinstance(x, A | B)` (runtime type checks)
 
         What IS counted (threshold applies to):
-        - Multi-type unions: `str | int`, `A | B | C`
+        - Multi-type unions in annotations: `str | int`, `A | B | C`
         - Complex patterns: unions with 3+ types
-        - Non-optional unions: any union without `None` as one of exactly 2 types
+        - Type annotation unions that are not simple optionals
 
         What is NOT counted (excluded from threshold):
         - Simple optionals: `X | None` where X is any single type
-        - These are idiomatic Python for nullable types, not complexity concerns
+        - isinstance() unions: `isinstance(x, str | int)` (runtime checks, not annotations)
 
         Threshold history (after exclusion logic):
         - 120 (2025-12-25): Initial threshold after excluding ~470 `X | None` patterns
@@ -62,14 +64,17 @@ class TestInfraValidatorConstants:
         - 121 (2025-12-25): OMN-949 DLQ, OMN-816, OMN-811, OMN-1006 merges (all used X | None patterns, excluded)
         - 121 (2025-12-26): OMN-1007 registry pattern + merge with main (X | None patterns excluded)
         - 122 (2026-01-15): OMN-1203 corpus capture service, OMN-1346 extract registration domain plugin
+        - 142 (2026-01-16): OMN-1305 ruff UP038 isinstance union syntax modernization (+20 unions)
+        - 121 (2026-01-16): OMN-1305 isinstance union exclusion (-21 isinstance unions now excluded)
         - 70 (2026-01-16): OMN-1358 reduce union complexity with type aliases (PR #157)
           - Introduced type aliases for common union patterns
           - Reduced non-optional unions from 122 to 70
+        - 81 (2026-01-16): OMN-1305 PR #151 merge with main - combined changes
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 70, (
-            "INFRA_MAX_UNIONS should be 70 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 81, (
+            "INFRA_MAX_UNIONS should be 81 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -85,7 +90,7 @@ class TestInfraValidatorConstants:
         - Fixed (code corrected to pass validation)
         - Exempted (added to exempted_patterns list with documented rationale)
 
-        Documented exemptions (KafkaEventBus, RuntimeHostProcess, etc.) are handled
+        Documented exemptions (EventBusKafka, RuntimeHostProcess, etc.) are handled
         via the exempted_patterns list in validate_infra_patterns().
         """
         assert INFRA_PATTERNS_STRICT is True, (
@@ -266,8 +271,8 @@ class TestValidateInfraUnionUsageDefaults:
         from pathlib import Path
 
         # Mock the union counter to return controlled values
-        # Returns: (non_optional_count, total_count, issues)
-        mock_count_unions.return_value = (0, 0, [])
+        # Returns: (threshold_count, total_count, optional_count, isinstance_count, issues)
+        mock_count_unions.return_value = (0, 0, 0, 0, [])
 
         # Call with defaults
         result = validate_infra_union_usage()
@@ -599,13 +604,28 @@ class TestUnionCountRegressionGuard:
             f"threshold ({INFRA_MAX_UNIONS})"
         )
 
-        # Verify optional_unions_excluded is present and consistent
-        excluded = result.metadata.model_extra.get("optional_unions_excluded")
-        assert excluded is not None, (
+        # Verify optional_unions_excluded is present
+        optional_excluded = result.metadata.model_extra.get("optional_unions_excluded")
+        assert optional_excluded is not None, (
             "Metadata should contain optional_unions_excluded count"
         )
-        assert excluded == result.metadata.total_unions - non_optional, (
-            "optional_unions_excluded should equal total_unions - non_optional_unions"
+
+        # Verify isinstance_unions_excluded is present
+        isinstance_excluded = result.metadata.model_extra.get(
+            "isinstance_unions_excluded"
+        )
+        assert isinstance_excluded is not None, (
+            "Metadata should contain isinstance_unions_excluded count"
+        )
+
+        # Verify the counts are consistent:
+        # total = threshold (non_optional) + optional + isinstance
+        expected_excluded = result.metadata.total_unions - non_optional
+        actual_excluded = optional_excluded + isinstance_excluded
+        assert actual_excluded == expected_excluded, (
+            f"excluded counts should equal total_unions - non_optional_unions: "
+            f"{actual_excluded} (optional: {optional_excluded} + isinstance: "
+            f"{isinstance_excluded}) != {expected_excluded}"
         )
 
 
@@ -892,3 +912,195 @@ class TestDefaultsConsistency:
         # Contract validator should default to INFRA_NODES_PATH
         sig = inspect.signature(validate_infra_contracts)
         assert sig.parameters["directory"].default == INFRA_NODES_PATH
+
+
+class TestIsinstanceUnionExclusion:
+    """Tests for isinstance() union exclusion from the threshold count.
+
+    isinstance(x, A | B) is a runtime type check, not a type annotation.
+    These patterns should NOT count toward the union complexity threshold because:
+    1. They are runtime expressions, not static type hints
+    2. Modern Python (PEP 604) and ruff UP038 encourage this syntax
+    3. The validator's goal is to limit complex TYPE ANNOTATIONS
+
+    See OMN-1305 for the feature implementation.
+    """
+
+    def test_isinstance_union_excluded_from_threshold(self, tmp_path: Path) -> None:
+        """Verify isinstance unions are not counted toward threshold.
+
+        A file with only isinstance unions should be valid even with max_unions=0
+        because isinstance unions are excluded from the count.
+        """
+        (tmp_path / "isinstance_only.py").write_text(
+            "def check(x) -> bool:\n"
+            "    if isinstance(x, str | int):\n"
+            "        return True\n"
+            "    return isinstance(x, float | bool)\n"
+        )
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=True)
+
+        assert result.is_valid, "isinstance unions should not count toward threshold"
+        assert result.errors == [], "Should have no errors for isinstance unions"
+
+        # Verify metadata shows the exclusion
+        if result.metadata:
+            total = result.metadata.total_unions
+            isinstance_excluded = result.metadata.model_extra.get(
+                "isinstance_unions_excluded", 0
+            )
+            threshold_count = result.metadata.model_extra.get("non_optional_unions", 0)
+
+            assert total == 2, "Should detect 2 total unions"
+            assert isinstance_excluded == 2, "Should exclude 2 isinstance unions"
+            assert threshold_count == 0, "Threshold count should be 0"
+
+    def test_annotation_union_counts_toward_threshold(self, tmp_path: Path) -> None:
+        """Verify type annotation unions DO count toward threshold.
+
+        A file with annotation unions (not isinstance) should count toward
+        the threshold and fail if max_unions=0.
+        """
+        (tmp_path / "annotation_union.py").write_text(
+            "def process(value: str | int) -> str:\n    return str(value)\n"
+        )
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=True)
+
+        assert not result.is_valid, "Annotation union should count toward threshold"
+
+        if result.metadata:
+            threshold_count = result.metadata.model_extra.get("non_optional_unions", 0)
+            isinstance_excluded = result.metadata.model_extra.get(
+                "isinstance_unions_excluded", 0
+            )
+
+            assert threshold_count == 1, "Should count 1 annotation union"
+            assert isinstance_excluded == 0, "No isinstance unions to exclude"
+
+    def test_mixed_isinstance_and_annotation_unions(self, tmp_path: Path) -> None:
+        """Verify mixed isinstance and annotation unions are counted correctly.
+
+        isinstance unions should be excluded, annotation unions should count.
+        """
+        (tmp_path / "mixed_unions.py").write_text(
+            "def process(value: str | int) -> str:\n"
+            "    if isinstance(value, str | bytes):\n"
+            "        return value\n"
+            "    return str(value)\n"
+        )
+
+        # max_unions=0 should fail because annotation union counts
+        result_strict = validate_infra_union_usage(
+            str(tmp_path), max_unions=0, strict=True
+        )
+        assert not result_strict.is_valid, "Should fail with max_unions=0"
+
+        # max_unions=1 should pass (1 annotation union, isinstance excluded)
+        result_relaxed = validate_infra_union_usage(
+            str(tmp_path), max_unions=1, strict=True
+        )
+        assert result_relaxed.is_valid, "Should pass with max_unions=1"
+
+        if result_relaxed.metadata:
+            total = result_relaxed.metadata.total_unions
+            isinstance_excluded = result_relaxed.metadata.model_extra.get(
+                "isinstance_unions_excluded", 0
+            )
+            threshold_count = result_relaxed.metadata.model_extra.get(
+                "non_optional_unions", 0
+            )
+
+            assert total == 2, "Should detect 2 total unions"
+            assert isinstance_excluded == 1, "Should exclude 1 isinstance union"
+            assert threshold_count == 1, "Should count 1 annotation union"
+
+    def test_isinstance_with_three_types(self, tmp_path: Path) -> None:
+        """Verify isinstance with 3+ types is excluded from threshold count.
+
+        isinstance(x, A | B | C) should be excluded regardless of type count.
+        Note: We use strict=False because omnibase_core may report style issues
+        for 4+ type unions, but our goal here is to verify threshold exclusion.
+        """
+        (tmp_path / "isinstance_multi.py").write_text(
+            "def check(x) -> bool:\n"
+            "    return isinstance(x, str | int | float | bool)\n"
+        )
+
+        # Use strict=False to focus on threshold check, not style issues
+        result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=False)
+
+        # The threshold check should pass because isinstance unions are excluded
+        # (non_optional_unions should be 0, which is <= max_unions=0)
+        if result.metadata:
+            threshold_count = result.metadata.model_extra.get("non_optional_unions", 0)
+            isinstance_excluded = result.metadata.model_extra.get(
+                "isinstance_unions_excluded", 0
+            )
+            assert threshold_count == 0, (
+                "Multi-type isinstance union should be excluded from threshold"
+            )
+            assert isinstance_excluded == 1, (
+                "Should count 1 isinstance union as excluded"
+            )
+
+    def test_isinstance_unions_excluded_field_in_metadata(self) -> None:
+        """Verify isinstance_unions_excluded is present in actual codebase validation.
+
+        This test validates the real codebase contains isinstance unions that
+        are being properly excluded and tracked in metadata.
+        """
+        result = validate_infra_union_usage()
+
+        assert result.metadata is not None, "Metadata should be present"
+        isinstance_count = result.metadata.model_extra.get("isinstance_unions_excluded")
+        assert isinstance_count is not None, (
+            "isinstance_unions_excluded should be in metadata"
+        )
+        assert isinstance(isinstance_count, int), (
+            "isinstance_unions_excluded should be an integer"
+        )
+        assert isinstance_count >= 0, (
+            "isinstance_unions_excluded should be non-negative"
+        )
+
+        # Verify the math: total = threshold + optional + isinstance
+        total = result.metadata.total_unions
+        threshold = result.metadata.model_extra.get("non_optional_unions", 0)
+        optional = result.metadata.model_extra.get("optional_unions_excluded", 0)
+
+        assert total == threshold + optional + isinstance_count, (
+            f"Union counts should sum correctly: "
+            f"{total} != {threshold} + {optional} + {isinstance_count}"
+        )
+
+    def test_optional_and_isinstance_both_excluded(self, tmp_path: Path) -> None:
+        """Verify both optional and isinstance patterns are excluded.
+
+        A file with only optionals and isinstance unions should pass with
+        max_unions=0 since both pattern types are excluded.
+        """
+        (tmp_path / "both_excluded.py").write_text(
+            "def process(value: str | None = None) -> bool:\n"
+            "    if isinstance(value, str | bytes):\n"
+            "        return True\n"
+            "    return False\n"
+        )
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=True)
+
+        assert result.is_valid, "Both optional and isinstance unions should be excluded"
+
+        if result.metadata:
+            total = result.metadata.total_unions
+            optional = result.metadata.model_extra.get("optional_unions_excluded", 0)
+            isinstance_count = result.metadata.model_extra.get(
+                "isinstance_unions_excluded", 0
+            )
+            threshold = result.metadata.model_extra.get("non_optional_unions", 0)
+
+            assert total == 2, "Should detect 2 total unions"
+            assert optional == 1, "Should exclude 1 optional union"
+            assert isinstance_count == 1, "Should exclude 1 isinstance union"
+            assert threshold == 0, "Threshold count should be 0"

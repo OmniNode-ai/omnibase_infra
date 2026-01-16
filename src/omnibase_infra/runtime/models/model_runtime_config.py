@@ -13,8 +13,8 @@ Configuration Priority (highest to lowest):
 Currently Used by kernel.py:
     - input_topic: Used for RuntimeHostProcess.input_topic
     - output_topic: Used for RuntimeHostProcess.output_topic
-    - consumer_group (alias: group_id): Used for InMemoryEventBus.group
-    - event_bus.environment: Used for InMemoryEventBus.environment
+    - consumer_group (alias: group_id): Used for EventBusInmemory.group
+    - event_bus.environment: Used for EventBusInmemory.environment
     - shutdown.grace_period_seconds: Used for graceful shutdown timeout
 
 Reserved for Future Use:

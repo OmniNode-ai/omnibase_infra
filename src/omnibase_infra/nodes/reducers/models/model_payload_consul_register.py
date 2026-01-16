@@ -36,7 +36,7 @@ class ModelPayloadConsulRegister(BaseModel):
         health_check: Optional health check configuration.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     intent_type: Literal["consul.register"] = Field(
         default="consul.register",

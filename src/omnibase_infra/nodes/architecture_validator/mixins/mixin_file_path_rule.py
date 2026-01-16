@@ -84,7 +84,7 @@ class MixinFilePathRule:
             None
         """
         # Only handle string or Path-like targets
-        if isinstance(target, (str, Path)):
+        if isinstance(target, str | Path):
             file_path = str(target)
             if not file_path:
                 return None

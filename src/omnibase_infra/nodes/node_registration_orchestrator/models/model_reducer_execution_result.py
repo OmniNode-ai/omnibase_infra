@@ -185,7 +185,7 @@ class ModelReducerExecutionResult(BaseModel):
             return ()
 
         # Validate input is a proper sequence (not str/bytes)
-        if not isinstance(v, Sequence) or isinstance(v, (str, bytes)):
+        if not isinstance(v, Sequence) or isinstance(v, str | bytes):
             raise ValueError(
                 f"intents must be a tuple or Sequence (excluding str/bytes), "
                 f"got {type(v).__name__}"

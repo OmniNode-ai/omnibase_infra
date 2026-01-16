@@ -5,13 +5,13 @@
 """Handler Registry - Constants and singleton accessors for handler registration.
 
 This module provides constants and singleton accessor functions for the
-ProtocolBindingRegistry and EventBusBindingRegistry classes. The actual
+RegistryProtocolBinding and RegistryEventBusBinding classes. The actual
 registry implementations are in the runtime/registry/ directory.
 
 Registry Classes (imported from runtime/registry/):
-- ProtocolBindingRegistry: Handler registration and resolution
+- RegistryProtocolBinding: Handler registration and resolution
 - RegistryError: Error raised when registry operations fail
-- EventBusBindingRegistry: Event bus implementation registration
+- RegistryEventBusBinding: Event bus implementation registration
 
 Handler Type Constants:
 - HANDLER_TYPE_HTTP, HANDLER_TYPE_DATABASE, etc.
@@ -20,18 +20,18 @@ Event Bus Kind Constants:
 - EVENT_BUS_INMEMORY, EVENT_BUS_KAFKA
 
 Singleton Accessors:
-- get_handler_registry(): Returns singleton ProtocolBindingRegistry
-- get_event_bus_registry(): Returns singleton EventBusBindingRegistry
+- get_handler_registry(): Returns singleton RegistryProtocolBinding
+- get_event_bus_registry(): Returns singleton RegistryEventBusBinding
 
 Example Usage:
     ```python
     from omnibase_infra.runtime.handler_registry import (
-        ProtocolBindingRegistry,
+        RegistryProtocolBinding,
         HANDLER_TYPE_HTTP,
         HANDLER_TYPE_DATABASE,
     )
 
-    registry = ProtocolBindingRegistry()
+    registry = RegistryProtocolBinding()
 
     # Register handlers
     registry.register(HANDLER_TYPE_HTTP, HttpHandler)
@@ -65,11 +65,11 @@ from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
 
 # Import registry classes from their canonical locations
 from omnibase_infra.runtime.registry.registry_event_bus_binding import (
-    EventBusBindingRegistry,
+    RegistryEventBusBinding,
 )
 from omnibase_infra.runtime.registry.registry_protocol_binding import (
-    ProtocolBindingRegistry,
     RegistryError,
+    RegistryProtocolBinding,
 )
 
 if TYPE_CHECKING:
@@ -132,19 +132,19 @@ EVENT_BUS_KAFKA: str = "kafka"
 # =============================================================================
 
 # Module-level singleton instances (lazy initialized)
-_handler_registry: ProtocolBindingRegistry | None = None
-_event_bus_registry: EventBusBindingRegistry | None = None
+_handler_registry: RegistryProtocolBinding | None = None
+_event_bus_registry: RegistryEventBusBinding | None = None
 _singleton_lock: threading.Lock = threading.Lock()
 
 
-def get_handler_registry() -> ProtocolBindingRegistry:
+def get_handler_registry() -> RegistryProtocolBinding:
     """Get the singleton handler registry instance.
 
-    Returns a module-level singleton instance of ProtocolBindingRegistry.
+    Returns a module-level singleton instance of RegistryProtocolBinding.
     Creates the instance on first call (lazy initialization).
 
     Returns:
-        ProtocolBindingRegistry: The singleton handler registry instance.
+        RegistryProtocolBinding: The singleton handler registry instance.
 
     Example:
         >>> registry = get_handler_registry()
@@ -158,22 +158,22 @@ def get_handler_registry() -> ProtocolBindingRegistry:
         with _singleton_lock:
             # Double-check locking pattern
             if _handler_registry is None:
-                _handler_registry = ProtocolBindingRegistry()
+                _handler_registry = RegistryProtocolBinding()
     return _handler_registry
 
 
-def get_event_bus_registry() -> EventBusBindingRegistry:
+def get_event_bus_registry() -> RegistryEventBusBinding:
     """Get the singleton event bus registry instance.
 
-    Returns a module-level singleton instance of EventBusBindingRegistry.
+    Returns a module-level singleton instance of RegistryEventBusBinding.
     Creates the instance on first call (lazy initialization).
 
     Returns:
-        EventBusBindingRegistry: The singleton event bus registry instance.
+        RegistryEventBusBinding: The singleton event bus registry instance.
 
     Example:
         >>> registry = get_event_bus_registry()
-        >>> registry.register(EVENT_BUS_INMEMORY, InMemoryEventBus)
+        >>> registry.register(EVENT_BUS_INMEMORY, EventBusInmemory)
         >>> same_registry = get_event_bus_registry()
         >>> same_registry is registry
         True
@@ -183,7 +183,7 @@ def get_event_bus_registry() -> EventBusBindingRegistry:
         with _singleton_lock:
             # Double-check locking pattern
             if _event_bus_registry is None:
-                _event_bus_registry = EventBusBindingRegistry()
+                _event_bus_registry = RegistryEventBusBinding()
     return _event_bus_registry
 
 
@@ -306,11 +306,11 @@ __all__: list[str] = [
     "HANDLER_TYPE_MCP",
     "HANDLER_TYPE_VALKEY",
     "HANDLER_TYPE_VAULT",
-    "EventBusBindingRegistry",
-    # Registry classes
-    "ProtocolBindingRegistry",
     # Error class
     "RegistryError",
+    # Registry classes
+    "RegistryEventBusBinding",
+    "RegistryProtocolBinding",
     "get_event_bus_class",
     "get_event_bus_registry",
     # Convenience functions

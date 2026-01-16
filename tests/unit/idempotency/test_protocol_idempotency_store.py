@@ -8,7 +8,7 @@ conform to the protocol contract.
 This file tests:
 1. Protocol definition correctness (runtime_checkable, required methods)
 2. Protocol method signatures (parameter types, return types)
-3. Implementation conformance for InMemoryIdempotencyStore and PostgresIdempotencyStore
+3. Implementation conformance for StoreIdempotencyInmemory and StoreIdempotencyPostgres
 
 Ticket: OMN-945
 """
@@ -21,9 +21,9 @@ from typing import get_type_hints
 from uuid import UUID
 
 from omnibase_infra.idempotency import (
-    InMemoryIdempotencyStore,
-    PostgresIdempotencyStore,
     ProtocolIdempotencyStore,
+    StoreIdempotencyInmemory,
+    StoreIdempotencyPostgres,
 )
 
 
@@ -192,13 +192,13 @@ class TestProtocolConformance:
     """Tests for implementation conformance to ProtocolIdempotencyStore."""
 
     def test_inmemory_conforms_to_protocol(self) -> None:
-        """InMemoryIdempotencyStore should conform to ProtocolIdempotencyStore.
+        """StoreIdempotencyInmemory should conform to ProtocolIdempotencyStore.
 
         Per ONEX conventions, protocol conformance is verified via duck typing
         by checking for required method presence and callability, rather than
         using isinstance checks with Protocol types.
         """
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         # Duck typing verification - check all protocol methods exist and are callable
         required_methods = [
             "check_and_record",
@@ -215,7 +215,7 @@ class TestProtocolConformance:
             )
 
     def test_postgres_conforms_to_protocol(self) -> None:
-        """PostgresIdempotencyStore should conform to ProtocolIdempotencyStore.
+        """StoreIdempotencyPostgres should conform to ProtocolIdempotencyStore.
 
         Per ONEX conventions, protocol conformance is verified via duck typing
         by checking for required method presence and callability, rather than
@@ -229,7 +229,7 @@ class TestProtocolConformance:
         config = ModelPostgresIdempotencyStoreConfig(
             dsn="postgresql://user:pass@localhost:5432/testdb",
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
         # Duck typing verification - check all protocol methods exist and are callable
         required_methods = [
             "check_and_record",
@@ -246,11 +246,11 @@ class TestProtocolConformance:
             )
 
     def test_inmemory_has_all_protocol_methods(self) -> None:
-        """InMemoryIdempotencyStore should implement all protocol methods.
+        """StoreIdempotencyInmemory should implement all protocol methods.
 
         Verifies that all required protocol methods are present and callable.
         """
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         required_methods = [
             "check_and_record",
             "is_processed",
@@ -266,7 +266,7 @@ class TestProtocolConformance:
             )
 
     def test_postgres_has_all_protocol_methods(self) -> None:
-        """PostgresIdempotencyStore should implement all protocol methods.
+        """StoreIdempotencyPostgres should implement all protocol methods.
 
         Verifies that all required protocol methods are present and callable.
         """
@@ -275,7 +275,7 @@ class TestProtocolConformance:
         config = ModelPostgresIdempotencyStoreConfig(
             dsn="postgresql://user:pass@localhost:5432/testdb",
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
         required_methods = [
             "check_and_record",
             "is_processed",

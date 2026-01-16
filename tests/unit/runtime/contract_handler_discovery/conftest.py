@@ -14,7 +14,7 @@ import pytest
 from omnibase_infra.runtime import (
     ContractHandlerDiscovery,
     HandlerPluginLoader,
-    ProtocolBindingRegistry,
+    RegistryProtocolBinding,
 )
 
 # =============================================================================
@@ -93,22 +93,22 @@ class MockValidHandler:
 
 
 @pytest.fixture
-def handler_registry() -> ProtocolBindingRegistry:
+def handler_registry() -> RegistryProtocolBinding:
     """Create a fresh, isolated handler registry for each test.
 
     This fixture uses pytest's default function scope, meaning each test
-    gets its own fresh ProtocolBindingRegistry instance. This ensures:
+    gets its own fresh RegistryProtocolBinding instance. This ensures:
     1. No test pollution - registrations from one test don't affect another
     2. Predictable state - each test starts with an empty registry
     3. Isolation - tests can run in any order without side effects
 
-    Note: ProtocolBindingRegistry is NOT a singleton in this test context.
+    Note: RegistryProtocolBinding is NOT a singleton in this test context.
     Each call creates a new instance with empty registration state.
 
     Returns:
-        A new, empty ProtocolBindingRegistry instance.
+        A new, empty RegistryProtocolBinding instance.
     """
-    return ProtocolBindingRegistry()
+    return RegistryProtocolBinding()
 
 
 @pytest.fixture
@@ -124,7 +124,7 @@ def plugin_loader() -> HandlerPluginLoader:
 @pytest.fixture
 def discovery_service(
     plugin_loader: HandlerPluginLoader,
-    handler_registry: ProtocolBindingRegistry,
+    handler_registry: RegistryProtocolBinding,
 ) -> ContractHandlerDiscovery:
     """Create a ContractHandlerDiscovery instance for testing.
 

@@ -56,8 +56,6 @@ Related:
 
 from __future__ import annotations
 
-__all__ = ["DispatcherNodeRegistrationAcked"]
-
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -88,6 +86,8 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeRegistrationAcked,
     )
+
+__all__ = ["DispatcherNodeRegistrationAcked"]
 
 logger = logging.getLogger(__name__)
 

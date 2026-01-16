@@ -31,11 +31,11 @@ Usage:
     ```python
     from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
     from omnibase_infra.runtime.models import ModelRuntimeSchedulerConfig
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
     # Create scheduler with configuration
     config = ModelRuntimeSchedulerConfig.default()
-    event_bus = KafkaEventBus.default()
+    event_bus = EventBusKafka.default()
     await event_bus.start()
 
     scheduler = RuntimeScheduler(config=config, event_bus=event_bus)
@@ -82,9 +82,10 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
 )
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.runtime.enums import EnumSchedulerStatus
@@ -127,7 +128,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
     Example:
         ```python
         config = ModelRuntimeSchedulerConfig.default()
-        event_bus = KafkaEventBus.default()
+        event_bus = EventBusKafka.default()
         await event_bus.start()
 
         scheduler = RuntimeScheduler(config=config, event_bus=event_bus)
@@ -144,13 +145,13 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
     def __init__(
         self,
         config: ModelRuntimeSchedulerConfig,
-        event_bus: KafkaEventBus,
+        event_bus: EventBusKafka,
     ) -> None:
         """Initialize the RuntimeScheduler.
 
         Args:
             config: Configuration model containing all scheduler settings.
-            event_bus: KafkaEventBus instance for publishing tick events.
+            event_bus: EventBusKafka instance for publishing tick events.
 
         Raises:
             ProtocolConfigurationError: If config or event_bus is None.
@@ -472,9 +473,16 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
             await self._record_tick_failure(correlation_id)
 
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="emit_tick",
+                target_name=self._config.tick_topic,
+                correlation_id=correlation_id,
+                # timeout_seconds omitted - Kafka timeout is event bus level, not available here
+            )
             raise InfraTimeoutError(
                 f"Timeout emitting tick to topic {self._config.tick_topic}",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except Exception as e:

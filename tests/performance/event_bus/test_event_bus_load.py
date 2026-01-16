@@ -22,7 +22,7 @@ Usage:
 
 Related:
     - OMN-57: Event bus performance testing (Phase 9)
-    - InMemoryEventBus: Primary implementation under test
+    - EventBusInmemory: Primary implementation under test
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from statistics import mean
 
 import pytest
 
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
 from tests.performance.event_bus.conftest import generate_unique_topic
 
@@ -61,7 +61,7 @@ class TestSustainedLoad:
             to handle GC pauses and CPU contention in full suite runs)
         """
         topic = generate_unique_topic()
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="sustained",
             group="load",
             max_history=10000,
@@ -125,7 +125,7 @@ class TestSustainedLoad:
         or memory issues over time.
         """
         topic = generate_unique_topic()
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="sub-load",
             group="sustained",
             max_history=5000,
@@ -189,7 +189,7 @@ class TestMemoryStability:
         """
         topic = generate_unique_topic()
         max_history = 1000
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="memory",
             group="bounded",
             max_history=max_history,
@@ -228,7 +228,7 @@ class TestMemoryStability:
         Validates that unsubscribed handlers are properly cleaned up.
         """
         topic = generate_unique_topic()
-        bus = InMemoryEventBus(environment="cleanup", group="test")
+        bus = EventBusInmemory(environment="cleanup", group="test")
         await bus.start()
 
         # Add and remove many subscribers
@@ -268,7 +268,7 @@ class TestMemoryStability:
         Runs multiple iterations and checks that memory growth is bounded.
         """
         topic = generate_unique_topic()
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="leak-test",
             group="memory",
             max_history=100,  # Small history
@@ -329,7 +329,7 @@ class TestMultipleSubscriberLoad:
         Validates that the event bus can handle high subscriber counts.
         """
         topic = generate_unique_topic()
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="fanout",
             group="100-subs",
             max_history=1000,
@@ -398,7 +398,7 @@ class TestMultipleSubscriberLoad:
         subscribers_per_topic = 5
         messages_per_topic = 50
 
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="multi-topic",
             group="load",
             max_history=10000,
@@ -472,7 +472,7 @@ class TestRecoveryResilience:
         Validates that failing subscribers don't break the bus.
         """
         topic = generate_unique_topic()
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="recovery",
             group="error",
             circuit_breaker_threshold=100,  # High threshold to not trip
@@ -530,7 +530,7 @@ class TestRecoveryResilience:
         """
         topic = generate_unique_topic()
         threshold = 5
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="circuit",
             group="breaker",
             circuit_breaker_threshold=threshold,
@@ -582,7 +582,7 @@ class TestRecoveryResilience:
         Validates that shutdown completes cleanly during active publishing.
         """
         topic = generate_unique_topic()
-        bus = InMemoryEventBus(environment="shutdown", group="test")
+        bus = EventBusInmemory(environment="shutdown", group="test")
         await bus.start()
 
         published = 0

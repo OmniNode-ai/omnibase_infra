@@ -11,7 +11,7 @@ This store is NOT suitable for production use:
 - Not distributed (single-process only)
 - Memory grows unbounded without cleanup
 
-Use PostgresIdempotencyStore or ValkeyIdempotencyStore for production.
+Use StoreIdempotencyPostgres or ValkeyIdempotencyStore for production.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from omnibase_infra.idempotency.protocol_idempotency_store import (
 )
 
 
-class InMemoryIdempotencyStore(ProtocolIdempotencyStore):
+class StoreIdempotencyInmemory(ProtocolIdempotencyStore):
     """In-memory idempotency store for testing.
 
     Implements ProtocolIdempotencyStore using a dict for storage and
@@ -50,7 +50,7 @@ class InMemoryIdempotencyStore(ProtocolIdempotencyStore):
         - get_all_records(): Inspect stored records for assertions
 
     Example:
-        >>> store = InMemoryIdempotencyStore()
+        >>> store = StoreIdempotencyInmemory()
         >>> result = await store.check_and_record(message_id, domain="test")
         >>> assert result is True  # First call returns True
         >>> result = await store.check_and_record(message_id, domain="test")
@@ -262,4 +262,4 @@ class InMemoryIdempotencyStore(ProtocolIdempotencyStore):
             return self._storage.get(key)
 
 
-__all__ = ["InMemoryIdempotencyStore"]
+__all__ = ["StoreIdempotencyInmemory"]

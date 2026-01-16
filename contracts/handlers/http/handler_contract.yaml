@@ -6,7 +6,7 @@
 # Unique identifier for this handler
 name: handler-http
 # Fully qualified class path for dynamic import
-handler_class: omnibase_infra.handlers.handler_http.HttpRestHandler
+handler_class: omnibase_infra.handlers.handler_http.HandlerHttpRest
 # Handler behavioral classification:
 # This handler is 'effect' because it makes HTTP requests to external services
 handler_type: effect

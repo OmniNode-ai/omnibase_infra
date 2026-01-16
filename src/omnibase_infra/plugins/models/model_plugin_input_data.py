@@ -7,7 +7,7 @@ the former PluginInputData TypedDict definition.
 
 Design Notes:
     - Uses ConfigDict(extra="allow") to support arbitrary fields
-    - Supports dict-like access via __getitem__ for backwards compatibility
+    - Supports dict-like access via __getitem__ for flexible API usage
     - Can be instantiated from dicts using model_validate()
     - Follows ONEX naming convention: Model<Name>
 """

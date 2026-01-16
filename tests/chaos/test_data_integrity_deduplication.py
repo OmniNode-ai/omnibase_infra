@@ -12,8 +12,8 @@ double-processing even under chaotic conditions such as:
 
 Deduplication Semantics:
     Combined with at-least-once delivery, proper deduplication provides
-    exactly-once semantics. The InMemoryIdempotencyStore (for testing)
-    and PostgresIdempotencyStore (for production) track processed messages
+    exactly-once semantics. The StoreIdempotencyInmemory (for testing)
+    and StoreIdempotencyPostgres (for production) track processed messages
     using a composite key of (domain, message_id).
 
 Architecture:
@@ -44,8 +44,8 @@ from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 import pytest
 
 from omnibase_infra.idempotency import (
-    InMemoryIdempotencyStore,
     ModelIdempotencyRecord,
+    StoreIdempotencyInmemory,
 )
 
 # -----------------------------------------------------------------------------
@@ -86,7 +86,7 @@ class DeduplicatingProcessor:
 
     def __init__(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         backend_executor: AsyncMock,
     ) -> None:
         """Initialize deduplicating processor.
@@ -225,13 +225,13 @@ class DeduplicatingProcessor:
 
 
 @pytest.fixture
-def idempotency_store() -> InMemoryIdempotencyStore:
+def idempotency_store() -> StoreIdempotencyInmemory:
     """Create in-memory idempotency store for tests.
 
     Returns:
-        Fresh InMemoryIdempotencyStore instance.
+        Fresh StoreIdempotencyInmemory instance.
     """
-    return InMemoryIdempotencyStore()
+    return StoreIdempotencyInmemory()
 
 
 @pytest.fixture
@@ -248,7 +248,7 @@ def mock_backend() -> AsyncMock:
 
 @pytest.fixture
 def processor(
-    idempotency_store: InMemoryIdempotencyStore,
+    idempotency_store: StoreIdempotencyInmemory,
     mock_backend: AsyncMock,
 ) -> DeduplicatingProcessor:
     """Create deduplicating processor for tests.
@@ -478,7 +478,7 @@ class TestDomainIsolation:
     async def test_same_intent_different_domains_independent(
         self,
         processor: DeduplicatingProcessor,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Verify same intent_id in different domains is independent.
 
@@ -517,7 +517,7 @@ class TestDomainIsolation:
     async def test_duplicate_in_same_domain_detected(
         self,
         processor: DeduplicatingProcessor,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Verify duplicates within same domain are detected.
 
@@ -557,7 +557,7 @@ class TestConcurrentDuplicates:
     @pytest.mark.asyncio
     async def test_concurrent_duplicate_submissions_deduplicated(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
     ) -> None:
         """Verify concurrent duplicate submissions are deduplicated.
@@ -596,7 +596,7 @@ class TestConcurrentDuplicates:
     @pytest.mark.asyncio
     async def test_concurrent_different_intents_all_processed(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
     ) -> None:
         """Verify concurrent different intents are all processed.
@@ -634,7 +634,7 @@ class TestIdempotencyRecordPersistence:
     @pytest.mark.asyncio
     async def test_idempotency_record_contains_correct_data(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Verify idempotency records contain correct metadata.
 
@@ -671,7 +671,7 @@ class TestIdempotencyRecordPersistence:
     @pytest.mark.asyncio
     async def test_idempotency_survives_processor_restart(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
     ) -> None:
         """Verify idempotency survives processor restart.

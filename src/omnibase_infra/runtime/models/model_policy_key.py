@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Policy Registry Key Model.
+"""ModelPolicyKey - Strongly-typed PolicyRegistry key.
 
-Strongly-typed key for PolicyRegistry dict operations.
-Replaces primitive tuple[str, str, str] pattern.
+Defines ModelPolicyKey for PolicyRegistry dict operations.
+Replaces primitive tuple[str, str, str] pattern with named fields.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ class ModelPolicyKey(BaseModel):
         ...     version="1.0.0"
         ... )
         >>> print(key.policy_id)
-        'retry_backoff'
-        >>> # Backward compatible with string
+        retry_backoff
+        >>> # Also accepts string policy_type
         >>> key2 = ModelPolicyKey(
         ...     policy_id="state_merger",
         ...     policy_type="reducer",
@@ -52,7 +52,9 @@ class ModelPolicyKey(BaseModel):
 
     model_config = ConfigDict(
         frozen=True,  # Make hashable for dict keys
+        from_attributes=True,
         str_strip_whitespace=True,
+        extra="forbid",
     )
 
     @field_validator("version", mode="before")
@@ -114,7 +116,7 @@ class ModelPolicyKey(BaseModel):
         return v
 
     def to_tuple(self) -> tuple[str, str, str]:
-        """Convert to tuple for backward compatibility.
+        """Convert to tuple representation.
 
         Returns:
             Tuple of (policy_id, policy_type, version)
@@ -128,7 +130,7 @@ class ModelPolicyKey(BaseModel):
 
     @classmethod
     def from_tuple(cls, key_tuple: tuple[str, str, str]) -> ModelPolicyKey:
-        """Create from tuple for backward compatibility.
+        """Create from tuple representation.
 
         Args:
             key_tuple: Tuple of (policy_id, policy_type, version)
