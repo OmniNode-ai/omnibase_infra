@@ -418,7 +418,8 @@ class InfraNamingConventionValidator:
         PERFORMANCE: Initializes file cache to avoid re-reading and re-parsing
         files across multiple validation phases.
         """
-        self.repo_path = repo_path
+        # Normalize path for consistent comparisons across the codebase
+        self.repo_path = repo_path.resolve()
         self.violations: list[NamingViolation] = []
         # PERFORMANCE: Cache parsed file info to avoid re-reading files
         # Key: resolved absolute path, Value: ParsedFileInfo
@@ -589,7 +590,7 @@ class InfraNamingConventionValidator:
                     relevant_dir=relevant_dir,
                 )
 
-            except (SyntaxError, UnicodeDecodeError) as e:
+            except (SyntaxError, UnicodeDecodeError, OSError) as e:
                 self._file_cache[file_path] = ParsedFileInfo(
                     file_path=file_path,
                     ast_tree=None,
@@ -693,8 +694,17 @@ class InfraNamingConventionValidator:
             # Check if file is in expected directory (using cached info if available)
             matches_dir = False
             if expected_dir:
-                # PERFORMANCE: Use path.parts for O(n) directory check vs string search
-                matches_dir = expected_dir in file_path.parts
+                # Match expected_dir as a direct child of omnibase_infra to avoid false positives
+                # For example, if expected_dir="models", we match "omnibase_infra/models/..."
+                # but NOT "/other/models/..." or nested "omnibase_infra/foo/models/..."
+                parts = file_path.parts
+                try:
+                    omnibase_idx = parts.index("omnibase_infra")
+                    if omnibase_idx + 1 < len(parts):
+                        matches_dir = parts[omnibase_idx + 1] == expected_dir
+                except ValueError:
+                    # omnibase_infra not in path
+                    pass
 
             if matches_prefix or matches_dir:
                 files_to_validate.add(file_path)

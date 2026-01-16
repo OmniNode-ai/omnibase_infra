@@ -619,15 +619,12 @@ async def bootstrap() -> int:
         if postgres_host:
             postgres_pool_start_time = time.time()
             try:
-                postgres_dsn = (
-                    f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:"
-                    f"{os.getenv('POSTGRES_PASSWORD', '')}@"
-                    f"{postgres_host}:"
-                    f"{os.getenv('POSTGRES_PORT', '5432')}/"
-                    f"{os.getenv('POSTGRES_DATABASE', 'omninode_bridge')}"
-                )
                 postgres_pool = await asyncpg.create_pool(
-                    postgres_dsn,
+                    user=os.getenv("POSTGRES_USER", "postgres"),
+                    password=os.getenv("POSTGRES_PASSWORD", ""),
+                    host=postgres_host,
+                    port=int(os.getenv("POSTGRES_PORT", "5432")),
+                    database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
                     min_size=2,
                     max_size=10,
                 )
