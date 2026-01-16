@@ -31,6 +31,7 @@ from omnibase_core.models.errors import ModelOnexError
 
 from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.errors import MessageTypeRegistryError
+from omnibase_infra.models.errors import ModelMessageTypeRegistryErrorContext
 from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,
 )
@@ -165,7 +166,9 @@ class MixinMessageTypeRegistration:
                         f"new={entry.allowed_categories}. "
                         f"All registrations for a message type must have the same "
                         f"allowed categories.",
-                        message_type=message_type,
+                        registry_context=ModelMessageTypeRegistryErrorContext(
+                            message_type=message_type,
+                        ),
                     )
                 if existing.domain_constraint != entry.domain_constraint:
                     # Build detailed mismatch description
@@ -212,8 +215,10 @@ class MixinMessageTypeRegistration:
                         f"'{message_type}': {'; '.join(differences)}. "
                         f"All registrations for a message type must have the same "
                         f"domain constraint configuration.",
-                        message_type=message_type,
-                        domain=entry.domain_constraint.owning_domain,
+                        registry_context=ModelMessageTypeRegistryErrorContext(
+                            message_type=message_type,
+                            domain=entry.domain_constraint.owning_domain,
+                        ),
                     )
 
                 # Merge handlers

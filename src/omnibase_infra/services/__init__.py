@@ -24,7 +24,7 @@ Exports:
 """
 
 from omnibase_infra.enums import EnumSelectionStrategy
-from omnibase_infra.services.corpus_capture_engine import CorpusCaptureEngine
+from omnibase_infra.services.corpus_capture import CorpusCapture
 from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
 from omnibase_infra.services.service_node_selector import (
     DEFAULT_SELECTION_KEY,
@@ -56,7 +56,7 @@ __all__ = [
     "ModelTimeoutEmissionResult",
     "ModelTimeoutQueryResult",
     "ServiceCapabilityQuery",
-    "CorpusCaptureEngine",
+    "CorpusCapture",
     "ServiceNodeSelector",
     "ServiceSnapshot",
     "ServiceTimeoutEmitter",

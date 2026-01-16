@@ -95,7 +95,7 @@ from omnibase_infra.handlers.models import (
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
-from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
 logger = logging.getLogger(__name__)
@@ -136,8 +136,44 @@ _POSTGRES_ERROR_PREFIXES: dict[type[asyncpg.PostgresError], str] = {
     asyncpg.CheckViolationError: "Check constraint violation",
 }
 
+# PostgreSQL SQLSTATE class codes for error classification
+# See: https://www.postgresql.org/docs/current/errcodes-appendix.html
+#
+# TRANSIENT errors (should trip circuit breaker):
+#   - Class 08: Connection Exception (database unreachable, connection lost)
+#   - Class 53: Insufficient Resources (out of memory, disk full, too many connections)
+#   - Class 57: Operator Intervention (admin shutdown, crash recovery, cannot connect now)
+#   - Class 58: System Error (I/O error, undefined file, duplicate file)
+#
+# PERMANENT errors (should NOT trip circuit breaker):
+#   - Class 23: Integrity Constraint Violation (FK, NOT NULL, unique, check)
+#   - Class 42: Syntax Error or Access Rule Violation (bad SQL, undefined table/column)
+#   - Class 28: Invalid Authorization Specification (bad credentials)
+#   - Class 22: Data Exception (division by zero, string data truncation)
+#   - Class 40: Transaction Rollback (serialization failure, deadlock detected)
+#
+#     DESIGN DECISION: Classified as PERMANENT despite deadlocks being retry-able.
+#
+#     Rationale:
+#     1. Deadlocks indicate transaction contention, not infrastructure failure
+#     2. The database is healthy - it correctly detected and resolved the deadlock
+#     3. Retrying at application level (with backoff) typically succeeds
+#     4. Tripping the circuit would block ALL queries, not just the conflicting ones
+#     5. High deadlock rates indicate application design issues (lock ordering,
+#        transaction scope) that should be fixed in code, not masked by circuit breaker
+#
+#     Note: If sustained deadlock storms occur, this is a symptom of application
+#     issues or schema contention that monitoring/alerting should surface, but
+#     the circuit breaker is not the right mitigation tool.
+#
+# The key insight: transient errors indicate the DATABASE INFRASTRUCTURE is unhealthy,
+# while permanent errors indicate the QUERY/APPLICATION is invalid. The circuit breaker
+# protects against infrastructure failures, not application bugs.
+_TRANSIENT_SQLSTATE_CLASSES: frozenset[str] = frozenset({"08", "53", "57", "58"})
+_PERMANENT_SQLSTATE_CLASSES: frozenset[str] = frozenset({"22", "23", "28", "42"})
 
-class HandlerDb(MixinEnvelopeExtraction):
+
+class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     """PostgreSQL database handler using asyncpg connection pool (MVP: query, execute only).
 
     Security Policy - DSN Handling:
@@ -172,8 +208,17 @@ class HandlerDb(MixinEnvelopeExtraction):
         parameterized statements to prevent SQL injection. Multi-statement SQL
         is intentionally blocked for security.
 
-    TODO(OMN-42): Consider implementing circuit breaker pattern for connection
-    resilience. See CLAUDE.md "Error Recovery Patterns" for implementation guidance.
+    Circuit Breaker:
+        This handler uses MixinAsyncCircuitBreaker for connection resilience.
+        The circuit breaker is initialized after the connection pool is created
+        in the initialize() method. Only connection-related errors (PostgresConnectionError,
+        QueryCanceledError) trip the circuit - application errors (syntax errors,
+        missing tables/columns) do not affect the circuit state.
+
+        States:
+        - CLOSED: Normal operation, requests allowed
+        - OPEN: Circuit tripped after threshold failures, requests blocked
+        - HALF_OPEN: Testing recovery after reset timeout, limited requests allowed
     """
 
     def __init__(self) -> None:
@@ -183,6 +228,7 @@ class HandlerDb(MixinEnvelopeExtraction):
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._initialized: bool = False
         self._dsn: str = ""
+        self._circuit_breaker_initialized: bool = False
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -280,6 +326,16 @@ class HandlerDb(MixinEnvelopeExtraction):
             # Note: DSN stored internally but never logged or exposed in errors.
             # Use _sanitize_dsn() if DSN info ever needs to be logged.
             self._initialized = True
+
+            # Initialize circuit breaker after pool creation succeeds
+            self._init_circuit_breaker(
+                threshold=5,
+                reset_timeout=30.0,
+                service_name="db_handler",
+                transport_type=EnumInfraTransportType.DATABASE,
+            )
+            self._circuit_breaker_initialized = True
+
             logger.info(
                 "%s initialized successfully",
                 self.__class__.__name__,
@@ -334,6 +390,12 @@ class HandlerDb(MixinEnvelopeExtraction):
 
     async def shutdown(self) -> None:
         """Close database connection pool and release resources."""
+        # Reset circuit breaker state
+        if self._circuit_breaker_initialized:
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+            self._circuit_breaker_initialized = False
+
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
@@ -486,6 +548,104 @@ class HandlerDb(MixinEnvelopeExtraction):
             "Invalid 'parameters' in payload - must be a list", context=ctx
         )
 
+    def _is_transient_error(self, error: asyncpg.PostgresError) -> bool:
+        """Determine if a PostgreSQL error is transient (should trip circuit breaker).
+
+        Transient errors indicate infrastructure issues where retrying later may succeed:
+        - Connection failures (Class 08)
+        - Resource exhaustion (Class 53)
+        - Server shutdown/restart (Class 57)
+        - System I/O errors (Class 58)
+
+        Permanent errors indicate application/query bugs that won't be fixed by retrying:
+        - Constraint violations (Class 23): FK, NOT NULL, unique, check
+        - Syntax errors (Class 42): bad SQL, undefined table/column
+        - Authorization failures (Class 28): invalid credentials
+        - Data exceptions (Class 22): division by zero, truncation
+
+        The circuit breaker ONLY trips on transient errors because:
+        1. Transient errors suggest the database infrastructure is unhealthy
+        2. Opening the circuit prevents cascading failures and gives the DB time to recover
+        3. Permanent errors are application bugs that should be fixed in code, not retried
+
+        Args:
+            error: The asyncpg PostgresError exception to classify.
+
+        Returns:
+            True if the error is transient (should increment circuit breaker failure count),
+            False if the error is permanent (should NOT affect circuit breaker state).
+
+        Examples:
+            >>> # Connection lost - transient, should trip circuit
+            >>> handler._is_transient_error(asyncpg.PostgresConnectionError())
+            True
+
+            >>> # FK violation - permanent, should NOT trip circuit
+            >>> handler._is_transient_error(asyncpg.ForeignKeyViolationError())
+            False
+        """
+        # Get SQLSTATE code from exception (5-character code like '23503')
+        sqlstate = getattr(error, "sqlstate", None)
+
+        if sqlstate is None:
+            # No SQLSTATE available - fall back to exception type classification
+            # Connection-related errors are always transient
+            if isinstance(error, asyncpg.PostgresConnectionError):
+                return True
+            # Query canceled (timeout) is transient - indicates server overload
+            if isinstance(error, asyncpg.QueryCanceledError):
+                return True
+            # Default: assume permanent (don't trip circuit for unknown errors)
+            # This is conservative - we'd rather miss a transient error than
+            # incorrectly trip the circuit on application bugs
+            logger.debug(
+                "No SQLSTATE for PostgreSQL error, defaulting to permanent classification",
+                extra={
+                    "error_type": type(error).__name__,
+                },
+            )
+            return False
+
+        # Extract class code (first 2 characters of SQLSTATE)
+        # e.g., '23503' -> '23' (Integrity Constraint Violation)
+        sqlstate_class = sqlstate[:2]
+
+        # Check if class is explicitly transient
+        if sqlstate_class in _TRANSIENT_SQLSTATE_CLASSES:
+            logger.debug(
+                "Classified PostgreSQL error as TRANSIENT (will trip circuit)",
+                extra={
+                    "sqlstate": sqlstate,
+                    "sqlstate_class": sqlstate_class,
+                    "error_type": type(error).__name__,
+                },
+            )
+            return True
+
+        # Check if class is explicitly permanent
+        if sqlstate_class in _PERMANENT_SQLSTATE_CLASSES:
+            logger.debug(
+                "Classified PostgreSQL error as PERMANENT (will NOT trip circuit)",
+                extra={
+                    "sqlstate": sqlstate,
+                    "sqlstate_class": sqlstate_class,
+                    "error_type": type(error).__name__,
+                },
+            )
+            return False
+
+        # Unknown class - log warning and default to permanent (conservative)
+        # Unknown errors are more likely to be application bugs than infrastructure issues
+        logger.warning(
+            "Unknown PostgreSQL SQLSTATE class, defaulting to permanent classification",
+            extra={
+                "sqlstate": sqlstate,
+                "sqlstate_class": sqlstate_class,
+                "error_type": type(error).__name__,
+            },
+        )
+        return False
+
     async def _execute_query(
         self,
         sql: str,
@@ -512,16 +672,38 @@ class HandlerDb(MixinEnvelopeExtraction):
             correlation_id=correlation_id,
         )
 
+        # Check circuit breaker before operation
+        if self._circuit_breaker_initialized:
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker(
+                    operation="db.query",
+                    correlation_id=correlation_id,
+                )
+
         try:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(sql, *parameters)
-                return self._build_response(
-                    [dict(row) for row in rows],
-                    len(rows),
-                    correlation_id,
-                    input_envelope_id,
-                )
+
+                # Reset circuit breaker immediately after successful operation,
+                # within connection context to avoid race conditions
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._reset_circuit_breaker()
+
+            return self._build_response(
+                [dict(row) for row in rows],
+                len(rows),
+                correlation_id,
+                input_envelope_id,
+            )
         except asyncpg.QueryCanceledError as e:
+            # Record failure for timeout errors (database overloaded)
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="db.query",
+                        correlation_id=correlation_id,
+                    )
             timeout_ctx = ModelTimeoutErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="db.query",
@@ -534,16 +716,53 @@ class HandlerDb(MixinEnvelopeExtraction):
                 context=timeout_ctx,
             ) from e
         except asyncpg.PostgresConnectionError as e:
+            # Record failure for connection errors (database unavailable)
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="db.query",
+                        correlation_id=correlation_id,
+                    )
             raise InfraConnectionError(
                 "Database connection lost during query", context=ctx
             ) from e
         except asyncpg.PostgresSyntaxError as e:
+            # Application error - do NOT trip circuit
             raise RuntimeHostError(f"SQL syntax error: {e.message}", context=ctx) from e
         except asyncpg.UndefinedTableError as e:
+            # Application error - do NOT trip circuit
             raise RuntimeHostError(f"Table not found: {e.message}", context=ctx) from e
         except asyncpg.UndefinedColumnError as e:
+            # Application error - do NOT trip circuit
             raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
+        except asyncpg.ForeignKeyViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Foreign key constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.NotNullViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Not null constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.UniqueViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Unique constraint violation: {e.message}", context=ctx
+            ) from e
         except asyncpg.PostgresError as e:
+            # Generic PostgreSQL error - use intelligent classification based on SQLSTATE
+            # to determine if this is a transient infrastructure issue or permanent app bug
+            if self._is_transient_error(e):
+                # Transient error (e.g., resource exhaustion, system error)
+                # Record failure to potentially trip circuit breaker
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._record_circuit_failure(
+                            operation="db.query",
+                            correlation_id=correlation_id,
+                        )
+            # Re-raise as RuntimeHostError regardless of classification
             raise RuntimeHostError(
                 f"Database error: {type(e).__name__}", context=ctx
             ) from e
@@ -574,16 +793,99 @@ class HandlerDb(MixinEnvelopeExtraction):
             correlation_id=correlation_id,
         )
 
+        # Check circuit breaker before operation
+        if self._circuit_breaker_initialized:
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker(
+                    operation="db.execute",
+                    correlation_id=correlation_id,
+                )
+
         try:
             async with self._pool.acquire() as conn:
                 result = await conn.execute(sql, *parameters)
-                # asyncpg returns string like "INSERT 0 1" or "UPDATE 5"
-                row_count = self._parse_row_count(result)
-                return self._build_response(
-                    [], row_count, correlation_id, input_envelope_id
-                )
+
+                # Reset circuit breaker immediately after successful operation,
+                # within connection context to avoid race conditions
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._reset_circuit_breaker()
+
+            # asyncpg returns string like "INSERT 0 1" or "UPDATE 5"
+            row_count = self._parse_row_count(result)
+            return self._build_response(
+                [], row_count, correlation_id, input_envelope_id
+            )
+        except asyncpg.QueryCanceledError as e:
+            # Record failure for timeout errors (database overloaded)
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="db.execute",
+                        correlation_id=correlation_id,
+                    )
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="db.execute",
+                target_name="db_handler",
+                correlation_id=correlation_id,
+                timeout_seconds=self._timeout,
+            )
+            raise InfraTimeoutError(
+                f"Statement timed out after {self._timeout}s",
+                context=timeout_ctx,
+            ) from e
+        except asyncpg.PostgresConnectionError as e:
+            # Record failure for connection errors (database unavailable)
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="db.execute",
+                        correlation_id=correlation_id,
+                    )
+            raise InfraConnectionError(
+                "Database connection lost during statement execution", context=ctx
+            ) from e
+        except asyncpg.PostgresSyntaxError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(f"SQL syntax error: {e.message}", context=ctx) from e
+        except asyncpg.UndefinedTableError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(f"Table not found: {e.message}", context=ctx) from e
+        except asyncpg.UndefinedColumnError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
+        except asyncpg.ForeignKeyViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Foreign key constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.NotNullViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Not null constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.UniqueViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Unique constraint violation: {e.message}", context=ctx
+            ) from e
         except asyncpg.PostgresError as e:
-            raise self._map_postgres_error(e, ctx) from e
+            # Generic PostgreSQL error - use intelligent classification based on SQLSTATE
+            # to determine if this is a transient infrastructure issue or permanent app bug
+            if self._is_transient_error(e):
+                # Transient error (e.g., resource exhaustion, system error)
+                # Record failure to potentially trip circuit breaker
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._record_circuit_failure(
+                            operation="db.execute",
+                            correlation_id=correlation_id,
+                        )
+            # Re-raise as RuntimeHostError regardless of classification
+            raise RuntimeHostError(
+                f"Database error: {type(e).__name__}", context=ctx
+            ) from e
 
     def _parse_row_count(self, result: str) -> int:
         """Parse row count from asyncpg execute result string.
@@ -697,11 +999,31 @@ class HandlerDb(MixinEnvelopeExtraction):
 
             The transport type for this handler is DATABASE (PostgreSQL).
 
+        Security Consideration:
+            The circuit_breaker field exposes operational state including failure counts.
+            This information is intended for internal monitoring and observability.
+
+            WARNING: If describe() is exposed via external APIs, failure counts could
+            reveal information useful to attackers (e.g., timing attacks when circuit
+            is about to open). For external exposure, consider:
+
+            1. Restricting describe() to authenticated admin/monitoring endpoints only
+            2. Sanitizing output to show only state (OPEN/CLOSED/HALF_OPEN), not counts
+            3. Rate-limiting describe() calls to prevent information harvesting
+
+            The current implementation assumes describe() is used for internal
+            monitoring dashboards and health checks, not public APIs.
+
         See Also:
             - handler_type property: Full documentation of architectural role
             - handler_category property: Full documentation of behavioral classification
             - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
         """
+        # Get circuit breaker state if initialized
+        cb_state: dict[str, object] | None = None
+        if self._circuit_breaker_initialized:
+            cb_state = self._get_circuit_breaker_state()
+
         return ModelDbDescribeResponse(
             handler_type=self.handler_type.value,
             handler_category=self.handler_category.value,
@@ -710,6 +1032,7 @@ class HandlerDb(MixinEnvelopeExtraction):
             timeout_seconds=self._timeout,
             initialized=self._initialized,
             version="0.1.0-mvp",
+            circuit_breaker=cb_state,
         )
 
 

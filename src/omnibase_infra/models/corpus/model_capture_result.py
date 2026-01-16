@@ -5,7 +5,7 @@
 Capture result model for corpus capture service.
 
 .. versionadded:: 0.5.0
-    Added for CorpusCaptureEngine (OMN-1203)
+    Added for CorpusCapture (OMN-1203)
 """
 
 from datetime import datetime
@@ -23,7 +23,7 @@ class ModelCaptureResult(BaseModel):
     Tracks whether an execution was captured or skipped, and why.
 
     .. versionadded:: 0.5.0
-        Added for CorpusCaptureEngine (OMN-1203)
+        Added for CorpusCapture (OMN-1203)
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

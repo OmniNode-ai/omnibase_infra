@@ -5,7 +5,7 @@
 Capture configuration model for corpus capture service.
 
 .. versionadded:: 0.5.0
-    Added for CorpusCaptureEngine (OMN-1203)
+    Added for CorpusCapture (OMN-1203)
 """
 
 from collections.abc import Sequence
@@ -31,7 +31,7 @@ class ModelCaptureConfig(BaseModel):
         ... )
 
     .. versionadded:: 0.5.0
-        Added for CorpusCaptureEngine (OMN-1203)
+        Added for CorpusCapture (OMN-1203)
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)

@@ -20,10 +20,12 @@ __all__ = [
 
 from omnibase_core.enums import EnumCoreErrorCode
 
-from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
+)
+from omnibase_infra.models.errors.model_message_type_registry_error_context import (
+    ModelMessageTypeRegistryErrorContext,
 )
 
 
@@ -40,20 +42,27 @@ class MessageTypeRegistryError(RuntimeHostError):
 
     Example:
         >>> from omnibase_infra.errors import ModelInfraErrorContext
+        >>> from omnibase_infra.models.errors import ModelMessageTypeRegistryErrorContext
+        >>> from omnibase_infra.enums import EnumMessageCategory
         >>> from uuid import uuid4
         >>> try:
         ...     handlers = registry.get_handlers("UnknownType", category, domain)
         ... except MessageTypeRegistryError as e:
         ...     print(f"Handler not found: {e}")
         ...
-        >>> # With correlation context
+        >>> # With correlation context and registry context
         >>> context = ModelInfraErrorContext.with_correlation(
         ...     correlation_id=uuid4(),
         ...     operation="get_handlers",
         ... )
+        >>> registry_context = ModelMessageTypeRegistryErrorContext(
+        ...     message_type="UnknownType",
+        ...     domain="myapp.events",
+        ...     category=EnumMessageCategory.EVENT,
+        ... )
         >>> raise MessageTypeRegistryError(
         ...     "Message type not found",
-        ...     message_type="UnknownType",
+        ...     registry_context=registry_context,
         ...     context=context,
         ... )
 
@@ -63,9 +72,7 @@ class MessageTypeRegistryError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        message_type: str | None = None,
-        domain: str | None = None,
-        category: EnumMessageCategory | None = None,
+        registry_context: ModelMessageTypeRegistryErrorContext | None = None,
         context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
@@ -73,20 +80,19 @@ class MessageTypeRegistryError(RuntimeHostError):
 
         Args:
             message: Human-readable error message
-            message_type: The message type that caused the error (if applicable)
-            domain: The domain involved in the error (if applicable)
-            category: The category involved in the error (if applicable)
+            registry_context: Bundled registry-specific context (message_type, domain, category)
             context: Bundled infrastructure context for correlation_id and structured fields
             **extra_context: Additional context information
         """
-        # Build extra context dict
+        # Build extra context dict from registry context
         extra: dict[str, object] = dict(extra_context)
-        if message_type is not None:
-            extra["message_type"] = message_type
-        if domain is not None:
-            extra["domain"] = domain
-        if category is not None:
-            extra["category"] = category.value
+        if registry_context is not None:
+            if registry_context.message_type is not None:
+                extra["message_type"] = registry_context.message_type
+            if registry_context.domain is not None:
+                extra["domain"] = registry_context.domain
+            if registry_context.category is not None:
+                extra["category"] = registry_context.category.value
 
         super().__init__(
             message=message,
