@@ -38,12 +38,14 @@ In the current ONEX architecture, each node runs as an **independent container**
 
 ONEX follows a strict **4-node architecture** pattern:
 
-| Node Type | Base Class | Purpose | I/O Operations |
-|-----------|------------|---------|----------------|
-| **EFFECT** | `NodeEffectService` | External I/O (APIs, DB, files) | Yes (`io_operations`) |
-| **COMPUTE** | `NodeComputeService` | Pure transforms/algorithms | No |
-| **REDUCER** | `NodeReducerService` | Aggregation/persistence | No (DB via adapters) |
-| **ORCHESTRATOR** | `NodeOrchestratorService` | Workflow coordination | No |
+| Node Type | Contract `node_type` | Base Class | Purpose | I/O Operations |
+|-----------|---------------------|------------|---------|----------------|
+| **EFFECT** | `EFFECT_GENERIC` | `NodeEffectService` | External I/O (APIs, DB, files) | Yes (`io_operations`) |
+| **COMPUTE** | `COMPUTE_GENERIC` | `NodeComputeService` | Pure transforms/algorithms | No |
+| **REDUCER** | `REDUCER_GENERIC` | `NodeReducerService` | Aggregation/persistence | No (DB via adapters) |
+| **ORCHESTRATOR** | `ORCHESTRATOR_GENERIC` | `NodeOrchestratorService` | Workflow coordination | No |
+
+**Note**: In `contract.yaml` files, use the `_GENERIC` suffix variants (e.g., `EFFECT_GENERIC`). In Python code, use `EnumNodeKind` values (e.g., `EnumNodeKind.EFFECT`).
 
 **Communication Pattern:**
 ```
@@ -246,7 +248,7 @@ version:
 contract_version: "1.0.0"
 node_version: "1.0.0"
 
-node_type: "EFFECT"
+node_type: "EFFECT_GENERIC"  # Use _GENERIC variants in contract.yaml
 
 description: >
   HashiCorp Vault secret management adapter for secure credential storage and retrieval.
@@ -608,7 +610,7 @@ if __name__ == "__main__":
 | `version` | object | Semantic version `{major, minor, patch}` |
 | `contract_version` | string | Contract version string |
 | `node_version` | string | Node implementation version |
-| `node_type` | enum | One of: `EFFECT`, `COMPUTE`, `REDUCER`, `ORCHESTRATOR` |
+| `node_type` | enum | One of: `EFFECT_GENERIC`, `COMPUTE_GENERIC`, `REDUCER_GENERIC`, `ORCHESTRATOR_GENERIC` |
 | `description` | string | Human-readable description |
 | `input_model` | string | Name of input model class |
 | `output_model` | string | Name of output model class |

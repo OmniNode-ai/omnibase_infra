@@ -53,6 +53,21 @@ Available Utilities:
 
     Kafka Testing:
         - wait_for_consumer_ready: Poll for Kafka consumer readiness with backoff
+        - wait_for_topic_metadata: Wait for topic metadata propagation after creation
+        - KafkaTopicManager: Async context manager for topic lifecycle management
+        - parse_bootstrap_servers: Parse bootstrap servers string into (host, port)
+        - get_kafka_error_hint: Get remediation hint for Kafka error codes
+        - KAFKA_ERROR_REMEDIATION_HINTS: Dict of error code remediation hints
+        - KAFKA_ERROR_TOPIC_ALREADY_EXISTS: Error code constant (36)
+        - KAFKA_ERROR_INVALID_PARTITIONS: Error code constant (37)
+
+    PostgreSQL Testing:
+        - PostgresConfig: Configuration dataclass for PostgreSQL connections
+        - build_postgres_dsn: Build PostgreSQL DSN from components
+        - check_postgres_reachable: Check if PostgreSQL is reachable via TCP
+        - check_postgres_reachable_simple: Simple TCP reachability check
+        - should_skip_migration: Check if migration contains CONCURRENTLY DDL
+        - CONCURRENT_DDL_PATTERN: Regex pattern for CONCURRENTLY DDL statements
 """
 
 from tests.helpers.ast_analysis import (
@@ -69,7 +84,6 @@ from tests.helpers.chaos_utils import (
     create_envelope_from_chained_message,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
-from tests.helpers.kafka_utils import wait_for_consumer_ready
 from tests.helpers.log_helpers import filter_handler_warnings, get_warning_messages
 from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
 from tests.helpers.replay_utils import (
@@ -95,6 +109,24 @@ from tests.helpers.statistics_utils import (
     minimum_sample_size_for_tolerance,
     run_with_warmup,
     run_with_warmup_sync,
+)
+from tests.helpers.util_kafka import (
+    KAFKA_ERROR_INVALID_PARTITIONS,
+    KAFKA_ERROR_REMEDIATION_HINTS,
+    KAFKA_ERROR_TOPIC_ALREADY_EXISTS,
+    KafkaTopicManager,
+    get_kafka_error_hint,
+    parse_bootstrap_servers,
+    wait_for_consumer_ready,
+    wait_for_topic_metadata,
+)
+from tests.helpers.util_postgres import (
+    CONCURRENT_DDL_PATTERN,
+    PostgresConfig,
+    build_postgres_dsn,
+    check_postgres_reachable,
+    check_postgres_reachable_simple,
+    should_skip_migration,
 )
 
 __all__ = [
@@ -141,5 +173,19 @@ __all__ = [
     "MockStatResult",
     "create_mock_stat_result",
     # Kafka testing utilities
+    "KAFKA_ERROR_INVALID_PARTITIONS",
+    "KAFKA_ERROR_REMEDIATION_HINTS",
+    "KAFKA_ERROR_TOPIC_ALREADY_EXISTS",
+    "KafkaTopicManager",
+    "get_kafka_error_hint",
+    "parse_bootstrap_servers",
     "wait_for_consumer_ready",
+    "wait_for_topic_metadata",
+    # PostgreSQL testing utilities
+    "CONCURRENT_DDL_PATTERN",
+    "PostgresConfig",
+    "build_postgres_dsn",
+    "check_postgres_reachable",
+    "check_postgres_reachable_simple",
+    "should_skip_migration",
 ]

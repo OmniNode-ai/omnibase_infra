@@ -6,10 +6,26 @@ This module provides fixtures for testing registration handlers against real
 PostgreSQL using testcontainers. Reuses projector fixtures and adds handler-
 specific fixtures for heartbeat processing tests.
 
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+================================================================
+
+This module imports session-scoped async fixtures from ``tests/integration/projectors/conftest.py``.
+When using these fixtures, ensure your test module has proper loop scope configuration:
+
+.. code-block:: python
+
+    pytestmark = [pytest.mark.asyncio(loop_scope="session")]
+
+Without this, you may encounter RuntimeError: "Task got Future attached to a different loop"
+due to pytest-asyncio 0.25+ defaulting to function-scoped event loops.
+
+See ``tests/integration/projectors/conftest.py`` for detailed documentation.
+
 Fixture Hierarchy:
     Session-scoped:
         - docker_available (from projectors)
         - postgres_container (from projectors)
+        - event_loop_policy (from projectors)
 
     Function-scoped:
         - pg_pool (from projectors)

@@ -9,11 +9,15 @@ auto-creation disabled, so topics must be created explicitly before use.
 Fixtures:
     ensure_test_topic: Creates topics via admin API before tests, cleans up after
     topic_factory: Factory fixture for creating multiple topics with custom settings
+
+Implementation Note:
+    This module uses shared helpers from tests.helpers.util_kafka to avoid code
+    duplication. The KafkaTopicManager class provides the core topic lifecycle
+    management functionality used by multiple fixtures.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from collections.abc import AsyncGenerator, Callable, Coroutine
@@ -44,108 +48,33 @@ if TYPE_CHECKING:
 # Tests will skip via fixture if not set. Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
 
-
-# =============================================================================
-# Kafka Error Code Remediation Hints
-# =============================================================================
-# Common Kafka/Redpanda error codes with actionable remediation hints.
-# Reference: https://kafka.apache.org/protocol.html#protocol_error_codes
-#
-# These hints help developers quickly diagnose and fix common issues when
-# running integration tests against Kafka/Redpanda brokers.
-# =============================================================================
-
-KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
-    # Topic management errors
-    36: (
-        "Topic already exists. This is usually harmless in test environments. "
-        "If you need a fresh topic, use a unique name with UUID suffix."
-    ),
-    37: (
-        "Invalid number of partitions. "
-        "Hint: Ensure partitions >= 1. For Redpanda, check that the broker has "
-        "sufficient memory allocated (see Docker memory limits or "
-        "'redpanda.developer_mode' setting)."
-    ),
-    38: (
-        "Invalid replication factor. "
-        "Hint: Replication factor cannot exceed the number of brokers. "
-        "For single-node test setups, use replication_factor=1."
-    ),
-    39: (
-        "Invalid replica assignment. "
-        "Hint: Check that all specified broker IDs exist in the cluster."
-    ),
-    40: (
-        "Invalid topic configuration. "
-        "Hint: Check topic config parameters (retention.ms, segment.bytes, etc.). "
-        "Some Redpanda/Kafka versions have different config key names."
-    ),
-    # Cluster state errors
-    41: (
-        "Not the cluster controller. This is retriable. "
-        "Hint: The cluster may be electing a new controller. Retry after a brief delay."
-    ),
-    # Authorization errors
-    29: (
-        "Cluster authorization failed. "
-        "Hint: Check that your client has ClusterAction permission. "
-        "For Redpanda, verify ACL configuration or disable authorization for tests."
-    ),
-    30: (
-        "Group authorization failed. "
-        "Hint: Check that your client has access to the consumer group. "
-        "Verify KAFKA_SASL_* environment variables if using SASL authentication."
-    ),
-    # Resource errors
-    89: (
-        "Out of memory or resource exhausted on broker. "
-        "Hint: For Redpanda in Docker, increase container memory limit "
-        "(e.g., 'docker update --memory 2g <container>'). "
-        "Check 'docker stats' for current memory usage."
-    ),
-}
-
-# Named constants for Kafka error codes (for readable conditionals)
-KAFKA_ERROR_TOPIC_ALREADY_EXISTS = 36
-KAFKA_ERROR_INVALID_PARTITIONS = 37  # Also used for memory limit in Redpanda
-
-
-def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
-    """Get a remediation hint for a Kafka error code.
-
-    Args:
-        error_code: The Kafka protocol error code.
-        error_message: Optional error message from the broker (for context).
-
-    Returns:
-        A formatted error message with remediation hints if available.
-    """
-    base_msg = f"Kafka error_code={error_code}"
-    if error_message:
-        base_msg += f", message='{error_message}'"
-
-    hint = KAFKA_ERROR_REMEDIATION_HINTS.get(error_code)
-    if hint:
-        return f"{base_msg}. {hint}"
-
-    # Generic hint for unknown errors
-    return (
-        f"{base_msg}. "
-        "Hint: Check Kafka/Redpanda broker logs for details. "
-        "Verify broker is running: 'docker ps | grep redpanda' or "
-        "'curl -s http://<host>:9644/v1/status/ready' for Redpanda health."
-    )
-
-
 # =============================================================================
 # Kafka Helpers (shared implementations)
 # =============================================================================
-# Re-exported from tests.helpers.kafka_utils for convenience.
-# See tests/helpers/kafka_utils.py for the canonical implementations.
-from tests.helpers.kafka_utils import wait_for_consumer_ready, wait_for_topic_metadata
+# Imported from tests.helpers.util_kafka for centralized implementation.
+# See tests/helpers/util_kafka.py for the canonical implementations.
+from tests.helpers.util_kafka import (
+    KAFKA_ERROR_INVALID_PARTITIONS,
+    KAFKA_ERROR_REMEDIATION_HINTS,
+    KAFKA_ERROR_TOPIC_ALREADY_EXISTS,
+    KafkaTopicManager,
+    get_kafka_error_hint,
+    parse_bootstrap_servers,
+    wait_for_consumer_ready,
+    wait_for_topic_metadata,
+)
 
-__all__ = ["wait_for_consumer_ready", "wait_for_topic_metadata"]
+# Re-export for backwards compatibility with any code importing from this module
+__all__ = [
+    "wait_for_consumer_ready",
+    "wait_for_topic_metadata",
+    "KafkaTopicManager",
+    "parse_bootstrap_servers",
+    "get_kafka_error_hint",
+    "KAFKA_ERROR_REMEDIATION_HINTS",
+    "KAFKA_ERROR_TOPIC_ALREADY_EXISTS",
+    "KAFKA_ERROR_INVALID_PARTITIONS",
+]
 
 
 # =============================================================================
@@ -166,6 +95,10 @@ async def ensure_test_topic() -> AsyncGenerator[
     After creating a topic, this fixture waits for the broker metadata to
     propagate to ensure the topic is ready for use.
 
+    Implementation:
+        Uses KafkaTopicManager from tests.helpers.util_kafka for centralized
+        topic lifecycle management and error handling.
+
     Yields:
         Async function that creates a topic with the given name and partition count.
         Returns the topic name for convenience.
@@ -175,115 +108,23 @@ async def ensure_test_topic() -> AsyncGenerator[
             topic = await ensure_test_topic(f"test.integration.{uuid4().hex[:12]}")
             # Topic now exists and can be used for produce/consume
     """
+    # Use the shared KafkaTopicManager for topic lifecycle management
+    async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
 
-    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-    from aiokafka.errors import TopicAlreadyExistsError
+        async def _create_topic(topic_name: str, partitions: int = 1) -> str:
+            """Create a topic with the given name and partition count.
 
-    admin: AIOKafkaAdminClient | None = None
-    created_topics: list[str] = []
+            Args:
+                topic_name: Name of the topic to create.
+                partitions: Number of partitions (default: 1).
 
-    async def _create_topic(topic_name: str, partitions: int = 1) -> str:
-        """Create a topic with the given name and partition count.
+            Returns:
+                The topic name (for chaining convenience).
+            """
+            return await manager.create_topic(topic_name, partitions=partitions)
 
-        Args:
-            topic_name: Name of the topic to create.
-            partitions: Number of partitions (default: 1).
-
-        Returns:
-            The topic name (for chaining convenience).
-        """
-        nonlocal admin, created_topics
-
-        # Lazy initialization of admin client
-        if admin is None:
-            admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-            try:
-                await admin.start()
-            except Exception as conn_err:
-                admin = None  # Reset to allow retry
-                # Parse host:port safely for error message (handles IPv6, empty, malformed)
-                bootstrap_parts = (
-                    KAFKA_BOOTSTRAP_SERVERS.rsplit(":", 1)
-                    if KAFKA_BOOTSTRAP_SERVERS
-                    else ["<not set>", "29092"]
-                )
-                host = bootstrap_parts[0] if bootstrap_parts else "<not set>"
-                port = bootstrap_parts[1] if len(bootstrap_parts) > 1 else "29092"
-                raise RuntimeError(
-                    f"Failed to connect to Kafka broker at {KAFKA_BOOTSTRAP_SERVERS}. "
-                    f"Hint: Verify the broker is running and accessible:\n"
-                    f"  1. Check container status: 'docker ps | grep redpanda'\n"
-                    f"  2. Test connectivity: 'nc -zv {host} {port}'\n"
-                    f"  3. For Redpanda, check health: 'curl -s http://<host>:9644/v1/status/ready'\n"
-                    f"  4. Verify KAFKA_BOOTSTRAP_SERVERS env var is correct\n"
-                    f"  5. If using Docker, ensure network connectivity to {KAFKA_BOOTSTRAP_SERVERS}\n"
-                    f"Original error: {conn_err}"
-                ) from conn_err
-
-        try:
-            response = await admin.create_topics(
-                [
-                    NewTopic(
-                        name=topic_name,
-                        num_partitions=partitions,
-                        replication_factor=1,
-                    )
-                ]
-            )
-            # Check for errors in the response (e.g., memory limit, invalid config)
-            # Response format: CreateTopicsResponse_v3(topic_errors=[(topic, error_code, error_message)])
-            if hasattr(response, "topic_errors") and response.topic_errors:
-                for topic_error in response.topic_errors:
-                    # topic_error is a tuple: (topic_name, error_code, error_message)
-                    _, error_code, error_message = topic_error
-                    if error_code != 0:
-                        # Error code 36 = TopicAlreadyExistsError (handled below)
-                        if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
-                            raise TopicAlreadyExistsError
-                        # Provide actionable remediation hints for common errors
-                        raise RuntimeError(
-                            f"Failed to create topic '{topic_name}': "
-                            f"{get_kafka_error_hint(error_code, error_message)}"
-                        )
-
-            created_topics.append(topic_name)
-
-            # Wait for topic metadata to propagate with expected partition count
-            await wait_for_topic_metadata(
-                admin, topic_name, expected_partitions=partitions
-            )
-        except TopicAlreadyExistsError:
-            # Topic already exists - this is acceptable in test environments
-            # Still wait for metadata in case topic was just created by another process
-            if admin is not None:
-                await wait_for_topic_metadata(
-                    admin, topic_name, timeout=5.0, expected_partitions=partitions
-                )
-
-        return topic_name
-
-    yield _create_topic
-
-    # Cleanup: delete created topics
-    if admin is not None:
-        if created_topics:
-            try:
-                await admin.delete_topics(created_topics)
-            except Exception as e:
-                logger.warning(
-                    "Cleanup failed for Kafka topics %s: %s",
-                    created_topics,
-                    e,
-                    exc_info=True,
-                )
-        try:
-            await admin.close()
-        except Exception as e:
-            logger.warning(
-                "Failed to close Kafka admin client: %s",
-                e,
-                exc_info=True,
-            )
+        yield _create_topic
+        # Cleanup is handled automatically by KafkaTopicManager context exit
 
 
 @pytest.fixture
@@ -350,6 +191,10 @@ async def topic_factory() -> AsyncGenerator[
     Similar to ensure_test_topic but allows specifying replication factor.
     Useful for testing with different topic configurations.
 
+    Implementation:
+        Uses KafkaTopicManager from tests.helpers.util_kafka for centralized
+        topic lifecycle management and error handling.
+
     Yields:
         Async function that creates a topic with custom settings.
 
@@ -357,110 +202,29 @@ async def topic_factory() -> AsyncGenerator[
         async def test_replicated_topic(topic_factory):
             topic = await topic_factory("my.topic", partitions=3, replication=1)
     """
-    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-    from aiokafka.errors import TopicAlreadyExistsError
+    # Use the shared KafkaTopicManager for topic lifecycle management
+    async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
 
-    admin: AIOKafkaAdminClient | None = None
-    created_topics: list[str] = []
+        async def _create_topic(
+            topic_name: str,
+            partitions: int = 1,
+            replication_factor: int = 1,
+        ) -> str:
+            """Create a topic with custom configuration.
 
-    async def _create_topic(
-        topic_name: str,
-        partitions: int = 1,
-        replication_factor: int = 1,
-    ) -> str:
-        """Create a topic with custom configuration.
+            Args:
+                topic_name: Name of the topic to create.
+                partitions: Number of partitions.
+                replication_factor: Replication factor (usually 1 for testing).
 
-        Args:
-            topic_name: Name of the topic to create.
-            partitions: Number of partitions.
-            replication_factor: Replication factor (usually 1 for testing).
-
-        Returns:
-            The topic name.
-        """
-        nonlocal admin, created_topics
-
-        if admin is None:
-            admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-            try:
-                await admin.start()
-            except Exception as conn_err:
-                admin = None  # Reset to allow retry
-                # Parse host:port safely for error message (handles IPv6, empty, malformed)
-                bootstrap_parts = (
-                    KAFKA_BOOTSTRAP_SERVERS.rsplit(":", 1)
-                    if KAFKA_BOOTSTRAP_SERVERS
-                    else ["<not set>", "29092"]
-                )
-                host = bootstrap_parts[0] if bootstrap_parts else "<not set>"
-                port = bootstrap_parts[1] if len(bootstrap_parts) > 1 else "29092"
-                raise RuntimeError(
-                    f"Failed to connect to Kafka broker at {KAFKA_BOOTSTRAP_SERVERS}. "
-                    f"Hint: Verify the broker is running and accessible:\n"
-                    f"  1. Check container status: 'docker ps | grep redpanda'\n"
-                    f"  2. Test connectivity: 'nc -zv {host} {port}'\n"
-                    f"  3. For Redpanda, check health: 'curl -s http://<host>:9644/v1/status/ready'\n"
-                    f"  4. Verify KAFKA_BOOTSTRAP_SERVERS env var is correct\n"
-                    f"  5. If using Docker, ensure network connectivity to {KAFKA_BOOTSTRAP_SERVERS}\n"
-                    f"Original error: {conn_err}"
-                ) from conn_err
-
-        try:
-            response = await admin.create_topics(
-                [
-                    NewTopic(
-                        name=topic_name,
-                        num_partitions=partitions,
-                        replication_factor=replication_factor,
-                    )
-                ]
+            Returns:
+                The topic name.
+            """
+            return await manager.create_topic(
+                topic_name,
+                partitions=partitions,
+                replication_factor=replication_factor,
             )
-            # Check for errors in the response (e.g., memory limit, invalid config)
-            if hasattr(response, "topic_errors") and response.topic_errors:
-                for topic_error in response.topic_errors:
-                    _, error_code, error_message = topic_error
-                    if error_code != 0:
-                        if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
-                            raise TopicAlreadyExistsError
-                        # Provide actionable remediation hints for common errors
-                        raise RuntimeError(
-                            f"Failed to create topic '{topic_name}': "
-                            f"{get_kafka_error_hint(error_code, error_message)}"
-                        )
 
-            created_topics.append(topic_name)
-            # Wait for topic metadata to propagate with expected partition count
-            await wait_for_topic_metadata(
-                admin, topic_name, expected_partitions=partitions
-            )
-        except TopicAlreadyExistsError:
-            # Topic already exists - still wait for metadata
-            if admin is not None:
-                await wait_for_topic_metadata(
-                    admin, topic_name, timeout=5.0, expected_partitions=partitions
-                )
-
-        return topic_name
-
-    yield _create_topic
-
-    # Cleanup
-    if admin is not None:
-        if created_topics:
-            try:
-                await admin.delete_topics(created_topics)
-            except Exception as e:
-                logger.warning(
-                    "Cleanup failed for Kafka topics %s: %s",
-                    created_topics,
-                    e,
-                    exc_info=True,
-                )
-        try:
-            await admin.close()
-        except Exception as e:
-            logger.warning(
-                "Failed to close Kafka admin client: %s",
-                e,
-                exc_info=True,
-            )
+        yield _create_topic
+        # Cleanup is handled automatically by KafkaTopicManager context exit

@@ -556,7 +556,9 @@ class TestContractIOOperationsAreEffectNodes:
         assert not misclassified_nodes, (
             "Contract has misclassified nodes:\n"
             + "\n".join(f"  - {msg}" for msg in misclassified_nodes)
-            + "\n\nAll I/O operations must use node_type: effect_generic"
+            + "\n\nNode classification rules:"
+            + "\n  - I/O operations MUST use node_type: effect_generic"
+            + "\n  - Non-I/O exceptions (pure computation) MUST NOT use effect_generic"
         )
 
     def test_effect_nodes_handle_external_systems(self, contract_data: dict) -> None:

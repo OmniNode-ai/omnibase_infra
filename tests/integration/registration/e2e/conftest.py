@@ -119,9 +119,9 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Kafka Helpers (shared implementations)
 # =============================================================================
-# Imported from tests.helpers.kafka_utils for shared use across test modules.
-# See tests/helpers/kafka_utils.py for the canonical implementations.
-from tests.helpers.kafka_utils import wait_for_consumer_ready, wait_for_topic_metadata
+# Imported from tests.helpers.util_kafka for shared use across test modules.
+# See tests/helpers/util_kafka.py for the canonical implementations.
+from tests.helpers.util_kafka import wait_for_consumer_ready, wait_for_topic_metadata
 
 # =============================================================================
 # Envelope Helper

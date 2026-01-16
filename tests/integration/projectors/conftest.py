@@ -8,10 +8,33 @@ This module provides shared fixtures for projector integration tests using
 testcontainers to spin up real PostgreSQL instances. These fixtures ensure
 proper isolation and cleanup for each test.
 
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+================================================================
+
+When using session-scoped async fixtures with pytest-asyncio 0.25+, you MUST
+configure the event loop scope to prevent "attached to a different loop" errors.
+
+**For modules importing these fixtures**, add to the importing module:
+
+.. code-block:: python
+
+    pytestmark = [pytest.mark.asyncio(loop_scope="session")]
+
+Or use module scope if only module-scoped fixtures are needed:
+
+.. code-block:: python
+
+    pytestmark = [pytest.mark.asyncio(loop_scope="module")]
+
+**Why**: pytest-asyncio 0.25+ defaults to function-scoped event loops. Session/module
+scoped async fixtures need matching loop scope to avoid RuntimeError when sharing
+async resources across tests.
+
 Fixture Scoping Strategy
 ------------------------
 Session-scoped:
     - postgres_container: PostgreSQL testcontainer (expensive startup)
+    - event_loop_policy: Asyncio event loop policy
 
 Function-scoped:
     - pg_pool: Fresh connection pool with clean schema per test
@@ -141,8 +164,44 @@ def postgres_container(
 def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
     """Create event loop policy for async tests.
 
-    This fixture ensures we have a consistent event loop policy
-    across the test session for asyncio operations.
+    IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+    =================================================================
+
+    This fixture ensures we have a consistent event loop policy across the test
+    session for asyncio operations. Starting with pytest-asyncio 0.25, the default
+    event loop scope changed from "module" to "function", which breaks session/module
+    scoped async fixtures.
+
+    **Why This Matters:**
+
+    - Session-scoped fixtures (``postgres_container``) are created on one event loop
+    - Without proper loop scope config, each test gets a NEW event loop
+    - Sharing async resources across different loops causes RuntimeError
+
+    **Symptoms Without Proper Configuration:**
+
+    .. code-block:: text
+
+        RuntimeError: Task <Task pending ...> got Future <Future ...>
+        attached to a different loop
+
+    **Configuration Options:**
+
+    1. **pytestmark with loop_scope** (preferred for module-scoped fixtures):
+
+       .. code-block:: python
+
+           pytestmark = [pytest.mark.asyncio(loop_scope="module")]
+
+    2. **pytest.ini or pyproject.toml** (global default):
+
+       .. code-block:: toml
+
+           [tool.pytest.ini_options]
+           asyncio_default_fixture_loop_scope = "module"
+
+    **Reference:**
+        https://pytest-asyncio.readthedocs.io/en/latest/concepts.html#event-loop-scope
 
     Returns:
         asyncio.DefaultEventLoopPolicy instance.

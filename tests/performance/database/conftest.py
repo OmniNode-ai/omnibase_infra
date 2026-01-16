@@ -74,6 +74,28 @@ from dotenv import load_dotenv
 
 from omnibase_infra.utils import sanitize_error_message
 
+# =============================================================================
+# Cross-Module Import: Shared Test Helpers
+# =============================================================================
+# From tests/helpers/util_postgres:
+#   - PostgresConfig: Configuration dataclass for PostgreSQL connections
+#   - check_postgres_reachable: TCP reachability check
+#   - should_skip_migration: Check if migration contains CONCURRENTLY DDL
+#
+# From tests/infrastructure_config.py:
+#   - DEFAULT_POSTGRES_PORT: Standard PostgreSQL port (5436) on infrastructure server
+#
+# This ensures consistent configuration and eliminates code duplication.
+# =============================================================================
+from tests.helpers.util_postgres import (
+    PostgresConfig,
+    check_postgres_reachable,
+    should_skip_migration,
+)
+from tests.infrastructure_config import (
+    DEFAULT_POSTGRES_PORT,
+)
+
 _logger = logging.getLogger(__name__)
 
 # Load environment configuration
@@ -81,19 +103,6 @@ _project_root = Path(__file__).parent.parent.parent.parent
 _env_file = _project_root / ".env"
 if _env_file.exists():
     load_dotenv(_env_file)
-
-# =============================================================================
-# Cross-Module Import: Infrastructure Configuration
-# =============================================================================
-# From tests/infrastructure_config.py:
-#   - DEFAULT_POSTGRES_PORT: Standard PostgreSQL port (5436) on infrastructure server
-#
-# This import ensures consistent port configuration across all database
-# performance tests. See tests/infrastructure_config.py for full documentation.
-# =============================================================================
-from tests.infrastructure_config import (
-    DEFAULT_POSTGRES_PORT,
-)
 
 if TYPE_CHECKING:
     import asyncpg
@@ -103,44 +112,18 @@ if TYPE_CHECKING:
 # Infrastructure Availability
 # =============================================================================
 
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+# Use shared PostgresConfig for consistent configuration management
+_postgres_config = PostgresConfig.from_env()
 
-# Normalize empty password to None
-if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
-    POSTGRES_PASSWORD = None
+# Export individual values for backwards compatibility with existing code
+POSTGRES_HOST = _postgres_config.host
+POSTGRES_PORT = _postgres_config.port
+POSTGRES_DATABASE = _postgres_config.database
+POSTGRES_USER = _postgres_config.user
+POSTGRES_PASSWORD = _postgres_config.password
 
-
-def _check_postgres_reachable() -> bool:
-    """Check if PostgreSQL server is reachable via TCP connection.
-
-    This function verifies actual network connectivity to the PostgreSQL server,
-    not just whether environment variables are set. This prevents tests from
-    failing with connection errors when the database is unreachable (e.g., when
-    running outside the Docker network where hostname resolution may fail).
-
-    Returns:
-        bool: True if PostgreSQL is reachable, False otherwise.
-    """
-    if not POSTGRES_HOST or not POSTGRES_PASSWORD:
-        return False
-
-    import socket
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5.0)
-            result = sock.connect_ex((POSTGRES_HOST, POSTGRES_PORT))
-            return result == 0
-    except (OSError, TimeoutError, socket.gaierror):
-        return False
-
-
-# Check PostgreSQL reachability at module import time
-POSTGRES_AVAILABLE = _check_postgres_reachable()
+# Check PostgreSQL reachability at module import time using shared helper
+POSTGRES_AVAILABLE = check_postgres_reachable(_postgres_config)
 
 # =============================================================================
 # Module-Level Markers
@@ -203,11 +186,11 @@ MIGRATIONS_DIR = Path(__file__).parent.parent.parent.parent / "docker" / "migrat
 
 
 def _build_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables."""
-    return (
-        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
-    )
+    """Build PostgreSQL DSN from environment variables.
+
+    Uses the shared PostgresConfig for consistent DSN building.
+    """
+    return _postgres_config.build_dsn()
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -317,12 +300,13 @@ async def schema_initialized(
             try:
                 sql = migration_file.read_text()
 
-                # Skip migrations containing CONCURRENTLY - these are for production
-                # and cannot run inside a transaction block. The non-concurrent
+                # Skip migrations containing CONCURRENTLY DDL statements - these are for
+                # production and cannot run inside a transaction block. The non-concurrent
                 # versions (e.g., 003_capability_fields.sql) create the same indexes.
-                if "CONCURRENTLY" in sql.upper():
+                # Uses shared should_skip_migration() helper for consistent pattern matching.
+                if should_skip_migration(sql):
                     _logger.debug(
-                        "Skipping %s: contains CREATE INDEX CONCURRENTLY "
+                        "Skipping %s: contains CONCURRENTLY DDL statement "
                         "(production-only migration, not compatible with test transactions)",
                         filename,
                     )

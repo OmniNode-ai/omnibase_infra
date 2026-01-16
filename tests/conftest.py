@@ -135,7 +135,7 @@ def assert_has_methods(
         ...     protocol_name="RegistryPolicy",
         ... )
     """
-    name = protocol_name or obj.__class__.__name__
+    name: str = protocol_name or obj.__class__.__name__
     for method_name in required_methods:
         assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
         # __len__ and __iter__ are special - they are callable via len()/iter()
@@ -171,10 +171,10 @@ def assert_has_async_methods(
         ...     protocol_name="ProtocolReducer",
         ... )
     """
-    name = protocol_name or obj.__class__.__name__
+    name: str = protocol_name or obj.__class__.__name__
     for method_name in required_methods:
         assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
-        method = getattr(obj, method_name)
+        method: object = getattr(obj, method_name)
         assert callable(method), f"{name}.{method_name} must be callable"
         assert asyncio.iscoroutinefunction(method), (
             f"{name}.{method_name} must be async (coroutine function)"
@@ -210,12 +210,12 @@ def assert_method_signature(
         ...     protocol_name="ProtocolReducer",
         ... )
     """
-    name = protocol_name or obj.__class__.__name__
+    name: str = protocol_name or obj.__class__.__name__
     assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
 
-    method = getattr(obj, method_name)
-    sig = inspect.signature(method)
-    params = list(sig.parameters.keys())
+    method: object = getattr(obj, method_name)
+    sig: inspect.Signature = inspect.signature(method)
+    params: list[str] = list(sig.parameters.keys())
 
     assert len(params) == len(expected_params), (
         f"{name}.{method_name} must have {len(expected_params)} parameters "

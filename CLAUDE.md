@@ -759,10 +759,17 @@ loader = HandlerPluginLoader(
 - **Secret Management** - Vault integration for secure credential handling
 
 ### Infrastructure 4-Node Pattern
-- **EFFECT** - External service interactions (adapters)
-- **COMPUTE** - Message processing and transformation
-- **REDUCER** - State consolidation and decision making
-- **ORCHESTRATOR** - Workflow coordination
+
+The ONEX architecture uses four node archetypes. In **contract.yaml** files, use the `_GENERIC` variants:
+
+| Archetype | Contract `node_type` | EnumNodeKind | Purpose |
+|-----------|---------------------|--------------|---------|
+| **EFFECT** | `EFFECT_GENERIC` | `EnumNodeKind.EFFECT` | External service interactions (adapters) |
+| **COMPUTE** | `COMPUTE_GENERIC` | `EnumNodeKind.COMPUTE` | Message processing and transformation |
+| **REDUCER** | `REDUCER_GENERIC` | `EnumNodeKind.REDUCER` | State consolidation and decision making |
+| **ORCHESTRATOR** | `ORCHESTRATOR_GENERIC` | `EnumNodeKind.ORCHESTRATOR` | Workflow coordination |
+
+**Note**: The `_GENERIC` suffix in contract files (e.g., `EFFECT_GENERIC`) indicates the base archetype without specialization. `EnumNodeKind` enum values (e.g., `EnumNodeKind.EFFECT`) are used in Python code for introspection and dispatch.
 
 ## Node Structure
 
@@ -777,7 +784,7 @@ nodes/<adapter>/
 
 **Contract Requirements:**
 - Semantic versioning (`contract_version`, `node_version`)
-- Node type (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR)
+- Node type using `_GENERIC` variants (`EFFECT_GENERIC`, `COMPUTE_GENERIC`, `REDUCER_GENERIC`, `ORCHESTRATOR_GENERIC`)
 - Strongly typed I/O (`input_model`, `output_model`)
 - Handler routing (for orchestrators)
 - Zero `Any` types

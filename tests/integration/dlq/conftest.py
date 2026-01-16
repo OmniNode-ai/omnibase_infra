@@ -51,7 +51,10 @@ from omnibase_infra.dlq import (
 # =============================================================================
 # Read configuration from environment variables (set via docker-compose or .env)
 #
-# Cross-Module Import: Infrastructure Configuration
+# Cross-Module Import: Shared Test Helpers
+# From tests/helpers/util_postgres:
+#   - PostgresConfig: Configuration dataclass for PostgreSQL connections
+#
 # From tests/infrastructure_config.py:
 #   - REMOTE_INFRA_HOST: Default infrastructure server IP (192.168.86.200)
 #     Used as fallback when POSTGRES_HOST is not set.
@@ -60,16 +63,21 @@ from omnibase_infra.dlq import (
 # DLQ integration tests. See tests/infrastructure_config.py for full
 # documentation on environment variable overrides and CI/CD graceful skip behavior.
 # =============================================================================
+from tests.helpers.util_postgres import PostgresConfig
 from tests.infrastructure_config import REMOTE_INFRA_HOST
 
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", REMOTE_INFRA_HOST)
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5436")
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+# Use shared PostgresConfig for consistent configuration management
+_postgres_config = PostgresConfig.from_env(fallback_host=REMOTE_INFRA_HOST)
+
+# Export individual values for backwards compatibility with existing code
+POSTGRES_HOST = _postgres_config.host
+POSTGRES_PORT = str(_postgres_config.port)
+POSTGRES_DATABASE = _postgres_config.database
+POSTGRES_USER = _postgres_config.user
+POSTGRES_PASSWORD = _postgres_config.password
 
 # Defensive check: warn if POSTGRES_PASSWORD is missing or empty
-if not POSTGRES_PASSWORD or not POSTGRES_PASSWORD.strip():
+if not POSTGRES_PASSWORD:
     import warnings
 
     warnings.warn(
@@ -79,11 +87,9 @@ if not POSTGRES_PASSWORD or not POSTGRES_PASSWORD.strip():
         UserWarning,
         stacklevel=1,
     )
-    # Normalize to None for consistent availability check
-    POSTGRES_PASSWORD = None
 
-# Check if PostgreSQL is available
-POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
+# Check if PostgreSQL is available using the shared config
+POSTGRES_AVAILABLE = _postgres_config.is_configured
 
 
 def _build_postgres_dsn() -> str:
@@ -96,10 +102,7 @@ def _build_postgres_dsn() -> str:
         This function should only be called after verifying
         POSTGRES_PASSWORD is set.
     """
-    return (
-        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
-    )
+    return _postgres_config.build_dsn()
 
 
 # =============================================================================
