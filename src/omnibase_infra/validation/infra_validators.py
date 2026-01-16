@@ -49,7 +49,7 @@ from omnibase_core.validation import (
 )
 
 # Local imports
-from omnibase_infra.types import PathLike
+from omnibase_infra.types import PathInput
 
 # Module-level initialization (AFTER all imports)
 logger = logging.getLogger(__name__)
@@ -418,7 +418,7 @@ INFRA_UNIONS_STRICT = True
 
 
 def validate_infra_architecture(
-    directory: PathLike = INFRA_SRC_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
     max_violations: int = INFRA_MAX_VIOLATIONS,
 ) -> ValidationResult:
     """
@@ -457,7 +457,7 @@ def validate_infra_architecture(
 
 
 def validate_infra_contracts(
-    directory: PathLike = INFRA_NODES_PATH,
+    directory: PathInput = INFRA_NODES_PATH,
 ) -> ValidationResult:
     """
     Validate all infrastructure node contracts.
@@ -474,7 +474,7 @@ def validate_infra_contracts(
 
 
 def validate_infra_patterns(
-    directory: PathLike = INFRA_SRC_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
     strict: bool = INFRA_PATTERNS_STRICT,
 ) -> ValidationResult:
     """
@@ -682,7 +682,7 @@ def _create_filtered_result(
 
 
 def validate_infra_contract_deep(
-    contract_path: PathLike,
+    contract_path: PathInput,
 ) -> ModelContractValidationResult:
     """
     Perform deep contract validation for ONEX compliance.
@@ -1032,7 +1032,7 @@ def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
 
 
 def validate_infra_union_usage(
-    directory: PathLike = INFRA_SRC_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
     max_unions: int = INFRA_MAX_UNIONS,
     strict: bool = INFRA_UNIONS_STRICT,
 ) -> ValidationResult:
@@ -1130,7 +1130,7 @@ def validate_infra_union_usage(
 
 
 def validate_infra_circular_imports(
-    directory: PathLike = INFRA_SRC_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
 ) -> ModelModuleImportResult:
     """
     Check for circular imports in infrastructure code.
@@ -1150,8 +1150,8 @@ def validate_infra_circular_imports(
 
 
 def validate_infra_all(
-    directory: PathLike = INFRA_SRC_PATH,
-    nodes_directory: PathLike = INFRA_NODES_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
+    nodes_directory: PathInput = INFRA_NODES_PATH,
 ) -> dict[str, ValidationResult | ModelModuleImportResult]:
     """
     Run all validations on infrastructure code.

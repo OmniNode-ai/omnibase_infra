@@ -13,7 +13,7 @@ Top-level exports (this module):
 Type aliases (from type_infra_aliases):
     - ASTFunctionDef: ast.AsyncFunctionDef | ast.FunctionDef
     - MessageOutputCategory: EnumMessageCategory | EnumNodeOutputType
-    - PathLike: Path | str
+    - PathInput: Path | str (named to avoid collision with stdlib os.PathLike)
     - PolicyTypeInput: EnumPolicyType | str
     - VersionInput: ModelSemVer | str
 
@@ -31,7 +31,7 @@ from omnibase_infra.types.type_dsn import ModelParsedDSN
 from omnibase_infra.types.type_infra_aliases import (
     ASTFunctionDef,
     MessageOutputCategory,
-    PathLike,
+    PathInput,
     PolicyTypeInput,
     VersionInput,
 )
@@ -41,7 +41,7 @@ __all__: list[str] = [
     # Type aliases
     "ASTFunctionDef",
     "MessageOutputCategory",
-    "PathLike",
+    "PathInput",
     "PolicyTypeInput",
     "VersionInput",
     # Models and TypedDicts

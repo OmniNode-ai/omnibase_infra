@@ -13,12 +13,10 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType, EnumPolicyType
-
-if TYPE_CHECKING:
-    from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 # Message category or node output type (for routing and validation)
 # Replaces 24 occurrences of: EnumMessageCategory | EnumNodeOutputType
@@ -26,7 +24,8 @@ type MessageOutputCategory = EnumMessageCategory | EnumNodeOutputType
 
 # Filesystem path input flexibility
 # Replaces 11 occurrences of: Path | str
-type PathLike = Path | str
+# Note: Named PathInput (not PathLike) to avoid collision with stdlib os.PathLike
+type PathInput = Path | str
 
 # Policy type with string fallback for API flexibility
 # Replaces 8 occurrences of: EnumPolicyType | str
@@ -43,7 +42,7 @@ type VersionInput = ModelSemVer | str
 __all__ = [
     "ASTFunctionDef",
     "MessageOutputCategory",
-    "PathLike",
+    "PathInput",
     "PolicyTypeInput",
     "VersionInput",
 ]
