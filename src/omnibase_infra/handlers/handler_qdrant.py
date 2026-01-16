@@ -641,13 +641,14 @@ class HandlerQdrant(MixinAsyncCircuitBreaker):
                 vector_data: list[float] | None = None
                 if include_vectors and point.vector is not None:
                     # Handle both list and dict vector formats
-                    if isinstance(point.vector, list):
-                        vector_data = [float(v) for v in point.vector]
-                    elif isinstance(point.vector, dict):
+                    raw_vector = point.vector
+                    if isinstance(raw_vector, list):
+                        vector_data = [float(v) for v in raw_vector]  # type: ignore[arg-type]
+                    elif isinstance(raw_vector, dict):
                         # For named vectors, get the default one
-                        first_vector = next(iter(point.vector.values()), None)
-                        if first_vector is not None:
-                            vector_data = [float(v) for v in first_vector]
+                        first_vector = next(iter(raw_vector.values()), None)
+                        if first_vector is not None and isinstance(first_vector, list):
+                            vector_data = [float(v) for v in first_vector]  # type: ignore[arg-type]
 
                 results.append(
                     ModelVectorSearchResult(

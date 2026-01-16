@@ -217,16 +217,11 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
 
         # Create async driver
         try:
-            driver_kwargs: dict[str, object] = {
-                "max_connection_pool_size": self._pool_size,
-            }
-            if encrypted:
-                driver_kwargs["encrypted"] = True
-
             self._driver = AsyncGraphDatabase.driver(
                 connection_uri,
                 auth=auth,
-                **driver_kwargs,
+                max_connection_pool_size=self._pool_size,
+                encrypted=bool(encrypted) if encrypted else False,
             )
             # Verify connectivity
             await self._driver.verify_connectivity()
@@ -450,43 +445,40 @@ class HandlerGraph(MixinAsyncCircuitBreaker):
             if transaction and self.supports_transactions:
                 # Execute all queries in a single transaction
                 async with driver.session(database=self._database) as session:
-                    async with session.begin_transaction() as tx:
-                        try:
-                            for query, params in queries:
-                                query_start = time.perf_counter()
-                                result = await tx.run(
-                                    query, dict(params) if params else {}
-                                )
-                                records_data = await result.data()
-                                summary = await result.consume()
-                                query_time_ms = (
-                                    time.perf_counter() - query_start
-                                ) * 1000
+                    tx = await session.begin_transaction()
+                    try:
+                        for query, params in queries:
+                            query_start = time.perf_counter()
+                            result = await tx.run(query, dict(params) if params else {})
+                            records_data = await result.data()
+                            summary = await result.consume()
+                            query_time_ms = (time.perf_counter() - query_start) * 1000
 
-                                results.append(
-                                    ModelGraphQueryResult(
-                                        records=list(records_data),
-                                        summary=ModelGraphQuerySummary(
-                                            query_type=summary.query_type or "unknown",
-                                            database=self._database,
-                                            contains_updates=summary.counters.contains_updates,
-                                        ),
-                                        counters=ModelGraphQueryCounters(
-                                            nodes_created=summary.counters.nodes_created,
-                                            nodes_deleted=summary.counters.nodes_deleted,
-                                            relationships_created=summary.counters.relationships_created,
-                                            relationships_deleted=summary.counters.relationships_deleted,
-                                            properties_set=summary.counters.properties_set,
-                                            labels_added=summary.counters.labels_added,
-                                            labels_removed=summary.counters.labels_removed,
-                                        ),
-                                        execution_time_ms=query_time_ms,
-                                    )
+                            results.append(
+                                ModelGraphQueryResult(
+                                    records=list(records_data),
+                                    summary=ModelGraphQuerySummary(
+                                        query_type=summary.query_type or "unknown",
+                                        database=self._database,
+                                        contains_updates=summary.counters.contains_updates,
+                                    ),
+                                    counters=ModelGraphQueryCounters(
+                                        nodes_created=summary.counters.nodes_created,
+                                        nodes_deleted=summary.counters.nodes_deleted,
+                                        relationships_created=summary.counters.relationships_created,
+                                        relationships_deleted=summary.counters.relationships_deleted,
+                                        properties_set=summary.counters.properties_set,
+                                        labels_added=summary.counters.labels_added,
+                                        labels_removed=summary.counters.labels_removed,
+                                    ),
+                                    execution_time_ms=query_time_ms,
                                 )
-                            await tx.commit()
-                        except Exception:
-                            rollback_occurred = True
-                            raise
+                            )
+                        await tx.commit()
+                    except Exception:
+                        await tx.rollback()
+                        rollback_occurred = True
+                        raise
             else:
                 # Execute queries individually without transaction
                 for query, params in queries:
