@@ -384,13 +384,15 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 121 (2025-12-25): OMN-881 introspection feature (+1 non-optional union)
 # - 121 (2025-12-25): OMN-949 DLQ, OMN-816, OMN-811, OMN-1006 merges (all used X | None patterns, excluded)
 # - 121 (2025-12-26): OMN-1007 registry pattern + merge with main (X | None patterns excluded)
-# - 122 (2026-01-15): OMN-1346 extract registration domain plugin (+1 non-optional union)
+# - 122 (2026-01-15): OMN-1203 corpus capture service, OMN-1346 extract registration domain plugin
 # - 142 (2026-01-16): OMN-1305 ruff UP038 isinstance union syntax modernization (+20 unions)
 # - 121 (2026-01-16): OMN-1305 isinstance union exclusion (excluding 21 isinstance unions)
 #   - Updated validator to exclude isinstance(x, A | B) patterns
 #   - These are runtime checks, not type annotations
 #   - Current breakdown: ~1088 optionals, ~21 isinstance, ~121 threshold unions
-# - 122 (2026-01-16): OMN-1305 PR #151 release ready fixes (+1 union from policy validation)
+# - 123 (2026-01-16): OMN-1305 PR #151 release ready + merge with main (OMN-1203 corpus capture)
+#   - +1 union from policy validation (PR #151)
+#   - Current breakdown: ~1104 optionals, ~21 isinstance, ~123 threshold unions
 #
 # Soft ceiling guidance:
 # - 100-120: Healthy range, minor increments OK for legitimate features
@@ -404,7 +406,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # 4. Consider if a domain-specific type from omnibase_core would be cleaner
 #
 # Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
-INFRA_MAX_UNIONS = 122
+INFRA_MAX_UNIONS = 123
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

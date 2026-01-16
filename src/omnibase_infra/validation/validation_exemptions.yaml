@@ -896,6 +896,20 @@ pattern_exemptions:
       - Model Context Protocol Specification (https://modelcontextprotocol.io/)
     ticket: OMN-1288
   # ==========================================================================
+  # Corpus Capture Model Exemptions (OMN-1203)
+  # ==========================================================================
+  # corpus_display_name in ModelCaptureConfig is a user-provided label for the
+  # corpus (e.g., "regression-suite-v1"). It is NOT an entity reference - it's
+  # simply a human-readable display name for configuration.
+  - file_pattern: 'model_capture_config\.py'
+    violation_pattern: "Field 'corpus_display_name' might reference an entity"
+    reason: >
+      corpus_display_name is a user-provided display label for the corpus (e.g., "regression-suite-v1"). This is a configuration display name, not an entity reference requiring UUID + display_name pattern.
+
+    documentation:
+      - src/omnibase_infra/models/corpus/model_capture_config.py (class docstring)
+    ticket: OMN-1203
+  # ==========================================================================
   # Union Reduction Phase 2 Model Exemptions (OMN-1002)
   # ==========================================================================
   # These models use builder patterns with many convenience methods.
