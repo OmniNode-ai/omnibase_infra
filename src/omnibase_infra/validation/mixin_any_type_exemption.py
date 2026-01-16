@@ -138,27 +138,33 @@ class MixinAnyTypeExemption:
         Note:
             Only scans first 100 lines for performance. Imports should
             always appear near the top of Python files per PEP 8.
+
+            IMPORTANT: Each line is checked individually rather than joining
+            context into a single string. This prevents false positives where
+            "NOTE:" appears on one line and "Any required" on a different,
+            unrelated line.
         """
         # Only scan first 100 lines - imports must be at top per PEP 8
         max_lines = min(100, len(self.source_lines))
         for i, line in enumerate(self.source_lines[:max_lines]):
             # Look for Any import
             if "from typing import" in line and "Any" in line:
-                # Check surrounding lines (5 before and 5 after)
+                # Check surrounding lines (5 before and 5 after) INDIVIDUALLY
+                # to prevent cross-line false positives
                 start = max(0, i - 5)
                 end = min(len(self.source_lines), i + 6)
-                context = "\n".join(self.source_lines[start:end])
-                # Use strict matching - must have exemption keyword after "Any"
-                if _is_any_exemption_note(context):
-                    return True
+                for check_line in self.source_lines[start:end]:
+                    # Only check comment lines for NOTE pattern
+                    if "#" in check_line and _is_any_exemption_note(check_line):
+                        return True
             elif "import typing" in line:
                 # Also check for 'import typing' style
                 start = max(0, i - 5)
                 end = min(len(self.source_lines), i + 6)
-                context = "\n".join(self.source_lines[start:end])
-                # Use strict matching - must have exemption keyword after "Any"
-                if _is_any_exemption_note(context):
-                    return True
+                for check_line in self.source_lines[start:end]:
+                    # Only check comment lines for NOTE pattern
+                    if "#" in check_line and _is_any_exemption_note(check_line):
+                        return True
         return False
 
     def _has_allow_decorator(self, decorator_list: list[ast.expr]) -> bool:
@@ -241,11 +247,17 @@ class MixinAnyTypeExemption:
         line_num = node.lineno
 
         # First, check for inline NOTE comment on the same line
-        # Use strict matching - must have exemption keyword after "Any"
+        # Extract ONLY the comment portion to avoid matching "Any" in code
+        # e.g., for "field: Any = Field(...)  # NOTE: Any required for..."
+        # we only want to check "# NOTE: Any required for..."
         if 0 < line_num <= len(self.source_lines):
             current_line = self.source_lines[line_num - 1]
-            if _is_any_exemption_note(current_line):
-                return True
+            # Find the comment portion (after #)
+            comment_idx = current_line.find("#")
+            if comment_idx != -1:
+                comment_portion = current_line[comment_idx:]
+                if _is_any_exemption_note(comment_portion):
+                    return True
 
         # Look for NOTE comment in contiguous comment block immediately above
         # Stop as soon as we hit a non-comment, non-blank line

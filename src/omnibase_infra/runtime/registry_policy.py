@@ -488,8 +488,10 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         # Validate protocol implementation (evaluate() method exists and is callable)
         self._validate_protocol_implementation(policy_id, policy_class)
 
-        # Validate sync enforcement
-        self._validate_sync_enforcement(policy_id, policy_class, allow_async)
+        # Validate sync enforcement (pass policy_type for better error context)
+        self._validate_sync_enforcement(
+            policy_id, policy_class, allow_async, policy_type
+        )
 
         # Normalize policy type
         normalized_type = self._normalize_policy_type(policy_type)
@@ -957,7 +959,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
             []
         """
         warnings.warn(
-            "RegistryPolicy.clear() is intended for testing only."
+            "RegistryPolicy.clear() is intended for testing only. "
             "Do not use in production code.",
             UserWarning,
             stacklevel=2,

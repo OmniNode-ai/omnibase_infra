@@ -257,6 +257,8 @@ class ExecutionShapeViolationError(ModelOnexError):
 
     Example:
         >>> from omnibase_infra.models.validation import ModelValidateAndRaiseParams
+        >>> from omnibase_infra.enums import EnumNodeArchetype, EnumMessageCategory
+        >>> validator = RuntimeShapeValidator()
         >>> try:
         ...     params = ModelValidateAndRaiseParams(
         ...         node_archetype=EnumNodeArchetype.REDUCER,

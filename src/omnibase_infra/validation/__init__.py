@@ -182,7 +182,7 @@ from omnibase_infra.validation.validator_routing_coverage import (
 
 # Runtime shape validation for ONEX 4-node architecture
 # NOTE: RuntimeShapeValidator uses EXECUTION_SHAPE_RULES from validator_execution_shape.py
-# (not a separate definition). See validator_runtime_shape.py lines 193-196 for the import.
+# (not a separate definition). See the import near the top of validator_runtime_shape.py.
 from omnibase_infra.validation.validator_runtime_shape import (
     ExecutionShapeViolationError,
     RuntimeShapeValidator,

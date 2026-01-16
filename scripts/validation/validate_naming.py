@@ -692,8 +692,12 @@ class InfraNamingConventionValidator:
                 files_to_validate.add(file_path)
 
         # Validate each unique file once
+        # PERFORMANCE: Pre-filter against _validated_file_categories to avoid
+        # unnecessary method calls for files already validated in this category
         for file_path in files_to_validate:
-            self._validate_class_names_in_file(file_path, category, rules, verbose)
+            validation_key = (file_path, category)
+            if validation_key not in self._validated_file_categories:
+                self._validate_class_names_in_file(file_path, category, rules, verbose)
 
     def _validate_class_names_in_file(
         self,
@@ -1025,6 +1029,18 @@ def run_ast_validation(repo_path: Path, verbose: bool = False) -> list[str]:
         if file_path.is_symlink():
             continue
 
+        # Skip files exceeding size limit to prevent memory issues during AST parsing
+        try:
+            file_size = file_path.stat().st_size
+            if file_size > MAX_FILE_SIZE_BYTES:
+                if verbose:
+                    size_mb = file_size / (1024 * 1024)
+                    print(f"Skipping large file: {file_path} ({size_mb:.2f} MB)")
+                continue
+        except OSError:
+            # If we can't stat the file, skip it
+            continue
+
         try:
             with open(file_path, encoding="utf-8") as f:
                 content = f.read()
@@ -1160,7 +1176,7 @@ Class Naming Conventions:
                 if not args.errors_only or v.severity == "error"
             ],
             # IMPORTANT: 'passed' mirrors the script exit code logic exactly.
-            # The exit code is determined by has_failures (line ~1122):
+            # The exit code is determined by has_failures (lines 1133-1135):
             #   has_failures = errors > 0 or ast_count > 0 or
             #                  (args.fail_on_warnings and warnings > 0)
             # Therefore:

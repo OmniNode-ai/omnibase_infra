@@ -333,9 +333,10 @@ def _init_dlq(self) -> None
 **Usage Example**:
 ```python
 from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
+from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
-class EventBusKafka(MixinKafkaDlq, MixinAsyncCircuitBreaker):
+class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker):
     def __init__(self, config: ModelKafkaEventBusConfig):
         # Initialize host attributes
         self._config = config
@@ -512,20 +513,32 @@ def _init_circuit_breaker(
 When combining mixins with dependencies, **order matters**. Mixins that provide functionality must come before mixins that depend on them:
 
 ```python
-# CORRECT - Dependency providers first
-class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker):
+# CORRECT - HandlerConsul: MixinRetryExecution depends on MixinAsyncCircuitBreaker (mixin dependency)
+class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
     pass
 
-class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
+# CORRECT - EventBusKafka: Kafka mixins use Protocol-based dependencies (no mixin ordering required)
+class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker):
     pass
 
 class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
     pass
 
-# INCORRECT - Dependency order reversed
+# INCORRECT - MixinRetryExecution needs MixinAsyncCircuitBreaker first in MRO
 class BadHandler(MixinRetryExecution, MixinAsyncCircuitBreaker):  # Will fail!
     pass
 ```
+
+**Why `EventBusKafka` has `MixinAsyncCircuitBreaker` last:**
+
+The ordering principle applies to **mixin-based dependencies** (where one mixin directly uses methods/attributes from another mixin via MRO). `MixinRetryExecution` has a mixin dependency on `MixinAsyncCircuitBreaker` because it accesses `_circuit_breaker_lock` and `_circuit_breaker_initialized` at runtime.
+
+In contrast, `MixinKafkaDlq` and `MixinKafkaBroadcast` use **Protocol-based dependencies** (duck typing). They require the HOST class to provide certain attributes (`_config`, `_producer`, etc.) but do not depend on any other mixin in the MRO. The host class (e.g., `EventBusKafka`) provides these attributes directly in `__init__`, so the mixin order is flexible.
+
+| Dependency Type | Example | Ordering Required |
+|----------------|---------|-------------------|
+| **Mixin-based** | `MixinRetryExecution` uses `MixinAsyncCircuitBreaker._circuit_breaker_lock` | Yes - provider mixin must come first |
+| **Protocol-based** | `MixinKafkaDlq` requires `ProtocolKafkaDlqHost._config` from host class | No - host provides attributes directly |
 
 ### Complete Initialization Example
 

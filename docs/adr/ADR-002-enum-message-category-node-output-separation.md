@@ -313,23 +313,22 @@ uppercase_patterns = {
 # Phase 4: Lenient substring matching (fallback)
 ```
 
-The `_MESSAGE_CATEGORY_PATTERNS` constant is used for legacy purposes in the
-`_is_return_type_allowed` method context mapping.
-
 ### Runtime Validator Usage
 
 ```python
 from omnibase_infra.validation import RuntimeShapeValidator
-from omnibase_infra.enums import EnumHandlerType, EnumNodeOutputType
+from omnibase_infra.enums import EnumNodeArchetype, EnumNodeOutputType
+from omnibase_infra.models.validation import ModelOutputValidationParams
 
 validator = RuntimeShapeValidator()
 
-# Validate reducer output
-violation = validator.validate_handler_output(
-    handler_type=EnumHandlerType.REDUCER,
+# Validate reducer output using ModelOutputValidationParams
+params = ModelOutputValidationParams(
+    node_archetype=EnumNodeArchetype.REDUCER,
     output=my_projection,
     output_category=EnumNodeOutputType.PROJECTION,  # Correct - projections use EnumNodeOutputType
 )
+violation = validator.validate_handler_output(params)
 ```
 
 ## References

@@ -228,6 +228,7 @@ class MixinPolicyValidation:
         policy_id: str,
         policy_class: type[ProtocolPolicy],
         allow_async: bool,
+        policy_type: str | EnumPolicyType | None = None,
     ) -> None:
         """Validate that policy methods are synchronous unless explicitly async.
 
@@ -238,10 +239,11 @@ class MixinPolicyValidation:
         during registration.
 
         Validation Process:
-            1. Inspect policy class for methods: reduce(), decide(), evaluate()
-            2. Check if any of these methods are async (coroutine functions)
-            3. If async methods found and allow_async=False, raise error
-            4. If async methods found and allow_async=True, allow registration
+            1. Validate policy_id and policy_type parameters individually
+            2. Inspect policy class for methods: reduce(), decide(), evaluate()
+            3. Check if any of these methods are async (coroutine functions)
+            4. If async methods found and allow_async=False, raise error
+            5. If async methods found and allow_async=True, allow registration
 
         This validation helps prevent accidental async policy registration and ensures
         that async policies are consciously marked as such for proper runtime handling.
@@ -250,11 +252,13 @@ class MixinPolicyValidation:
             policy_id: Unique identifier for the policy being validated
             policy_class: The policy class to validate for async methods
             allow_async: If True, allows async interface; if False, enforces sync
+            policy_type: Optional policy type for error context (orchestrator or reducer)
 
         Raises:
             PolicyRegistryError: If policy has async methods (reduce, decide, evaluate)
-                                and allow_async=False. Error includes the policy_id
-                                and the name of the async method that caused validation failure.
+                                and allow_async=False. Error includes the policy_id,
+                                policy_type, and the name of the async method that
+                                caused validation failure.
 
         Example:
             >>> # This will fail - async policy without explicit flag
@@ -269,24 +273,48 @@ class MixinPolicyValidation:
             >>> mixin._validate_sync_enforcement("async_pol", AsyncPolicy, True)
         """
         # Validate policy_id individually before using in error messages
+        # Normalize policy_type for error context (may be None, str, or EnumPolicyType)
+        normalized_policy_type: str | None = None
+        if policy_type is not None:
+            if isinstance(policy_type, EnumPolicyType):
+                normalized_policy_type = policy_type.value
+            elif isinstance(policy_type, str):
+                normalized_policy_type = policy_type
+
         if policy_id is None:
             raise PolicyRegistryError(
                 "policy_id is required and cannot be None",
                 policy_id=None,
-                policy_type=None,
+                policy_type=normalized_policy_type,
             )
         if not isinstance(policy_id, str):
             raise PolicyRegistryError(
                 f"policy_id must be a string, got {type(policy_id).__name__}",
                 policy_id=str(policy_id),
-                policy_type=None,
+                policy_type=normalized_policy_type,
             )
         if not policy_id.strip():
             raise PolicyRegistryError(
                 "policy_id is required and cannot be empty",
                 policy_id=policy_id,
-                policy_type=None,
+                policy_type=normalized_policy_type,
             )
+
+        # Validate policy_type individually if provided (for better error context)
+        if policy_type is not None:
+            if not isinstance(policy_type, (str, EnumPolicyType)):
+                raise PolicyRegistryError(
+                    f"policy_type must be a string or EnumPolicyType, "
+                    f"got {type(policy_type).__name__}",
+                    policy_id=policy_id,
+                    policy_type=str(policy_type),
+                )
+            if isinstance(policy_type, str) and not policy_type.strip():
+                raise PolicyRegistryError(
+                    "policy_type cannot be empty when provided",
+                    policy_id=policy_id,
+                    policy_type=policy_type,
+                )
 
         for method_name in self._ASYNC_CHECK_METHODS:
             if hasattr(policy_class, method_name):
@@ -298,7 +326,7 @@ class MixinPolicyValidation:
                             f"allow_async=True not specified. "
                             f"Policy plugins must be synchronous by default.",
                             policy_id=policy_id,
-                            policy_type=None,
+                            policy_type=normalized_policy_type,
                             async_method=method_name,
                         )
 

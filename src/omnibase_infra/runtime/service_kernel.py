@@ -63,6 +63,9 @@ from uuid import UUID
 import asyncpg
 import yaml
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.runtime.introspection_event_router import (
+    IntrospectionEventRouter,
+)
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -75,11 +78,10 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.runtime.dispatchers import DispatcherNodeIntrospected
-from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
-from omnibase_infra.runtime.introspection_event_router import (
-    IntrospectionEventRouter,
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
+    DispatcherNodeIntrospected,
 )
+from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import (
     ModelProjectorPluginLoaderConfig,
     ModelRuntimeConfig,
@@ -176,9 +178,11 @@ def load_runtime_config(
         4. Return fully validated configuration model
 
     Configuration Precedence:
-        - File-based config takes precedence over environment variables
-        - Individual environment variables can override specific file settings
+        - File-based config is returned as-is when present (no environment overrides)
+        - Environment variables are only used when no config file exists
         - Defaults are used when neither file nor environment variables are set
+        - Note: Environment overrides (e.g., ONEX_ENVIRONMENT) are applied by the
+          caller (bootstrap), not by this function
 
     Args:
         contracts_dir: Path to the contracts directory containing runtime_config.yaml.

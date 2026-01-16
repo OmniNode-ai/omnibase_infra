@@ -149,15 +149,16 @@ class MixinKafkaDlq:
 
     @property
     def dlq_metrics(self) -> ModelDlqMetrics:
-        """Get a copy of the current DLQ metrics.
+        """Get a deep copy of the current DLQ metrics.
 
-        Returns a copy of the metrics to prevent unintended mutation
-        from external code. Thread-safe access to metrics data.
+        Returns a deep copy of the metrics to prevent unintended mutation
+        from external code. Deep copy ensures nested dicts (topic_counts,
+        error_type_counts) are also copied. Thread-safe access to metrics data.
 
         Returns:
-            Copy of the current DLQ metrics
+            Deep copy of the current DLQ metrics
         """
-        return self._dlq_metrics.model_copy()
+        return self._dlq_metrics.model_copy(deep=True)
 
     async def register_dlq_callback(
         self,
@@ -247,16 +248,32 @@ class MixinKafkaDlq:
         # Sanitize error message to prevent credential leakage in DLQ
         sanitized_failure_reason = sanitize_error_message(error)
 
+        # Defensive decode for key and value to handle edge cases
+        # This matches the pattern in _publish_raw_to_dlq for consistency
+        try:
+            key_str = (
+                failed_message.key.decode("utf-8", errors="replace")
+                if failed_message.key
+                else None
+            )
+        except Exception:
+            key_str = "<decode_failed>"
+
+        try:
+            value_str = (
+                failed_message.value.decode("utf-8", errors="replace")
+                if failed_message.value
+                else "<no_value>"
+            )
+        except Exception:
+            value_str = "<decode_failed>"
+
         # Build DLQ message with failure metadata
         dlq_payload = {
             "original_topic": original_topic,
             "original_message": {
-                "key": (
-                    failed_message.key.decode("utf-8", errors="replace")
-                    if failed_message.key
-                    else None
-                ),
-                "value": failed_message.value.decode("utf-8", errors="replace"),
+                "key": key_str,
+                "value": value_str,
                 "offset": failed_message.offset,
                 "partition": failed_message.partition,
             },
