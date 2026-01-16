@@ -48,10 +48,13 @@ from omnibase_core.enums import EnumTopicType
 
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.enums.enum_backend_type import EnumBackendType
+from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
+from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.enums.enum_confirmation_event_type import EnumConfirmationEventType
 from omnibase_infra.enums.enum_contract_type import EnumContractType
+from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_environment import EnumEnvironment
 from omnibase_infra.enums.enum_execution_shape_violation import (
@@ -86,10 +89,13 @@ from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
 __all__: list[str] = [
     "EnumAnyTypeViolation",
     "EnumBackendType",
+    "EnumCaptureOutcome",
+    "EnumCaptureState",
     "EnumChainViolationType",
     "EnumCircuitState",
     "EnumConfirmationEventType",
     "EnumContractType",
+    "EnumDedupeStrategy",
     "EnumDispatchStatus",
     "EnumEnvironment",
     "EnumExecutionShapeViolation",

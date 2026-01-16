@@ -18,7 +18,6 @@ class ModelMcpToolCall(BaseModel):
         correlation_id: Optional correlation ID for request tracing.
     """
 
-    # ONEX_EXCLUDE: entity_pattern - tool_name is MCP tool identifier, not entity reference
     tool_name: str = Field(..., description="Name of the tool to invoke")
     arguments: dict[str, object] = Field(
         default_factory=dict, description="Tool parameters as key-value pairs"
