@@ -490,16 +490,30 @@ class MyOrchestrator(NodeOrchestrator):
 | Unavailable | `InfraUnavailableError` |
 
 ### Error Context
+
+**MANDATORY**: Use `with_correlation()` factory method for error context creation.
+
 ```python
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
 
-context = ModelInfraErrorContext(
+# Auto-generate correlation_id (new error, no existing ID)
+context = ModelInfraErrorContext.with_correlation(
     transport_type=EnumInfraTransportType.DATABASE,
     operation="execute_query",
-    correlation_id=request.correlation_id,
 )
+
+# Propagate existing correlation_id (preserve trace chain)
+context = ModelInfraErrorContext.with_correlation(
+    correlation_id=request.correlation_id,
+    transport_type=EnumInfraTransportType.DATABASE,
+    operation="execute_query",
+)
+
 raise InfraConnectionError("Failed to connect", context=context) from e
 ```
+
+**See**: `docs/decisions/adr-error-context-factory-pattern.md`
 
 ### Error Hierarchy
 ```

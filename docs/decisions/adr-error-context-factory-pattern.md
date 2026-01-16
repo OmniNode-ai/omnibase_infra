@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-01-16
 **Related Tickets**: OMN-1306, OMN-1350
+**Follow-up Tickets**: To be created for validator implementation (`correlation_patterns` validator)
 
 ## Context
 
@@ -67,7 +68,7 @@ def with_correlation(
     return cls(correlation_id=correlation_id or uuid4(), **kwargs)
 ```
 
-**Location**: `src/omnibase_infra/models/errors/model_infra_error_context.py` (Lines 70-96)
+**Location**: `src/omnibase_infra/models/errors/model_infra_error_context.py`
 
 ### Usage Rules
 
@@ -101,7 +102,7 @@ def with_correlation(
 - Unknown fields are rejected by Pydantic validation (`extra="forbid"`)
 - Runtime errors catch misuse; static analysis cannot
 
-**Valid fields**: `transport_type`, `operation`, `target_name`, `namespace`
+**Valid fields**: `correlation_id`, `transport_type`, `operation`, `target_name`, `namespace`
 
 ### Two Patterns Coexist During Migration
 
@@ -147,17 +148,71 @@ Following the existing `any_types` validator pattern, implement AST-based detect
 
 ```python
 # scripts/validators/correlation_validator.py
+import ast
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class Violation:
+    """Represents a validation violation."""
+    file: Path
+    line: int
+    message: str
+    code: str
+
+
+def is_uuid4_call(node: ast.expr) -> bool:
+    """Check if node is a call to uuid4()."""
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name) and node.func.id == "uuid4":
+            return True
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "uuid4":
+            return True
+    return False
+
+
+def is_uuid4_or_pattern(node: ast.expr) -> bool:
+    """Check if node is `x or uuid4()` pattern."""
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+        return any(is_uuid4_call(value) for value in node.values)
+    return False
+
+
+def is_model_infra_error_context_call(node: ast.Call) -> bool:
+    """Check if call is to ModelInfraErrorContext constructor."""
+    if isinstance(node.func, ast.Name):
+        return node.func.id == "ModelInfraErrorContext"
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr == "ModelInfraErrorContext"
+    return False
+
+
+def has_correlation_id_kwarg(node: ast.Call) -> bool:
+    """Check if call has correlation_id keyword argument."""
+    return any(kw.arg == "correlation_id" for kw in node.keywords)
+
 
 def validate_correlation_patterns(file_path: Path) -> list[Violation]:
     """Detect anti-patterns in correlation ID handling."""
     violations = []
-    tree = ast.parse(file_path.read_text())
+    source = file_path.read_text()
+    tree = ast.parse(source)
+
+    # Skip the factory method implementation itself
+    in_with_correlation_method = False
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            # Check for uuid4() as correlation_id kwarg
+        # Track if we're inside with_correlation method
+        if isinstance(node, ast.FunctionDef) and node.name == "with_correlation":
+            in_with_correlation_method = True
+            continue
+
+        if isinstance(node, ast.Call) and not in_with_correlation_method:
+            # Check for uuid4() as correlation_id kwarg value
             for keyword in node.keywords:
                 if keyword.arg == "correlation_id":
+                    # Pattern 1: correlation_id=uuid4()
                     if is_uuid4_call(keyword.value):
                         violations.append(
                             Violation(
@@ -167,6 +222,29 @@ def validate_correlation_patterns(file_path: Path) -> list[Violation]:
                                 code="CORR_001",
                             )
                         )
+                    # Pattern 2: correlation_id=x or uuid4()
+                    elif is_uuid4_or_pattern(keyword.value):
+                        violations.append(
+                            Violation(
+                                file=file_path,
+                                line=node.lineno,
+                                message="Use ModelInfraErrorContext.with_correlation() instead of 'x or uuid4()' pattern",
+                                code="CORR_002",
+                            )
+                        )
+
+            # Pattern 3: ModelInfraErrorContext() without correlation_id
+            if is_model_infra_error_context_call(node):
+                if not has_correlation_id_kwarg(node):
+                    violations.append(
+                        Violation(
+                            file=file_path,
+                            line=node.lineno,
+                            message="ModelInfraErrorContext() missing correlation_id; use with_correlation() factory",
+                            code="CORR_003",
+                        )
+                    )
+
     return violations
 ```
 
@@ -190,16 +268,22 @@ When creating an error context with no existing correlation ID:
 
 ```python
 from omnibase_infra.models.errors import ModelInfraErrorContext
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.enums import EnumInfraTransportType
 
-# Factory auto-generates correlation_id
-context = ModelInfraErrorContext.with_correlation(
-    transport_type=EnumInfraTransportType.DATABASE,
-    operation="execute_query",
-    target_name="omninode_bridge",
-)
-
-raise InfraConnectionError("Connection refused", context=context) from e
+def connect_to_database(host: str) -> None:
+    """Attempt database connection with proper error context."""
+    try:
+        # Attempt connection
+        establish_connection(host)
+    except ConnectionRefusedError as e:
+        # Factory auto-generates correlation_id
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="execute_query",
+            target_name="omninode_bridge",
+        )
+        raise InfraConnectionError("Connection refused", context=context) from e
 ```
 
 ### Pattern 2: Propagate (Preserve Existing ID Through Call Chain)
@@ -336,16 +420,20 @@ This requires broader architectural consensus and is tracked separately.
 
 ### Finding Direct Constructor Usage
 
+These are quick manual checks for ad-hoc verification. The `correlation_patterns` validator (when implemented) provides robust AST-based detection with proper exemption handling.
+
 ```bash
-# Find potential violations (direct constructor without with_correlation)
-grep -rn "ModelInfraErrorContext(" src/ | grep -v "with_correlation" | grep -v "__pycache__"
+# Quick check: Find potential violations (direct constructor without with_correlation)
+grep -rn "ModelInfraErrorContext(" src/ --include="*.py" | grep -v "with_correlation" | grep -v "__pycache__"
 
-# Find manual uuid4() in correlation_id
-grep -rn "correlation_id=uuid4()" src/ | grep -v "__pycache__" | grep -v "with_correlation"
+# Quick check: Find manual uuid4() in correlation_id
+grep -rn "correlation_id=uuid4()" src/ --include="*.py" | grep -v "__pycache__" | grep -v "with_correlation"
 
-# Find or-pattern
-grep -rn "correlation_id.*or.*uuid4()" src/ | grep -v "__pycache__" | grep -v "with_correlation"
+# Quick check: Find or-pattern
+grep -rn "correlation_id.*or.*uuid4()" src/ --include="*.py" | grep -v "__pycache__" | grep -v "with_correlation"
 ```
+
+**Note**: These grep commands are for quick manual verification only. They may produce false positives (e.g., comments, string literals) and miss complex patterns. Use the AST-based validator for authoritative enforcement.
 
 ### Code Review Checklist
 
@@ -363,3 +451,7 @@ When reviewing code with `ModelInfraErrorContext`:
 - `scripts/validate.py` - Existing validator framework
 - [OMN-1306](https://linear.app/omninode/issue/OMN-1306) - Infrastructure error context refactoring
 - [OMN-1350](https://linear.app/omninode/issue/OMN-1350) - Document factory pattern in ADR
+
+### Planned Follow-up Work
+
+- **Validator Implementation**: Create Linear ticket for implementing `scripts/validate.py correlation_patterns` validator with pre-commit and CI integration (see "Lint/Validator Enforcement" section above)
