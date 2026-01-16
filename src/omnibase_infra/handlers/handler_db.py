@@ -94,7 +94,7 @@ from omnibase_infra.handlers.models import (
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
-from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
 logger = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ _POSTGRES_ERROR_PREFIXES: dict[type[asyncpg.PostgresError], str] = {
 }
 
 
-class HandlerDb(MixinEnvelopeExtraction):
+class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     """PostgreSQL database handler using asyncpg connection pool (MVP: query, execute only).
 
     Security Policy - DSN Handling:
@@ -171,8 +171,17 @@ class HandlerDb(MixinEnvelopeExtraction):
         parameterized statements to prevent SQL injection. Multi-statement SQL
         is intentionally blocked for security.
 
-    TODO(OMN-42): Consider implementing circuit breaker pattern for connection
-    resilience. See CLAUDE.md "Error Recovery Patterns" for implementation guidance.
+    Circuit Breaker:
+        This handler uses MixinAsyncCircuitBreaker for connection resilience.
+        The circuit breaker is initialized after the connection pool is created
+        in the initialize() method. Only connection-related errors (PostgresConnectionError,
+        QueryCanceledError) trip the circuit - application errors (syntax errors,
+        missing tables/columns) do not affect the circuit state.
+
+        States:
+        - CLOSED: Normal operation, requests allowed
+        - OPEN: Circuit tripped after threshold failures, requests blocked
+        - HALF_OPEN: Testing recovery after reset timeout, limited requests allowed
     """
 
     def __init__(self) -> None:
@@ -182,6 +191,7 @@ class HandlerDb(MixinEnvelopeExtraction):
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._initialized: bool = False
         self._dsn: str = ""
+        self._circuit_breaker_initialized: bool = False
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -279,6 +289,16 @@ class HandlerDb(MixinEnvelopeExtraction):
             # Note: DSN stored internally but never logged or exposed in errors.
             # Use _sanitize_dsn() if DSN info ever needs to be logged.
             self._initialized = True
+
+            # Initialize circuit breaker after pool creation succeeds
+            self._init_circuit_breaker(
+                threshold=5,
+                reset_timeout=30.0,
+                service_name="db_handler",
+                transport_type=EnumInfraTransportType.DATABASE,
+            )
+            self._circuit_breaker_initialized = True
+
             logger.info(
                 "%s initialized successfully",
                 self.__class__.__name__,
@@ -333,6 +353,12 @@ class HandlerDb(MixinEnvelopeExtraction):
 
     async def shutdown(self) -> None:
         """Close database connection pool and release resources."""
+        # Reset circuit breaker state
+        if self._circuit_breaker_initialized:
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+            self._circuit_breaker_initialized = False
+
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
@@ -511,32 +537,64 @@ class HandlerDb(MixinEnvelopeExtraction):
             correlation_id=correlation_id,
         )
 
+        # Check circuit breaker before operation
+        if self._circuit_breaker_initialized:
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker(
+                    operation="db.query",
+                    correlation_id=correlation_id,
+                )
+
         try:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(sql, *parameters)
-                return self._build_response(
-                    [dict(row) for row in rows],
-                    len(rows),
-                    correlation_id,
-                    input_envelope_id,
-                )
+
+            # Reset circuit breaker on success
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._reset_circuit_breaker()
+
+            return self._build_response(
+                [dict(row) for row in rows],
+                len(rows),
+                correlation_id,
+                input_envelope_id,
+            )
         except asyncpg.QueryCanceledError as e:
+            # Record failure for timeout errors (database overloaded)
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="db.query",
+                        correlation_id=correlation_id,
+                    )
             raise InfraTimeoutError(
                 f"Query timed out after {self._timeout}s",
                 context=ctx,
                 timeout_seconds=self._timeout,
             ) from e
         except asyncpg.PostgresConnectionError as e:
+            # Record failure for connection errors (database unavailable)
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="db.query",
+                        correlation_id=correlation_id,
+                    )
             raise InfraConnectionError(
                 "Database connection lost during query", context=ctx
             ) from e
         except asyncpg.PostgresSyntaxError as e:
+            # Application error - do NOT trip circuit
             raise RuntimeHostError(f"SQL syntax error: {e.message}", context=ctx) from e
         except asyncpg.UndefinedTableError as e:
+            # Application error - do NOT trip circuit
             raise RuntimeHostError(f"Table not found: {e.message}", context=ctx) from e
         except asyncpg.UndefinedColumnError as e:
+            # Application error - do NOT trip circuit
             raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
         except asyncpg.PostgresError as e:
+            # Generic PostgreSQL error - do NOT trip circuit (application bug likely)
             raise RuntimeHostError(
                 f"Database error: {type(e).__name__}", context=ctx
             ) from e
@@ -567,15 +625,38 @@ class HandlerDb(MixinEnvelopeExtraction):
             correlation_id=correlation_id,
         )
 
+        # Check circuit breaker before operation
+        if self._circuit_breaker_initialized:
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker(
+                    operation="db.execute",
+                    correlation_id=correlation_id,
+                )
+
         try:
             async with self._pool.acquire() as conn:
                 result = await conn.execute(sql, *parameters)
-                # asyncpg returns string like "INSERT 0 1" or "UPDATE 5"
-                row_count = self._parse_row_count(result)
-                return self._build_response(
-                    [], row_count, correlation_id, input_envelope_id
-                )
+
+            # Reset circuit breaker on success
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    await self._reset_circuit_breaker()
+
+            # asyncpg returns string like "INSERT 0 1" or "UPDATE 5"
+            row_count = self._parse_row_count(result)
+            return self._build_response(
+                [], row_count, correlation_id, input_envelope_id
+            )
         except asyncpg.PostgresError as e:
+            # Record circuit failure ONLY for connection/timeout errors
+            if self._circuit_breaker_initialized and isinstance(
+                e, (asyncpg.PostgresConnectionError, asyncpg.QueryCanceledError)
+            ):
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="db.execute",
+                        correlation_id=correlation_id,
+                    )
             raise self._map_postgres_error(e, ctx) from e
 
     def _parse_row_count(self, result: str) -> int:
@@ -688,6 +769,11 @@ class HandlerDb(MixinEnvelopeExtraction):
             - handler_category property: Full documentation of behavioral classification
             - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
         """
+        # Get circuit breaker state if initialized
+        cb_state: dict[str, object] | None = None
+        if self._circuit_breaker_initialized:
+            cb_state = self._get_circuit_breaker_state()
+
         return ModelDbDescribeResponse(
             handler_type=self.handler_type.value,
             handler_category=self.handler_category.value,
@@ -696,6 +782,7 @@ class HandlerDb(MixinEnvelopeExtraction):
             timeout_seconds=self._timeout,
             initialized=self._initialized,
             version="0.1.0-mvp",
+            circuit_breaker=cb_state,
         )
 
 
