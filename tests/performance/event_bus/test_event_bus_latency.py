@@ -41,6 +41,12 @@ from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from tests.performance.event_bus.conftest import generate_unique_topic
 
+# Mark all tests in this module as performance tests
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.asyncio,
+]
+
 # -----------------------------------------------------------------------------
 # Publish Latency Tests
 # -----------------------------------------------------------------------------
