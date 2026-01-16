@@ -141,6 +141,188 @@ class TestTypesModuleSubmoduleAccess:
         assert TypedDictCapabilities is not None
 
 
+class TestTypeAliasMyPyCompatibility:
+    """Verify type aliases work with strict type checking.
+
+    These tests ensure that the type aliases defined in omnibase_infra.types
+    are compatible with mypy strict mode and can be used in function signatures
+    without type errors.
+
+    The tests verify:
+    1. MessageOutputCategory accepts both EnumMessageCategory and EnumNodeOutputType
+    2. Type aliases can be used in function parameters and return types
+    3. All enum values of both types are accepted by the union type alias
+    """
+
+    def test_message_output_category_accepts_enum_message_category(self) -> None:
+        """Verify MessageOutputCategory accepts EnumMessageCategory values."""
+        from omnibase_infra.enums import EnumMessageCategory
+        from omnibase_infra.types import MessageOutputCategory
+
+        def accepts_category(cat: MessageOutputCategory) -> str:
+            """Function using MessageOutputCategory type alias."""
+            return str(cat)
+
+        # All EnumMessageCategory values should be accepted
+        result_event = accepts_category(EnumMessageCategory.EVENT)
+        result_command = accepts_category(EnumMessageCategory.COMMAND)
+        result_intent = accepts_category(EnumMessageCategory.INTENT)
+
+        assert "event" in result_event.lower()
+        assert "command" in result_command.lower()
+        assert "intent" in result_intent.lower()
+
+    def test_message_output_category_accepts_enum_node_output_type(self) -> None:
+        """Verify MessageOutputCategory accepts EnumNodeOutputType values."""
+        from omnibase_infra.enums import EnumNodeOutputType
+        from omnibase_infra.types import MessageOutputCategory
+
+        def accepts_category(cat: MessageOutputCategory) -> str:
+            """Function using MessageOutputCategory type alias."""
+            return str(cat)
+
+        # All EnumNodeOutputType values should be accepted
+        result_event = accepts_category(EnumNodeOutputType.EVENT)
+        result_command = accepts_category(EnumNodeOutputType.COMMAND)
+        result_intent = accepts_category(EnumNodeOutputType.INTENT)
+        result_projection = accepts_category(EnumNodeOutputType.PROJECTION)
+
+        assert "event" in result_event.lower()
+        assert "command" in result_command.lower()
+        assert "intent" in result_intent.lower()
+        assert "projection" in result_projection.lower()
+
+    def test_message_output_category_in_function_signature(self) -> None:
+        """Verify MessageOutputCategory works in function signatures."""
+        from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
+        from omnibase_infra.types import MessageOutputCategory
+
+        def process_category(category: MessageOutputCategory) -> MessageOutputCategory:
+            """Function with MessageOutputCategory in both param and return type."""
+            return category
+
+        # Both enum types should work for input and output
+        msg_cat = EnumMessageCategory.EVENT
+        node_out = EnumNodeOutputType.PROJECTION
+
+        result1 = process_category(msg_cat)
+        result2 = process_category(node_out)
+
+        assert result1 == msg_cat
+        assert result2 == node_out
+
+    def test_message_output_category_in_collection_types(self) -> None:
+        """Verify MessageOutputCategory works in collection type hints."""
+        from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
+        from omnibase_infra.types import MessageOutputCategory
+
+        def collect_categories(
+            categories: list[MessageOutputCategory],
+        ) -> dict[str, MessageOutputCategory]:
+            """Function using MessageOutputCategory in collection types."""
+            return {cat.value: cat for cat in categories}
+
+        mixed_categories: list[MessageOutputCategory] = [
+            EnumMessageCategory.EVENT,
+            EnumNodeOutputType.PROJECTION,
+            EnumMessageCategory.COMMAND,
+            EnumNodeOutputType.INTENT,
+        ]
+
+        result = collect_categories(mixed_categories)
+
+        assert len(result) == 4
+        assert "event" in result
+        assert "projection" in result
+
+    def test_message_output_category_type_identity(self) -> None:
+        """Verify MessageOutputCategory preserves type identity of enum values."""
+        from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
+        from omnibase_infra.types import MessageOutputCategory
+
+        def get_category(cat: MessageOutputCategory) -> MessageOutputCategory:
+            """Pass-through function to verify type is preserved."""
+            return cat
+
+        # Verify EnumMessageCategory identity is preserved
+        msg_event = EnumMessageCategory.EVENT
+        result_msg = get_category(msg_event)
+        assert isinstance(result_msg, EnumMessageCategory)
+        assert result_msg is msg_event
+
+        # Verify EnumNodeOutputType identity is preserved
+        node_projection = EnumNodeOutputType.PROJECTION
+        result_node = get_category(node_projection)
+        assert isinstance(result_node, EnumNodeOutputType)
+        assert result_node is node_projection
+
+    def test_path_input_accepts_path_and_str(self) -> None:
+        """Verify PathInput accepts both Path and str values."""
+        from pathlib import Path
+
+        from omnibase_infra.types import PathInput
+
+        def process_path(path: PathInput) -> str:
+            """Function using PathInput type alias."""
+            return str(path)
+
+        # Both Path and str should be accepted
+        path_obj = Path("/workspace/example/test.py")
+        path_str = "/workspace/example/test.py"
+
+        result1 = process_path(path_obj)
+        result2 = process_path(path_str)
+
+        assert result1 == "/workspace/example/test.py"
+        assert result2 == "/workspace/example/test.py"
+
+    def test_policy_type_input_accepts_enum_and_str(self) -> None:
+        """Verify PolicyTypeInput accepts both EnumPolicyType and str values."""
+        from omnibase_infra.enums import EnumPolicyType
+        from omnibase_infra.types import PolicyTypeInput
+
+        def process_policy(policy: PolicyTypeInput) -> str:
+            """Function using PolicyTypeInput type alias."""
+            return str(policy)
+
+        # Both EnumPolicyType and str should be accepted
+        result1 = process_policy(EnumPolicyType.ORCHESTRATOR)
+        result2 = process_policy("custom_policy")
+
+        assert "orchestrator" in result1.lower()
+        assert result2 == "custom_policy"
+
+    def test_ast_function_def_accepts_both_function_types(self) -> None:
+        """Verify ASTFunctionDef accepts both ast function definition types."""
+        import ast
+
+        from omnibase_infra.types import ASTFunctionDef
+
+        def get_function_name(func: ASTFunctionDef) -> str:
+            """Function using ASTFunctionDef type alias."""
+            return func.name
+
+        # Parse sample code to get both function types
+        sync_code = "def sync_func(): pass"
+        async_code = "async def async_func(): pass"
+
+        sync_tree = ast.parse(sync_code)
+        async_tree = ast.parse(async_code)
+
+        sync_func = sync_tree.body[0]
+        async_func = async_tree.body[0]
+
+        assert isinstance(sync_func, ast.FunctionDef)
+        assert isinstance(async_func, ast.AsyncFunctionDef)
+
+        # Both should be accepted by the type alias
+        result1 = get_function_name(sync_func)
+        result2 = get_function_name(async_func)
+
+        assert result1 == "sync_func"
+        assert result2 == "async_func"
+
+
 class TestTypesModuleExportConsistency:
     """Tests verifying export consistency between top-level and submodules."""
 

@@ -6,6 +6,20 @@ Infrastructure-specific type aliases for union complexity reduction.
 These type aliases consolidate repeated union patterns found in omnibase_infra,
 following the same pattern as omnibase_core.types.type_json.
 
+When to use each alias:
+    MessageOutputCategory: Use for message routing, dispatcher selection,
+        and node output validation. Accepts both EnumMessageCategory (EVENT,
+        COMMAND, INTENT) and EnumNodeOutputType (includes PROJECTION).
+
+    PathInput: Use for function parameters that accept filesystem paths.
+        Allows callers to pass either Path objects or string paths.
+
+    PolicyTypeInput: Use for policy configuration APIs that need flexibility
+        between enum values and string representations.
+
+    ASTFunctionDef: Use when analyzing Python AST for function definitions,
+        covering both sync and async functions.
+
 See OMN-1358 for the union reduction initiative that drove these definitions.
 """
 
