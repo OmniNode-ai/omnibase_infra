@@ -94,6 +94,7 @@ from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
 from omnibase_infra.runtime.util_version import normalize_version
+from omnibase_infra.types import PolicyTypeInput
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -593,7 +594,7 @@ class PolicyRegistry:
 
     def _normalize_policy_type(
         self,
-        policy_type: str | EnumPolicyType,
+        policy_type: PolicyTypeInput,
     ) -> str:
         """Normalize policy type to string value and validate against EnumPolicyType.
 
@@ -769,7 +770,7 @@ class PolicyRegistry:
         self,
         policy_id: str,
         policy_class: type[ProtocolPolicy],
-        policy_type: str | EnumPolicyType,
+        policy_type: PolicyTypeInput,
         version: str = "1.0.0",
         allow_async: bool = False,
     ) -> None:
@@ -850,7 +851,7 @@ class PolicyRegistry:
     def get(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
         version: str | None = None,
     ) -> type[ProtocolPolicy]:
         """Get policy class by ID, type, and optional version.
@@ -1296,7 +1297,7 @@ class PolicyRegistry:
 
     def list_keys(
         self,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
     ) -> list[tuple[str, str, str]]:
         """List registered policy keys as (id, type, version) tuples.
 
@@ -1373,7 +1374,7 @@ class PolicyRegistry:
     def is_registered(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
         version: str | None = None,
     ) -> bool:
         """Check if a policy is registered.
@@ -1422,7 +1423,7 @@ class PolicyRegistry:
     def unregister(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
         version: str | None = None,
     ) -> int:
         """Unregister policy plugins.
