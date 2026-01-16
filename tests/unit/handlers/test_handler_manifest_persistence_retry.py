@@ -1250,7 +1250,8 @@ class TestRetryTiming:
 
     @pytest.mark.asyncio
     @pytest.mark.xfail(
-        reason="Timing-based test may be flaky in CI - backoff timing is approximate"
+        reason="Timing-based test may be flaky in CI - backoff timing is approximate",
+        strict=True,
     )
     async def test_backoff_timing_approximate(
         self, temp_storage_path: Path, mock_container: MagicMock

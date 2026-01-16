@@ -5,6 +5,25 @@
 This module provides fixtures for testing PostgreSQL query performance
 using EXPLAIN ANALYZE to verify index usage and query efficiency.
 
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+================================================================
+This module requires ``loop_scope="module"`` for the asyncio marker to prevent
+event loop mismatch errors. Without this, module-scoped async fixtures will
+fail with::
+
+    RuntimeError: Task <Task pending ...> got Future <Future ...>
+    attached to a different loop
+
+The configuration is set via pytestmark::
+
+    pytestmark = [
+        pytest.mark.database,
+        pytest.mark.asyncio(loop_scope="module"),
+    ]
+
+This ensures all async fixtures in this module share the same event loop.
+See: https://pytest-asyncio.readthedocs.io/en/latest/concepts.html#event-loop-scope
+
 PRODUCTION SAFETY WARNING:
     This module uses EXPLAIN ANALYZE which EXECUTES the query to get actual
     timing and row counts. While this is safe for SELECT queries (no mutations),
@@ -320,7 +339,7 @@ async def schema_initialized(
                     continue
 
                 # Calculate simple checksum for tracking
-                checksum = hashlib.md5(sql.encode()).hexdigest()
+                checksum = hashlib.sha256(sql.encode()).hexdigest()
 
                 _logger.info("Applying migration: %s", filename)
                 await conn.execute(sql)

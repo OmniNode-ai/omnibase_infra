@@ -106,6 +106,10 @@ KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
     ),
 }
 
+# Named constants for Kafka error codes (for readable conditionals)
+KAFKA_ERROR_TOPIC_ALREADY_EXISTS = 36
+KAFKA_ERROR_INVALID_PARTITIONS = 37  # Also used for memory limit in Redpanda
+
 
 def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
     """Get a remediation hint for a Kafka error code.
@@ -197,12 +201,19 @@ async def ensure_test_topic() -> AsyncGenerator[
                 await admin.start()
             except Exception as conn_err:
                 admin = None  # Reset to allow retry
+                # Parse host:port safely for error message (handles IPv6, empty, malformed)
+                bootstrap_parts = (
+                    KAFKA_BOOTSTRAP_SERVERS.rsplit(":", 1)
+                    if KAFKA_BOOTSTRAP_SERVERS
+                    else ["<not set>", "29092"]
+                )
+                host = bootstrap_parts[0] if bootstrap_parts else "<not set>"
+                port = bootstrap_parts[1] if len(bootstrap_parts) > 1 else "29092"
                 raise RuntimeError(
                     f"Failed to connect to Kafka broker at {KAFKA_BOOTSTRAP_SERVERS}. "
                     f"Hint: Verify the broker is running and accessible:\n"
                     f"  1. Check container status: 'docker ps | grep redpanda'\n"
-                    f"  2. Test connectivity: 'nc -zv {KAFKA_BOOTSTRAP_SERVERS.split(':')[0]} "
-                    f"{KAFKA_BOOTSTRAP_SERVERS.split(':')[1] if ':' in KAFKA_BOOTSTRAP_SERVERS else '29092'}'\n"
+                    f"  2. Test connectivity: 'nc -zv {host} {port}'\n"
                     f"  3. For Redpanda, check health: 'curl -s http://<host>:9644/v1/status/ready'\n"
                     f"  4. Verify KAFKA_BOOTSTRAP_SERVERS env var is correct\n"
                     f"  5. If using Docker, ensure network connectivity to {KAFKA_BOOTSTRAP_SERVERS}\n"
@@ -227,7 +238,7 @@ async def ensure_test_topic() -> AsyncGenerator[
                     _, error_code, error_message = topic_error
                     if error_code != 0:
                         # Error code 36 = TopicAlreadyExistsError (handled below)
-                        if error_code == 36:
+                        if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
                             raise TopicAlreadyExistsError
                         # Provide actionable remediation hints for common errors
                         raise RuntimeError(
@@ -375,12 +386,19 @@ async def topic_factory() -> AsyncGenerator[
                 await admin.start()
             except Exception as conn_err:
                 admin = None  # Reset to allow retry
+                # Parse host:port safely for error message (handles IPv6, empty, malformed)
+                bootstrap_parts = (
+                    KAFKA_BOOTSTRAP_SERVERS.rsplit(":", 1)
+                    if KAFKA_BOOTSTRAP_SERVERS
+                    else ["<not set>", "29092"]
+                )
+                host = bootstrap_parts[0] if bootstrap_parts else "<not set>"
+                port = bootstrap_parts[1] if len(bootstrap_parts) > 1 else "29092"
                 raise RuntimeError(
                     f"Failed to connect to Kafka broker at {KAFKA_BOOTSTRAP_SERVERS}. "
                     f"Hint: Verify the broker is running and accessible:\n"
                     f"  1. Check container status: 'docker ps | grep redpanda'\n"
-                    f"  2. Test connectivity: 'nc -zv {KAFKA_BOOTSTRAP_SERVERS.split(':')[0]} "
-                    f"{KAFKA_BOOTSTRAP_SERVERS.split(':')[1] if ':' in KAFKA_BOOTSTRAP_SERVERS else '29092'}'\n"
+                    f"  2. Test connectivity: 'nc -zv {host} {port}'\n"
                     f"  3. For Redpanda, check health: 'curl -s http://<host>:9644/v1/status/ready'\n"
                     f"  4. Verify KAFKA_BOOTSTRAP_SERVERS env var is correct\n"
                     f"  5. If using Docker, ensure network connectivity to {KAFKA_BOOTSTRAP_SERVERS}\n"
@@ -402,7 +420,7 @@ async def topic_factory() -> AsyncGenerator[
                 for topic_error in response.topic_errors:
                     _, error_code, error_message = topic_error
                     if error_code != 0:
-                        if error_code == 36:  # TopicAlreadyExistsError
+                        if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
                             raise TopicAlreadyExistsError
                         # Provide actionable remediation hints for common errors
                         raise RuntimeError(

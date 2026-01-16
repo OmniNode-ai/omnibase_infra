@@ -3,14 +3,10 @@
 """ONEX Infrastructure Nodes Module.
 
 This module provides node implementations for the ONEX 4-node architecture:
-- EFFECT: External I/O operations (Kafka, Consul, Vault, PostgreSQL adapters)
-- COMPUTE: Pure data transformations (compute plugins)
-- REDUCER: State aggregation from multiple sources
-- ORCHESTRATOR: Workflow coordination across nodes
-
-Note: As of omnibase_core 0.7.0, the actual ``node_type`` contract values use the
-``_GENERIC`` suffix (e.g., ``EFFECT_GENERIC``, ``ORCHESTRATOR_GENERIC``). The names
-above refer to the conceptual architecture patterns.
+- EFFECT_GENERIC: External I/O operations (Kafka, Consul, Vault, PostgreSQL adapters)
+- COMPUTE_GENERIC: Pure data transformations (compute plugins)
+- REDUCER_GENERIC: State aggregation from multiple sources
+- ORCHESTRATOR_GENERIC: Workflow coordination across nodes
 
 Available Submodules:
 - effects: Effect nodes for external I/O operations
