@@ -21,6 +21,7 @@ from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraVaultError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -278,9 +279,19 @@ class MixinVaultToken:
         assert self._client is not None
         assert self._config is not None
 
+        # Capture namespace for use in closure
+        namespace = self._config.namespace
+
         def renew_func() -> dict[str, object]:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="vault.renew_token",
+                    target_name="vault_handler",
+                    correlation_id=correlation_id,
+                    namespace=namespace,
+                )
+                raise InfraVaultError("Vault client not initialized", context=ctx)
             result: dict[str, object] = self._client.auth.token.renew_self()
             return result
 

@@ -43,6 +43,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, TypedDict, cast
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    ContainerValidationError,
+    ContainerWiringError,
+    ServiceResolutionError,
+)
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
+
 
 class WiringResult(TypedDict):
     """Result of wire_registration_handlers operation.
@@ -185,7 +195,7 @@ async def wire_registration_dispatchers(
 
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
-        RuntimeError: If required handlers are not registered in the container,
+        ContainerWiringError: If required handlers are not registered in the container,
             or if the engine is already frozen (cannot register new dispatchers).
 
     Engine Frozen Behavior:
@@ -334,10 +344,15 @@ async def wire_registration_dispatchers(
             "Failed to wire registration dispatchers",
             extra={"error": str(e), "error_type": type(e).__name__},
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="wire_registration_dispatchers",
+        )
+        raise ContainerWiringError(
             f"Failed to wire registration dispatchers: {e}\n"
             f"Fix: Ensure wire_registration_handlers(container, pool) "
-            f"was called first."
+            f"was called first.",
+            context=context,
         ) from e
 
     return {
@@ -383,7 +398,8 @@ async def wire_registration_handlers(
 
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
-        RuntimeError: If service registration fails.
+        ContainerValidationError: If container missing required service_registry API.
+        ContainerWiringError: If service registration fails.
 
     Note:
         Services are registered with scope="global" and may conflict if multiple
@@ -497,10 +513,27 @@ async def wire_registration_handlers(
             else f"Missing attribute: {e}"
         )
         logger.exception("Failed to register handlers", extra={"hint": hint})
-        raise RuntimeError(f"Handler wiring failed - {hint}\nOriginal: {e}") from e
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="wire_registration_handlers",
+        )
+        raise ContainerValidationError(
+            f"Handler wiring failed - {hint}\nOriginal: {e}",
+            context=context,
+            missing_attribute="register_instance"
+            if "register_instance" in error_str
+            else str(e),
+        ) from e
     except Exception as e:
         logger.exception("Failed to register handlers", extra={"error": str(e)})
-        raise RuntimeError(f"Failed to wire registration handlers: {e}") from e
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="wire_registration_handlers",
+        )
+        raise ContainerWiringError(
+            f"Failed to wire registration handlers: {e}",
+            context=context,
+        ) from e
 
     logger.info(
         "Registration handlers wired successfully",
@@ -533,9 +566,15 @@ async def get_projection_reader_from_container(
         )
     except Exception as e:
         logger.exception("Failed to resolve ProjectionReaderRegistration")
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_ProjectionReaderRegistration",
+        )
+        raise ServiceResolutionError(
             f"ProjectionReaderRegistration not registered. "
-            f"Call wire_registration_handlers first. Error: {e}"
+            f"Call wire_registration_handlers first. Error: {e}",
+            service_name="ProjectionReaderRegistration",
+            context=context,
         ) from e
 
 
@@ -555,9 +594,15 @@ async def get_handler_node_introspected_from_container(
         )
     except Exception as e:
         logger.exception("Failed to resolve HandlerNodeIntrospected")
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_HandlerNodeIntrospected",
+        )
+        raise ServiceResolutionError(
             f"HandlerNodeIntrospected not registered. "
-            f"Call wire_registration_handlers first. Error: {e}"
+            f"Call wire_registration_handlers first. Error: {e}",
+            service_name="HandlerNodeIntrospected",
+            context=context,
         ) from e
 
 
@@ -577,9 +622,15 @@ async def get_handler_runtime_tick_from_container(
         )
     except Exception as e:
         logger.exception("Failed to resolve HandlerRuntimeTick")
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_HandlerRuntimeTick",
+        )
+        raise ServiceResolutionError(
             f"HandlerRuntimeTick not registered. "
-            f"Call wire_registration_handlers first. Error: {e}"
+            f"Call wire_registration_handlers first. Error: {e}",
+            service_name="HandlerRuntimeTick",
+            context=context,
         ) from e
 
 
@@ -601,9 +652,15 @@ async def get_handler_node_registration_acked_from_container(
         )
     except Exception as e:
         logger.exception("Failed to resolve HandlerNodeRegistrationAcked")
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_HandlerNodeRegistrationAcked",
+        )
+        raise ServiceResolutionError(
             f"HandlerNodeRegistrationAcked not registered. "
-            f"Call wire_registration_handlers first. Error: {e}"
+            f"Call wire_registration_handlers first. Error: {e}",
+            service_name="HandlerNodeRegistrationAcked",
+            context=context,
         ) from e
 
 

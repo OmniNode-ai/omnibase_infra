@@ -1629,7 +1629,7 @@ class TestPolicyRegistrySemverCacheConfiguration:
             PolicyRegistry.SEMVER_CACHE_SIZE = original_size
 
     def test_configure_semver_cache_after_use_raises_error(self) -> None:
-        """Test that configuring cache after first use raises RuntimeError."""
+        """Test that configuring cache after first use raises ProtocolConfigurationError."""
         # Reset cache to start fresh
         PolicyRegistry._reset_semver_cache()
 
@@ -1637,7 +1637,7 @@ class TestPolicyRegistrySemverCacheConfiguration:
         PolicyRegistry._parse_semver("1.0.0")
 
         # Attempt to reconfigure should fail
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             PolicyRegistry.configure_semver_cache(maxsize=256)
 
         assert "Cannot reconfigure semver cache after first use" in str(exc_info.value)

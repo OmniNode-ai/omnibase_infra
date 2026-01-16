@@ -43,6 +43,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
+    InfraConsulError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -570,7 +571,13 @@ class HandlerConsul(
             InfraUnavailableError: If circuit breaker is OPEN
         """
         if self._config is None:
-            raise RuntimeError("Config not initialized")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation=operation,
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraConsulError("Consul config not initialized", context=context)
 
         await self._check_circuit_if_enabled(operation, correlation_id)
 
@@ -589,9 +596,21 @@ class HandlerConsul(
             await asyncio.sleep(retry_state.delay_seconds)
 
         # Should never reach here, but satisfy type checker
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation=operation,
+            target_name="consul_handler",
+            correlation_id=correlation_id,
+        )
         if retry_state.last_error is not None:
-            raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
-        raise RuntimeError("Retry loop completed without result")
+            raise InfraConsulError(
+                f"Retry exhausted: {retry_state.last_error}",
+                context=context,
+            )
+        raise InfraConsulError(
+            "Retry loop completed without result",
+            context=context,
+        )
 
     def _init_retry_context(self, operation: str, correlation_id: UUID) -> RetryContext:
         """Initialize retry state and operation context.
@@ -604,7 +623,13 @@ class HandlerConsul(
             RetryContext with initialized retry_state and operation_context.
         """
         if self._config is None:
-            raise RuntimeError("Config not initialized")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation=operation,
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraConsulError("Consul config not initialized", context=context)
 
         retry_config = self._config.retry
         retry_state = ModelRetryState(
@@ -656,7 +681,13 @@ class HandlerConsul(
                 If error is not retriable or retries are exhausted.
         """
         if self._config is None:
-            raise RuntimeError("Config not initialized")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation=operation,
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraConsulError("Consul config not initialized", context=context)
 
         retry_config = self._config.retry
         try:

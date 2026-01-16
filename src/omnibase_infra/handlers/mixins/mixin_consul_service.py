@@ -22,6 +22,7 @@ from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraConsulError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -156,11 +157,31 @@ class MixinConsulService:
         )
 
         if self._client is None:
-            raise RuntimeError("Client not initialized")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="consul.register",
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraConsulError(
+                "Consul client not initialized",
+                context=context,
+                service_name=name,
+            )
 
         def register_func() -> bool:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.register",
+                    target_name="consul_handler",
+                    correlation_id=correlation_id,
+                )
+                raise InfraConsulError(
+                    "Consul client not initialized",
+                    context=ctx,
+                    service_name=name,
+                )
             self._client.agent.service.register(
                 name=name,
                 service_id=service_id_str,
@@ -215,11 +236,29 @@ class MixinConsulService:
             )
 
         if self._client is None:
-            raise RuntimeError("Client not initialized")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="consul.deregister",
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraConsulError(
+                "Consul client not initialized",
+                context=context,
+            )
 
         def deregister_func() -> bool:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.deregister",
+                    target_name="consul_handler",
+                    correlation_id=correlation_id,
+                )
+                raise InfraConsulError(
+                    "Consul client not initialized",
+                    context=ctx,
+                )
             self._client.agent.service.deregister(service_id)
             return True
 

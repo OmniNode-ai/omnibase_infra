@@ -23,6 +23,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    InfraVaultError,
     ModelInfraErrorContext,
     SecretResolutionError,
 )
@@ -268,7 +269,13 @@ class MixinVaultRetry:
             InfraUnavailableError: If circuit breaker is OPEN
         """
         if self._config is None:
-            raise RuntimeError("Config not initialized")
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.VAULT,
+                operation=operation,
+                target_name="vault_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraVaultError("Vault config not initialized", context=ctx)
 
         # Check circuit breaker before execution (async mixin pattern)
         if self._circuit_breaker_initialized:
@@ -332,9 +339,19 @@ class MixinVaultRetry:
             await asyncio.sleep(retry_state.delay_seconds)
 
         # Should never reach here, but satisfy type checker
+        ctx = self._create_vault_error_context(operation, correlation_id)
         if retry_state.last_error is not None:
-            raise RuntimeError(f"Retry exhausted: {retry_state.last_error}")
-        raise RuntimeError("Retry loop completed without result")
+            raise InfraVaultError(
+                f"Vault operation retry exhausted: {retry_state.last_error}",
+                context=ctx,
+                retry_count=retry_state.attempt,
+                last_error=retry_state.last_error,
+            )
+        raise InfraVaultError(
+            "Vault retry loop completed without result",
+            context=ctx,
+            retry_count=retry_state.attempt,
+        )
 
     async def _execute_vault_operation(
         self, func: Callable[[], T], op_context: ModelOperationContext

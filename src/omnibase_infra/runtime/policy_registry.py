@@ -1011,7 +1011,7 @@ class PolicyRegistry:
         """
         with cls._semver_cache_lock:
             if cls._semver_cache is not None:
-                raise RuntimeError(
+                raise ProtocolConfigurationError(
                     "Cannot reconfigure semver cache after first use. "
                     "Set PolicyRegistry.SEMVER_CACHE_SIZE before creating any "
                     "registry instances, or use _reset_semver_cache() for testing."

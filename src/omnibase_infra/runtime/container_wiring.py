@@ -56,7 +56,17 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.models.primitives import ModelSemVer
 
-from omnibase_infra.errors import ServiceRegistryUnavailableError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    ContainerValidationError,
+    ContainerWiringError,
+    ServiceRegistrationError,
+    ServiceRegistryUnavailableError,
+    ServiceResolutionError,
+)
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
@@ -218,7 +228,9 @@ async def wire_infrastructure_services(
 
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
-        RuntimeError: If service registration fails.
+        ContainerValidationError: If container missing required service_registry API.
+        ServiceRegistrationError: If service registration fails with invalid arguments.
+        ContainerWiringError: If service wiring fails for other reasons.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -308,11 +320,17 @@ async def wire_infrastructure_services(
                 "hint": hint,
             },
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="register_infrastructure_services",
+        )
+        raise ContainerValidationError(
             f"Container wiring failed - {hint}\n"
             f"Required API: container.service_registry.register_instance("
             f"interface, instance, scope, metadata)\n"
-            f"Original error: {e}"
+            f"Original error: {e}",
+            context=context,
+            missing_attribute=missing_attr,
         ) from e
     except TypeError as e:
         # Invalid arguments to register_instance
@@ -328,11 +346,17 @@ async def wire_infrastructure_services(
                 "hint": hint,
             },
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="register_infrastructure_services",
+        )
+        raise ServiceRegistrationError(
             f"Container wiring failed - {hint}\n"
             f"Expected signature: register_instance(interface=Type, instance=obj, "
             f"scope='global'|'request'|'transient', metadata=dict)\n"
-            f"Original error: {e}"
+            f"Original error: {e}",
+            context=context,
+            invalid_argument=invalid_arg,
         ) from e
     except Exception as e:
         # Generic fallback for unexpected errors
@@ -340,7 +364,14 @@ async def wire_infrastructure_services(
             "Failed to register infrastructure services",
             extra={"error": str(e), "error_type": type(e).__name__},
         )
-        raise RuntimeError(f"Failed to wire infrastructure services: {e}") from e
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="wire_infrastructure_services",
+        )
+        raise ContainerWiringError(
+            f"Failed to wire infrastructure services: {e}",
+            context=context,
+        ) from e
 
     logger.info(
         "Infrastructure services wired successfully",
@@ -371,7 +402,8 @@ async def get_policy_registry_from_container(
         PolicyRegistry instance from container.
 
     Raises:
-        RuntimeError: If PolicyRegistry not registered in container.
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        ServiceResolutionError: If PolicyRegistry not registered in container.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -383,7 +415,7 @@ async def get_policy_registry_from_container(
 
     Note:
         This function assumes PolicyRegistry was registered via
-        wire_infrastructure_services(). If not, it will raise RuntimeError.
+        wire_infrastructure_services(). If not, it will raise ServiceResolutionError.
         For auto-registration, use get_or_create_policy_registry() instead.
     """
     # Validate service_registry is available
@@ -415,10 +447,16 @@ async def get_policy_registry_from_container(
                 "hint": hint,
             },
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_PolicyRegistry",
+        )
+        raise ServiceResolutionError(
             f"Failed to resolve PolicyRegistry - {hint}\n"
             f"Required API: container.service_registry.resolve_service(PolicyRegistry)\n"
-            f"Original error: {e}"
+            f"Original error: {e}",
+            service_name="PolicyRegistry",
+            context=context,
         ) from e
     except Exception as e:
         logger.exception(
@@ -429,12 +467,18 @@ async def get_policy_registry_from_container(
                 "service_type": "PolicyRegistry",
             },
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_PolicyRegistry",
+        )
+        raise ServiceResolutionError(
             f"PolicyRegistry not registered in container.\n"
             f"Service type requested: PolicyRegistry\n"
             f"Resolution method: container.service_registry.resolve_service(PolicyRegistry)\n"
             f"Fix: Call wire_infrastructure_services(container) first.\n"
-            f"Original error: {e}"
+            f"Original error: {e}",
+            service_name="PolicyRegistry",
+            context=context,
         ) from e
 
 
@@ -508,8 +552,14 @@ async def get_or_create_policy_registry(
                 "Failed to auto-register PolicyRegistry",
                 extra={"error": str(e), "error_type": type(e).__name__},
             )
-            raise RuntimeError(
-                f"Failed to create and register PolicyRegistry: {e}"
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="auto_register_PolicyRegistry",
+            )
+            raise ServiceRegistrationError(
+                f"Failed to create and register PolicyRegistry: {e}",
+                service_name="PolicyRegistry",
+                context=context,
             ) from e
 
 
@@ -531,7 +581,8 @@ async def get_handler_registry_from_container(
         ProtocolBindingRegistry instance from container.
 
     Raises:
-        RuntimeError: If ProtocolBindingRegistry not registered in container.
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        ServiceResolutionError: If ProtocolBindingRegistry not registered in container.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -544,7 +595,7 @@ async def get_handler_registry_from_container(
 
     Note:
         This function assumes ProtocolBindingRegistry was registered via
-        wire_infrastructure_services(). If not, it will raise RuntimeError.
+        wire_infrastructure_services(). If not, it will raise ServiceResolutionError.
     """
     # Validate service_registry is available
     _validate_service_registry(container, "resolve ProtocolBindingRegistry")
@@ -575,10 +626,16 @@ async def get_handler_registry_from_container(
                 "hint": hint,
             },
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_ProtocolBindingRegistry",
+        )
+        raise ServiceResolutionError(
             f"Failed to resolve ProtocolBindingRegistry - {hint}\n"
             f"Required API: container.service_registry.resolve_service(ProtocolBindingRegistry)\n"
-            f"Original error: {e}"
+            f"Original error: {e}",
+            service_name="ProtocolBindingRegistry",
+            context=context,
         ) from e
     except Exception as e:
         logger.exception(
@@ -589,12 +646,18 @@ async def get_handler_registry_from_container(
                 "service_type": "ProtocolBindingRegistry",
             },
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_ProtocolBindingRegistry",
+        )
+        raise ServiceResolutionError(
             f"ProtocolBindingRegistry not registered in container.\n"
             f"Service type requested: ProtocolBindingRegistry\n"
             f"Resolution method: container.service_registry.resolve_service(ProtocolBindingRegistry)\n"
             f"Fix: Call wire_infrastructure_services(container) first.\n"
-            f"Original error: {e}"
+            f"Original error: {e}",
+            service_name="ProtocolBindingRegistry",
+            context=context,
         ) from e
 
 
@@ -616,7 +679,8 @@ async def get_compute_registry_from_container(
         RegistryCompute instance from container.
 
     Raises:
-        RuntimeError: If RegistryCompute not registered in container.
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        ServiceResolutionError: If RegistryCompute not registered in container.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -628,7 +692,7 @@ async def get_compute_registry_from_container(
 
     Note:
         This function assumes RegistryCompute was registered via
-        wire_infrastructure_services(). If not, it will raise RuntimeError.
+        wire_infrastructure_services(). If not, it will raise ServiceResolutionError.
         For auto-registration, use get_or_create_compute_registry() instead.
     """
     # Validate service_registry is available
@@ -660,10 +724,16 @@ async def get_compute_registry_from_container(
                 "hint": hint,
             },
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_RegistryCompute",
+        )
+        raise ServiceResolutionError(
             f"Failed to resolve RegistryCompute - {hint}\n"
             f"Required API: container.service_registry.resolve_service(RegistryCompute)\n"
-            f"Original error: {e}"
+            f"Original error: {e}",
+            service_name="RegistryCompute",
+            context=context,
         ) from e
     except Exception as e:
         logger.exception(
@@ -674,12 +744,18 @@ async def get_compute_registry_from_container(
                 "service_type": "RegistryCompute",
             },
         )
-        raise RuntimeError(
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_RegistryCompute",
+        )
+        raise ServiceResolutionError(
             f"RegistryCompute not registered in container.\n"
             f"Service type requested: RegistryCompute\n"
             f"Resolution method: container.service_registry.resolve_service(RegistryCompute)\n"
             f"Fix: Call wire_infrastructure_services(container) first.\n"
-            f"Original error: {e}"
+            f"Original error: {e}",
+            service_name="RegistryCompute",
+            context=context,
         ) from e
 
 
@@ -753,8 +829,14 @@ async def get_or_create_compute_registry(
                 "Failed to auto-register RegistryCompute",
                 extra={"error": str(e), "error_type": type(e).__name__},
             )
-            raise RuntimeError(
-                f"Failed to create and register RegistryCompute: {e}"
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="auto_register_RegistryCompute",
+            )
+            raise ServiceRegistrationError(
+                f"Failed to create and register RegistryCompute: {e}",
+                service_name="RegistryCompute",
+                context=context,
             ) from e
 
 
@@ -801,7 +883,8 @@ async def wire_registration_handlers(
 
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
-        RuntimeError: If service registration fails.
+        ContainerValidationError: If container missing required service_registry API.
+        ContainerWiringError: If service registration fails.
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
@@ -853,7 +936,8 @@ async def get_projection_reader_from_container(
         ProjectionReaderRegistration instance from container.
 
     Raises:
-        RuntimeError: If ProjectionReaderRegistration not registered in container.
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        ServiceResolutionError: If ProjectionReaderRegistration not registered in container.
 
     Example:
         >>> pool = await asyncpg.create_pool(dsn)
@@ -885,7 +969,8 @@ async def get_handler_node_introspected_from_container(
         HandlerNodeIntrospected instance from container.
 
     Raises:
-        RuntimeError: If handler not registered in container.
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        ServiceResolutionError: If handler not registered in container.
 
     Note:
         This function delegates to the Registration domain wiring module
@@ -912,7 +997,8 @@ async def get_handler_runtime_tick_from_container(
         HandlerRuntimeTick instance from container.
 
     Raises:
-        RuntimeError: If handler not registered in container.
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        ServiceResolutionError: If handler not registered in container.
 
     Note:
         This function delegates to the Registration domain wiring module
@@ -939,7 +1025,8 @@ async def get_handler_node_registration_acked_from_container(
         HandlerNodeRegistrationAcked instance from container.
 
     Raises:
-        RuntimeError: If handler not registered in container.
+        ServiceRegistryUnavailableError: If service_registry is missing or None.
+        ServiceResolutionError: If handler not registered in container.
 
     Note:
         This function delegates to the Registration domain wiring module
@@ -991,7 +1078,7 @@ async def wire_registration_dispatchers(
 
     Raises:
         ServiceRegistryUnavailableError: If service_registry is missing or None.
-        RuntimeError: If required handlers are not registered in the container,
+        ContainerWiringError: If required handlers are not registered in the container,
             or if the engine is already frozen (cannot register new dispatchers).
 
     Engine Frozen Behavior:

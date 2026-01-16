@@ -92,6 +92,7 @@ from omnibase_infra.errors.error_architecture_violation import (
 )
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.errors.error_compute_registry import ComputeRegistryError
+from omnibase_infra.errors.error_consul import InfraConsulError
 from omnibase_infra.errors.error_container_wiring import (
     ContainerValidationError,
     ContainerWiringError,
@@ -112,6 +113,7 @@ from omnibase_infra.errors.error_infra import (
     UnknownHandlerTypeError,
 )
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
+from omnibase_infra.errors.error_vault import InfraVaultError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -128,8 +130,11 @@ __all__: list[str] = [
     "EventBusRegistryError",
     "InfraAuthenticationError",
     "InfraConnectionError",
+    # Service-specific connection errors
+    "InfraConsulError",
     "InfraTimeoutError",
     "InfraUnavailableError",
+    "InfraVaultError",
     # Configuration model
     "ModelInfraErrorContext",
     "PolicyRegistryError",
