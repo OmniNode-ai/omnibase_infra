@@ -589,7 +589,6 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 "No SQLSTATE for PostgreSQL error, defaulting to permanent classification",
                 extra={
                     "error_type": type(error).__name__,
-                    "error_message": str(error),
                 },
             )
             return False
@@ -630,7 +629,6 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 "sqlstate": sqlstate,
                 "sqlstate_class": sqlstate_class,
                 "error_type": type(error).__name__,
-                "error_message": str(error),
             },
         )
         return False
@@ -733,6 +731,11 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             raise RuntimeHostError(
                 f"Not null constraint violation: {e.message}", context=ctx
             ) from e
+        except asyncpg.UniqueViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Unique constraint violation: {e.message}", context=ctx
+            ) from e
         except asyncpg.PostgresError as e:
             # Generic PostgreSQL error - use intelligent classification based on SQLSTATE
             # to determine if this is a transient infrastructure issue or permanent app bug
@@ -806,10 +809,16 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                         operation="db.execute",
                         correlation_id=correlation_id,
                     )
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="db.execute",
+                target_name="db_handler",
+                correlation_id=correlation_id,
+                timeout_seconds=self._timeout,
+            )
             raise InfraTimeoutError(
                 f"Statement timed out after {self._timeout}s",
-                context=ctx,
-                timeout_seconds=self._timeout,
+                context=timeout_ctx,
             ) from e
         except asyncpg.PostgresConnectionError as e:
             # Record failure for connection errors (database unavailable)
@@ -840,6 +849,11 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             # Application error - do NOT trip circuit
             raise RuntimeHostError(
                 f"Not null constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.UniqueViolationError as e:
+            # Application error - do NOT trip circuit
+            raise RuntimeHostError(
+                f"Unique constraint violation: {e.message}", context=ctx
             ) from e
         except asyncpg.PostgresError as e:
             # Generic PostgreSQL error - use intelligent classification based on SQLSTATE

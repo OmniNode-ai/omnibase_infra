@@ -8,6 +8,7 @@ and capabilities responses.
 
 from __future__ import annotations
 
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -72,7 +73,7 @@ class ModelDbDescribeResponse(BaseModel):
     version: str = Field(
         description="Handler version string",
     )
-    circuit_breaker: dict[str, object] | None = Field(
+    circuit_breaker: dict[str, JsonType] | None = Field(
         default=None,
         description="Circuit breaker state information (state, failures, threshold, etc.)",
     )
