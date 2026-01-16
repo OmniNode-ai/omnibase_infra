@@ -234,9 +234,15 @@ class MixinMessageTypeRegistration:
                 # New registration
                 self._entries[message_type] = entry
 
-                # Track domain
+                # Track domain - validate full domain constraint, not just owning_domain
                 domain = entry.domain_constraint.owning_domain
                 self._domains.add(domain)
+
+                # Also track allowed_cross_domains for comprehensive domain awareness
+                # This enables domain coverage reporting and validation
+                for cross_domain in entry.domain_constraint.allowed_cross_domains:
+                    if cross_domain:  # Validate non-empty cross-domain names
+                        self._domains.add(cross_domain)
 
                 # Track handler references
                 for handler_id in entry.handler_ids:

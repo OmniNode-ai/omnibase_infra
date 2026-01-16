@@ -189,19 +189,26 @@ class IntrospectionEventRouter:
     def container(self) -> ModelONEXContainer:
         """Return the ONEX service container.
 
-        The ModelONEXContainer provides:
-        - get_service_async(ProtocolType): Async service resolution by protocol type.
-        - get_service_sync(ProtocolType): Sync service resolution by protocol type.
-        - get_service_optional(ProtocolType): Returns None if service not found.
-        - Configuration and shared state management across the application.
+        The ModelONEXContainer provides protocol-based service resolution:
+
+        - get_service_async(protocol_type, service_name=None, correlation_id=None):
+          Async service resolution with caching and logging.
+        - get_service_sync(protocol_type, service_name=None):
+          Sync service resolution with optional performance monitoring.
+        - get_service(protocol_type, service_name=None):
+          Compatibility alias for get_service_sync().
+        - get_service_optional(protocol_type, service_name=None):
+          Returns None if service not found (non-throwing).
+        - service_registry property:
+          Direct access to ServiceRegistry for service registration.
 
         Returns:
             The ModelONEXContainer instance passed during initialization.
 
         Example:
-            >>> # Resolve a service from the container (async)
+            >>> # Resolve a service from the container by protocol (async)
             >>> from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
-            >>> policy_registry = await router.container.get_service_async(ProtocolPolicy)
+            >>> policy = await router.container.get_service_async(ProtocolPolicy)
         """
         return self._container
 

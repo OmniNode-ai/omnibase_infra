@@ -203,6 +203,7 @@ class MixinPolicyValidation:
                 f"policy_type property, evaluate() method",
                 policy_id=policy_id,
                 policy_class=policy_class.__name__,
+                policy_type=normalized_policy_type,
             )
 
         # Validate policy_id attribute exists on the class (individual check)
@@ -212,6 +213,7 @@ class MixinPolicyValidation:
                 f"property from ProtocolPolicy protocol",
                 policy_id=policy_id,
                 policy_class=policy_class.__name__,
+                policy_type=normalized_policy_type,
             )
 
         # Validate policy_type attribute exists on the class (individual check)
@@ -221,6 +223,7 @@ class MixinPolicyValidation:
                 f"property from ProtocolPolicy protocol",
                 policy_id=policy_id,
                 policy_class=policy_class.__name__,
+                policy_type=normalized_policy_type,
             )
 
         # Validate policy_id attribute value on the class (not just existence)
@@ -240,6 +243,7 @@ class MixinPolicyValidation:
                     f"but its value is None - must be a non-empty string",
                     policy_id=policy_id,
                     policy_class=policy_class.__name__,
+                    policy_type=normalized_policy_type,
                 )
             if not isinstance(class_policy_id_attr, str):
                 raise PolicyRegistryError(
@@ -247,6 +251,7 @@ class MixinPolicyValidation:
                     f"but its value must be a string, got {type(class_policy_id_attr).__name__}",
                     policy_id=policy_id,
                     policy_class=policy_class.__name__,
+                    policy_type=normalized_policy_type,
                 )
             if not class_policy_id_attr.strip():
                 raise PolicyRegistryError(
@@ -254,6 +259,7 @@ class MixinPolicyValidation:
                     f"but its value is empty - must be a non-empty string",
                     policy_id=policy_id,
                     policy_class=policy_class.__name__,
+                    policy_type=normalized_policy_type,
                 )
 
         # Validate policy_type attribute value on the class (not just existence)
@@ -273,6 +279,7 @@ class MixinPolicyValidation:
                     f"but its value is None - must be a valid EnumPolicyType",
                     policy_id=policy_id,
                     policy_class=policy_class.__name__,
+                    policy_type=normalized_policy_type,
                 )
             # Accept both EnumPolicyType enum and string values
             if isinstance(class_policy_type_attr, EnumPolicyType):
@@ -286,6 +293,7 @@ class MixinPolicyValidation:
                         f"value: {class_policy_type_attr!r}. Must be one of: {sorted(valid_types)}",
                         policy_id=policy_id,
                         policy_class=policy_class.__name__,
+                        policy_type=normalized_policy_type,
                     )
             else:
                 raise PolicyRegistryError(
@@ -294,6 +302,7 @@ class MixinPolicyValidation:
                     f"got {type(class_policy_type_attr).__name__}",
                     policy_id=policy_id,
                     policy_class=policy_class.__name__,
+                    policy_type=normalized_policy_type,
                 )
 
         # Check evaluate() method exists
@@ -303,6 +312,7 @@ class MixinPolicyValidation:
                 f"method from ProtocolPolicy protocol",
                 policy_id=policy_id,
                 policy_class=policy_class.__name__,
+                policy_type=normalized_policy_type,
             )
 
         # Check evaluate is callable
@@ -313,6 +323,7 @@ class MixinPolicyValidation:
                 f"(not callable) - must be a callable method",
                 policy_id=policy_id,
                 policy_class=policy_class.__name__,
+                policy_type=normalized_policy_type,
             )
 
     def _validate_sync_enforcement(

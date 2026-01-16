@@ -32,16 +32,30 @@ Use this table to quickly identify mixin requirements and common usage patterns.
 
 ### Key Dependencies Summary
 
-**Mixins with mixin-based dependencies** (ordering matters - `MixinAsyncCircuitBreaker` must come first):
-- `MixinRetryExecution` - Needs `_circuit_breaker_lock`, `_circuit_breaker_initialized` from `MixinAsyncCircuitBreaker`
-- `MixinConsulInitialization` - Uses `_init_circuit_breaker()` from `MixinAsyncCircuitBreaker`
-- `MixinVaultInitialization` - Uses `_init_circuit_breaker()` from `MixinAsyncCircuitBreaker`
+Mixin ordering depends on the **dependency type**. There are two patterns:
 
-**Protocol-based mixins** (ordering flexible - get attributes from host class, not other mixins):
-- `MixinKafkaDlq` - Requires `_config`, `_producer`, `_producer_lock`, `_model_headers_to_kafka()` from host
-- `MixinKafkaBroadcast` - Requires `_environment`, `_group`, `publish()` from host
+**1. Mixin-Based Dependencies** (ordering required):
 
-**Note**: `EventBusKafka` can have `MixinAsyncCircuitBreaker` last because `MixinKafkaDlq` and `MixinKafkaBroadcast` use Protocol-based dependencies (they get required attributes from the host class `__init__`, not from other mixins in the MRO). See [Correct Inheritance Order](#correct-inheritance-order) for details.
+When one mixin directly accesses methods/attributes from another mixin via MRO, the provider mixin MUST come first:
+
+| Dependent Mixin | Requires From | Provider Mixin |
+|-----------------|---------------|----------------|
+| `MixinRetryExecution` | `_circuit_breaker_lock`, `_circuit_breaker_initialized` | `MixinAsyncCircuitBreaker` |
+| `MixinConsulInitialization` | `_init_circuit_breaker()` | `MixinAsyncCircuitBreaker` |
+| `MixinVaultInitialization` | `_init_circuit_breaker()` | `MixinAsyncCircuitBreaker` |
+
+> **Note**: This ordering rule applies ONLY when there is an actual mixin-based dependency (one mixin accesses another mixin's attributes via MRO). If mixins use Protocol-based dependencies instead (requiring attributes from the host class), ordering is flexible. See `EventBusKafka` example below.
+
+**2. Protocol-Based Dependencies** (ordering flexible):
+
+When mixins require attributes from the HOST class (not other mixins), ordering is flexible because the host `__init__` provides all required attributes directly:
+
+| Mixin | Requires From Host |
+|-------|-------------------|
+| `MixinKafkaDlq` | `_config`, `_producer`, `_producer_lock`, `_model_headers_to_kafka()` |
+| `MixinKafkaBroadcast` | `_environment`, `_group`, `publish()` |
+
+**Example - EventBusKafka**: `MixinAsyncCircuitBreaker` can be last because `MixinKafkaDlq` and `MixinKafkaBroadcast` use Protocol-based dependencies. See [Correct Inheritance Order](#correct-inheritance-order) for details.
 
 ---
 

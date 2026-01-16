@@ -207,6 +207,11 @@ class MixinMessageTypeQuery:
         Returns:
             The registry entry if found, None otherwise.
 
+        Note:
+            Unlike get_handlers_unchecked(), this method returns entries
+            regardless of their enabled status. Check entry.enabled if you
+            need to distinguish between enabled and disabled entries.
+
         Raises:
             ModelOnexError: If registry is not frozen (INVALID_STATE)
 

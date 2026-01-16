@@ -409,18 +409,23 @@ class InfraNamingConventionValidator:
         PERFORMANCE: Initializes file cache to avoid re-reading and re-parsing
         files across multiple validation phases.
         """
-        # Normalize path for consistent comparisons across the codebase
+        # Normalize path for consistent comparisons across the codebase.
+        # IMPORTANT: All paths used internally (file_cache keys, validated_file_categories,
+        # etc.) MUST be resolved absolute paths to ensure consistent deduplication.
         self.repo_path = repo_path.resolve()
         self.violations: list[NamingViolation] = []
         # PERFORMANCE: Cache parsed file info to avoid re-reading files
         # Key: resolved absolute path, Value: ParsedFileInfo
         self._file_cache: dict[Path, ParsedFileInfo] = {}
         # PERFORMANCE: Cache all Python files found during directory scan
-        # Avoids multiple rglob calls for different categories
+        # Avoids multiple rglob calls for different categories.
+        # All paths are stored as resolved absolute paths for consistent comparison.
         self._all_python_files: list[Path] | None = None
-        # Track files skipped due to size limit (path, size_in_bytes)
+        # Track files skipped due to size limit (resolved path, size_in_bytes)
         self._skipped_large_files: list[tuple[Path, int]] = []
-        # Track which (file, category) pairs have been validated to prevent duplicates
+        # Track which (resolved_path, category) pairs have been validated to prevent duplicates.
+        # IMPORTANT: The callee (_validate_class_names_in_file) owns deduplication - it checks
+        # and adds to this set. Callers should NOT pre-check or add to this set.
         self._validated_file_categories: set[tuple[Path, str]] = set()
         # PERFORMANCE: Ensure compiled patterns are ready (lazy compilation)
         self._ensure_compiled_patterns()
@@ -555,8 +560,19 @@ class InfraNamingConventionValidator:
             # Parse the file and extract class definitions
             try:
                 # Defensive size check - files should be pre-filtered but check anyway
-                # to prevent memory issues for direct calls
-                file_size = file_path.stat().st_size
+                # to prevent memory issues for direct calls.
+                # OSError from stat() is caught below and treated as a parse error.
+                try:
+                    file_size = file_path.stat().st_size
+                except OSError as stat_error:
+                    # File may have been deleted, permissions changed, or is inaccessible
+                    self._file_cache[file_path] = ParsedFileInfo(
+                        file_path=file_path,
+                        ast_tree=None,
+                        parse_error=f"Cannot access file: {stat_error}",
+                    )
+                    return self._file_cache[file_path]
+
                 if file_size > MAX_FILE_SIZE_BYTES:
                     size_mb = file_size / (1024 * 1024)
                     self._file_cache[file_path] = ParsedFileInfo(
@@ -566,6 +582,8 @@ class InfraNamingConventionValidator:
                     )
                     return self._file_cache[file_path]
 
+                # Read and parse file content.
+                # OSError during open/read is caught below.
                 with open(file_path, encoding="utf-8") as f:
                     content = f.read()
 
@@ -594,6 +612,9 @@ class InfraNamingConventionValidator:
                 )
 
             except (SyntaxError, UnicodeDecodeError, OSError) as e:
+                # SyntaxError: Invalid Python syntax
+                # UnicodeDecodeError: File encoding issues
+                # OSError: File access issues (permissions, deleted during scan, etc.)
                 self._file_cache[file_path] = ParsedFileInfo(
                     file_path=file_path,
                     ast_tree=None,
@@ -677,13 +698,14 @@ class InfraNamingConventionValidator:
             - Uses cached file list from _get_all_python_files() instead of
               separate rglob calls for each category
             - Files are filtered in-memory using cached path info
-            - Each file is validated only once per category
+            - Each file is validated only once per category (deduplication handled by callee)
         """
         file_prefix = rules.get("file_prefix")
         expected_dir = rules.get("directory")
 
         # PERFORMANCE: Filter from cached file list instead of multiple rglob calls
         # This is O(n) where n = total files, vs O(n * m) for m glob patterns
+        # Using a set prevents duplicate entries within this category's file list
         files_to_validate: set[Path] = set()
 
         for file_path in self._get_all_python_files():
@@ -695,6 +717,8 @@ class InfraNamingConventionValidator:
             matches_prefix = file_prefix and file_path.name.startswith(file_prefix)
 
             # Check if file is in expected directory (relative to repo_path)
+            # Use repo-relative paths to avoid false positives from directories
+            # outside the repo or nested directories with the same name.
             matches_dir = False
             if expected_dir:
                 # Match expected_dir as a direct child of repo_path to avoid false positives
@@ -706,22 +730,21 @@ class InfraNamingConventionValidator:
                     if relative_path.parts and relative_path.parts[0] == expected_dir:
                         matches_dir = True
                 except ValueError:
-                    # File not under repo_path
+                    # File not under repo_path - skip it
                     pass
 
             if matches_prefix or matches_dir:
                 files_to_validate.add(file_path)
 
-        # Validate each unique file once
-        # PERFORMANCE: Pre-filter against _validated_file_categories to avoid
-        # unnecessary method calls for files already validated in this category.
-        # NOTE: The callee (_validate_class_names_in_file) handles adding to the
-        # set, which also enables deduplication for direct calls (e.g., from tests).
+        # Validate each file in the category.
+        # NOTE: Deduplication is handled entirely by _validate_class_names_in_file.
+        # This caller does NOT pre-check _validated_file_categories to avoid:
+        #   1. Redundant checks (callee checks anyway)
+        #   2. Race conditions if this code is ever made concurrent
+        #   3. Confusion about which component owns deduplication
+        # The set lookup in the callee is O(1), so the overhead is negligible.
         for file_path in files_to_validate:
-            validation_key = (file_path, category)
-            if validation_key not in self._validated_file_categories:
-                # Let the callee add to set and perform validation
-                self._validate_class_names_in_file(file_path, category, rules, verbose)
+            self._validate_class_names_in_file(file_path, category, rules, verbose)
 
     def _validate_class_names_in_file(
         self,
@@ -733,7 +756,7 @@ class InfraNamingConventionValidator:
         """Validate class names in a specific file.
 
         Args:
-            file_path: Path to the Python file to validate.
+            file_path: Path to the Python file to validate (must be resolved absolute path).
             category: The category being validated.
             rules: Dictionary containing validation rules.
             verbose: If True, show detailed output.
@@ -744,32 +767,38 @@ class InfraNamingConventionValidator:
             - Class definitions are pre-extracted during parsing
 
         Note:
-            Deduplication is handled at two levels for robustness:
-            1. The caller (_validate_category) checks _validated_file_categories before calling
-            2. This method adds to set first, then validates, ensuring no duplicates
-               even for direct calls (e.g., from tests)
+            This method OWNS all deduplication logic. Callers should NOT pre-check
+            _validated_file_categories - this method handles it to ensure:
+            1. Single point of control for deduplication logic
+            2. Works correctly for both normal flow and direct calls (e.g., from tests)
+            3. Atomic check-and-add pattern prevents race conditions
         """
-        # Handle deduplication - add to set first to prevent re-validation
-        # This handles both:
-        # - Normal flow: caller pre-checks but doesn't add, we add here
-        # - Direct calls: we add and validate (subsequent calls return early)
-        validation_key = (file_path, category)
+        # Ensure file_path is resolved for consistent deduplication
+        # (should already be resolved from _get_all_python_files, but defensive)
+        resolved_path = file_path if file_path.is_absolute() else file_path.resolve()
+
+        # DEDUPLICATION: Check and add in one logical operation.
+        # This method is the single owner of deduplication - callers do not pre-check.
+        validation_key = (resolved_path, category)
         if validation_key in self._validated_file_categories:
             return  # Already validated this file/category combination
         self._validated_file_categories.add(validation_key)
 
         # PERFORMANCE: Use cached parsed info instead of re-reading file
-        file_info = self._get_parsed_file_info(file_path)
+        # Use resolved_path for cache lookup consistency
+        file_info = self._get_parsed_file_info(resolved_path)
 
         if file_info.parse_error:
             if verbose:
-                print(f"Warning: Could not parse {file_path}: {file_info.parse_error}")
+                print(
+                    f"Warning: Could not parse {resolved_path}: {file_info.parse_error}"
+                )
             return
 
         # PERFORMANCE: Use pre-extracted class definitions
         for class_name, line_number in file_info.class_defs:
             self._check_class_naming_cached(
-                file_path, class_name, line_number, category, rules
+                resolved_path, class_name, line_number, category, rules
             )
 
     def _check_class_naming_cached(
@@ -1109,6 +1138,20 @@ def run_ast_validation(
 
     for file_path in files_to_check:
         try:
+            # Defensive size check before reading - even cached files might have
+            # been modified or the cache might contain stale entries.
+            # This prevents memory issues from unexpectedly large files.
+            try:
+                file_size = file_path.stat().st_size
+                if file_size > MAX_FILE_SIZE_BYTES:
+                    if verbose:
+                        size_mb = file_size / (1024 * 1024)
+                        print(f"Skipping large file: {file_path} ({size_mb:.2f} MB)")
+                    continue
+            except OSError:
+                # File may have been deleted or is inaccessible - skip it
+                continue
+
             with open(file_path, encoding="utf-8") as f:
                 content = f.read()
 
@@ -1244,6 +1287,8 @@ Class Naming Conventions:
             "ast_issues": ast_count,
             "skipped_files": skipped_files_count,
             "max_file_size_bytes": MAX_FILE_SIZE_BYTES,
+            # Include fail_on_warnings flag so consumers know how 'passed' was calculated
+            "fail_on_warnings": args.fail_on_warnings,
             "violations": [
                 {
                     "file_path": v.file_path,
