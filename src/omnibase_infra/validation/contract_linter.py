@@ -192,8 +192,10 @@ class ModelContractLintResult(BaseModel):
         ]
 
 
-# Valid node types per ONEX 4-node architecture
-VALID_NODE_TYPES = frozenset({"EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"})
+# Valid node types per ONEX 4-node architecture (omnibase_core 0.7.0+)
+VALID_NODE_TYPES = frozenset(
+    {"EFFECT_GENERIC", "COMPUTE_GENERIC", "REDUCER_GENERIC", "ORCHESTRATOR_GENERIC"}
+)
 
 
 # Rule ID mapping for contract violations

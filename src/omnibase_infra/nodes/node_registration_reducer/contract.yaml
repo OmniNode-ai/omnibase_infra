@@ -18,7 +18,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 name: "node_registration_reducer"
-node_type: "REDUCER"
+node_type: "REDUCER_GENERIC"
 # Enum Usage (CLAUDE.md reference):
 #   - node_type uses EnumNodeOutputType.REDUCER for validation
 #   - Reducer outputs are PROJECTION type (state + intents) via EnumNodeOutputType
