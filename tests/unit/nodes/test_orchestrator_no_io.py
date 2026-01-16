@@ -540,22 +540,22 @@ class TestContractIOOperationsAreEffectNodes:
 
             if node_id in non_io_exceptions:
                 # These should NOT be effect nodes despite keyword matches
-                if node_type == "effect":
+                if node_type == "effect_generic":
                     misclassified_nodes.append(
-                        f"{node_id}: marked as 'effect' but should be '{node['node_type']}'"
+                        f"{node_id}: marked as 'effect_generic' but should be '{node['node_type']}'"
                     )
                 continue
 
             # I/O operations should be effect nodes
-            if suggests_io and node_type != "effect":
+            if suggests_io and node_type != "effect_generic":
                 misclassified_nodes.append(
-                    f"{node_id}: performs I/O but marked as '{node_type}' instead of 'effect'"
+                    f"{node_id}: performs I/O but marked as '{node_type}' instead of 'effect_generic'"
                 )
 
         assert not misclassified_nodes, (
             "Contract has misclassified nodes:\n"
             + "\n".join(f"  - {msg}" for msg in misclassified_nodes)
-            + "\n\nAll I/O operations must use node_type: effect"
+            + "\n\nAll I/O operations must use node_type: effect_generic"
         )
 
     def test_effect_nodes_handle_external_systems(self, contract_data: dict) -> None:
@@ -571,7 +571,9 @@ class TestContractIOOperationsAreEffectNodes:
             "execution_graph"
         ]["nodes"]
 
-        effect_nodes = [n for n in execution_graph if n["node_type"] == "effect"]
+        effect_nodes = [
+            n for n in execution_graph if n["node_type"] == "effect_generic"
+        ]
         effect_node_ids = {n["node_id"] for n in effect_nodes}
 
         # Expected effect nodes for external system interaction
@@ -596,10 +598,12 @@ class TestContractIOOperationsAreEffectNodes:
             "execution_graph"
         ]["nodes"]
 
-        non_effect_nodes = [n for n in execution_graph if n["node_type"] != "effect"]
+        non_effect_nodes = [
+            n for n in execution_graph if n["node_type"] != "effect_generic"
+        ]
 
         # Pure node types
-        pure_types = {"compute", "reducer"}
+        pure_types = {"compute_generic", "reducer_generic"}
 
         for node in non_effect_nodes:
             node_type = node["node_type"]
