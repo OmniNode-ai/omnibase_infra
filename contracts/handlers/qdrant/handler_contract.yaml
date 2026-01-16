@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# Handler contract for HandlerQdrant (Qdrant vector database operations)
+# Part of OMN-1142: Qdrant & Memgraph Effect Handlers
+# Unique identifier for this handler
+name: handler-qdrant
+# Fully qualified class path for dynamic import
+handler_class: omnibase_infra.handlers.handler_qdrant.HandlerQdrant
+# Handler behavioral classification:
+# - effect: External side effects (I/O, database, network)
+# - compute: Pure computation, no side effects
+# - nondeterministic_compute: Computation that may vary (random, time-based)
+#
+# This handler is 'effect' because it executes vector operations against Qdrant
+handler_type: effect
+# Tags for discovery and filtering
+tags:
+  - vector
+  - qdrant
+  - semantic-search
+  - infrastructure
+  - effect
+# Security metadata for handler loading validation
+security:
+  # Trusted namespace - loader should verify class is from trusted namespace
+  trusted_namespace: omnibase_infra.handlers
+  # Audit logging - enable for security-sensitive handlers
+  audit_logging: true

@@ -45,8 +45,6 @@ if TYPE_CHECKING:
 
 def validate_timezone_aware_datetime(
     dt: datetime,
-    *,
-    allow_none: bool = False,
 ) -> datetime:
     """Validate that a datetime is timezone-aware.
 
@@ -54,10 +52,11 @@ def validate_timezone_aware_datetime(
     in Pydantic field validators. Use this instead of duplicating the validation
     logic in each model.
 
+    For optional datetime fields, use ``validate_timezone_aware_datetime_optional``
+    instead.
+
     Args:
         dt: The datetime value to validate.
-        allow_none: If True, None values pass through unchanged.
-            Set to True for optional datetime fields.
 
     Returns:
         The validated datetime (unchanged if valid).
@@ -87,11 +86,6 @@ def validate_timezone_aware_datetime(
         def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
             return validate_timezone_aware_datetime(v)
     """
-    if dt is None:
-        if allow_none:
-            return dt  # type: ignore[return-value]
-        raise ValueError("timestamp cannot be None")
-
     if not is_timezone_aware(dt):
         raise ValueError(
             "timestamp must be timezone-aware. Use datetime.now(UTC) or "

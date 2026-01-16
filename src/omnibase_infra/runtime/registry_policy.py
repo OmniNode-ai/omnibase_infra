@@ -90,8 +90,11 @@ from omnibase_core.errors import ModelOnexError
 from omnibase_core.models.primitives import ModelSemVer
 from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumPolicyType
+from omnibase_infra.enums import EnumInfraTransportType, EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.runtime.mixin_policy_validation import MixinPolicyValidation
 from omnibase_infra.runtime.mixin_semver_cache import MixinSemverCache
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
@@ -895,10 +898,15 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         """
         with cls._semver_cache_lock:
             if cls._semver_cache is not None:
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="configure_semver_cache",
+                )
                 raise ProtocolConfigurationError(
                     "Cannot reconfigure semver cache after first use. "
                     "Set RegistryPolicy.SEMVER_CACHE_SIZE before creating any "
-                    "registry instances, or use _reset_semver_cache() for testing."
+                    "registry instances, or use _reset_semver_cache() for testing.",
+                    context=context,
                 )
             cls.SEMVER_CACHE_SIZE = maxsize
 
