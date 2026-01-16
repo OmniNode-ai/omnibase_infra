@@ -327,6 +327,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 operation="project",
                 target_name=f"projector.{self.projector_id}",
                 correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
             )
             raise InfraTimeoutError(
                 f"Projection timed out for: {self.projector_id}",
@@ -528,6 +529,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 operation="get_state",
                 target_name=f"projector.{self.projector_id}",
                 correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
             )
             raise InfraTimeoutError(
                 f"State query timed out for: {self.projector_id}",
@@ -638,6 +640,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 operation="get_states",
                 target_name=f"projector.{self.projector_id}",
                 correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
             )
             raise InfraTimeoutError(
                 f"Bulk state query timed out for: {self.projector_id}",
@@ -742,6 +745,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 operation="partial_update",
                 target_name=f"projector.{self.projector_id}",
                 correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
             )
             raise InfraTimeoutError(
                 f"Partial update timed out for: {self.projector_id}",
@@ -854,6 +858,7 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 operation="upsert_partial",
                 target_name=f"projector.{self.projector_id}",
                 correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
             )
             raise InfraTimeoutError(
                 f"Partial upsert timed out for: {self.projector_id}",

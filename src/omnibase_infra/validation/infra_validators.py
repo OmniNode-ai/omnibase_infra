@@ -26,6 +26,7 @@ Exemption System:
 """
 
 # Standard library imports
+import ast
 import logging
 import re
 from functools import lru_cache
@@ -356,21 +357,23 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # ============================================================================
 
 # Maximum allowed union count in infrastructure code.
-# This threshold counts ONLY non-optional unions (excluding `X | None` patterns).
+# This threshold counts ONLY complex type annotation unions.
 #
-# Simple optional patterns (`X | None`) are excluded from this count because:
-# - `X | None` is the ONEX-preferred idiomatic Python pattern for nullable types
-# - Per PEP 604, this is the standard way to express optionality
-# - These are NOT problematic - only complex unions like `str | int | float` are flagged
+# Excluded patterns (NOT counted toward threshold):
+# 1. Simple optionals (`X | None`) - idiomatic nullable pattern (PEP 604)
+# 2. isinstance() unions (`isinstance(x, A | B)`) - runtime type checks, not annotations
 #
 # What IS counted (threshold applies to):
-# - Multi-type unions: `str | int`, `A | B | C`
+# - Multi-type unions in annotations: `def foo(x: str | int)`
 # - Complex patterns: `dict[str, str | int]` (nested unions)
 # - Unions with 3+ types (potential "primitive soup")
 #
 # What is NOT counted (excluded from threshold):
 # - Simple optionals: `str | None`, `int | None`, `ModelFoo | None`
-# - These are idiomatic Python nullable patterns, not complexity concerns
+#   - These are idiomatic Python nullable patterns, not complexity concerns
+# - isinstance() unions: `isinstance(x, str | int)` (ruff UP038 modern syntax)
+#   - These are runtime type checks, not type annotations
+#   - Encouraged by ruff UP038 over isinstance(x, (str, int))
 #
 # Threshold history (after exclusion logic):
 # - 120 (2025-12-25): Initial threshold after excluding ~470 `X | None` patterns
@@ -382,6 +385,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 121 (2025-12-25): OMN-949 DLQ, OMN-816, OMN-811, OMN-1006 merges (all used X | None patterns, excluded)
 # - 121 (2025-12-26): OMN-1007 registry pattern + merge with main (X | None patterns excluded)
 # - 122 (2026-01-15): OMN-1346 extract registration domain plugin (+1 non-optional union)
+# - 142 (2026-01-16): OMN-1305 ruff UP038 isinstance union syntax modernization (+20 unions)
+# - 121 (2026-01-16): OMN-1305 isinstance union exclusion (excluding 21 isinstance unions)
+#   - Updated validator to exclude isinstance(x, A | B) patterns
+#   - These are runtime checks, not type annotations
+#   - Current breakdown: ~1088 optionals, ~21 isinstance, ~121 threshold unions
 #
 # Soft ceiling guidance:
 # - 100-120: Healthy range, minor increments OK for legitimate features
@@ -391,10 +399,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # When incrementing threshold:
 # 1. Document the ticket/PR that added unions in threshold history above
 # 2. Verify new unions are not simple X | None (those should be excluded automatically)
-# 3. Consider if a domain-specific type from omnibase_core would be cleaner
+# 3. Verify new unions are not isinstance() patterns (also excluded automatically)
+# 4. Consider if a domain-specific type from omnibase_core would be cleaner
 #
 # Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
-INFRA_MAX_UNIONS = 122
+INFRA_MAX_UNIONS = 121
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -840,6 +849,168 @@ def is_simple_optional(pattern: ModelUnionPattern) -> bool:
 
 
 # ==============================================================================
+# isinstance() Union Exclusion
+# ==============================================================================
+#
+# Modern Python (PEP 604) allows isinstance(x, A | B) syntax instead of
+# isinstance(x, (A, B)). These are runtime type checks, NOT type annotations.
+# Ruff UP038 encourages this modern syntax.
+#
+# The union validator's goal is to limit complex TYPE ANNOTATIONS that indicate
+# type ambiguity in function signatures. isinstance() unions are:
+# - Runtime expressions, not type hints
+# - Used for dynamic type checking, not static typing
+# - Encouraged by modern Python style guides (ruff UP038)
+#
+# Therefore, isinstance() unions should NOT count toward the union threshold.
+
+
+class IsinstanceUnionVisitor(ast.NodeVisitor):
+    """
+    AST visitor to find line numbers where unions appear inside isinstance() calls.
+
+    This visitor tracks context when descending into isinstance() call arguments,
+    marking any union (BitOr) expressions found in the second argument as
+    "isinstance unions" that should be excluded from the complexity threshold.
+
+    The visitor correctly handles:
+    - isinstance(x, A | B) - simple isinstance union
+    - isinstance(x, A | B | C) - multi-type isinstance union
+    - isinstance(x, list[A | B]) - union inside generic (NOT excluded, it's a type hint)
+
+    Attributes:
+        isinstance_union_lines: Set of line numbers containing isinstance unions.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the visitor with empty line tracking."""
+        self.isinstance_union_lines: set[int] = set()
+        self._in_isinstance_type_arg: bool = False
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """
+        Visit a Call node and check if it's an isinstance() call.
+
+        When an isinstance() call is found, we mark that we're inside its
+        second argument (the type specification) before visiting children.
+        Any BitOr (union) found in this context is tracked.
+
+        Args:
+            node: The Call AST node to visit.
+        """
+        # Check if this is an isinstance() call
+        is_isinstance_call = (
+            isinstance(node.func, ast.Name) and node.func.id == "isinstance"
+        )
+
+        if is_isinstance_call and len(node.args) >= 2:
+            # Visit the first argument (the object being checked) normally
+            self.visit(node.args[0])
+
+            # Mark that we're in the type argument, then visit it
+            self._in_isinstance_type_arg = True
+            self.visit(node.args[1])
+            self._in_isinstance_type_arg = False
+
+            # Visit any remaining arguments normally
+            for arg in node.args[2:]:
+                self.visit(arg)
+
+            # Visit keyword arguments normally
+            for keyword in node.keywords:
+                self.visit(keyword)
+        else:
+            # Not isinstance(), visit normally
+            self.generic_visit(node)
+
+    def visit_BinOp(self, node: ast.BinOp) -> None:
+        """
+        Visit a BinOp node and track if it's a union inside isinstance().
+
+        When we're inside an isinstance() type argument and find a BitOr
+        (union) operator, we record this line as an isinstance union.
+
+        Args:
+            node: The BinOp AST node to visit.
+        """
+        if self._in_isinstance_type_arg and isinstance(node.op, ast.BitOr):
+            # This is a union inside isinstance() - track the line
+            self.isinstance_union_lines.add(node.lineno)
+
+        # Continue visiting children (for nested unions like A | B | C)
+        self.generic_visit(node)
+
+
+@lru_cache(maxsize=128)
+def _find_isinstance_union_lines(file_path: Path) -> frozenset[int]:
+    """
+    Find all line numbers containing unions inside isinstance() calls.
+
+    This function parses the file once and returns all lines where unions
+    appear inside isinstance() type arguments. Results are cached to avoid
+    repeated parsing when checking multiple patterns from the same file.
+
+    Args:
+        file_path: Path to the Python file to analyze.
+
+    Returns:
+        Frozenset of line numbers (1-based) containing isinstance unions.
+        Returns empty frozenset if file cannot be parsed or doesn't exist.
+
+    Examples:
+        >>> # File with: isinstance(x, str | int)  on line 5
+        >>> _find_isinstance_union_lines(Path("example.py"))
+        frozenset({5})
+
+    Note:
+        Uses lru_cache to avoid re-parsing files during the same validation run.
+        Cache should be cleared between validation runs if files may have changed.
+    """
+    try:
+        source = file_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(file_path))
+    except (OSError, SyntaxError) as e:
+        logger.debug("Cannot parse %s for isinstance detection: %s", file_path, e)
+        return frozenset()
+
+    visitor = IsinstanceUnionVisitor()
+    visitor.visit(tree)
+    return frozenset(visitor.isinstance_union_lines)
+
+
+def is_isinstance_union(pattern: ModelUnionPattern) -> bool:
+    """
+    Determine if a union pattern is inside an isinstance() call.
+
+    isinstance() unions are runtime type checks, not type annotations.
+    They should NOT count toward the union complexity threshold because:
+    1. They are runtime expressions, not static type hints
+    2. Modern Python (PEP 604) encourages isinstance(x, A | B) syntax
+    3. Ruff UP038 recommends this syntax over isinstance(x, (A, B))
+
+    Args:
+        pattern: The ModelUnionPattern to check.
+
+    Returns:
+        True if the pattern is inside an isinstance() call, False otherwise.
+
+    Examples:
+        >>> # Pattern from: isinstance(x, str | int)
+        >>> is_isinstance_union(pattern_from_isinstance)
+        True
+        >>> # Pattern from: def foo(x: str | int)
+        >>> is_isinstance_union(pattern_from_annotation)
+        False
+
+    Note:
+        This function caches file parsing results for efficiency.
+    """
+    file_path = Path(pattern.file_path)
+    isinstance_lines = _find_isinstance_union_lines(file_path)
+    return pattern.line in isinstance_lines
+
+
+# ==============================================================================
 # Path Skipping Configuration
 # ==============================================================================
 #
@@ -986,24 +1157,33 @@ def should_skip_path(path: Path) -> bool:
     return any(is_skip_directory(part) for part in path.parent.parts)
 
 
-def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
+def _count_non_optional_unions(
+    directory: Path,
+) -> tuple[int, int, int, int, list[str]]:
     """
-    Count unions in a directory, excluding simple optional patterns (`X | None`).
+    Count unions in a directory, excluding simple optional and isinstance patterns.
 
     This function provides accurate union counting for threshold checks by
-    excluding idiomatic `X | None` patterns that are valid ONEX style.
+    excluding:
+    - Idiomatic `X | None` patterns (simple optionals) that are valid ONEX style
+    - isinstance(x, A | B) patterns that are runtime type checks, not annotations
 
     Args:
         directory: Directory to scan for Python files.
 
     Returns:
-        Tuple of (non_optional_count, total_count, issues):
-        - non_optional_count: Count of unions excluding `X | None` patterns
+        Tuple of (threshold_count, total_count, optional_count, isinstance_count, issues):
+        - threshold_count: Count of unions that count toward threshold
+          (excludes both `X | None` and isinstance patterns)
         - total_count: Total count of all unions (for reporting)
+        - optional_count: Count of simple `X | None` patterns excluded
+        - isinstance_count: Count of isinstance unions excluded
         - issues: List of validation issues found
     """
     total_unions = 0
-    non_optional_unions = 0
+    threshold_unions = 0
+    optional_unions = 0
+    isinstance_unions = 0
     all_issues: list[str] = []
 
     for py_file in directory.rglob("*.py"):
@@ -1014,16 +1194,26 @@ def _count_non_optional_unions(directory: Path) -> tuple[int, int, list[str]]:
         union_count, issues, patterns = validate_union_usage_file(py_file)
         total_unions += union_count
 
-        # Count non-optional patterns
+        # Count and categorize patterns
         for pattern in patterns:
-            if not is_simple_optional(pattern):
-                non_optional_unions += 1
+            if is_simple_optional(pattern):
+                optional_unions += 1
+            elif is_isinstance_union(pattern):
+                isinstance_unions += 1
+            else:
+                threshold_unions += 1
 
         # Prefix issues with file path
         if issues:
             all_issues.extend([f"{py_file}: {issue}" for issue in issues])
 
-    return non_optional_unions, total_unions, all_issues
+    return (
+        threshold_unions,
+        total_unions,
+        optional_unions,
+        isinstance_unions,
+        all_issues,
+    )
 
 
 def validate_infra_union_usage(
@@ -1036,18 +1226,21 @@ def validate_infra_union_usage(
 
     Prevents overly complex union types that complicate infrastructure code.
 
-    This validator EXCLUDES simple optional patterns (`X | None`) from the count
-    because they are the ONEX-preferred idiomatic pattern for nullable types.
-    Only actual complex unions (like `str | int | float`) count toward the threshold.
+    This validator EXCLUDES the following patterns from the count:
+    - Simple optional patterns (`X | None`) - idiomatic nullable types
+    - isinstance() unions (`isinstance(x, A | B)`) - runtime type checks
+
+    Only actual complex TYPE ANNOTATIONS count toward the threshold.
 
     What IS counted (threshold applies to):
-        - Multi-type unions: `str | int`, `A | B | C`
-        - Complex patterns: unions with 3+ types
-        - Non-optional unions: any union without `None` as one of exactly 2 types
+        - Multi-type unions in annotations: `def foo(x: str | int)`
+        - Complex patterns: unions with 3+ types in annotations
+        - Non-optional type hints: any annotation union without `None`
 
     What is NOT counted (excluded from threshold):
         - Simple optionals: `X | None` where X is any single type
-        - These are idiomatic Python for nullable types, not complexity concerns
+        - isinstance() unions: `isinstance(x, A | B)` (runtime checks, not annotations)
+        - These are either idiomatic Python or runtime expressions, not type complexity
 
     Exemptions:
         Exemption patterns are loaded from validation_exemptions.yaml (union_exemptions section).
@@ -1058,23 +1251,23 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum NON-OPTIONAL union count threshold. Defaults to INFRA_MAX_UNIONS.
-            Note: This threshold applies only to non-optional unions (`X | None` excluded).
+        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS.
+            Note: This threshold applies only after excluding optionals and isinstance.
         strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
 
     Returns:
         ModelValidationResult with validation status and any errors.
-        The metadata includes both total_unions (all unions) and non_optional_unions
-        (excluding `X | None` patterns) for transparency.
+        The metadata includes total_unions (all unions), threshold_unions (what counts),
+        and breakdown of excluded patterns for transparency.
 
     Metadata Extension Fields:
         ModelValidationMetadata uses `extra="allow"` to support domain-specific fields.
         The following extension fields are used by this validator and are properly typed:
 
-        - non_optional_unions (int): Count of unions excluding `X | None` patterns.
+        - non_optional_unions (int): Count of unions after all exclusions.
           This is what the threshold check applies to.
-        - optional_unions_excluded (int): Count of simple `X | None` optionals that were
-          excluded from the threshold check for transparency.
+        - optional_unions_excluded (int): Count of simple `X | None` optionals excluded.
+        - isinstance_unions_excluded (int): Count of isinstance() unions excluded.
 
         These fields are additional to the base ModelValidationMetadata fields like
         total_unions and max_unions which are formally defined on the model.
@@ -1082,8 +1275,10 @@ def validate_infra_union_usage(
     # Convert to Path if string
     dir_path = Path(directory) if isinstance(directory, str) else directory
 
-    # Count unions with exclusion of simple optionals
-    non_optional_count, total_count, issues = _count_non_optional_unions(dir_path)
+    # Count unions with exclusion of simple optionals and isinstance patterns
+    threshold_count, total_count, optional_count, isinstance_count, issues = (
+        _count_non_optional_unions(dir_path)
+    )
 
     # Load exemption patterns from YAML configuration
     exempted_patterns = get_union_exemptions()
@@ -1091,19 +1286,17 @@ def validate_infra_union_usage(
     # Filter errors using regex-based pattern matching
     filtered_issues = _filter_exempted_errors(issues, exempted_patterns)
 
-    # Determine validity: non-optional count must be within threshold
+    # Determine validity: threshold count must be within max
     # and no issues in strict mode
-    is_valid = (non_optional_count <= max_unions) and (
-        not filtered_issues or not strict
-    )
+    is_valid = (threshold_count <= max_unions) and (not filtered_issues or not strict)
 
     # Count Python files for metadata (excluding archive, examples, __pycache__)
     python_files = list(dir_path.rglob("*.py"))
     files_processed = len([f for f in python_files if not should_skip_path(f)])
 
-    # Create result with enhanced metadata showing both counts
+    # Create result with enhanced metadata showing all counts
     # Note: ModelValidationMetadata uses extra="allow", so extension fields
-    # (non_optional_unions, optional_unions_excluded) are accepted as int values.
+    # are accepted as int values.
     # See docstring "Metadata Extension Fields" section for field documentation.
     return ModelValidationResult(
         is_valid=is_valid,
@@ -1113,13 +1306,14 @@ def validate_infra_union_usage(
             validation_type="union_usage",
             files_processed=files_processed,
             violations_found=len(filtered_issues),
-            total_unions=total_count,  # Base field: all unions including X | None
+            total_unions=total_count,  # Base field: all unions found
             max_unions=max_unions,  # Base field: configured threshold
             strict_mode=strict,  # Base field: whether strict mode enabled
             # Extension fields (via extra="allow", typed as int)
             # These provide transparency into the exclusion logic:
-            non_optional_unions=non_optional_count,  # What threshold actually checks
-            optional_unions_excluded=total_count - non_optional_count,  # X | None count
+            non_optional_unions=threshold_count,  # What threshold actually checks
+            optional_unions_excluded=optional_count,  # X | None patterns
+            isinstance_unions_excluded=isinstance_count,  # isinstance(x, A | B) patterns
         ),
     )
 

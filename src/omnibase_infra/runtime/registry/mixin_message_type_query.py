@@ -20,12 +20,7 @@ Related:
 
 from __future__ import annotations
 
-__all__ = [
-    "MixinMessageTypeQuery",
-]
-
 import logging
-from typing import TYPE_CHECKING
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
@@ -35,6 +30,10 @@ from omnibase_infra.errors import MessageTypeRegistryError
 from omnibase_infra.models.registry.model_message_type_entry import (
     ModelMessageTypeEntry,
 )
+
+__all__ = [
+    "MixinMessageTypeQuery",
+]
 
 logger = logging.getLogger(__name__)
 

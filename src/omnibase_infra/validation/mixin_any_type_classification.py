@@ -9,7 +9,6 @@ Field() calls, type expressions, etc.
 from __future__ import annotations
 
 import ast
-from typing import TYPE_CHECKING
 
 
 class MixinAnyTypeClassification:
@@ -70,7 +69,10 @@ class MixinAnyTypeClassification:
         if isinstance(node.target, ast.Name):
             name = node.target.id
             # Type aliases typically use PascalCase or end with "Type"
-            if name.endswith("Type") or (name[0].isupper() and "_" not in name):
+            # Exclude ALL_CAPS names (not name.isupper()) to match _is_likely_type_alias_name
+            if name.endswith("Type") or (
+                name[0].isupper() and "_" not in name and not name.isupper()
+            ):
                 # Only consider it a type alias if value is a type expression
                 if node.value is not None:
                     return self._is_type_expression(node.value)

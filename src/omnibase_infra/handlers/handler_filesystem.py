@@ -285,7 +285,7 @@ class HandlerFileSystem(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             )
 
         if (
-            not isinstance(allowed_paths_raw, (list, tuple))
+            not isinstance(allowed_paths_raw, list | tuple)
             or len(allowed_paths_raw) == 0
         ):
             raise ProtocolConfigurationError(

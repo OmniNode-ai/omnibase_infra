@@ -194,10 +194,10 @@ class IntrospectionEventRouter:
             The ModelONEXContainer instance passed during initialization.
 
         Example:
-            >>> # Resolve a service from the container
-            >>> from omnibase_infra.runtime.policy_registry import PolicyRegistry
-            >>> policy_registry = router.container.service_registry.resolve_service(
-            ...     PolicyRegistry
+            >>> # Resolve a service from the container (async)
+            >>> from omnibase_infra.runtime.registry_policy import RegistryPolicy
+            >>> registry = await router.container.service_registry.resolve_service(
+            ...     RegistryPolicy
             ... )
         """
         return self._container

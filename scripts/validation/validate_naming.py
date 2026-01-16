@@ -691,19 +691,19 @@ class InfraNamingConventionValidator:
             # Check if file matches the prefix pattern
             matches_prefix = file_prefix and file_path.name.startswith(file_prefix)
 
-            # Check if file is in expected directory (using cached info if available)
+            # Check if file is in expected directory (relative to repo_path)
             matches_dir = False
             if expected_dir:
-                # Match expected_dir as a direct child of omnibase_infra to avoid false positives
-                # For example, if expected_dir="models", we match "omnibase_infra/models/..."
-                # but NOT "/other/models/..." or nested "omnibase_infra/foo/models/..."
-                parts = file_path.parts
+                # Match expected_dir as a direct child of repo_path to avoid false positives
+                # For example, if expected_dir="models" and repo_path="/src/omnibase_infra",
+                # we match "/src/omnibase_infra/models/..." but NOT nested paths like
+                # "/src/omnibase_infra/nodes/models/..." or unrelated "/other/models/..."
                 try:
-                    omnibase_idx = parts.index("omnibase_infra")
-                    if omnibase_idx + 1 < len(parts):
-                        matches_dir = parts[omnibase_idx + 1] == expected_dir
+                    relative_path = file_path.relative_to(self.repo_path)
+                    if relative_path.parts and relative_path.parts[0] == expected_dir:
+                        matches_dir = True
                 except ValueError:
-                    # omnibase_infra not in path
+                    # File not under repo_path
                     pass
 
             if matches_prefix or matches_dir:
@@ -742,17 +742,18 @@ class InfraNamingConventionValidator:
             - Class definitions are pre-extracted during parsing
 
         Note:
-            Deduplication is primarily handled by the caller (_validate_category),
-            which checks and adds the (file, category) key to _validated_file_categories
-            before calling this method. For direct calls (e.g., from tests), this method
-            also handles deduplication by adding to the set if not already present.
+            Deduplication is handled at two levels for robustness:
+            1. The caller (_validate_category) checks _validated_file_categories before calling
+            2. This method also checks and returns early if already validated
+            This ensures no duplicate validations occur even for direct calls (e.g., from tests).
         """
         # Handle deduplication for direct calls that bypass _validate_category
         # The caller (_validate_category) adds to set before calling, so this
         # check will pass for normal flow but catches direct/test invocations
         validation_key = (file_path, category)
-        if validation_key not in self._validated_file_categories:
-            self._validated_file_categories.add(validation_key)
+        if validation_key in self._validated_file_categories:
+            return  # Already validated this file/category combination
+        self._validated_file_categories.add(validation_key)
 
         # PERFORMANCE: Use cached parsed info instead of re-reading file
         file_info = self._get_parsed_file_info(file_path)
@@ -813,9 +814,18 @@ class InfraNamingConventionValidator:
         expected_dir = rules.get("directory")
 
         # Only validate classes in files that should contain this category
-        # PERFORMANCE: Use path.parts for directory check
+        # Use repo-relative path for accurate directory matching
         in_relevant_file = file_prefix and file_path.name.startswith(file_prefix)
-        in_relevant_dir = expected_dir and expected_dir in file_path.parts
+        in_relevant_dir = False
+        if expected_dir:
+            try:
+                relative_path = file_path.relative_to(self.repo_path)
+                in_relevant_dir = (
+                    relative_path.parts and relative_path.parts[0] == expected_dir
+                )
+            except ValueError:
+                # File not under repo_path
+                pass
 
         if not in_relevant_file and not in_relevant_dir:
             return
@@ -1097,7 +1107,10 @@ def run_ast_validation(
             for issue in checker.issues:
                 ast_issues.append(f"{file_path}: {issue}")
 
-        except (SyntaxError, UnicodeDecodeError):
+        except (SyntaxError, UnicodeDecodeError, OSError):
+            # SyntaxError: Invalid Python syntax
+            # UnicodeDecodeError: File encoding issues
+            # OSError: File access issues (permissions, deleted during scan, etc.)
             continue
 
     return ast_issues

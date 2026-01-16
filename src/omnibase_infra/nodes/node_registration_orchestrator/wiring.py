@@ -58,7 +58,6 @@ class WiringResult(TypedDict):
 if TYPE_CHECKING:
     import asyncpg
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
     from omnibase_infra.handlers.handler_consul import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
@@ -67,6 +66,7 @@ if TYPE_CHECKING:
         HandlerRuntimeTick,
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.runtime import MessageDispatchEngine
     from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 logger = logging.getLogger(__name__)
@@ -195,7 +195,7 @@ async def wire_registration_dispatchers(
 
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
-        >>> from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+        >>> from omnibase_infra.runtime import MessageDispatchEngine
         >>> import asyncpg
         >>>
         >>> container = ModelONEXContainer()

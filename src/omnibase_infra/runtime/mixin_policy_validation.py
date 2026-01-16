@@ -35,6 +35,8 @@ class MixinPolicyValidation:
     the class method count and provide better separation of concerns.
 
     Methods:
+        _validate_policy_id_param: Validate policy_id parameter (shared helper)
+        _validate_policy_type_param: Validate policy_type parameter (shared helper)
         _validate_protocol_implementation: Validate policy implements ProtocolPolicy
         _validate_sync_enforcement: Validate sync/async policy methods
         _normalize_policy_type: Normalize and validate policy type
@@ -43,6 +45,100 @@ class MixinPolicyValidation:
 
     # Methods to check for async validation (class attribute shared with RegistryPolicy)
     _ASYNC_CHECK_METHODS: tuple[str, ...] = ("reduce", "decide", "evaluate")
+
+    @staticmethod
+    def _validate_policy_id_param(
+        policy_id: str | None,
+        policy_class: type | None = None,
+        policy_type: str | None = None,
+    ) -> None:
+        """Validate policy_id parameter individually.
+
+        This shared helper validates that policy_id is a non-empty string.
+        It is used by both _validate_protocol_implementation and
+        _validate_sync_enforcement to ensure consistent validation.
+
+        Args:
+            policy_id: The policy_id parameter to validate.
+            policy_class: Optional policy class for error context.
+            policy_type: Optional policy type for error context.
+
+        Raises:
+            PolicyRegistryError: If policy_id is None, not a string, or empty.
+        """
+        if policy_id is None:
+            raise PolicyRegistryError(
+                "policy_id is required and cannot be None",
+                policy_id=None,
+                policy_class=policy_class.__name__ if policy_class else None,
+                policy_type=policy_type,
+            )
+        if not isinstance(policy_id, str):
+            raise PolicyRegistryError(
+                f"policy_id must be a string, got {type(policy_id).__name__}",
+                policy_id=str(policy_id),
+                policy_class=policy_class.__name__ if policy_class else None,
+                policy_type=policy_type,
+            )
+        if not policy_id.strip():
+            raise PolicyRegistryError(
+                "policy_id is required and cannot be empty",
+                policy_id=policy_id,
+                policy_class=policy_class.__name__ if policy_class else None,
+                policy_type=policy_type,
+            )
+
+    @staticmethod
+    def _validate_policy_type_param(
+        policy_type: str | EnumPolicyType | None,
+        policy_id: str | None = None,
+        allow_none: bool = True,
+    ) -> str | None:
+        """Validate policy_type parameter individually.
+
+        This shared helper validates that policy_type is a valid string or
+        EnumPolicyType. It is used by _validate_sync_enforcement and
+        _normalize_policy_type to ensure consistent validation.
+
+        Args:
+            policy_type: The policy_type parameter to validate.
+            policy_id: Optional policy_id for error context.
+            allow_none: If True, None is a valid value. If False, None raises error.
+
+        Returns:
+            Normalized string value if policy_type is provided, None otherwise.
+
+        Raises:
+            PolicyRegistryError: If policy_type is invalid (wrong type, empty string,
+                or None when allow_none=False).
+        """
+        if policy_type is None:
+            if not allow_none:
+                raise PolicyRegistryError(
+                    "policy_type is required and cannot be None",
+                    policy_id=policy_id,
+                    policy_type=None,
+                )
+            return None
+
+        if isinstance(policy_type, EnumPolicyType):
+            return policy_type.value
+
+        if not isinstance(policy_type, str):
+            raise PolicyRegistryError(
+                f"policy_type must be a string or EnumPolicyType, "
+                f"got {type(policy_type).__name__}",
+                policy_id=policy_id,
+                policy_type=str(policy_type),
+            )
+        if not policy_type.strip():
+            raise PolicyRegistryError(
+                "policy_type cannot be empty when provided",
+                policy_id=policy_id,
+                policy_type=policy_type,
+            )
+
+        return policy_type
 
     def _validate_protocol_implementation(
         self,
@@ -78,25 +174,8 @@ class MixinPolicyValidation:
                 - Missing evaluate() method
                 - evaluate is not callable
         """
-        # Validate policy_id individually before using in error messages
-        if policy_id is None:
-            raise PolicyRegistryError(
-                "policy_id is required and cannot be None",
-                policy_id=None,
-                policy_class=policy_class.__name__ if policy_class else None,
-            )
-        if not isinstance(policy_id, str):
-            raise PolicyRegistryError(
-                f"policy_id must be a string, got {type(policy_id).__name__}",
-                policy_id=str(policy_id),
-                policy_class=policy_class.__name__ if policy_class else None,
-            )
-        if not policy_id.strip():
-            raise PolicyRegistryError(
-                "policy_id is required and cannot be empty",
-                policy_id=policy_id,
-                policy_class=policy_class.__name__ if policy_class else None,
-            )
+        # Validate policy_id parameter individually using shared helper
+        self._validate_policy_id_param(policy_id, policy_class=policy_class)
 
         # Check for required attributes
         has_policy_id = hasattr(policy_class, "policy_id")
@@ -272,49 +351,13 @@ class MixinPolicyValidation:
             >>> # This will succeed - async explicitly flagged
             >>> mixin._validate_sync_enforcement("async_pol", AsyncPolicy, True)
         """
-        # Validate policy_id individually before using in error messages
-        # Normalize policy_type for error context (may be None, str, or EnumPolicyType)
-        normalized_policy_type: str | None = None
-        if policy_type is not None:
-            if isinstance(policy_type, EnumPolicyType):
-                normalized_policy_type = policy_type.value
-            elif isinstance(policy_type, str):
-                normalized_policy_type = policy_type
+        # Validate policy_type first to get normalized value for error context
+        normalized_policy_type = self._validate_policy_type_param(
+            policy_type, policy_id=policy_id, allow_none=True
+        )
 
-        if policy_id is None:
-            raise PolicyRegistryError(
-                "policy_id is required and cannot be None",
-                policy_id=None,
-                policy_type=normalized_policy_type,
-            )
-        if not isinstance(policy_id, str):
-            raise PolicyRegistryError(
-                f"policy_id must be a string, got {type(policy_id).__name__}",
-                policy_id=str(policy_id),
-                policy_type=normalized_policy_type,
-            )
-        if not policy_id.strip():
-            raise PolicyRegistryError(
-                "policy_id is required and cannot be empty",
-                policy_id=policy_id,
-                policy_type=normalized_policy_type,
-            )
-
-        # Validate policy_type individually if provided (for better error context)
-        if policy_type is not None:
-            if not isinstance(policy_type, (str, EnumPolicyType)):
-                raise PolicyRegistryError(
-                    f"policy_type must be a string or EnumPolicyType, "
-                    f"got {type(policy_type).__name__}",
-                    policy_id=policy_id,
-                    policy_type=str(policy_type),
-                )
-            if isinstance(policy_type, str) and not policy_type.strip():
-                raise PolicyRegistryError(
-                    "policy_type cannot be empty when provided",
-                    policy_id=policy_id,
-                    policy_type=policy_type,
-                )
+        # Validate policy_id individually using shared helper
+        self._validate_policy_id_param(policy_id, policy_type=normalized_policy_type)
 
         for method_name in self._ASYNC_CHECK_METHODS:
             if hasattr(policy_class, method_name):
@@ -376,43 +419,24 @@ class MixinPolicyValidation:
             PolicyRegistryError: Invalid policy_type: 'invalid'.
                                  Must be one of: ['orchestrator', 'reducer']
         """
-        # Validate policy_type individually before processing
-        if policy_type is None:
-            raise PolicyRegistryError(
-                "policy_type is required and cannot be None",
-                policy_id=None,
-                policy_type=None,
-            )
-
-        if isinstance(policy_type, EnumPolicyType):
-            return policy_type.value
-
-        # For string type, validate it's not empty
-        if not isinstance(policy_type, str):
-            raise PolicyRegistryError(
-                f"policy_type must be a string or EnumPolicyType, "
-                f"got {type(policy_type).__name__}",
-                policy_id=None,
-                policy_type=str(policy_type),
-            )
-        if not policy_type.strip():
-            raise PolicyRegistryError(
-                "policy_type is required and cannot be empty",
-                policy_id=None,
-                policy_type=policy_type,
-            )
+        # Validate policy_type using shared helper (requires non-None)
+        normalized = self._validate_policy_type_param(
+            policy_type, policy_id=None, allow_none=False
+        )
+        # At this point normalized is guaranteed to be a non-None string
+        assert normalized is not None  # Type narrowing for mypy
 
         # Validate string against enum values
         valid_types = {e.value for e in EnumPolicyType}
-        if policy_type not in valid_types:
+        if normalized not in valid_types:
             raise PolicyRegistryError(
-                f"Invalid policy_type: {policy_type!r}. "
+                f"Invalid policy_type: {normalized!r}. "
                 f"Must be one of: {sorted(valid_types)}",
                 policy_id=None,
-                policy_type=policy_type,
+                policy_type=normalized,
             )
 
-        return policy_type
+        return normalized
 
     @staticmethod
     def _normalize_version(version: str) -> str:

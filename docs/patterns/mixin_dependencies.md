@@ -163,6 +163,18 @@ model["custom_field"]       # "value"
 model.get("missing", "N/A") # "N/A"
 ```
 
+**Note on `extra="allow"` Configuration**:
+The `extra="allow"` setting in `ConfigDict` enables storing arbitrary fields not defined in the model schema. This is useful for dict-like access patterns but has trade-offs:
+
+| Aspect | Trade-off |
+|--------|-----------|
+| **Flexibility** | Allows dynamic fields at runtime |
+| **Type Safety** | Extra fields are untyped (`object`) - no IDE autocompletion or type checking |
+| **Validation** | Extra fields bypass Pydantic validation |
+| **Serialization** | Extra fields are included in `.model_dump()` output |
+
+For strict typing, prefer explicit field definitions with `MixinDictLikeAccessors` providing convenience access to typed fields only.
+
 ---
 
 ### MixinRetryExecution
@@ -549,6 +561,16 @@ In contrast, `MixinKafkaDlq` and `MixinKafkaBroadcast` use **Protocol-based depe
 When using multiple mixins, ensure all initialization methods are called:
 
 ```python
+from concurrent.futures import ThreadPoolExecutor
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.mixins import (
+    MixinAsyncCircuitBreaker,
+    MixinEnvelopeExtraction,
+    MixinRetryExecution,
+)
+
+
 class MyCompleteHandler(
     MixinEnvelopeExtraction,
     MixinAsyncCircuitBreaker,

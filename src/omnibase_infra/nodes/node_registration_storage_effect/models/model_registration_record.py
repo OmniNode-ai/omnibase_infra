@@ -160,7 +160,7 @@ class ModelRegistrationRecord(BaseModel):
                         f"capabilities[{i}] must be a string, got {type(item).__name__}"
                     )
             return v
-        if isinstance(v, (list, set, frozenset)):
+        if isinstance(v, list | set | frozenset):
             # Convert sequence to tuple, validating contents
             result: list[str] = []
             for i, item in enumerate(v):

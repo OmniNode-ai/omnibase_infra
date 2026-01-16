@@ -43,7 +43,8 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
-    from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+
+    from omnibase_infra.runtime import MessageDispatchEngine
 
 
 @dataclass

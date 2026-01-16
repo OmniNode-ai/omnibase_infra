@@ -9,7 +9,6 @@ comments, and file-level NOTE patterns.
 from __future__ import annotations
 
 import ast
-from typing import TYPE_CHECKING
 
 # Decorator names that allow Any type usage
 _ALLOW_DECORATORS: frozenset[str] = frozenset({"allow_any", "allow_any_type"})
@@ -39,6 +38,81 @@ _ANY_EXEMPTION_KEYWORDS: frozenset[str] = frozenset(
 # - With docstring gap (5 lines max)
 # Larger values would risk matching unrelated NOTE comments.
 _NOTE_LOOKBACK_LINES = 5
+
+
+def _extract_comment_portion(line: str) -> str | None:
+    """Extract the comment portion of a line, ignoring # in string literals.
+
+    This function finds the first # that is NOT inside a string literal
+    (single-quoted, double-quoted, or triple-quoted).
+
+    Args:
+        line: A single line of source code.
+
+    Returns:
+        The comment portion (including #) if found, None otherwise.
+
+    Examples:
+        >>> _extract_comment_portion("x = 1  # comment")
+        '# comment'
+        >>> _extract_comment_portion('x = "# not comment"  # real comment')
+        '# real comment'
+        >>> _extract_comment_portion('x = "# not comment"')
+        None
+    """
+    in_single_quote = False
+    in_double_quote = False
+    i = 0
+    n = len(line)
+
+    while i < n:
+        char = line[i]
+
+        # Check for triple quotes (must check before single quotes)
+        if i + 2 < n:
+            triple = line[i : i + 3]
+            if triple == '"""' and not in_single_quote:
+                # Triple double quote - skip to end or toggle
+                if in_double_quote:
+                    in_double_quote = False
+                else:
+                    in_double_quote = True
+                i += 3
+                continue
+            if triple == "'''" and not in_double_quote:
+                # Triple single quote - skip to end or toggle
+                if in_single_quote:
+                    in_single_quote = False
+                else:
+                    in_single_quote = True
+                i += 3
+                continue
+
+        # Check for escaped quotes
+        if char == "\\" and i + 1 < n:
+            # Skip escaped character
+            i += 2
+            continue
+
+        # Check for single quote
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            i += 1
+            continue
+
+        # Check for double quote
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            i += 1
+            continue
+
+        # Check for comment (only if not in string)
+        if char == "#" and not in_single_quote and not in_double_quote:
+            return line[i:]
+
+        i += 1
+
+    return None
 
 
 def _is_any_exemption_note(text: str) -> bool:
@@ -135,9 +209,18 @@ class MixinAnyTypeExemption:
         The NOTE comment must follow the specific format:
             # NOTE: Any required for <reason>
             # NOTE: Any needed for <reason>
-            # NOTE: Any type <reason>
+            # NOTE: Any necessary for <reason>
 
-        Generic NOTE comments that happen to mention "Any" do not qualify.
+        The keyword after "Any" must indicate intent (required, needed, necessary,
+        used, workaround). Generic NOTE comments do not qualify.
+
+        Supports both single-line and multi-line import blocks:
+            from typing import Any  # NOTE: Any required for...
+
+            from typing import (
+                Any,  # NOTE: Any required for...
+                Dict,
+            )
 
         Returns:
             True if file has a valid file-level NOTE comment.
@@ -150,28 +233,63 @@ class MixinAnyTypeExemption:
             context into a single string. This prevents false positives where
             "NOTE:" appears on one line and "Any required" on a different,
             unrelated line.
+
+            Uses _extract_comment_portion to avoid false positives from
+            # characters inside string literals.
         """
         # Only scan first 100 lines - imports must be at top per PEP 8
         max_lines = min(100, len(self.source_lines))
+
+        # Track if we're inside a multi-line import block
+        in_multiline_import = False
+        multiline_import_start = -1
+
         for i, line in enumerate(self.source_lines[:max_lines]):
-            # Look for Any import
+            # Detect start of multi-line import: "from typing import ("
+            if "from typing import" in line and "(" in line and ")" not in line:
+                in_multiline_import = True
+                multiline_import_start = i
+                continue
+
+            # Inside multi-line import block
+            if in_multiline_import:
+                # Check if this line contains Any
+                if "Any" in line:
+                    # Check this line and surrounding lines for NOTE
+                    start = max(0, multiline_import_start - 5)
+                    end = min(len(self.source_lines), i + 6)
+                    for check_line in self.source_lines[start:end]:
+                        comment = _extract_comment_portion(check_line)
+                        if comment and _is_any_exemption_note(comment):
+                            return True
+
+                # End of multi-line import block
+                if ")" in line:
+                    in_multiline_import = False
+                    multiline_import_start = -1
+                continue
+
+            # Single-line import: "from typing import Any"
             if "from typing import" in line and "Any" in line:
                 # Check surrounding lines (5 before and 5 after) INDIVIDUALLY
                 # to prevent cross-line false positives
                 start = max(0, i - 5)
                 end = min(len(self.source_lines), i + 6)
                 for check_line in self.source_lines[start:end]:
-                    # Only check comment lines for NOTE pattern
-                    if "#" in check_line and _is_any_exemption_note(check_line):
+                    # Use _extract_comment_portion to avoid string literal false positives
+                    comment = _extract_comment_portion(check_line)
+                    if comment and _is_any_exemption_note(comment):
                         return True
+
+            # Also check for 'import typing' style
             elif "import typing" in line:
-                # Also check for 'import typing' style
                 start = max(0, i - 5)
                 end = min(len(self.source_lines), i + 6)
                 for check_line in self.source_lines[start:end]:
-                    # Only check comment lines for NOTE pattern
-                    if "#" in check_line and _is_any_exemption_note(check_line):
+                    comment = _extract_comment_portion(check_line)
+                    if comment and _is_any_exemption_note(comment):
                         return True
+
         return False
 
     def _has_allow_decorator(self, decorator_list: list[ast.expr]) -> bool:
@@ -217,9 +335,10 @@ class MixinAnyTypeExemption:
         The NOTE comment must follow the specific format:
             # NOTE: Any required for <reason>
             # NOTE: Any needed for <reason>
-            # NOTE: Any type <reason>
+            # NOTE: Any necessary for <reason>
 
-        Generic NOTE comments that happen to mention "Any" do not qualify.
+        The keyword after "Any" must indicate intent (required, needed, necessary,
+        used, workaround). Generic NOTE comments do not qualify.
 
         File-level NOTE comments (within 5 lines of Any import) exempt all
         Field() usages in that file, supporting the common pattern of
@@ -236,15 +355,15 @@ class MixinAnyTypeExemption:
             MixinAnyTypeClassification and the main class respectively.
         """
         # Check if value is a Field() call
-        # NOTE: _is_field_call is provided by MixinAnyTypeClassification via multiple
-        # inheritance. Mypy cannot verify mixin method availability at static analysis.
-        if node.value is None or not self._is_field_call(node.value):  # type: ignore[attr-defined]  # NOTE: mixin method
+        # NOTE: OMN-1305 - _is_field_call is provided by MixinAnyTypeClassification
+        # via multiple inheritance. Mypy cannot verify mixin method availability.
+        if node.value is None or not self._is_field_call(node.value):  # type: ignore[attr-defined]
             return False
 
         # Check if annotation contains Any
-        # NOTE: _contains_any is provided by the main class via multiple inheritance.
-        # Mypy cannot verify method availability in mixin composition.
-        if not self._contains_any(node.annotation):  # type: ignore[attr-defined]  # NOTE: mixin method
+        # NOTE: OMN-1305 - _contains_any is provided by the main AnyTypeDetector
+        # class via multiple inheritance. Mypy cannot verify mixin composition.
+        if not self._contains_any(node.annotation):  # type: ignore[attr-defined]
             return False
 
         # File-level NOTE comment exempts all Field() usages
@@ -257,14 +376,14 @@ class MixinAnyTypeExemption:
         # Extract ONLY the comment portion to avoid matching "Any" in code
         # e.g., for "field: Any = Field(...)  # NOTE: Any required for..."
         # we only want to check "# NOTE: Any required for..."
+        # Uses _extract_comment_portion to avoid false positives from
+        # # characters inside string literals.
         if 0 < line_num <= len(self.source_lines):
             current_line = self.source_lines[line_num - 1]
-            # Find the comment portion (after #)
-            comment_idx = current_line.find("#")
-            if comment_idx != -1:
-                comment_portion = current_line[comment_idx:]
-                if _is_any_exemption_note(comment_portion):
-                    return True
+            # Use _extract_comment_portion to properly handle # in strings
+            comment_portion = _extract_comment_portion(current_line)
+            if comment_portion and _is_any_exemption_note(comment_portion):
+                return True
 
         # Look for NOTE comment in contiguous comment block immediately above
         # Stop as soon as we hit a non-comment, non-blank line

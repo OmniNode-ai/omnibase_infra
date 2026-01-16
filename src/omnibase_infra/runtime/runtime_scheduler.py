@@ -478,6 +478,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 operation="emit_tick",
                 target_name=self._config.tick_topic,
                 correlation_id=correlation_id,
+                # timeout_seconds omitted - Kafka timeout is event bus level, not available here
             )
             raise InfraTimeoutError(
                 f"Timeout emitting tick to topic {self._config.tick_topic}",

@@ -21,15 +21,10 @@ Related:
 
 from __future__ import annotations
 
-__all__ = [
-    "MixinMessageTypeRegistration",
-]
-
 import logging
 import threading
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
@@ -42,6 +37,10 @@ from omnibase_infra.models.registry.model_domain_constraint import (
 from omnibase_infra.models.registry.model_message_type_entry import (
     ModelMessageTypeEntry,
 )
+
+__all__ = [
+    "MixinMessageTypeRegistration",
+]
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,6 @@ This mixin provides methods for tracking and reporting Any type violations.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumAnyTypeViolation, EnumValidationSeverity
 from omnibase_infra.models.validation.model_any_type_violation import (

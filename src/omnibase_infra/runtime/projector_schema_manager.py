@@ -473,6 +473,7 @@ class ProjectorSchemaValidator:
                 operation="table_exists",
                 target_name=f"{effective_schema}.{table_name}",
                 correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
             )
             raise InfraTimeoutError(
                 "Table existence check timed out",
@@ -544,6 +545,7 @@ class ProjectorSchemaValidator:
                 operation="get_table_columns",
                 target_name=f"{effective_schema}.{table_name}",
                 correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
             )
             raise InfraTimeoutError(
                 "Column introspection timed out",

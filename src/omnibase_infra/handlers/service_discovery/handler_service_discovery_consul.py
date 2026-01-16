@@ -573,7 +573,7 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                 svc_name = svc_data.get("Service", "")
                 address = svc_data.get("Address", "") or node_data.get("Address", "")
                 port_raw = svc_data.get("Port", 0)
-                port = int(port_raw) if isinstance(port_raw, (int, float, str)) else 0
+                port = int(port_raw) if isinstance(port_raw, int | float | str) else 0
                 svc_tags = cast(list[str], svc_data.get("Tags", []))
                 svc_meta = cast(dict[str, str], svc_data.get("Meta", {}))
 

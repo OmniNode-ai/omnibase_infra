@@ -236,6 +236,18 @@ def load_runtime_config(
             with config_path.open(encoding="utf-8") as f:
                 raw_config = yaml.safe_load(f) or {}
 
+            # Type guard: reject non-mapping YAML payloads
+            # yaml.safe_load() can return list, str, int, etc. for valid YAML
+            # but runtime config must be a dict (mapping) for model validation
+            if not isinstance(raw_config, dict):
+                raise ProtocolConfigurationError(
+                    f"Runtime config at {config_path} must be a YAML mapping (dict), "
+                    f"got {type(raw_config).__name__}",
+                    context=context,
+                    config_path=str(config_path),
+                    error_details=f"Expected dict, got {type(raw_config).__name__}",
+                )
+
             # Contract validation: validate against schema before Pydantic
             # This provides early, actionable error messages for pattern/range violations
             contract_errors = validate_runtime_config(raw_config)
@@ -791,7 +803,27 @@ async def bootstrap() -> int:
                 # CONSUL_HOST determines whether to enable Consul registration
                 consul_host = os.getenv("CONSUL_HOST")
                 if consul_host:
-                    consul_port = int(os.getenv("CONSUL_PORT", "8500"))
+                    # Validate CONSUL_PORT environment variable
+                    consul_port_str = os.getenv("CONSUL_PORT", "8500")
+                    try:
+                        consul_port = int(consul_port_str)
+                        if not MIN_PORT <= consul_port <= MAX_PORT:
+                            logger.warning(
+                                "CONSUL_PORT %d outside valid range %d-%d, using default 8500 (correlation_id=%s)",
+                                consul_port,
+                                MIN_PORT,
+                                MAX_PORT,
+                                correlation_id,
+                            )
+                            consul_port = 8500
+                    except ValueError:
+                        logger.warning(
+                            "Invalid CONSUL_PORT value '%s', using default 8500 (correlation_id=%s)",
+                            consul_port_str,
+                            correlation_id,
+                        )
+                        consul_port = 8500
+
                     try:
                         # Deferred import: Only load HandlerConsul when Consul is configured.
                         # This avoids loading the consul dependency (and its transitive deps)
@@ -1139,18 +1171,22 @@ async def bootstrap() -> int:
         # The message handler is extracted to IntrospectionMessageHandler for
         # better testability and separation of concerns (PR #101 code quality).
         #
-        # NOTE: Duck typing consideration (protocol compliance strategy):
-        # The isinstance(event_bus, EventBusKafka) check gates subscribe() capability.
-        # Both EventBusKafka and EventBusInmemory implement subscribe(), so this
-        # could use duck typing: hasattr(event_bus, 'subscribe') and callable(...).
-        # However, isinstance is retained here because:
-        # 1. Introspection in production requires Kafka's distributed consumer groups
-        # 2. EventBusInmemory's subscribe is for testing, not production introspection
-        # 3. Fail-fast: explicit Kafka check prevents unexpected behavior in prod
-        # Future: Consider ProtocolSubscribableEventBus if more buses need subscribe.
-        if introspection_dispatcher is not None and isinstance(
-            event_bus, EventBusKafka
-        ):
+        # Duck typing approach per CLAUDE.md architectural guidelines:
+        # Check for subscribe() capability via hasattr/callable instead of isinstance.
+        # This enables any event bus implementing subscribe() to participate in
+        # introspection event consumption, following protocol-based polymorphism.
+        #
+        # Production considerations:
+        # - EventBusKafka: Uses distributed consumer groups for production workloads
+        # - EventBusInmemory: subscribe() works for testing scenarios
+        # - Other implementations: Will work if they implement subscribe()
+        #
+        # The duck typing approach allows new event bus implementations to
+        # participate in introspection without modifying this code.
+        has_subscribe = hasattr(event_bus, "subscribe") and callable(
+            getattr(event_bus, "subscribe", None)
+        )
+        if introspection_dispatcher is not None and has_subscribe:
             # Create extracted event router with container-based DI pattern
             # Dependencies are passed explicitly since they are created at runtime
             # by the kernel and may not be registered in the container yet
