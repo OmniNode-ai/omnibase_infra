@@ -325,18 +325,24 @@ class InfraNamingConventionValidator:
 
     # PERFORMANCE: Pre-compiled naming patterns for fast class name validation
     # Maps category -> compiled regex pattern
-    _COMPILED_NAMING_PATTERNS: ClassVar[dict[str, re.Pattern[str]]] = {
-        "handlers": re.compile(r"^Handler[A-Z][A-Za-z0-9]*$"),
-        "dispatchers": re.compile(r"^Dispatcher[A-Z][A-Za-z0-9]*$"),
-        "stores": re.compile(r"^Store[A-Z][A-Za-z0-9]*$"),
-        "adapters": re.compile(r"^Adapter[A-Z][A-Za-z0-9]*$"),
-        "registries": re.compile(r"^Registry[A-Z][A-Za-z0-9]*$"),
-        "services": re.compile(r"^Service[A-Z][A-Za-z0-9]*$"),
-        "models": re.compile(r"^Model[A-Z][A-Za-z0-9]*$"),
-        "enums": re.compile(r"^Enum[A-Z][A-Za-z0-9]*$"),
-        "protocols": re.compile(r"^Protocol[A-Z][A-Za-z0-9]*$"),
-        "mixins": re.compile(r"^Mixin[A-Z][A-Za-z0-9]*$"),
-    }
+    # NOTE: Generated from NAMING_PATTERNS to avoid pattern duplication
+    _COMPILED_NAMING_PATTERNS: ClassVar[dict[str, re.Pattern[str]]] = {}
+
+    @classmethod
+    def _ensure_compiled_patterns(cls) -> None:
+        """Lazily compile naming patterns from NAMING_PATTERNS if not already done.
+
+        PERFORMANCE: Patterns are compiled once on first access, avoiding both:
+        - Duplication of pattern strings between NAMING_PATTERNS and compiled dict
+        - Repeated compilation on every validation call
+        """
+        if cls._COMPILED_NAMING_PATTERNS:
+            return  # Already compiled
+
+        for category, rules in cls.NAMING_PATTERNS.items():
+            pattern = rules.get("pattern")
+            if pattern:
+                cls._COMPILED_NAMING_PATTERNS[category] = re.compile(pattern)
 
     # Architectural exemptions - documented design decisions
     ARCHITECTURAL_EXEMPTIONS: ClassVar[dict[str, list[str]]] = {
@@ -424,6 +430,8 @@ class InfraNamingConventionValidator:
         self._skipped_large_files: list[tuple[Path, int]] = []
         # Track which (file, category) pairs have been validated to prevent duplicates
         self._validated_file_categories: set[tuple[Path, str]] = set()
+        # PERFORMANCE: Ensure compiled patterns are ready (lazy compilation)
+        self._ensure_compiled_patterns()
 
     def check_file_name(self, file_path: Path) -> tuple[str | None, str]:
         """Check if a file name conforms to omnibase_infra naming conventions.
@@ -693,10 +701,14 @@ class InfraNamingConventionValidator:
 
         # Validate each unique file once
         # PERFORMANCE: Pre-filter against _validated_file_categories to avoid
-        # unnecessary method calls for files already validated in this category
+        # unnecessary method calls for files already validated in this category.
+        # IMPORTANT: Add to set BEFORE calling method to prevent any edge case
+        # where the same (file, category) could be processed twice.
         for file_path in files_to_validate:
             validation_key = (file_path, category)
             if validation_key not in self._validated_file_categories:
+                # Mark as validated BEFORE processing to prevent duplicates
+                self._validated_file_categories.add(validation_key)
                 self._validate_class_names_in_file(file_path, category, rules, verbose)
 
     def _validate_class_names_in_file(
@@ -718,13 +730,19 @@ class InfraNamingConventionValidator:
             - Uses cached parsed file info from _get_parsed_file_info()
             - Each file is read and parsed only once across all categories
             - Class definitions are pre-extracted during parsing
-            - Tracks (file, category) pairs to prevent duplicate validations
+
+        Note:
+            Deduplication is primarily handled by the caller (_validate_category),
+            which checks and adds the (file, category) key to _validated_file_categories
+            before calling this method. For direct calls (e.g., from tests), this method
+            also handles deduplication by adding to the set if not already present.
         """
-        # Prevent duplicate validation of the same file for the same category
+        # Handle deduplication for direct calls that bypass _validate_category
+        # The caller (_validate_category) adds to set before calling, so this
+        # check will pass for normal flow but catches direct/test invocations
         validation_key = (file_path, category)
-        if validation_key in self._validated_file_categories:
-            return
-        self._validated_file_categories.add(validation_key)
+        if validation_key not in self._validated_file_categories:
+            self._validated_file_categories.add(validation_key)
 
         # PERFORMANCE: Use cached parsed info instead of re-reading file
         file_info = self._get_parsed_file_info(file_path)
@@ -1003,7 +1021,11 @@ class InfraNamingConventionValidator:
         return report
 
 
-def run_ast_validation(repo_path: Path, verbose: bool = False) -> list[str]:
+def run_ast_validation(
+    repo_path: Path,
+    verbose: bool = False,
+    cached_files: list[Path] | None = None,
+) -> list[str]:
     """Run AST-based validation using omnibase_core's NamingConventionChecker.
 
     This validates function naming (snake_case) and detects anti-patterns.
@@ -1011,6 +1033,10 @@ def run_ast_validation(repo_path: Path, verbose: bool = False) -> list[str]:
     Args:
         repo_path: Path to validate.
         verbose: If True, show detailed output.
+        cached_files: Optional pre-computed list of Python files to validate.
+            If provided, skips directory scanning for better performance.
+            Files should already be filtered (no __pycache__, archived, etc.)
+            and within size limits.
 
     Returns:
         List of AST-based violations.
@@ -1022,25 +1048,34 @@ def run_ast_validation(repo_path: Path, verbose: bool = False) -> list[str]:
 
     ast_issues: list[str] = []
 
-    for file_path in repo_path.rglob("*.py"):
-        # Cross-platform path segment check
-        if "__pycache__" in file_path.parts or _is_in_archived_directory(file_path):
-            continue
-        if file_path.is_symlink():
-            continue
-
-        # Skip files exceeding size limit to prevent memory issues during AST parsing
-        try:
-            file_size = file_path.stat().st_size
-            if file_size > MAX_FILE_SIZE_BYTES:
-                if verbose:
-                    size_mb = file_size / (1024 * 1024)
-                    print(f"Skipping large file: {file_path} ({size_mb:.2f} MB)")
+    # Use cached file list if provided, otherwise scan directory
+    if cached_files is not None:
+        files_to_check = cached_files
+    else:
+        # Build file list from scratch (fallback path)
+        files_to_check = []
+        for file_path in repo_path.rglob("*.py"):
+            # Cross-platform path segment check
+            if "__pycache__" in file_path.parts or _is_in_archived_directory(file_path):
                 continue
-        except OSError:
-            # If we can't stat the file, skip it
-            continue
+            if file_path.is_symlink():
+                continue
 
+            # Skip files exceeding size limit to prevent memory issues
+            try:
+                file_size = file_path.stat().st_size
+                if file_size > MAX_FILE_SIZE_BYTES:
+                    if verbose:
+                        size_mb = file_size / (1024 * 1024)
+                        print(f"Skipping large file: {file_path} ({size_mb:.2f} MB)")
+                    continue
+            except OSError:
+                # If we can't stat the file, skip it
+                continue
+
+            files_to_check.append(file_path.resolve())
+
+    for file_path in files_to_check:
         try:
             with open(file_path, encoding="utf-8") as f:
                 content = f.read()
@@ -1111,6 +1146,12 @@ Class Naming Conventions:
         action="store_true",
         help="Output results in JSON format",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check mode (default behavior): exit with code 1 if errors found. "
+        "This flag exists for compatibility with common linter conventions.",
+    )
 
     args = parser.parse_args()
 
@@ -1132,7 +1173,10 @@ Class Naming Conventions:
     if args.include_ast:
         if not args.json:
             print("\nRunning AST validation (function naming, anti-patterns)...")
-        ast_issues = run_ast_validation(repo_path, args.verbose)
+        # PERFORMANCE: Reuse the validator's cached file list to avoid
+        # redundant directory scanning
+        cached_files = validator._get_all_python_files()
+        ast_issues = run_ast_validation(repo_path, args.verbose, cached_files)
         if ast_issues and not args.json:
             print(f"Found {len(ast_issues)} AST-based issues:")
             for issue in ast_issues[:20]:

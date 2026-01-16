@@ -63,9 +63,6 @@ from uuid import UUID
 import asyncpg
 import yaml
 from omnibase_core.container import ModelONEXContainer
-from omnibase_infra.runtime.introspection_event_router import (
-    IntrospectionEventRouter,
-)
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -80,6 +77,9 @@ from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
     DispatcherNodeIntrospected,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router import (
+    IntrospectionEventRouter,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import (

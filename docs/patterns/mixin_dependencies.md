@@ -510,17 +510,21 @@ def _init_circuit_breaker(
 
 ### Correct Inheritance Order
 
-When combining mixins with dependencies, **order matters**. Mixins that provide functionality must come before mixins that depend on them:
+When combining mixins with **mixin-based dependencies**, **order matters**. Mixins that provide functionality must come before mixins that depend on them in the MRO. However, **Protocol-based dependencies** (where mixins require attributes from the host class, not from other mixins) do not require specific ordering.
 
 ```python
 # CORRECT - HandlerConsul: MixinRetryExecution depends on MixinAsyncCircuitBreaker (mixin dependency)
+# MixinAsyncCircuitBreaker MUST come first because MixinRetryExecution accesses its attributes via MRO
 class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
     pass
 
-# CORRECT - EventBusKafka: Kafka mixins use Protocol-based dependencies (no mixin ordering required)
+# CORRECT - EventBusKafka: All mixins use Protocol-based dependencies (no mixin ordering required)
+# MixinAsyncCircuitBreaker can be last because MixinKafkaDlq and MixinKafkaBroadcast
+# get their required attributes from the host class, not from other mixins
 class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker):
     pass
 
+# CORRECT - RegistryPolicy: Neither mixin depends on the other
 class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
     pass
 

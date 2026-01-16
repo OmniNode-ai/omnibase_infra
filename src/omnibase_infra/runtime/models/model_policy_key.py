@@ -51,6 +51,7 @@ class ModelPolicyKey(BaseModel):
 
     model_config = ConfigDict(
         frozen=True,  # Make hashable for dict keys
+        from_attributes=True,
         str_strip_whitespace=True,
         extra="forbid",
     )

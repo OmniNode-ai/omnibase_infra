@@ -44,48 +44,55 @@ _NOTE_LOOKBACK_LINES = 5
 def _is_any_exemption_note(text: str) -> bool:
     """Check if text contains a valid Any type exemption note.
 
-    A valid exemption note must have "NOTE:" followed by "Any" and then
-    one of the exemption keywords (required, needed, necessary, etc.).
-    This prevents generic NOTE comments from accidentally matching.
+    A valid exemption note must have:
+    1. A comment marker (#)
+    2. "NOTE:" immediately after the comment marker (with optional whitespace)
+    3. "Any" after NOTE:
+    4. One of the exemption keywords (required, needed, necessary, etc.) after "Any"
+
+    This prevents generic NOTE comments from accidentally matching and ensures
+    NOTE: is at the start of a comment, not buried in the middle.
 
     Valid examples:
         - "# NOTE: Any required for Pydantic discriminated union"
-        - "# NOTE: Any type needed for dynamic payloads"
+        - "code  # NOTE: Any type needed for dynamic payloads"
         - "# NOTE: Any workaround - see ADR-123"
 
-    Invalid examples (too generic):
+    Invalid examples:
+        - "# Some text NOTE: Any required" (NOTE not at comment start)
+        - "NOTE: Any required" (no comment marker)
         - "# NOTE: This handles Any input" (no keyword after Any)
         - "# NOTE: Any questions?" (not an exemption)
-        - "# Any type is needed" (no NOTE:)
+        - "x = 'NOTE: Any required'" (NOTE in string, not comment)
 
     Args:
         text: Text to check (can be single line or multi-line context).
 
     Returns:
-        True if text contains a valid Any exemption note.
+        True if text contains a valid Any exemption note at comment start.
     """
-    # Must contain NOTE: pattern
-    if _NOTE_PATTERN not in text:
+    # Must contain a comment marker
+    comment_idx = text.find("#")
+    if comment_idx == -1:
         return False
 
-    # Convert to lowercase for case-insensitive matching
-    text_lower = text.lower()
+    # Extract the comment portion (after #) and strip leading whitespace
+    comment = text[comment_idx + 1 :].lstrip()
+    comment_lower = comment.lower()
 
-    # Find NOTE: position first
-    note_pos = text_lower.find("note:")
-    if note_pos == -1:
+    # NOTE: must be at the start of the comment (after # and whitespace)
+    if not comment_lower.startswith("note:"):
         return False
 
-    # Look for "any" AFTER the NOTE: position (not just anywhere in the text)
-    # This avoids matching "Any" from "from typing import Any" before the NOTE
-    text_after_note = text_lower[note_pos + 5 :]  # Start after "note:"
-    any_pos_in_note = text_after_note.find("any")
-    if any_pos_in_note == -1:
+    # Look for "any" AFTER the "note:" prefix
+    text_after_note = comment_lower[5:]  # Start after "note:"
+    any_pos = text_after_note.find("any")
+    if any_pos == -1:
         return False
 
     # Check for exemption keyword after "any" (within reasonable distance)
     # Look at the text after "any" (limited window to avoid false matches)
-    after_any = text_after_note[any_pos_in_note + 3 : any_pos_in_note + 50]
+    after_any = text_after_note[any_pos + 3 : any_pos + 50]
 
     for keyword in _ANY_EXEMPTION_KEYWORDS:
         if keyword in after_any:

@@ -38,6 +38,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import ValidationError
 
@@ -97,13 +98,21 @@ class IntrospectionEventRouter:
     distributed tracing. If no correlation ID is present, it generates
     a new one to ensure all operations can be traced.
 
+    This class follows the container-based dependency injection pattern,
+    receiving a ModelONEXContainer for service resolution while also
+    accepting explicit dependencies for router-specific configuration.
+
     Attributes:
+        _container: ONEX service container for dependency resolution.
         _dispatcher: The DispatcherNodeIntrospected to route events to.
         _event_bus: Event bus implementing ProtocolEventBusLike for publishing.
         _output_topic: The topic to publish output events to.
 
     Example:
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> container = ModelONEXContainer()
         >>> router = IntrospectionEventRouter(
+        ...     container=container,
         ...     dispatcher=introspection_dispatcher,
         ...     event_bus=event_bus,
         ...     output_topic="registration.output",
@@ -121,13 +130,20 @@ class IntrospectionEventRouter:
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         dispatcher: DispatcherNodeIntrospected,
         event_bus: ProtocolEventBusLike,
         output_topic: str,
     ) -> None:
-        """Initialize IntrospectionEventRouter with direct dependency injection.
+        """Initialize IntrospectionEventRouter with container-based dependency injection.
+
+        Follows the ONEX container-based DI pattern where the container is passed
+        as the first parameter for service resolution, with additional explicit
+        parameters for router-specific configuration.
 
         Args:
+            container: ONEX service container for dependency resolution. Provides
+                access to service_registry for resolving shared services.
             dispatcher: The DispatcherNodeIntrospected to route events to.
             event_bus: Event bus implementing ProtocolEventBusLike for publishing.
             output_topic: The topic to publish output events to.
@@ -136,7 +152,10 @@ class IntrospectionEventRouter:
             ValueError: If output_topic is empty.
 
         Example:
+            >>> from omnibase_core.container import ModelONEXContainer
+            >>> container = ModelONEXContainer()
             >>> router = IntrospectionEventRouter(
+            ...     container=container,
             ...     dispatcher=introspection_dispatcher,
             ...     event_bus=event_bus,
             ...     output_topic="registration.output",
@@ -148,6 +167,7 @@ class IntrospectionEventRouter:
         if not output_topic:
             raise ValueError("output_topic cannot be empty")
 
+        self._container = container
         self._dispatcher = dispatcher
         self._event_bus = event_bus
         self._output_topic = output_topic
@@ -160,6 +180,27 @@ class IntrospectionEventRouter:
                 "event_bus_type": type(self._event_bus).__name__,
             },
         )
+
+    @property
+    def container(self) -> ModelONEXContainer:
+        """Return the ONEX service container.
+
+        The ModelONEXContainer provides:
+        - service_registry: ServiceRegistry for resolving services by interface type.
+          Use container.service_registry.resolve_service(InterfaceType) to get instances.
+        - Configuration and shared state management across the application.
+
+        Returns:
+            The ModelONEXContainer instance passed during initialization.
+
+        Example:
+            >>> # Resolve a service from the container
+            >>> from omnibase_infra.runtime.policy_registry import PolicyRegistry
+            >>> policy_registry = router.container.service_registry.resolve_service(
+            ...     PolicyRegistry
+            ... )
+        """
+        return self._container
 
     @property
     def output_topic(self) -> str:
