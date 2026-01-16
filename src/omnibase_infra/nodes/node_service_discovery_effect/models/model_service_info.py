@@ -68,7 +68,7 @@ class ModelServiceInfo(BaseModel):
         <EnumHealthStatus.HEALTHY: 'healthy'>
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     service_id: UUID = Field(
         ...,

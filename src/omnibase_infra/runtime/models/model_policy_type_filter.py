@@ -52,6 +52,8 @@ class ModelPolicyTypeFilter(BaseModel):
 
     model_config = ConfigDict(
         frozen=True,  # Make immutable like ModelPolicyKey
+        extra="forbid",
+        from_attributes=True,
     )
 
     @classmethod

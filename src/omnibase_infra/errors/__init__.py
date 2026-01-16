@@ -112,10 +112,14 @@ from omnibase_infra.errors.error_infra import (
     SecretResolutionError,
     UnknownHandlerTypeError,
 )
+from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.error_vault import InfraVaultError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
+)
+from omnibase_infra.models.errors.model_timeout_error_context import (
+    ModelTimeoutErrorContext,
 )
 
 __all__: list[str] = [
@@ -135,8 +139,11 @@ __all__: list[str] = [
     "InfraTimeoutError",
     "InfraUnavailableError",
     "InfraVaultError",
-    # Configuration model
+    # Message type registry errors
+    "MessageTypeRegistryError",
+    # Configuration models
     "ModelInfraErrorContext",
+    "ModelTimeoutErrorContext",
     "PolicyRegistryError",
     "ProtocolConfigurationError",
     # Error classes

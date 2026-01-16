@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # mypy: disable-error-code="index, operator, arg-type"
-"""Unit tests for PostgresIdempotencyStore metrics and observability.
+"""Unit tests for StoreIdempotencyPostgres metrics and observability.
 
 Tests cover:
 - Initial metrics state
@@ -28,7 +28,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.idempotency import (
     ModelPostgresIdempotencyStoreConfig,
-    PostgresIdempotencyStore,
+    StoreIdempotencyPostgres,
 )
 
 
@@ -45,16 +45,16 @@ class TestPostgresIdempotencyStoreMetrics:
     @pytest.fixture
     def store(
         self, config: ModelPostgresIdempotencyStoreConfig
-    ) -> PostgresIdempotencyStore:
+    ) -> StoreIdempotencyPostgres:
         """Create uninitialized store fixture."""
-        return PostgresIdempotencyStore(config)
+        return StoreIdempotencyPostgres(config)
 
     @pytest.fixture
     async def initialized_store(
         self, config: ModelPostgresIdempotencyStoreConfig
-    ) -> PostgresIdempotencyStore:
+    ) -> StoreIdempotencyPostgres:
         """Create and initialize store fixture with mocked pool."""
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -70,7 +70,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_initial_metrics_are_zero(
-        self, store: PostgresIdempotencyStore
+        self, store: StoreIdempotencyPostgres
     ) -> None:
         """Test that metrics start at zero for new store."""
         metrics = await store.get_metrics()
@@ -86,7 +86,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_metrics_track_new_message(
-        self, initialized_store: PostgresIdempotencyStore
+        self, initialized_store: StoreIdempotencyPostgres
     ) -> None:
         """Test metrics increment for new message."""
         mock_conn = AsyncMock()
@@ -105,7 +105,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_metrics_track_duplicate(
-        self, initialized_store: PostgresIdempotencyStore
+        self, initialized_store: StoreIdempotencyPostgres
     ) -> None:
         """Test metrics increment for duplicate message."""
         mock_conn = AsyncMock()
@@ -124,7 +124,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_metrics_track_error_on_timeout(
-        self, initialized_store: PostgresIdempotencyStore
+        self, initialized_store: StoreIdempotencyPostgres
     ) -> None:
         """Test metrics increment for timeout error."""
         mock_conn = AsyncMock()
@@ -144,7 +144,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_metrics_track_error_on_connection_loss(
-        self, initialized_store: PostgresIdempotencyStore
+        self, initialized_store: StoreIdempotencyPostgres
     ) -> None:
         """Test metrics increment for connection error."""
         mock_conn = AsyncMock()
@@ -165,7 +165,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_metrics_track_cleanup(
-        self, initialized_store: PostgresIdempotencyStore
+        self, initialized_store: StoreIdempotencyPostgres
     ) -> None:
         """Test metrics track cleanup operations."""
         mock_conn = AsyncMock()
@@ -183,7 +183,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_metrics_accumulate_over_multiple_cleanups(
-        self, initialized_store: PostgresIdempotencyStore
+        self, initialized_store: StoreIdempotencyPostgres
     ) -> None:
         """Test metrics accumulate cleanup totals correctly."""
         mock_conn = AsyncMock()
@@ -205,7 +205,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_metrics_calculate_rates(
-        self, initialized_store: PostgresIdempotencyStore
+        self, initialized_store: StoreIdempotencyPostgres
     ) -> None:
         """Test metrics calculate duplicate and error rates correctly."""
         mock_conn = AsyncMock()
@@ -238,7 +238,7 @@ class TestPostgresIdempotencyStoreMetrics:
 
     @pytest.mark.asyncio
     async def test_get_metrics_returns_copy(
-        self, store: PostgresIdempotencyStore
+        self, store: StoreIdempotencyPostgres
     ) -> None:
         """Test that get_metrics returns a copy to prevent external mutation."""
         metrics1 = await store.get_metrics()

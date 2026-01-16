@@ -11,7 +11,7 @@ of event envelopes through the routing system. Tests cover:
 4. Correlation ID propagation through the routing pipeline
 
 Test Patterns:
-- Uses InMemoryEventBus for deterministic testing without external dependencies
+- Uses EventBusInmemory for deterministic testing without external dependencies
 - Tests validate complete routing flow from envelope creation to handler dispatch
 - Correlation ID tracking verified at each stage of routing
 
@@ -28,13 +28,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.errors import EnvelopeValidationError, UnknownHandlerTypeError
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.runtime.envelope_validator import (
     PAYLOAD_REQUIRED_OPERATIONS,
     validate_envelope,
 )
-from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
 # =============================================================================
 # Test Configuration
@@ -51,13 +51,13 @@ SUBSCRIBER_SETUP_DELAY = 0.05
 
 
 @pytest.fixture
-def event_bus() -> InMemoryEventBus:
-    """Create InMemoryEventBus fixture for testing.
+def event_bus() -> EventBusInmemory:
+    """Create EventBusInmemory fixture for testing.
 
     Returns:
-        InMemoryEventBus instance configured for test environment.
+        EventBusInmemory instance configured for test environment.
     """
-    return InMemoryEventBus(
+    return EventBusInmemory(
         environment="integration-test",
         group="envelope-routing-test",
         max_history=500,
@@ -65,15 +65,15 @@ def event_bus() -> InMemoryEventBus:
 
 
 @pytest.fixture
-def handler_registry() -> ProtocolBindingRegistry:
+def handler_registry() -> RegistryProtocolBinding:
     """Create handler registry with standard handlers registered.
 
     Registers mock handlers for common protocol types used in envelope routing.
 
     Returns:
-        ProtocolBindingRegistry with http, db, kafka, consul, vault handlers.
+        RegistryProtocolBinding with http, db, kafka, consul, vault handlers.
     """
-    registry = ProtocolBindingRegistry()
+    registry = RegistryProtocolBinding()
 
     # Create minimal mock handler class for testing
     class MockHandler:
@@ -143,7 +143,7 @@ class TestEnvelopeRoutingE2E:
     @pytest.mark.asyncio
     async def test_envelope_publish_and_receive_through_event_bus(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         correlation_id: UUID,
     ) -> None:
         """Test complete envelope flow from publish to receive through event bus.
@@ -201,7 +201,7 @@ class TestEnvelopeRoutingE2E:
     @pytest.mark.asyncio
     async def test_envelope_validation_before_routing(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
         correlation_id: UUID,
     ) -> None:
         """Test envelope validation occurs before routing to handlers.
@@ -227,8 +227,8 @@ class TestEnvelopeRoutingE2E:
     @pytest.mark.asyncio
     async def test_full_routing_pipeline_with_validation(
         self,
-        event_bus: InMemoryEventBus,
-        handler_registry: ProtocolBindingRegistry,
+        event_bus: EventBusInmemory,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test complete routing pipeline: validation -> publish -> receive -> dispatch.
 
@@ -301,8 +301,8 @@ class TestEnvelopeRoutingE2E:
     @pytest.mark.asyncio
     async def test_multiple_envelope_types_routing(
         self,
-        event_bus: InMemoryEventBus,
-        handler_registry: ProtocolBindingRegistry,
+        event_bus: EventBusInmemory,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test routing of multiple envelope types to appropriate handlers.
 
@@ -379,8 +379,8 @@ class TestEnvelopePayloadExtraction:
     @pytest.mark.asyncio
     async def test_payload_extraction_for_operations_requiring_payload(
         self,
-        event_bus: InMemoryEventBus,
-        handler_registry: ProtocolBindingRegistry,
+        event_bus: EventBusInmemory,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test payload extraction for operations that require payload.
 
@@ -478,7 +478,7 @@ class TestEnvelopePayloadExtraction:
     @pytest.mark.asyncio
     async def test_complex_nested_payload_extraction(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Test extraction of complex nested payload structures.
 
@@ -545,7 +545,7 @@ class TestEnvelopePayloadExtraction:
     @pytest.mark.asyncio
     async def test_payload_with_binary_data_as_base64(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Test payload containing binary data encoded as base64.
 
@@ -604,7 +604,7 @@ class TestEnvelopeRoutingErrors:
 
     def test_missing_operation_raises_validation_error(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that envelope without operation raises EnvelopeValidationError."""
         envelope: dict[str, object] = {"payload": {"url": "https://example.com"}}
@@ -616,7 +616,7 @@ class TestEnvelopeRoutingErrors:
 
     def test_empty_operation_raises_validation_error(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that envelope with empty operation raises EnvelopeValidationError."""
         envelope: dict[str, object] = {"operation": "", "payload": {}}
@@ -628,7 +628,7 @@ class TestEnvelopeRoutingErrors:
 
     def test_unknown_handler_type_raises_error(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that unknown operation prefix raises UnknownHandlerTypeError."""
         envelope: dict[str, object] = {
@@ -644,7 +644,7 @@ class TestEnvelopeRoutingErrors:
 
     def test_missing_required_payload_raises_error(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that operations requiring payload fail without payload."""
         # Test each operation that requires payload
@@ -659,7 +659,7 @@ class TestEnvelopeRoutingErrors:
 
     def test_empty_payload_raises_error_for_required_operations(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that empty payload dict raises error for operations requiring payload."""
         envelope: dict[str, object] = {
@@ -675,8 +675,8 @@ class TestEnvelopeRoutingErrors:
     @pytest.mark.asyncio
     async def test_invalid_envelope_in_routing_pipeline(
         self,
-        event_bus: InMemoryEventBus,
-        handler_registry: ProtocolBindingRegistry,
+        event_bus: EventBusInmemory,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test handling of invalid envelope in routing pipeline.
 
@@ -746,7 +746,7 @@ class TestCorrelationIdPropagation:
 
     def test_missing_correlation_id_is_generated(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that missing correlation_id is auto-generated as UUID."""
         envelope: dict[str, object] = {
@@ -761,7 +761,7 @@ class TestCorrelationIdPropagation:
 
     def test_string_correlation_id_converted_to_uuid(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that string correlation_id is converted to UUID."""
         original_id = uuid4()
@@ -778,7 +778,7 @@ class TestCorrelationIdPropagation:
 
     def test_uuid_correlation_id_preserved(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that UUID correlation_id is preserved unchanged."""
         original_id = uuid4()
@@ -794,7 +794,7 @@ class TestCorrelationIdPropagation:
 
     def test_invalid_string_correlation_id_replaced(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that invalid string correlation_id is replaced with new UUID."""
         envelope: dict[str, object] = {
@@ -810,8 +810,8 @@ class TestCorrelationIdPropagation:
     @pytest.mark.asyncio
     async def test_correlation_id_preserved_through_event_bus_transport(
         self,
-        event_bus: InMemoryEventBus,
-        handler_registry: ProtocolBindingRegistry,
+        event_bus: EventBusInmemory,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test correlation ID is preserved through event bus transport.
 
@@ -868,7 +868,7 @@ class TestCorrelationIdPropagation:
     @pytest.mark.asyncio
     async def test_correlation_id_in_event_headers(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Test correlation ID is propagated to event message headers.
 
@@ -923,8 +923,8 @@ class TestCorrelationIdPropagation:
     @pytest.mark.asyncio
     async def test_correlation_id_chain_through_multiple_hops(
         self,
-        event_bus: InMemoryEventBus,
-        handler_registry: ProtocolBindingRegistry,
+        event_bus: EventBusInmemory,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test correlation ID preserved through multi-hop routing.
 
@@ -1000,8 +1000,8 @@ class TestEnvelopeRoutingEdgeCases:
     @pytest.mark.asyncio
     async def test_high_volume_envelope_routing(
         self,
-        event_bus: InMemoryEventBus,
-        handler_registry: ProtocolBindingRegistry,
+        event_bus: EventBusInmemory,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test envelope routing under high volume.
 
@@ -1060,7 +1060,7 @@ class TestEnvelopeRoutingEdgeCases:
     @pytest.mark.asyncio
     async def test_envelope_with_none_values(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Test envelope handling with None values in payload.
 
@@ -1108,7 +1108,7 @@ class TestEnvelopeRoutingEdgeCases:
     @pytest.mark.asyncio
     async def test_envelope_with_unicode_content(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Test envelope routing with unicode content.
 
@@ -1151,7 +1151,7 @@ class TestEnvelopeRoutingEdgeCases:
 
     def test_operation_without_dot_uses_whole_string_as_prefix(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that operation without dot uses entire string as handler prefix.
 
@@ -1164,7 +1164,7 @@ class TestEnvelopeRoutingEdgeCases:
 
     def test_case_sensitive_operation_prefix(
         self,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Test that operation prefix matching is case-sensitive.
 

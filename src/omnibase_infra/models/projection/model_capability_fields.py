@@ -65,6 +65,7 @@ class ModelCapabilityFields(BaseModel):
     model_config = ConfigDict(
         frozen=True,  # Immutable for safe passing
         extra="forbid",
+        from_attributes=True,
     )
 
     contract_type: ContractTypeWithUnknown | None = Field(

@@ -189,7 +189,7 @@ class ModelPostgresIntentPayload(BaseModel):
                         f"endpoints[{i}][1] (value) must be a string, "
                         f"got {type(val).__name__}"
                     )
-            return v  # type: ignore[return-value]  # Runtime validated by Pydantic
+            return v  # type: ignore[return-value]  # NOTE: runtime type validated by Pydantic
         if isinstance(v, Mapping):
             if len(v) == 0:
                 # Log warning for empty Mapping to help detect potentially missing data.

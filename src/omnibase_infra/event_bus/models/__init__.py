@@ -7,7 +7,7 @@ with event bus implementations.
 Exports:
     ModelEventHeaders: Headers for event bus messages implementing ProtocolEventHeaders
     ModelEventMessage: Event bus message implementing ProtocolEventMessage
-    ModelKafkaEventBusConfig: Configuration model for KafkaEventBus
+    ModelKafkaEventBusConfig: Configuration model for EventBusKafka
     ModelDlqEvent: DLQ event model for callback payloads
     ModelDlqMetrics: Aggregate metrics for DLQ operations
 """

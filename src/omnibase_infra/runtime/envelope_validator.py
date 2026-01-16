@@ -25,7 +25,7 @@ from omnibase_infra.errors import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+    from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
 
 def normalize_correlation_id(raw_value: object) -> UUID:
@@ -95,7 +95,7 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
 
 def validate_envelope(
     envelope: dict[str, object],
-    registry: ProtocolBindingRegistry,
+    registry: RegistryProtocolBinding,
 ) -> None:
     """Validate envelope before dispatch to handler.
 

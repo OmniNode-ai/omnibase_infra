@@ -47,7 +47,7 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
 )
@@ -81,7 +81,7 @@ class SimulatedEffectExecutor:
 
     def __init__(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         consul_client: MagicMock,
         postgres_client: MagicMock,
     ) -> None:
@@ -148,7 +148,7 @@ class TestHighVolumeSequential:
     @pytest.mark.asyncio
     async def test_1000_sequential_registrations(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         fast_mock_consul_client: MagicMock,
         fast_mock_postgres_client: MagicMock,
     ) -> None:
@@ -187,7 +187,7 @@ class TestHighVolumeSequential:
     @pytest.mark.asyncio
     async def test_sequential_with_duplicates(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         fast_mock_consul_client: MagicMock,
         fast_mock_postgres_client: MagicMock,
     ) -> None:
@@ -239,7 +239,7 @@ class TestConcurrentLoad:
     @pytest.mark.asyncio
     async def test_100_concurrent_registrations(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         fast_mock_consul_client: MagicMock,
         fast_mock_postgres_client: MagicMock,
     ) -> None:
@@ -280,7 +280,7 @@ class TestConcurrentLoad:
     @pytest.mark.asyncio
     async def test_500_concurrent_registrations(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         fast_mock_consul_client: MagicMock,
         fast_mock_postgres_client: MagicMock,
     ) -> None:
@@ -318,7 +318,7 @@ class TestConcurrentLoad:
     @pytest.mark.asyncio
     async def test_concurrent_with_duplicate_intents(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         fast_mock_consul_client: MagicMock,
         fast_mock_postgres_client: MagicMock,
     ) -> None:
@@ -535,7 +535,7 @@ class TestLatencyDistribution:
     @pytest.mark.asyncio
     async def test_latency_distribution_1000_ops(
         self,
-        inmemory_idempotency_store: InMemoryIdempotencyStore,
+        inmemory_idempotency_store: StoreIdempotencyInmemory,
         fast_mock_consul_client: MagicMock,
         fast_mock_postgres_client: MagicMock,
     ) -> None:

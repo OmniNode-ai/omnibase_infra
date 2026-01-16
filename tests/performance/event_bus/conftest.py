@@ -13,10 +13,10 @@ Usage:
 
 Supported Event Bus Implementations:
     The ONEX infrastructure supports multiple event bus implementations:
-    - InMemoryEventBus: Used for unit and performance tests (this module)
-    - KafkaEventBus: Used for integration and E2E tests with real Kafka/Redpanda
+    - EventBusInmemory: Used for unit and performance tests (this module)
+    - EventBusKafka: Used for integration and E2E tests with real Kafka/Redpanda
 
-    This module uses InMemoryEventBus for deterministic performance benchmarking.
+    This module uses EventBusInmemory for deterministic performance benchmarking.
     For Kafka-based testing, see tests/integration/event_bus/conftest.py and
     tests/integration/registration/e2e/conftest.py.
 
@@ -34,7 +34,7 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
 # -----------------------------------------------------------------------------
@@ -43,13 +43,13 @@ from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
 
 @pytest.fixture
-async def event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
-    """Create and start an InMemoryEventBus for testing.
+async def event_bus() -> AsyncGenerator[EventBusInmemory, None]:
+    """Create and start an EventBusInmemory for testing.
 
     Yields:
-        Started InMemoryEventBus instance.
+        Started EventBusInmemory instance.
     """
-    bus = InMemoryEventBus(
+    bus = EventBusInmemory(
         environment="perf-test",
         group="benchmark",
         max_history=10000,
@@ -60,13 +60,13 @@ async def event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
 
 
 @pytest.fixture
-async def high_volume_event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
-    """Create InMemoryEventBus with high history capacity for volume testing.
+async def high_volume_event_bus() -> AsyncGenerator[EventBusInmemory, None]:
+    """Create EventBusInmemory with high history capacity for volume testing.
 
     Yields:
-        InMemoryEventBus with 100k history capacity.
+        EventBusInmemory with 100k history capacity.
     """
-    bus = InMemoryEventBus(
+    bus = EventBusInmemory(
         environment="high-volume",
         group="stress-test",
         max_history=100000,
@@ -77,13 +77,13 @@ async def high_volume_event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
 
 
 @pytest.fixture
-async def low_latency_event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
-    """Create InMemoryEventBus optimized for low latency testing.
+async def low_latency_event_bus() -> AsyncGenerator[EventBusInmemory, None]:
+    """Create EventBusInmemory optimized for low latency testing.
 
     Yields:
-        InMemoryEventBus with minimal history for lower overhead.
+        EventBusInmemory with minimal history for lower overhead.
     """
-    bus = InMemoryEventBus(
+    bus = EventBusInmemory(
         environment="low-latency",
         group="latency-test",
         max_history=100,  # Small history for minimal overhead

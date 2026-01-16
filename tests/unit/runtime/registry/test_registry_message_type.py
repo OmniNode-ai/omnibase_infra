@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Tests for MessageTypeRegistry."""
+"""Tests for RegistryMessageType."""
 
 from datetime import UTC, datetime
 
@@ -15,8 +15,8 @@ from omnibase_infra.models.registry.model_message_type_entry import (
     ModelMessageTypeEntry,
 )
 from omnibase_infra.runtime.registry.registry_message_type import (
-    MessageTypeRegistry,
     MessageTypeRegistryError,
+    RegistryMessageType,
     extract_domain_from_topic,
 )
 
@@ -186,7 +186,7 @@ class TestMessageTypeRegistryRegistration:
 
     def test_register_message_type(self) -> None:
         """Test basic message type registration."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         entry = ModelMessageTypeEntry(
             message_type="UserCreated",
             handler_ids=("user-handler",),
@@ -201,7 +201,7 @@ class TestMessageTypeRegistryRegistration:
 
     def test_register_simple(self) -> None:
         """Test convenience registration method."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="OrderCreated",
             handler_id="order-handler",
@@ -215,7 +215,7 @@ class TestMessageTypeRegistryRegistration:
 
     def test_register_multiple_handlers_fan_out(self) -> None:
         """Test registering multiple handlers for same message type (fan-out)."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
 
         # First registration
         entry1 = ModelMessageTypeEntry(
@@ -251,7 +251,7 @@ class TestMessageTypeRegistryRegistration:
 
     def test_register_duplicate_handler_idempotent(self) -> None:
         """Test that registering the same handler twice is idempotent (no duplicates)."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
 
         # First registration with handler-a
         entry1 = ModelMessageTypeEntry(
@@ -297,7 +297,7 @@ class TestMessageTypeRegistryRegistration:
 
     def test_register_after_freeze_fails(self) -> None:
         """Test that registration fails after freeze."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.freeze()
 
         entry = ModelMessageTypeEntry(
@@ -314,13 +314,13 @@ class TestMessageTypeRegistryRegistration:
 
     def test_register_none_entry_fails(self) -> None:
         """Test that registering None entry fails."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         with pytest.raises(ModelOnexError):
             registry.register_message_type(None)  # type: ignore[arg-type]
 
     def test_register_conflicting_category_constraints_fails(self) -> None:
         """Test that conflicting category constraints raise error."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
 
         # First registration with EVENT only
         entry1 = ModelMessageTypeEntry(
@@ -347,7 +347,7 @@ class TestMessageTypeRegistryRegistration:
 
     def test_register_conflicting_domain_constraints_fails(self) -> None:
         """Test that conflicting domain constraints raise error."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
 
         # First registration with user domain
         entry1 = ModelMessageTypeEntry(
@@ -378,7 +378,7 @@ class TestMessageTypeRegistryFreeze:
 
     def test_freeze(self) -> None:
         """Test basic freeze functionality."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         assert registry.is_frozen is False
 
         registry.freeze()
@@ -386,7 +386,7 @@ class TestMessageTypeRegistryFreeze:
 
     def test_freeze_is_idempotent(self) -> None:
         """Test that freeze() can be called multiple times."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.freeze()
         registry.freeze()  # Should not raise
         assert registry.is_frozen is True
@@ -396,9 +396,9 @@ class TestMessageTypeRegistryQueries:
     """Tests for query functionality."""
 
     @pytest.fixture
-    def populated_registry(self) -> MessageTypeRegistry:
+    def populated_registry(self) -> RegistryMessageType:
         """Create a registry with test data."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
 
         # Register user domain events
         registry.register_simple(
@@ -434,7 +434,7 @@ class TestMessageTypeRegistryQueries:
         return registry
 
     def test_get_handlers_success(
-        self, populated_registry: MessageTypeRegistry
+        self, populated_registry: RegistryMessageType
     ) -> None:
         """Test successful handler lookup."""
         handlers = populated_registry.get_handlers(
@@ -445,7 +445,7 @@ class TestMessageTypeRegistryQueries:
         assert handlers == ["user-handler"]
 
     def test_get_handlers_not_found(
-        self, populated_registry: MessageTypeRegistry
+        self, populated_registry: RegistryMessageType
     ) -> None:
         """Test handler lookup for unknown message type."""
         with pytest.raises(MessageTypeRegistryError) as exc_info:
@@ -458,7 +458,7 @@ class TestMessageTypeRegistryQueries:
         assert "UnknownType" in str(exc_info.value.message)
 
     def test_get_handlers_category_mismatch(
-        self, populated_registry: MessageTypeRegistry
+        self, populated_registry: RegistryMessageType
     ) -> None:
         """Test handler lookup with wrong category."""
         with pytest.raises(MessageTypeRegistryError) as exc_info:
@@ -470,7 +470,7 @@ class TestMessageTypeRegistryQueries:
         assert "not allowed in category" in str(exc_info.value.message)
 
     def test_get_handlers_domain_mismatch(
-        self, populated_registry: MessageTypeRegistry
+        self, populated_registry: RegistryMessageType
     ) -> None:
         """Test handler lookup with wrong domain."""
         with pytest.raises(MessageTypeRegistryError) as exc_info:
@@ -483,7 +483,7 @@ class TestMessageTypeRegistryQueries:
 
     def test_get_handlers_before_freeze_fails(self) -> None:
         """Test that get_handlers fails before freeze."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="UserCreated",
             handler_id="user-handler",
@@ -500,7 +500,7 @@ class TestMessageTypeRegistryQueries:
         assert "freeze()" in str(exc_info.value.message)
 
     def test_get_handlers_unchecked(
-        self, populated_registry: MessageTypeRegistry
+        self, populated_registry: RegistryMessageType
     ) -> None:
         """Test unchecked handler lookup."""
         handlers = populated_registry.get_handlers_unchecked("UserCreated")
@@ -509,24 +509,24 @@ class TestMessageTypeRegistryQueries:
         # Unknown type returns None
         assert populated_registry.get_handlers_unchecked("Unknown") is None
 
-    def test_get_entry(self, populated_registry: MessageTypeRegistry) -> None:
+    def test_get_entry(self, populated_registry: RegistryMessageType) -> None:
         """Test getting full entry."""
         entry = populated_registry.get_entry("UserCreated")
         assert entry is not None
         assert entry.message_type == "UserCreated"
         assert entry.handler_ids == ("user-handler",)
 
-    def test_get_entry_not_found(self, populated_registry: MessageTypeRegistry) -> None:
+    def test_get_entry_not_found(self, populated_registry: RegistryMessageType) -> None:
         """Test getting entry that doesn't exist."""
         entry = populated_registry.get_entry("Unknown")
         assert entry is None
 
-    def test_has_message_type(self, populated_registry: MessageTypeRegistry) -> None:
+    def test_has_message_type(self, populated_registry: RegistryMessageType) -> None:
         """Test checking if message type exists."""
         assert populated_registry.has_message_type("UserCreated") is True
         assert populated_registry.has_message_type("Unknown") is False
 
-    def test_list_message_types(self, populated_registry: MessageTypeRegistry) -> None:
+    def test_list_message_types(self, populated_registry: RegistryMessageType) -> None:
         """Test listing all message types."""
         types = populated_registry.list_message_types()
         assert "UserCreated" in types
@@ -536,7 +536,7 @@ class TestMessageTypeRegistryQueries:
         assert len(types) == 4
 
     def test_list_message_types_by_category(
-        self, populated_registry: MessageTypeRegistry
+        self, populated_registry: RegistryMessageType
     ) -> None:
         """Test filtering message types by category."""
         events = populated_registry.list_message_types(
@@ -553,7 +553,7 @@ class TestMessageTypeRegistryQueries:
         assert "UserCreated" not in commands
 
     def test_list_message_types_by_domain(
-        self, populated_registry: MessageTypeRegistry
+        self, populated_registry: RegistryMessageType
     ) -> None:
         """Test filtering message types by domain."""
         user_types = populated_registry.list_message_types(domain="user")
@@ -567,7 +567,7 @@ class TestMessageTypeRegistryQueries:
         assert "UserCreated" not in order_types
 
     def test_list_message_types_by_category_and_domain(
-        self, populated_registry: MessageTypeRegistry
+        self, populated_registry: RegistryMessageType
     ) -> None:
         """Test filtering message types by both category and domain."""
         user_events = populated_registry.list_message_types(
@@ -579,14 +579,14 @@ class TestMessageTypeRegistryQueries:
         assert "CreateUserCommand" not in user_events  # COMMAND, not EVENT
         assert "OrderCreated" not in user_events  # order domain
 
-    def test_list_domains(self, populated_registry: MessageTypeRegistry) -> None:
+    def test_list_domains(self, populated_registry: RegistryMessageType) -> None:
         """Test listing all domains."""
         domains = populated_registry.list_domains()
         assert "user" in domains
         assert "order" in domains
         assert len(domains) == 2
 
-    def test_list_handlers(self, populated_registry: MessageTypeRegistry) -> None:
+    def test_list_handlers(self, populated_registry: RegistryMessageType) -> None:
         """Test listing all handler IDs."""
         handlers = populated_registry.list_handlers()
         assert "user-handler" in handlers
@@ -599,7 +599,7 @@ class TestMessageTypeRegistryValidation:
 
     def test_validate_startup_success(self) -> None:
         """Test successful startup validation."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="UserCreated",
             handler_id="user-handler",
@@ -614,7 +614,7 @@ class TestMessageTypeRegistryValidation:
 
     def test_validate_startup_missing_handler(self) -> None:
         """Test validation detects missing handlers."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="UserCreated",
             handler_id="user-handler",
@@ -631,7 +631,7 @@ class TestMessageTypeRegistryValidation:
 
     def test_validate_startup_without_handler_set(self) -> None:
         """Test validation without providing handler set."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="UserCreated",
             handler_id="user-handler",
@@ -646,7 +646,7 @@ class TestMessageTypeRegistryValidation:
 
     def test_validate_topic_message_type_success(self) -> None:
         """Test topic-message type validation success."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="UserCreated",
             handler_id="user-handler",
@@ -664,7 +664,7 @@ class TestMessageTypeRegistryValidation:
 
     def test_validate_topic_message_type_category_mismatch(self) -> None:
         """Test topic-message type validation with category mismatch."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="UserCreated",
             handler_id="user-handler",
@@ -683,7 +683,7 @@ class TestMessageTypeRegistryValidation:
 
     def test_validate_topic_message_type_domain_mismatch(self) -> None:
         """Test topic-message type validation with domain mismatch."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="UserCreated",
             handler_id="user-handler",
@@ -706,7 +706,7 @@ class TestMessageTypeRegistryDomainCrossDomain:
 
     def test_cross_domain_allowed(self) -> None:
         """Test cross-domain consumption when explicitly allowed."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
 
         # Register notification handler that can consume from user domain
         entry = ModelMessageTypeEntry(
@@ -732,7 +732,7 @@ class TestMessageTypeRegistryDomainCrossDomain:
 
     def test_cross_domain_blocked_by_default(self) -> None:
         """Test cross-domain consumption blocked by default."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
 
         # Register handler without cross-domain permissions
         entry = ModelMessageTypeEntry(
@@ -760,7 +760,7 @@ class TestMessageTypeRegistryProperties:
 
     def test_entry_count(self) -> None:
         """Test entry_count property."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         assert registry.entry_count == 0
 
         registry.register_simple(
@@ -781,7 +781,7 @@ class TestMessageTypeRegistryProperties:
 
     def test_handler_count(self) -> None:
         """Test handler_count property."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         assert registry.handler_count == 0
 
         registry.register_simple(
@@ -812,7 +812,7 @@ class TestMessageTypeRegistryProperties:
 
     def test_domain_count(self) -> None:
         """Test domain_count property."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         assert registry.domain_count == 0
 
         registry.register_simple(
@@ -847,7 +847,7 @@ class TestMessageTypeRegistryDunderMethods:
 
     def test_len(self) -> None:
         """Test __len__ method."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         assert len(registry) == 0
 
         registry.register_simple(
@@ -860,7 +860,7 @@ class TestMessageTypeRegistryDunderMethods:
 
     def test_contains(self) -> None:
         """Test __contains__ method."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="Type1",
             handler_id="handler",
@@ -873,7 +873,7 @@ class TestMessageTypeRegistryDunderMethods:
 
     def test_str(self) -> None:
         """Test __str__ method."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="Type1",
             handler_id="handler",
@@ -882,13 +882,13 @@ class TestMessageTypeRegistryDunderMethods:
         )
 
         result = str(registry)
-        assert "MessageTypeRegistry" in result
+        assert "RegistryMessageType" in result
         assert "entries=1" in result
         assert "domains=1" in result
 
     def test_repr(self) -> None:
         """Test __repr__ method."""
-        registry = MessageTypeRegistry()
+        registry = RegistryMessageType()
         registry.register_simple(
             message_type="Type1",
             handler_id="handler",
@@ -897,5 +897,5 @@ class TestMessageTypeRegistryDunderMethods:
         )
 
         result = repr(registry)
-        assert "MessageTypeRegistry" in result
+        assert "RegistryMessageType" in result
         assert "Type1" in result

@@ -13,8 +13,8 @@ generators instead of random UUIDs and real timestamps.
 
 Note:
     The core models (EventFactory, EventSequenceLog, EventSequenceEntry) are
-    defined in tests.helpers.replay_utils and re-exported here for backwards
-    compatibility with test imports from conftest.
+    defined in tests.helpers.replay_utils and re-exported here for convenient
+    test imports from conftest.
 """
 
 from __future__ import annotations

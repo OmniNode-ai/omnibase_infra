@@ -34,10 +34,10 @@ class TestModelFailedComponentConstruction:
     def test_basic_construction(self) -> None:
         """Test basic construction with required fields."""
         failed = ModelFailedComponent(
-            component_name="KafkaEventBus",
+            component_name="EventBusKafka",
             error_message="Connection timeout during shutdown",
         )
-        assert failed.component_name == "KafkaEventBus"
+        assert failed.component_name == "EventBusKafka"
         assert failed.error_message == "Connection timeout during shutdown"
 
     def test_construction_with_simple_values(self) -> None:
@@ -72,10 +72,10 @@ class TestModelFailedComponentConstruction:
     def test_construction_with_unicode(self) -> None:
         """Test construction with unicode characters."""
         failed = ModelFailedComponent(
-            component_name="KafkaEventBus\u2605",
+            component_name="EventBusKafka\u2605",
             error_message="Error: Failed with \u2764 and \u00e9",
         )
-        assert failed.component_name == "KafkaEventBus\u2605"
+        assert failed.component_name == "EventBusKafka\u2605"
         assert "\u00e9" in failed.error_message
 
     def test_construction_with_newlines(self) -> None:
@@ -316,11 +316,11 @@ class TestModelFailedComponentStrRepr:
     def test_str_format(self) -> None:
         """Test that __str__ returns expected format."""
         failed = ModelFailedComponent(
-            component_name="KafkaEventBus",
+            component_name="EventBusKafka",
             error_message="Connection timeout during shutdown",
         )
         result = str(failed)
-        assert result == "KafkaEventBus: Connection timeout during shutdown"
+        assert result == "EventBusKafka: Connection timeout during shutdown"
 
     def test_str_with_simple_values(self) -> None:
         """Test __str__ with simple values."""
@@ -614,10 +614,10 @@ class TestModelFailedComponentJsonDeserialization:
     def test_model_validate_json_valid(self) -> None:
         """Test JSON deserialization with valid JSON containing all fields."""
         json_str = (
-            '{"component_name": "KafkaEventBus", "error_message": "Connection timeout"}'
+            '{"component_name": "EventBusKafka", "error_message": "Connection timeout"}'
         )
         failed = ModelFailedComponent.model_validate_json(json_str)
-        assert failed.component_name == "KafkaEventBus"
+        assert failed.component_name == "EventBusKafka"
         assert failed.error_message == "Connection timeout"
 
     def test_model_validate_json_roundtrip(self) -> None:

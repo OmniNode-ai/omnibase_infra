@@ -24,8 +24,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from omnibase_infra.handlers.registration_storage.handler_mock_registration_storage import (
-    MockRegistrationStorageHandler,
+from omnibase_infra.handlers.registration_storage.handler_registration_storage_mock import (
+    HandlerRegistrationStorageMock,
 )
 from omnibase_infra.nodes.node_registration_storage_effect.registry import (
     RegistryInfraRegistrationStorage,
@@ -58,9 +58,9 @@ def container_with_none_registry() -> MagicMock:
 
 
 @pytest.fixture
-def mock_handler() -> MockRegistrationStorageHandler:
-    """Create a MockRegistrationStorageHandler for testing."""
-    return MockRegistrationStorageHandler()
+def mock_handler() -> HandlerRegistrationStorageMock:
+    """Create a HandlerRegistrationStorageMock for testing."""
+    return HandlerRegistrationStorageMock()
 
 
 @pytest.fixture
@@ -72,10 +72,10 @@ def mock_postgres_handler() -> MagicMock:
     without requiring actual database connection.
     """
     from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
-        ProtocolRegistrationStorageHandler,
+        ProtocolRegistrationPersistence,
     )
 
-    handler = MagicMock(spec=ProtocolRegistrationStorageHandler)
+    handler = MagicMock(spec=ProtocolRegistrationPersistence)
     handler.handler_type = "postgresql"
     return handler
 
@@ -106,7 +106,7 @@ class TestRegistryInfraRegistrationStorageRegister:
         ]
 
         assert "protocol" in metadata
-        assert metadata["protocol"] == "ProtocolRegistrationStorageHandler"
+        assert metadata["protocol"] == "ProtocolRegistrationPersistence"
         assert "module" in metadata
         assert "pluggable" in metadata
         assert metadata["pluggable"] is True
@@ -143,7 +143,7 @@ class TestRegistryInfraRegistrationStorageRegisterHandler:
     def test_register_handler_adds_typed_key(
         self,
         mock_container: MagicMock,
-        mock_handler: MockRegistrationStorageHandler,
+        mock_handler: HandlerRegistrationStorageMock,
     ) -> None:
         """register_handler() adds handler under typed key."""
         RegistryInfraRegistrationStorage.register_handler(mock_container, mock_handler)
@@ -174,7 +174,7 @@ class TestRegistryInfraRegistrationStorageRegisterHandler:
     def test_register_handler_no_default_for_non_postgresql(
         self,
         mock_container: MagicMock,
-        mock_handler: MockRegistrationStorageHandler,
+        mock_handler: HandlerRegistrationStorageMock,
     ) -> None:
         """register_handler() does not set default for non-postgresql handlers."""
         RegistryInfraRegistrationStorage.register_handler(mock_container, mock_handler)
@@ -190,7 +190,7 @@ class TestRegistryInfraRegistrationStorageRegisterHandler:
     def test_register_handler_with_none_service_registry(
         self,
         container_with_none_registry: MagicMock,
-        mock_handler: MockRegistrationStorageHandler,
+        mock_handler: HandlerRegistrationStorageMock,
     ) -> None:
         """register_handler() handles None service_registry gracefully."""
         # Should not raise
@@ -201,7 +201,7 @@ class TestRegistryInfraRegistrationStorageRegisterHandler:
     def test_register_multiple_handlers(
         self,
         mock_container: MagicMock,
-        mock_handler: MockRegistrationStorageHandler,
+        mock_handler: HandlerRegistrationStorageMock,
         mock_postgres_handler: MagicMock,
     ) -> None:
         """register_handler() can register multiple handlers of different types."""
@@ -230,7 +230,7 @@ class TestRegistryInfraRegistrationStorageGetHandler:
     def test_get_handler_by_type(
         self,
         mock_container: MagicMock,
-        mock_handler: MockRegistrationStorageHandler,
+        mock_handler: HandlerRegistrationStorageMock,
     ) -> None:
         """get_handler() retrieves handler by type."""
         RegistryInfraRegistrationStorage.register_handler(mock_container, mock_handler)
@@ -269,7 +269,7 @@ class TestRegistryInfraRegistrationStorageGetHandler:
     def test_get_handler_returns_none_for_no_default(
         self,
         mock_container: MagicMock,
-        mock_handler: MockRegistrationStorageHandler,
+        mock_handler: HandlerRegistrationStorageMock,
     ) -> None:
         """get_handler() returns None when no default is set."""
         # Register mock handler (not postgresql, so no default)
@@ -306,7 +306,7 @@ class TestRegistryHandlerSwapping:
     ) -> None:
         """Handlers can be swapped by re-registering with same type."""
         # Register first mock handler
-        handler1 = MockRegistrationStorageHandler()
+        handler1 = HandlerRegistrationStorageMock()
         RegistryInfraRegistrationStorage.register_handler(mock_container, handler1)
 
         retrieved1 = RegistryInfraRegistrationStorage.get_handler(
@@ -315,7 +315,7 @@ class TestRegistryHandlerSwapping:
         assert retrieved1 is handler1
 
         # Swap with second mock handler
-        handler2 = MockRegistrationStorageHandler()
+        handler2 = HandlerRegistrationStorageMock()
         RegistryInfraRegistrationStorage.register_handler(mock_container, handler2)
 
         retrieved2 = RegistryInfraRegistrationStorage.get_handler(
@@ -325,10 +325,13 @@ class TestRegistryHandlerSwapping:
         assert retrieved2 is not handler1
 
     def test_protocol_key_constant(self) -> None:
-        """PROTOCOL_KEY constant is correctly defined."""
+        """PROTOCOL_KEY constant is correctly defined.
+
+        PROTOCOL_KEY should align with protocol name: ProtocolRegistrationPersistence.
+        """
         assert (
             RegistryInfraRegistrationStorage.PROTOCOL_KEY
-            == "protocol_registration_storage_handler"
+            == "protocol_registration_persistence"
         )
 
     def test_default_handler_type_constant(self) -> None:

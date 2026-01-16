@@ -68,7 +68,7 @@ Time Capture Semantics:
 See Also:
     omnibase_core.enums.EnumNodeKind: Node type classification
     omnibase_infra.models.dispatch.ModelDispatcherRegistration: Dispatcher metadata
-    omnibase_infra.runtime.message_dispatch_engine: Uses this context for dispatch
+    omnibase_infra.runtime.service_message_dispatch_engine: Uses this context for dispatch
 """
 
 from datetime import datetime

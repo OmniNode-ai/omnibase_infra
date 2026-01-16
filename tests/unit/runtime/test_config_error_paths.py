@@ -27,8 +27,8 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     ProtocolConfigurationError,
 )
-from omnibase_infra.runtime.kernel import load_runtime_config
-from omnibase_infra.runtime.validation import load_and_validate_config
+from omnibase_infra.runtime.service_kernel import load_runtime_config
+from omnibase_infra.runtime.util_validation import load_and_validate_config
 
 # TYPE_CHECKING block intentionally removed - no type-only imports needed
 

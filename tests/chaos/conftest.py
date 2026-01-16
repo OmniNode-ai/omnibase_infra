@@ -46,7 +46,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
 )
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 
 # =============================================================================
 # Module-Level Markers - IMPORTANT PYTEST BEHAVIOR
@@ -527,7 +527,7 @@ class ChaosEffectExecutor:
 
     def __init__(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         failure_injector: FailureInjector,
         backend_client: MagicMock,
     ) -> None:
@@ -941,18 +941,18 @@ def mock_backend_client() -> MagicMock:
 
 
 @pytest.fixture
-def chaos_idempotency_store() -> InMemoryIdempotencyStore:
+def chaos_idempotency_store() -> StoreIdempotencyInmemory:
     """Create in-memory idempotency store for chaos testing.
 
     Returns:
-        InMemoryIdempotencyStore for testing.
+        StoreIdempotencyInmemory for testing.
     """
-    return InMemoryIdempotencyStore()
+    return StoreIdempotencyInmemory()
 
 
 @pytest.fixture
 def chaos_effect_executor(
-    chaos_idempotency_store: InMemoryIdempotencyStore,
+    chaos_idempotency_store: StoreIdempotencyInmemory,
     failure_injector: FailureInjector,
     mock_backend_client: MagicMock,
 ) -> ChaosEffectExecutor:

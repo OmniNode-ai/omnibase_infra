@@ -47,11 +47,11 @@ class TestServiceRegistrationError:
         """Test basic error initialization."""
         error = ServiceRegistrationError(
             "Failed to register service",
-            service_name="PolicyRegistry",
+            service_name="RegistryPolicy",
         )
 
         assert "Failed to register service" in str(error)
-        assert error.model.context["service_name"] == "PolicyRegistry"
+        assert error.model.context["service_name"] == "RegistryPolicy"
 
     def test_with_full_context(self) -> None:
         """Test error with full context."""
@@ -59,21 +59,21 @@ class TestServiceRegistrationError:
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="register_policy_registry",
-            target_name="PolicyRegistry",
+            target_name="RegistryPolicy",
             correlation_id=correlation_id,
         )
 
         error = ServiceRegistrationError(
-            "Failed to register PolicyRegistry",
-            service_name="PolicyRegistry",
+            "Failed to register RegistryPolicy",
+            service_name="RegistryPolicy",
             context=context,
             original_error="Container missing attribute",
             hint="Ensure container.service_registry exists",
         )
 
         assert error.model.correlation_id == correlation_id
-        assert error.model.context["service_name"] == "PolicyRegistry"
-        assert error.model.context["target_name"] == "PolicyRegistry"
+        assert error.model.context["service_name"] == "RegistryPolicy"
+        assert error.model.context["target_name"] == "RegistryPolicy"
         assert error.model.context["original_error"] == "Container missing attribute"
         assert error.model.context["hint"] == "Ensure container.service_registry exists"
 
@@ -86,7 +86,7 @@ class TestServiceRegistrationError:
         try:
             raise ServiceRegistrationError(
                 "Failed to register service",
-                service_name="PolicyRegistry",
+                service_name="RegistryPolicy",
             ) from original
         except ServiceRegistrationError as e:
             assert e.__cause__ is original
@@ -100,11 +100,11 @@ class TestServiceResolutionError:
         """Test basic error initialization."""
         error = ServiceResolutionError(
             "Service not found",
-            service_name="PolicyRegistry",
+            service_name="RegistryPolicy",
         )
 
         assert "Service not found" in str(error)
-        assert error.model.context["service_name"] == "PolicyRegistry"
+        assert error.model.context["service_name"] == "RegistryPolicy"
 
     def test_with_full_context(self) -> None:
         """Test error with full context."""
@@ -112,21 +112,21 @@ class TestServiceResolutionError:
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="resolve_policy_registry",
-            target_name="PolicyRegistry",
+            target_name="RegistryPolicy",
             correlation_id=correlation_id,
         )
 
         error = ServiceResolutionError(
-            "PolicyRegistry not registered in container",
-            service_name="PolicyRegistry",
+            "RegistryPolicy not registered in container",
+            service_name="RegistryPolicy",
             context=context,
             original_error="Service not found in registry",
             error_type="ValueError",
         )
 
         assert error.model.correlation_id == correlation_id
-        assert error.model.context["service_name"] == "PolicyRegistry"
-        assert error.model.context["target_name"] == "PolicyRegistry"
+        assert error.model.context["service_name"] == "RegistryPolicy"
+        assert error.model.context["target_name"] == "RegistryPolicy"
         assert error.model.context["original_error"] == "Service not found in registry"
         assert error.model.context["error_type"] == "ValueError"
 
@@ -138,8 +138,8 @@ class TestServiceResolutionError:
         )
 
         error = ServiceResolutionError(
-            "PolicyRegistry not registered. Call wire_infrastructure_services() first.",
-            service_name="PolicyRegistry",
+            "RegistryPolicy not registered. Call wire_infrastructure_services() first.",
+            service_name="RegistryPolicy",
             context=context,
         )
 
@@ -260,7 +260,7 @@ class TestErrorUsageScenarios:
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="register_policy_registry",
-            target_name="PolicyRegistry",
+            target_name="RegistryPolicy",
             correlation_id=correlation_id,
         )
 
@@ -270,8 +270,8 @@ class TestErrorUsageScenarios:
 
         try:
             raise ServiceRegistrationError(
-                "Failed to register PolicyRegistry: invalid registration arguments",
-                service_name="PolicyRegistry",
+                "Failed to register RegistryPolicy: invalid registration arguments",
+                service_name="RegistryPolicy",
                 context=context,
                 original_error=str(original_error),
                 hint="Check register_instance() signature compatibility",
@@ -279,7 +279,7 @@ class TestErrorUsageScenarios:
         except ServiceRegistrationError as e:
             # Verify error structure
             assert e.model.correlation_id == correlation_id
-            assert e.model.context["service_name"] == "PolicyRegistry"
+            assert e.model.context["service_name"] == "RegistryPolicy"
             assert "invalid registration arguments" in str(e)
             assert isinstance(e.__cause__, TypeError)
 
@@ -289,23 +289,23 @@ class TestErrorUsageScenarios:
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="resolve_policy_registry",
-            target_name="PolicyRegistry",
+            target_name="RegistryPolicy",
             correlation_id=correlation_id,
         )
 
-        original_error = ValueError("Service not found: PolicyRegistry")
+        original_error = ValueError("Service not found: RegistryPolicy")
 
         try:
             raise ServiceResolutionError(
-                "PolicyRegistry not registered in container. Call wire_infrastructure_services() first.",
-                service_name="PolicyRegistry",
+                "RegistryPolicy not registered in container. Call wire_infrastructure_services() first.",
+                service_name="RegistryPolicy",
                 context=context,
                 original_error=str(original_error),
             ) from original_error
         except ServiceResolutionError as e:
             # Verify error structure
             assert e.model.correlation_id == correlation_id
-            assert e.model.context["service_name"] == "PolicyRegistry"
+            assert e.model.context["service_name"] == "RegistryPolicy"
             assert "not registered" in str(e)
             assert isinstance(e.__cause__, ValueError)
 

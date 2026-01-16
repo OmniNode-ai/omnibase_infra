@@ -3,7 +3,7 @@
 """Contract-Based Handler Discovery Service for ONEX Infrastructure.
 
 This module provides ContractHandlerDiscovery, which bridges the HandlerPluginLoader
-(which loads handler metadata from contracts) with the ProtocolBindingRegistry
+(which loads handler metadata from contracts) with the RegistryProtocolBinding
 (which tracks handler classes for runtime instantiation).
 
 Part of OMN-1133: Handler Discovery Service implementation.
@@ -48,7 +48,7 @@ Example Usage:
 
 See Also:
     - HandlerPluginLoader: Loader for reading handler contracts from filesystem
-    - ProtocolBindingRegistry: Registry for storing discovered handler classes
+    - RegistryProtocolBinding: Registry for storing discovered handler classes
     - ModelDiscoveryResult: Model representing discovery operation results
     - ProtocolHandlerDiscovery: Protocol interface this class implements
 
@@ -74,7 +74,7 @@ from omnibase_infra.models.runtime.model_discovery_warning import (
 from omnibase_infra.runtime.registry.registry_protocol_binding import RegistryError
 
 if TYPE_CHECKING:
-    from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+    from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
     from omnibase_infra.runtime.protocol_handler_plugin_loader import (
         ProtocolHandlerPluginLoader,
     )
@@ -86,7 +86,7 @@ class ContractHandlerDiscovery:
     """Discovers and registers handlers from contracts automatically.
 
     This class bridges the HandlerPluginLoader (which loads handler metadata from
-    contracts) with the ProtocolBindingRegistry (which tracks handler classes for
+    contracts) with the RegistryProtocolBinding (which tracks handler classes for
     runtime instantiation).
 
     Pattern: Stateless service that coordinates between plugin loader and registry.
@@ -123,7 +123,7 @@ class ContractHandlerDiscovery:
     def __init__(
         self,
         plugin_loader: ProtocolHandlerPluginLoader,
-        handler_registry: ProtocolBindingRegistry,
+        handler_registry: RegistryProtocolBinding,
     ) -> None:
         """Initialize the discovery service.
 
@@ -131,7 +131,7 @@ class ContractHandlerDiscovery:
             plugin_loader: Loader for reading handler contracts from filesystem.
                 Must implement ProtocolHandlerPluginLoader protocol.
             handler_registry: Registry for storing discovered handler classes.
-                Must implement ProtocolBindingRegistry interface.
+                Must implement RegistryProtocolBinding interface.
         """
         self._plugin_loader = plugin_loader
         self._handler_registry = handler_registry

@@ -7,7 +7,7 @@ context for alerting, monitoring, and debugging failed message processing.
 
 This model is passed to DLQ callback hooks when messages are published to
 the dead letter queue, enabling custom alerting integration (PagerDuty,
-Slack, email, etc.) without coupling the KafkaEventBus to specific
+Slack, email, etc.) without coupling the EventBusKafka to specific
 alerting implementations.
 
 Example:
@@ -32,7 +32,7 @@ Example:
 
 See Also:
     ModelDlqMetrics: Aggregate metrics for DLQ operations
-    KafkaEventBus._publish_to_dlq: DLQ publishing implementation
+    EventBusKafka._publish_to_dlq: DLQ publishing implementation
 """
 
 from __future__ import annotations

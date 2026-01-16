@@ -44,7 +44,7 @@ from omnibase_infra.runtime.handler_plugin_loader import (
 # =============================================================================
 
 # Real handler class paths from omnibase_infra.handlers
-REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HttpRestHandler"
+REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HandlerHttpRest"
 REAL_HANDLER_DB_CLASS = "omnibase_infra.handlers.handler_db.HandlerDb"
 REAL_HANDLER_VAULT_CLASS = "omnibase_infra.handlers.handler_vault.HandlerVault"
 REAL_HANDLER_CONSUL_CLASS = "omnibase_infra.handlers.handler_consul.HandlerConsul"

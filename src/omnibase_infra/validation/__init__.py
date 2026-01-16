@@ -86,9 +86,9 @@ Security Design (Intentional Fail-Open Architecture):
     | Network layer | TLS, firewall rules, service mesh policies |
 
     See individual validator modules for detailed fail-open documentation:
-    - execution_shape_validator.py: AST-based static analysis (module docstring, lines 17-49)
-    - runtime_shape_validator.py: Runtime validation (Security Design section, lines 52-121)
-    - routing_coverage_validator.py: Routing gap detection (module docstring)
+    - validator_execution_shape.py: AST-based static analysis (Limitations section in module docstring)
+    - validator_runtime_shape.py: Runtime validation (Security Design section in module docstring)
+    - validator_routing_coverage.py: Routing gap detection (module docstring)
 """
 
 from omnibase_core.validation import (
@@ -101,8 +101,41 @@ from omnibase_core.validation import (
     validate_union_usage,
 )
 
+# Contract linting for CI gate (PR #57)
+from omnibase_infra.validation.enums.enum_contract_violation_severity import (
+    EnumContractViolationSeverity,
+)
+
+# Infrastructure-specific wrappers will be imported from infra_validators
+from omnibase_infra.validation.infra_validators import (
+    INFRA_MAX_UNIONS,
+    get_validation_summary,
+    is_isinstance_union,
+    validate_infra_all,
+    validate_infra_architecture,
+    validate_infra_circular_imports,
+    validate_infra_contracts,
+    validate_infra_patterns,
+    validate_infra_union_usage,
+)
+from omnibase_infra.validation.linter_contract import (
+    ContractLinter,
+    lint_contract_file,
+    lint_contracts_ci,
+    lint_contracts_in_directory,
+)
+from omnibase_infra.validation.models.model_contract_lint_result import (
+    ModelContractLintResult,
+)
+from omnibase_infra.validation.models.model_contract_violation import (
+    ModelContractViolation,
+)
+
+# Validation error aggregation and reporting for startup (OMN-1091)
+from omnibase_infra.validation.service_validation_aggregator import ValidationAggregator
+
 # AST-based Any type validation for strong typing policy (OMN-1276)
-from omnibase_infra.validation.any_type_validator import (
+from omnibase_infra.validation.validator_any_type import (
     AnyTypeDetector,
     ModelAnyTypeValidationResult,
     validate_any_types,
@@ -111,29 +144,18 @@ from omnibase_infra.validation.any_type_validator import (
 )
 
 # Chain propagation validation for correlation and causation chains (OMN-951)
-from omnibase_infra.validation.chain_propagation_validator import (
+from omnibase_infra.validation.validator_chain_propagation import (
     ChainPropagationError,
     ChainPropagationValidator,
     enforce_chain_propagation,
     validate_message_chain,
 )
 
-# Contract linting for CI gate (PR #57)
-from omnibase_infra.validation.contract_linter import (
-    ContractLinter,
-    EnumContractViolationSeverity,
-    ModelContractLintResult,
-    ModelContractViolation,
-    lint_contract_file,
-    lint_contracts_ci,
-    lint_contracts_in_directory,
-)
-
 # AST-based execution shape validation for CI gate (OMN-958)
-# NOTE: EXECUTION_SHAPE_RULES is defined ONLY in execution_shape_validator.py
+# NOTE: EXECUTION_SHAPE_RULES is defined ONLY in validator_execution_shape.py
 # (the canonical single source of truth). This import re-exports it for public API
-# convenience. See execution_shape_validator.py lines 112-149 for the definition.
-from omnibase_infra.validation.execution_shape_validator import (
+# convenience. See validator_execution_shape.py lines 111-148 for the definition.
+from omnibase_infra.validation.validator_execution_shape import (
     EXECUTION_SHAPE_RULES,
     ExecutionShapeValidator,
     ModelDetectedNodeInfo,
@@ -143,26 +165,14 @@ from omnibase_infra.validation.execution_shape_validator import (
     validate_execution_shapes_ci,
 )
 
-# Infrastructure-specific wrappers will be imported from infra_validators
-from omnibase_infra.validation.infra_validators import (
-    INFRA_MAX_UNIONS,
-    get_validation_summary,
-    validate_infra_all,
-    validate_infra_architecture,
-    validate_infra_circular_imports,
-    validate_infra_contracts,
-    validate_infra_patterns,
-    validate_infra_union_usage,
-)
-
 # Registration-time security validation for handlers (OMN-1098)
-from omnibase_infra.validation.registration_security_validator import (
+from omnibase_infra.validation.validator_registration_security import (
     RegistrationSecurityValidator,
     validate_handler_registration,
 )
 
 # Routing coverage validation for startup fail-fast (OMN-958)
-from omnibase_infra.validation.routing_coverage_validator import (
+from omnibase_infra.validation.validator_routing_coverage import (
     RoutingCoverageError,
     RoutingCoverageValidator,
     check_routing_coverage_ci,
@@ -172,9 +182,9 @@ from omnibase_infra.validation.routing_coverage_validator import (
 )
 
 # Runtime shape validation for ONEX 4-node architecture
-# NOTE: RuntimeShapeValidator uses EXECUTION_SHAPE_RULES from execution_shape_validator.py
-# (not a separate definition). See runtime_shape_validator.py lines 66-69 for the import.
-from omnibase_infra.validation.runtime_shape_validator import (
+# NOTE: RuntimeShapeValidator uses EXECUTION_SHAPE_RULES from validator_execution_shape.py
+# (not a separate definition). See the import section of validator_runtime_shape.py.
+from omnibase_infra.validation.validator_runtime_shape import (
     ExecutionShapeViolationError,
     RuntimeShapeValidator,
     detect_message_category,
@@ -182,7 +192,7 @@ from omnibase_infra.validation.runtime_shape_validator import (
 )
 
 # Security validation for handler introspection and security constraints
-from omnibase_infra.validation.security_validator import (
+from omnibase_infra.validation.validator_security import (
     SENSITIVE_METHOD_PATTERNS,
     SENSITIVE_PARAMETER_NAMES,
     SecurityRuleId,
@@ -194,7 +204,7 @@ from omnibase_infra.validation.security_validator import (
 )
 
 # Topic category validation for execution shape enforcement
-from omnibase_infra.validation.topic_category_validator import (
+from omnibase_infra.validation.validator_topic_category import (
     NODE_ARCHETYPE_EXPECTED_CATEGORIES,
     TOPIC_CATEGORY_PATTERNS,
     TOPIC_SUFFIXES,
@@ -204,9 +214,6 @@ from omnibase_infra.validation.topic_category_validator import (
     validate_topic_categories_in_directory,
     validate_topic_categories_in_file,
 )
-
-# Validation error aggregation and reporting for startup (OMN-1091)
-from omnibase_infra.validation.validation_aggregator import ValidationAggregator
 
 __all__: list[str] = [
     # Constants
@@ -254,6 +261,7 @@ __all__: list[str] = [
     "get_execution_shape_rules",  # Get shape rules
     "get_validation_summary",  # Get validation summary
     "has_sensitive_parameters",  # Sensitive parameter check
+    "is_isinstance_union",  # Check if union is in isinstance() call
     "is_sensitive_method_name",  # Sensitive method check
     "lint_contract_file",  # Lint single contract file
     "lint_contracts_ci",  # CI contract linting

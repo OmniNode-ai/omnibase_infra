@@ -25,6 +25,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     InfraVaultError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     SecretResolutionError,
 )
 from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
@@ -126,11 +127,16 @@ class MixinVaultRetry:
             retry_state, operation, correlation_id
         )
         if not retry_state.is_retriable():
-            ctx = self._create_vault_error_context(operation, correlation_id)
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.VAULT,
+                operation=operation,
+                target_name="vault_handler",
+                correlation_id=correlation_id,
+                timeout_seconds=timeout_seconds,
+            )
             raise InfraTimeoutError(
                 f"Vault operation timed out after {timeout_seconds}s",
-                context=ctx,
-                timeout_seconds=timeout_seconds,
+                context=timeout_ctx,
             ) from error
 
     async def _handle_vault_forbidden(

@@ -25,7 +25,7 @@ from omnibase_core.errors import ModelOnexError
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.errors import ModelInfraErrorContext, ModelTimeoutErrorContext
 from omnibase_infra.errors.error_infra import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -104,6 +104,162 @@ class TestModelInfraErrorContext:
         context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.HTTP)
         with pytest.raises(ValidationError):
             context.transport_type = EnumInfraTransportType.DATABASE  # type: ignore[misc]
+
+
+class TestModelTimeoutErrorContext:
+    """Tests for ModelTimeoutErrorContext - stricter timeout error context.
+
+    ModelTimeoutErrorContext differs from ModelInfraErrorContext:
+    - transport_type: Required (not optional)
+    - operation: Required (not optional)
+    - correlation_id: Required, auto-generated if not provided
+    - timeout_seconds: Optional float for timeout value
+    """
+
+    def test_basic_instantiation_with_required_fields(self) -> None:
+        """Test that context requires transport_type and operation."""
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="execute_query",
+        )
+        assert context.transport_type == EnumInfraTransportType.DATABASE
+        assert context.operation == "execute_query"
+        assert context.correlation_id is not None  # Auto-generated
+
+    def test_correlation_id_auto_generated(self) -> None:
+        """Test that correlation_id is auto-generated when not provided."""
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="fetch",
+        )
+        assert context.correlation_id is not None
+        # Verify it's a valid UUID4
+        assert context.correlation_id.version == 4
+
+    def test_correlation_id_uses_provided_value(self) -> None:
+        """Test that provided correlation_id is used."""
+        provided_id = uuid4()
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="produce",
+            correlation_id=provided_id,
+        )
+        assert context.correlation_id == provided_id
+
+    def test_with_all_optional_fields(self) -> None:
+        """Test context with all optional fields populated."""
+        correlation_id = uuid4()
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="query",
+            target_name="postgresql-primary",
+            correlation_id=correlation_id,
+            timeout_seconds=30.0,
+        )
+        assert context.transport_type == EnumInfraTransportType.DATABASE
+        assert context.operation == "query"
+        assert context.target_name == "postgresql-primary"
+        assert context.correlation_id == correlation_id
+        assert context.timeout_seconds == 30.0
+
+    def test_missing_transport_type_raises(self) -> None:
+        """Test that missing transport_type raises validation error."""
+        with pytest.raises(ValidationError):
+            ModelTimeoutErrorContext(operation="query")  # type: ignore[call-arg]
+
+    def test_missing_operation_raises(self) -> None:
+        """Test that missing operation raises validation error."""
+        with pytest.raises(ValidationError):
+            ModelTimeoutErrorContext(transport_type=EnumInfraTransportType.DATABASE)  # type: ignore[call-arg]
+
+    def test_empty_operation_raises(self) -> None:
+        """Test that empty operation raises validation error."""
+        with pytest.raises(ValidationError):
+            ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="",
+            )
+
+    def test_timeout_seconds_validation(self) -> None:
+        """Test that negative timeout_seconds raises validation error."""
+        with pytest.raises(ValidationError):
+            ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="request",
+                timeout_seconds=-1.0,
+            )
+
+    def test_immutability(self) -> None:
+        """Test that context model is immutable (frozen)."""
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="request",
+        )
+        with pytest.raises(ValidationError):
+            context.operation = "new_operation"  # type: ignore[misc]
+
+
+class TestInfraTimeoutErrorWithTimeoutContext:
+    """Tests for InfraTimeoutError with ModelTimeoutErrorContext."""
+
+    def test_infra_timeout_error_with_timeout_context(self) -> None:
+        """Test InfraTimeoutError with ModelTimeoutErrorContext."""
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="execute_query",
+            target_name="postgresql",
+            timeout_seconds=30.0,
+        )
+        error = InfraTimeoutError("Query timed out", context=context)
+
+        assert "Query timed out" in str(error)
+        assert error.model.context["operation"] == "execute_query"
+        assert error.model.context["target_name"] == "postgresql"
+        assert error.model.context["timeout_seconds"] == 30.0
+        # Correlation ID is guaranteed by ModelTimeoutErrorContext
+        assert error.model.correlation_id is not None
+
+    def test_infra_timeout_error_correlation_id_propagated(self) -> None:
+        """Test that correlation_id from ModelTimeoutErrorContext is propagated."""
+        correlation_id = uuid4()
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="fetch",
+            correlation_id=correlation_id,
+        )
+        error = InfraTimeoutError("Request timed out", context=context)
+
+        assert error.model.correlation_id == correlation_id
+
+    def test_infra_timeout_error_auto_generated_correlation_id(self) -> None:
+        """Test that auto-generated correlation_id is propagated."""
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="produce",
+        )
+        error = InfraTimeoutError("Produce timed out", context=context)
+
+        # Should have a valid auto-generated correlation_id
+        assert error.model.correlation_id is not None
+        assert error.model.correlation_id.version == 4
+
+    def test_infra_timeout_error_extra_context_merged(self) -> None:
+        """Test that extra_context is merged with ModelTimeoutErrorContext fields."""
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="query",
+            timeout_seconds=10.0,
+        )
+        error = InfraTimeoutError(
+            "Query timed out",
+            context=context,
+            query_type="SELECT",
+            retry_count=3,
+        )
+
+        assert error.model.context["timeout_seconds"] == 10.0
+        assert error.model.context["query_type"] == "SELECT"
+        assert error.model.context["retry_count"] == 3
 
 
 class TestRuntimeHostError:
@@ -450,43 +606,58 @@ class TestInfraTimeoutError:
     """Tests for InfraTimeoutError."""
 
     def test_basic_instantiation(self) -> None:
-        """Test basic error instantiation."""
-        error = InfraTimeoutError("Operation timed out")
+        """Test basic error instantiation with required context."""
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="execute_query",
+        )
+        error = InfraTimeoutError("Operation timed out", context=context)
         assert "Operation timed out" in str(error)
         assert isinstance(error, RuntimeHostError)
+        # Verify correlation_id is auto-generated
+        assert error.model.correlation_id is not None
 
     def test_with_context_model(self) -> None:
         """Test error with context model and timeout details."""
-        context = ModelInfraErrorContext(
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
             operation="execute_query",
             target_name="postgresql",
+            timeout_seconds=30.0,
         )
         error = InfraTimeoutError(
             "Query timeout exceeded",
             context=context,
-            timeout_seconds=30,
         )
         assert error.model.context["operation"] == "execute_query"
-        assert error.model.context["timeout_seconds"] == 30
+        assert error.model.context["timeout_seconds"] == 30.0
         assert error.model.context["target_name"] == "postgresql"
 
     def test_error_code_mapping(self) -> None:
         """Test that error uses appropriate CoreErrorCode."""
-        error = InfraTimeoutError("Timeout error")
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="fetch_resource",
+        )
+        error = InfraTimeoutError("Timeout error", context=context)
         assert error.model.error_code == EnumCoreErrorCode.TIMEOUT_ERROR
 
     def test_error_chaining(self) -> None:
         """Test error chaining from timeout exception."""
-        context = ModelInfraErrorContext(operation="select")
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="select",
+            timeout_seconds=10.0,
+        )
         timeout = TimeoutError("Operation exceeded deadline")
         try:
             raise InfraTimeoutError(
-                "Database query timeout", context=context, timeout_seconds=10
+                "Database query timeout", context=context
             ) from timeout
         except InfraTimeoutError as e:
             assert e.__cause__ == timeout
             assert e.model.context["operation"] == "select"
-            assert e.model.context["timeout_seconds"] == 10
+            assert e.model.context["timeout_seconds"] == 10.0
 
 
 class TestInfraAuthenticationError:
@@ -585,11 +756,16 @@ class TestAllErrorsInheritance:
 
     def test_all_errors_inherit_from_runtime_host_error(self) -> None:
         """Test inheritance chain for all error classes."""
+        # InfraTimeoutError requires context
+        timeout_context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="test_operation",
+        )
         errors = [
             ProtocolConfigurationError("test"),
             SecretResolutionError("test"),
             InfraConnectionError("test"),
-            InfraTimeoutError("test"),
+            InfraTimeoutError("test", context=timeout_context),
             InfraAuthenticationError("test"),
             InfraUnavailableError("test"),
         ]
@@ -607,11 +783,17 @@ class TestStructuredFieldsComprehensive:
         """Test that all errors support correlation_id via context model."""
         correlation_id = uuid4()
         context = ModelInfraErrorContext(correlation_id=correlation_id)
+        # ModelTimeoutErrorContext for InfraTimeoutError
+        timeout_context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="test",
+            correlation_id=correlation_id,
+        )
         errors = [
             ProtocolConfigurationError("test", context=context),
             SecretResolutionError("test", context=context),
             InfraConnectionError("test", context=context),
-            InfraTimeoutError("test", context=context),
+            InfraTimeoutError("test", context=timeout_context),
             InfraAuthenticationError("test", context=context),
             InfraUnavailableError("test", context=context),
         ]
@@ -650,8 +832,9 @@ class TestStructuredFieldsComprehensive:
             ),
             InfraTimeoutError(
                 "test",
-                context=ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.KAFKA
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="test",
                 ),
             ),
             InfraAuthenticationError(
@@ -692,7 +875,11 @@ class TestStructuredFieldsComprehensive:
                 "test", context=ModelInfraErrorContext(operation="connect")
             ),
             InfraTimeoutError(
-                "test", context=ModelInfraErrorContext(operation="execute")
+                "test",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="execute",
+                ),
             ),
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(operation="authenticate")
@@ -719,7 +906,12 @@ class TestStructuredFieldsComprehensive:
                 "test", context=ModelInfraErrorContext(target_name="postgresql")
             ),
             InfraTimeoutError(
-                "test", context=ModelInfraErrorContext(target_name="kafka")
+                "test",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="test_operation",
+                    target_name="kafka",
+                ),
             ),
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(target_name="consul")
@@ -795,11 +987,15 @@ class TestErrorChaining:
     def test_infra_timeout_error_chaining_preserves_cause(self) -> None:
         """Test InfraTimeoutError properly chains and preserves original exception."""
         original = TimeoutError("Operation timed out after 30s")
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="execute_query",
+        )
         try:
             try:
                 raise original
             except TimeoutError as e:
-                raise InfraTimeoutError("Query timeout") from e
+                raise InfraTimeoutError("Query timeout", context=context) from e
         except InfraTimeoutError as wrapped:
             assert wrapped.__cause__ is original
             assert isinstance(wrapped.__cause__, TimeoutError)
@@ -834,11 +1030,12 @@ class TestErrorChaining:
     def test_chained_error_with_context_preserved(self) -> None:
         """Test that context is preserved when chaining errors."""
         correlation_id = uuid4()
-        context = ModelInfraErrorContext(
+        context = ModelTimeoutErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="execute_query",
             target_name="postgresql",
             correlation_id=correlation_id,
+            timeout_seconds=30.0,
         )
         original = TimeoutError("Query exceeded deadline")
         try:
@@ -848,7 +1045,6 @@ class TestErrorChaining:
                 raise InfraTimeoutError(
                     "Database query timeout",
                     context=context,
-                    timeout_seconds=30,
                 ) from e
         except InfraTimeoutError as wrapped:
             # Verify chaining
@@ -861,7 +1057,7 @@ class TestErrorChaining:
             )
             assert wrapped.model.context["operation"] == "execute_query"
             assert wrapped.model.context["target_name"] == "postgresql"
-            assert wrapped.model.context["timeout_seconds"] == 30
+            assert wrapped.model.context["timeout_seconds"] == 30.0
 
     def test_multi_level_chaining(self) -> None:
         """Test error chaining through multiple levels."""
@@ -1429,7 +1625,7 @@ class TestErrorContextSecretSanitization:
             (ProtocolConfigurationError, "Config error"),
             (SecretResolutionError, "Secret error"),
             (InfraConnectionError, "Connection error"),
-            (InfraTimeoutError, "Timeout error"),
+            # InfraTimeoutError tested separately (requires ModelTimeoutErrorContext)
             (InfraAuthenticationError, "Auth error"),
             (InfraUnavailableError, "Unavailable error"),
         ],
@@ -1441,6 +1637,9 @@ class TestErrorContextSecretSanitization:
 
         This test validates that the structured context for each error type
         only contains safe fields when properly constructed.
+
+        Note: InfraTimeoutError is tested separately as it requires
+        ModelTimeoutErrorContext instead of ModelInfraErrorContext.
         """
         correlation_id = uuid4()
         context = ModelInfraErrorContext(
@@ -1467,6 +1666,41 @@ class TestErrorContextSecretSanitization:
         # Verify no secret patterns in serialized context
         self._assert_no_secret_patterns_in_context(
             error, f"{error_class.__name__} with safe fields"
+        )
+
+    def test_infra_timeout_error_context_serialization_is_safe(self) -> None:
+        """Verify InfraTimeoutError serializes context without exposing secrets.
+
+        InfraTimeoutError requires ModelTimeoutErrorContext (with timeout_seconds),
+        tested separately from the parameterized test above.
+        """
+        correlation_id = uuid4()
+        context = ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="test_operation",
+            target_name="test-service",
+            correlation_id=correlation_id,
+            timeout_seconds=30.0,
+        )
+
+        error = InfraTimeoutError(
+            "Timeout error",
+            context=context,
+            host="service.example.com",
+            port=8080,
+            retry_count=2,
+        )
+
+        # Verify safe fields are present
+        assert error.model.context["operation"] == "test_operation"
+        assert error.model.context["target_name"] == "test-service"
+        assert error.model.context["host"] == "service.example.com"
+        assert error.model.context["port"] == 8080
+        assert error.model.context["timeout_seconds"] == 30.0
+
+        # Verify no secret patterns in serialized context
+        self._assert_no_secret_patterns_in_context(
+            error, "InfraTimeoutError with safe fields"
         )
 
     # =========================================================================

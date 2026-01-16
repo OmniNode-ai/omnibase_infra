@@ -11,6 +11,182 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **IMPORTANT**: This section documents API changes that may require code modifications when upgrading. Review each item carefully before upgrading.
 
+#### File and Class Naming Standardization (OMN-1305, PR #151)
+
+This refactoring enforces consistent naming conventions across the entire codebase per CLAUDE.md standards. **All import paths and class names have changed.**
+
+##### Summary of Changes
+
+| Category | Count | Pattern Change |
+|----------|-------|----------------|
+| Event Bus | 2 files, 2 classes | `{name}_event_bus` → `event_bus_{name}` |
+| Handlers | 6 files, 6 classes | Suffix → Prefix standardization |
+| Protocols | 4 files, 4 classes | Removed `Handler` suffix, domain-specific naming |
+| Runtime | 6 files, 6 classes | Added `service_`, `util_`, `registry_` prefixes |
+| Validation | 8 files, 8 classes | `{name}_validator` → `validator_{name}` |
+| Stores | 2 classes | Suffix → Prefix standardization |
+
+##### Event Bus Renames
+
+| Old File | New File |
+|----------|----------|
+| `inmemory_event_bus.py` | `event_bus_inmemory.py` |
+| `kafka_event_bus.py` | `event_bus_kafka.py` |
+
+| Old Class | New Class |
+|-----------|-----------|
+| `InMemoryEventBus` | `EventBusInmemory` |
+| `KafkaEventBus` | `EventBusKafka` |
+
+**Migration**:
+```python
+# BEFORE
+from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+
+# AFTER
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+```
+
+##### Handler Renames
+
+| Old File | New File |
+|----------|----------|
+| `handler_mock_registration_storage.py` | `handler_registration_storage_mock.py` |
+| `handler_postgres_registration_storage.py` | `handler_registration_storage_postgres.py` |
+| `handler_consul_service_discovery.py` | `handler_service_discovery_consul.py` |
+| `handler_mock_service_discovery.py` | `handler_service_discovery_mock.py` |
+
+| Old Class | New Class |
+|-----------|-----------|
+| `MockRegistrationStorageHandler` | `HandlerRegistrationStorageMock` |
+| `PostgresRegistrationStorageHandler` | `HandlerRegistrationStoragePostgres` |
+| `ConsulServiceDiscoveryHandler` | `HandlerServiceDiscoveryConsul` |
+| `MockServiceDiscoveryHandler` | `HandlerServiceDiscoveryMock` |
+| `HttpRestHandler` | `HandlerHttpRest` |
+
+**Migration**:
+```python
+# BEFORE
+from omnibase_infra.handlers.registration_storage.handler_postgres_registration_storage import (
+    PostgresRegistrationStorageHandler,
+)
+
+# AFTER
+from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
+    HandlerRegistrationStoragePostgres,
+)
+```
+
+##### Protocol Renames
+
+| Old File | New File |
+|----------|----------|
+| `protocol_registration_storage_handler.py` | `protocol_registration_persistence.py` |
+| `protocol_service_discovery_handler.py` | `protocol_discovery_operations.py` |
+
+| Old Class | New Class |
+|-----------|-----------|
+| `ProtocolRegistrationStorageHandler` | `ProtocolRegistrationPersistence` |
+| `ProtocolServiceDiscoveryHandler` | `ProtocolDiscoveryOperations` |
+
+**Migration**:
+```python
+# BEFORE
+from omnibase_infra.handlers.registration_storage.protocol_registration_storage_handler import (
+    ProtocolRegistrationStorageHandler,
+)
+
+# AFTER
+from omnibase_infra.handlers.registration_storage.protocol_registration_persistence import (
+    ProtocolRegistrationPersistence,
+)
+```
+
+##### Runtime File Renames
+
+| Old File | New File | Rationale |
+|----------|----------|-----------|
+| `policy_registry.py` | `registry_policy.py` | Registry prefix pattern |
+| `message_dispatch_engine.py` | `service_message_dispatch_engine.py` | Service prefix pattern |
+| `runtime_host_process.py` | `service_runtime_host_process.py` | Service prefix pattern |
+| `wiring.py` | `util_wiring.py` | Util prefix pattern |
+| `container_wiring.py` | `util_container_wiring.py` | Util prefix pattern |
+| `validation.py` | `util_validation.py` | Util prefix pattern |
+
+| Old Class | New Class |
+|-----------|-----------|
+| `PolicyRegistry` | `RegistryPolicy` |
+| `ProtocolBindingRegistry` | `RegistryProtocolBinding` |
+| `MessageTypeRegistry` | `RegistryMessageType` |
+| `EventBusBindingRegistry` | `RegistryEventBusBinding` |
+
+**Migration**:
+```python
+# BEFORE
+from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+
+# AFTER
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
+from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
+```
+
+##### Validation File Renames
+
+| Old File | New File |
+|----------|----------|
+| `any_type_validator.py` | `validator_any_type.py` |
+| `chain_propagation_validator.py` | `validator_chain_propagation.py` |
+| `contract_linter.py` | `linter_contract.py` |
+| `registration_security_validator.py` | `validator_registration_security.py` |
+| `routing_coverage_validator.py` | `validator_routing_coverage.py` |
+| `runtime_shape_validator.py` | `validator_runtime_shape.py` |
+| `security_validator.py` | `validator_security.py` |
+| `topic_category_validator.py` | `validator_topic_category.py` |
+| `validation_aggregator.py` | `service_validation_aggregator.py` |
+
+> **Note**: Class names within validation files remain unchanged (e.g., `AnyTypeDetector`, `ChainPropagationValidator`). Only import paths changed.
+
+**Migration**:
+```python
+# BEFORE
+from omnibase_infra.validation.any_type_validator import AnyTypeDetector
+from omnibase_infra.validation.chain_propagation_validator import ChainPropagationValidator
+
+# AFTER
+from omnibase_infra.validation.validator_any_type import AnyTypeDetector
+from omnibase_infra.validation.validator_chain_propagation import ChainPropagationValidator
+```
+
+##### Store Class Renames
+
+| Old Class | New Class |
+|-----------|-----------|
+| `InMemoryIdempotencyStore` | `StoreIdempotencyInmemory` |
+| `PostgresIdempotencyStore` | `StoreIdempotencyPostgres` |
+
+##### Automated Migration
+
+Run these commands to find affected imports in your codebase:
+
+```bash
+# Find all affected imports
+grep -rE "(InMemoryEventBus|KafkaEventBus|PolicyRegistry|inmemory_event_bus|kafka_event_bus)" \
+    --include="*.py" /path/to/your/code
+
+# Specific patterns for each category
+grep -r "from omnibase_infra.event_bus.inmemory_event_bus" --include="*.py" .
+grep -r "from omnibase_infra.event_bus.kafka_event_bus" --include="*.py" .
+grep -r "from omnibase_infra.runtime.policy_registry" --include="*.py" .
+grep -r "from omnibase_infra.validation.any_type_validator" --include="*.py" .
+```
+
+##### CI Enforcement
+
+A new naming validator (`scripts/validation/validate_naming.py`) enforces these conventions. The CI pipeline will reject PRs that violate naming standards.
+
 #### MixinNodeIntrospection API (OMN-881, PR #54)
 
 ##### 1. Cache Invalidation Method Signature Change

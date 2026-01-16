@@ -87,6 +87,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.models import (
@@ -265,7 +266,7 @@ class HandlerDb(MixinEnvelopeExtraction):
             )
 
         timeout_raw = config.get("timeout", _DEFAULT_TIMEOUT_SECONDS)
-        if isinstance(timeout_raw, (int, float)):
+        if isinstance(timeout_raw, int | float):
             self._timeout = float(timeout_raw)
 
         try:
@@ -521,10 +522,16 @@ class HandlerDb(MixinEnvelopeExtraction):
                     input_envelope_id,
                 )
         except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="db.query",
+                target_name="db_handler",
+                correlation_id=correlation_id,
+                timeout_seconds=self._timeout,
+            )
             raise InfraTimeoutError(
                 f"Query timed out after {self._timeout}s",
-                context=ctx,
-                timeout_seconds=self._timeout,
+                context=timeout_ctx,
             ) from e
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
@@ -615,10 +622,17 @@ class HandlerDb(MixinEnvelopeExtraction):
 
         # Special cases requiring specific error types or additional arguments
         if exc_type is asyncpg.QueryCanceledError:
+            # Convert ModelInfraErrorContext to ModelTimeoutErrorContext for stricter typing
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=ctx.transport_type or EnumInfraTransportType.DATABASE,
+                operation=ctx.operation or "db.statement",
+                target_name=ctx.target_name,
+                correlation_id=ctx.correlation_id,
+                timeout_seconds=self._timeout,
+            )
             return InfraTimeoutError(
                 f"Statement timed out after {self._timeout}s",
-                context=ctx,
-                timeout_seconds=self._timeout,
+                context=timeout_ctx,
             )
 
         if exc_type is asyncpg.PostgresConnectionError:

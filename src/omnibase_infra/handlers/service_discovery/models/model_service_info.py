@@ -49,7 +49,7 @@ class ModelServiceInfo(BaseModel):
         correlation_id: Correlation ID for tracing (handler extension).
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     service_id: UUID = Field(
         ...,

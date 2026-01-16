@@ -75,6 +75,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
@@ -288,7 +289,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_entity_state", corr_id)
             raise InfraTimeoutError(
                 "Entity state lookup timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -365,7 +372,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_registration_status", corr_id)
             raise InfraTimeoutError(
                 "Registration status lookup timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -442,7 +455,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_by_state", corr_id)
             raise InfraTimeoutError(
                 "State query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -538,7 +557,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 )
             raise InfraTimeoutError(
                 "Overdue ack registrations query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -638,7 +663,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 )
             raise InfraTimeoutError(
                 "Overdue liveness registrations query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -718,7 +749,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("count_by_state", corr_id)
             raise InfraTimeoutError(
                 "State count query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -824,7 +861,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_by_capability_tag", corr_id)
             raise InfraTimeoutError(
                 "Capability tag query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -920,7 +963,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_by_intent_type", corr_id)
             raise InfraTimeoutError(
                 "Intent type query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -1044,7 +1093,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_by_intent_types", corr_id)
             raise InfraTimeoutError(
                 "Intent types query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -1139,7 +1194,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_by_protocol", corr_id)
             raise InfraTimeoutError(
                 "Protocol query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -1235,7 +1296,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_by_contract_type", corr_id)
             raise InfraTimeoutError(
                 "Contract type query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -1348,7 +1415,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 )
             raise InfraTimeoutError(
                 "Capability tags query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:
@@ -1463,7 +1536,13 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 )
             raise InfraTimeoutError(
                 "Capability tags query timed out",
-                context=ctx,
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                    # timeout_seconds omitted - value not available in this context (defaults to None)
+                ),
             ) from e
 
         except Exception as e:

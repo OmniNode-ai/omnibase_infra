@@ -41,7 +41,7 @@ class ModelEventHeaders(BaseModel):
         retry_count: Current MESSAGE-LEVEL retry attempt number (application-level).
             This tracks end-to-end message delivery attempts across services,
             incremented when a handler fails and the message is republished.
-            Distinct from bus-level retry in KafkaEventBus (max_retry_attempts)
+            Distinct from bus-level retry in EventBusKafka (max_retry_attempts)
             which handles transient Kafka connection failures.
         max_retries: Maximum MESSAGE-LEVEL retry attempts allowed (application-level).
             When retry_count >= max_retries, message should be sent to DLQ.
@@ -92,7 +92,7 @@ class ModelEventHeaders(BaseModel):
         default=0,
         description=(
             "Current MESSAGE-LEVEL retry attempt (application-level). "
-            "Distinct from KafkaEventBus.max_retry_attempts (bus-level)."
+            "Distinct from EventBusKafka.max_retry_attempts (bus-level)."
         ),
     )
     max_retries: int = Field(

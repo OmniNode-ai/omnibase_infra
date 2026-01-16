@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Event Bus Binding Registry - Registry for event bus implementations.
 
-This module provides the EventBusBindingRegistry class for registering and
+This module provides the RegistryEventBusBinding class for registering and
 resolving event bus implementations in the omnibase_infra layer.
 
 Event Bus Categories:
@@ -11,14 +11,14 @@ Event Bus Categories:
 
 Example Usage:
     ```python
-    from omnibase_infra.runtime.registry import EventBusBindingRegistry
+    from omnibase_infra.runtime.registry import RegistryEventBusBinding
     from omnibase_infra.runtime.handler_registry import (
         EVENT_BUS_INMEMORY,
         EVENT_BUS_KAFKA,
     )
 
-    registry = EventBusBindingRegistry()
-    registry.register(EVENT_BUS_INMEMORY, InMemoryEventBus)
+    registry = RegistryEventBusBinding()
+    registry.register(EVENT_BUS_INMEMORY, EventBusInmemory)
 
     if registry.is_registered(EVENT_BUS_INMEMORY):
         bus_cls = registry.get(EVENT_BUS_INMEMORY)
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
 
 
-class EventBusBindingRegistry:
+class RegistryEventBusBinding:
     """Registry for event bus implementations.
 
     Provides a centralized registry for event bus types, enabling runtime
@@ -52,7 +52,7 @@ class EventBusBindingRegistry:
     retrieval operations.
 
     Note:
-        Unlike ProtocolBindingRegistry, this registry does not provide
+        Unlike RegistryProtocolBinding, this registry does not provide
         unregister() or clear() methods. Event buses are infrastructure
         components that should remain registered for the lifetime of the
         application. Removing them at runtime could cause message routing
@@ -66,8 +66,8 @@ class EventBusBindingRegistry:
 
     Example:
         ```python
-        registry = EventBusBindingRegistry()
-        registry.register("inmemory", InMemoryEventBus)
+        registry = RegistryEventBusBinding()
+        registry.register("inmemory", EventBusInmemory)
 
         if registry.is_registered("inmemory"):
             bus_cls = registry.get("inmemory")
@@ -100,7 +100,7 @@ class EventBusBindingRegistry:
             4. Thread-safe registration - stores binding under lock
 
         Note:
-            Unlike ProtocolBindingRegistry, this registry prevents overwriting
+            Unlike RegistryProtocolBinding, this registry prevents overwriting
             existing registrations. Event buses are infrastructure components
             that should remain stable for the application lifetime.
 
@@ -141,8 +141,8 @@ class EventBusBindingRegistry:
 
         Example:
             ```python
-            registry.register(EVENT_BUS_INMEMORY, InMemoryEventBus)
-            registry.register(EVENT_BUS_KAFKA, KafkaEventBus)
+            registry.register(EVENT_BUS_INMEMORY, EventBusInmemory)
+            registry.register(EVENT_BUS_KAFKA, EventBusKafka)
             ```
         """
         # Validate bus_cls implements ProtocolEventBus
@@ -264,5 +264,5 @@ class EventBusBindingRegistry:
 
 
 __all__: list[str] = [
-    "EventBusBindingRegistry",
+    "RegistryEventBusBinding",
 ]

@@ -90,7 +90,7 @@ class ModelRegistrationRecord(BaseModel):
         <EnumNodeKind.EFFECT: 'effect'>
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     node_id: UUID = Field(
         ...,
@@ -162,7 +162,7 @@ class ModelRegistrationRecord(BaseModel):
                         f"capabilities[{i}] must be a string, got {type(item).__name__}"
                     )
             return v
-        if isinstance(v, (list, set, frozenset)):
+        if isinstance(v, list | set | frozenset):
             # Convert sequence to tuple, validating contents
             result: list[str] = []
             for i, item in enumerate(v):
