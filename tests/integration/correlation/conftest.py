@@ -100,19 +100,19 @@ def assert_correlation_in_logs(
     """Assert correlation ID appears in logs for given boundary.
 
     Searches through captured log records for entries that contain the
-    specified correlation_id and mentions the given boundary in the message.
-    This is useful for verifying that correlation IDs are properly propagated
-    at specific points in the system (e.g., handler entry, handler exit).
+    specified correlation_id and have the given boundary in either the
+    message or the boundary attribute (from extra dict).
 
     Args:
         records: List of captured LogRecord objects from log_capture fixture.
         correlation_id: The correlation ID to search for in log records.
-        boundary: A string that should appear in the log message at the
-            boundary being tested (e.g., "handler_a_entry", "handler_b_exit").
+        boundary: A string that should appear in the boundary attribute or
+            log message at the boundary being tested (e.g., "handler_a_entry",
+            "handler_b_exit").
 
     Raises:
         AssertionError: If no log record with the given correlation_id
-            contains the boundary string in its message.
+            matches the boundary.
 
     Example:
         def test_boundary_logging(log_capture, correlation_id):
@@ -127,8 +127,16 @@ def assert_correlation_in_logs(
         if hasattr(r, "correlation_id")
         and str(getattr(r, "correlation_id", "")) == str(correlation_id)
     ]
-    assert any(boundary in str(r.msg) for r in matching), (
-        f"No log with correlation_id {correlation_id} at boundary '{boundary}'"
+
+    # Check both message content and boundary attribute
+    found = any(
+        boundary in str(r.msg) or getattr(r, "boundary", "") == boundary
+        for r in matching
+    )
+
+    assert found, (
+        f"No log with correlation_id {correlation_id} at boundary '{boundary}'. "
+        f"Found {len(matching)} records with matching correlation_id."
     )
 
 
@@ -278,9 +286,65 @@ class MockHandlerB:
         )
 
 
+class MockHandlerC:
+    """Mock handler for third-leg chain testing.
+
+    This handler simulates a third service in a chain, used to verify
+    correlation ID propagation across three or more handler boundaries.
+    Similar to MockHandlerB but without failure mode, focused on simple
+    receive-and-log behavior.
+
+    Attributes:
+        _logger: Logger instance for this handler.
+        received_messages: List of messages received by this handler.
+
+    Example:
+        async def test_handler_c_receives(log_capture, correlation_id):
+            handler = MockHandlerC()
+            await handler.handle({"correlation_id": str(correlation_id)})
+            assert len(handler.received_messages) == 1
+    """
+
+    def __init__(self) -> None:
+        """Initialize handler with logger and message tracking."""
+        self._logger = logging.getLogger("omnibase_infra.test.handler_c")
+        self.received_messages: list[dict[str, object]] = []
+
+    async def handle(self, message: dict[str, object]) -> None:
+        """Handle incoming message with correlation tracking.
+
+        Extracts correlation_id from the message and logs entry/exit
+        points for verification.
+
+        Args:
+            message: The message to handle. Expected to have a
+                "correlation_id" key with a string UUID value.
+        """
+        correlation_id = message.get("correlation_id")
+
+        self._logger.info(
+            "Handler C received event",
+            extra={
+                "correlation_id": str(correlation_id),
+                "boundary": "handler_c_entry",
+            },
+        )
+
+        self.received_messages.append(message)
+
+        self._logger.info(
+            "Handler C completed",
+            extra={
+                "correlation_id": str(correlation_id),
+                "boundary": "handler_c_exit",
+            },
+        )
+
+
 __all__ = [
     "MockHandlerA",
     "MockHandlerB",
+    "MockHandlerC",
     "assert_correlation_in_logs",
     "correlation_id",
     "log_capture",

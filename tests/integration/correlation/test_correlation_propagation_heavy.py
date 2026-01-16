@@ -49,7 +49,10 @@ try:
     HTTPSERVER_AVAILABLE = True
 except ImportError:
     HTTPSERVER_AVAILABLE = False
-    HTTPServer = None  # type: ignore[assignment,misc]
+
+    class HTTPServer:  # type: ignore[no-redef]
+        """Placeholder class when pytest-httpserver is not available."""
+
 
 if TYPE_CHECKING:
     import logging
@@ -317,8 +320,13 @@ class TestCorrelationDatabase:
             correlation_id: Test correlation ID from conftest fixture
             log_capture: Log capturing fixture from conftest
         """
-        # This test requires real PostgreSQL
-        # Check for db_config or similar fixtures in existing tests
+        # TODO(OMN-1349): Implement when database fixtures available
+        # Required fixtures: db_config, initialized_db_handler from handlers/conftest.py
+        # Implementation should:
+        # 1. Execute a database operation with correlation_id in context
+        # 2. Verify correlation_id appears in log records via log_capture
+        # 3. Verify correlation_id is preserved in any error contexts
+        # See tests/integration/handlers/conftest.py for db_config and initialized_db_handler patterns
         pytest.skip("Requires real PostgreSQL - implement when db fixtures available")
 
     @pytest.mark.asyncio
@@ -334,6 +342,14 @@ class TestCorrelationDatabase:
         Args:
             correlation_id: Test correlation ID from conftest fixture
         """
+        # TODO(OMN-1349): Implement when database fixtures available
+        # Required fixtures: db_config, initialized_db_handler from handlers/conftest.py
+        # Implementation should:
+        # 1. Trigger a database error (invalid query, connection failure, etc.)
+        # 2. Catch InfraConnectionError or InfraTimeoutError
+        # 3. Verify error.correlation_id == correlation_id
+        # 4. Verify error.model.context contains expected operation details
+        # See tests/integration/handlers/conftest.py for fixture patterns
         pytest.skip("Requires real PostgreSQL - implement when db fixtures available")
 
 
@@ -365,6 +381,15 @@ class TestCorrelationKafka:
         Args:
             correlation_id: Test correlation ID from conftest fixture
         """
+        # TODO(OMN-1349): Implement when Kafka/event bus fixtures available
+        # Required fixtures: kafka_producer, kafka_consumer, or event_bus adapter
+        # Implementation should:
+        # 1. Create ModelEventEnvelope with correlation_id
+        # 2. Publish to test topic via Kafka adapter
+        # 3. Consume message from topic
+        # 4. Verify consumed envelope.correlation_id == original correlation_id
+        # 5. Verify X-Correlation-ID header is present in Kafka message headers
+        # Note: May need to create kafka fixtures similar to handlers/conftest.py patterns
         pytest.skip(
             "Requires real Kafka/Redpanda - implement when event bus fixtures available"
         )
@@ -382,6 +407,14 @@ class TestCorrelationKafka:
         Args:
             correlation_id: Test correlation ID from conftest fixture
         """
+        # TODO(OMN-1349): Implement when Kafka/event bus fixtures available
+        # Required fixtures: kafka_producer or event_bus adapter with error injection
+        # Implementation should:
+        # 1. Trigger a Kafka error (broker unavailable, topic doesn't exist, etc.)
+        # 2. Catch InfraUnavailableError or InfraConnectionError
+        # 3. Verify error.correlation_id == correlation_id
+        # 4. Verify error.model.context["transport_type"] == EnumInfraTransportType.KAFKA
+        # See TestCorrelationErrorContext for error context verification patterns
         pytest.skip(
             "Requires real Kafka/Redpanda - implement when event bus fixtures available"
         )

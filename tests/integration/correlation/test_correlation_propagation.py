@@ -26,61 +26,21 @@ import pytest
 from tests.integration.correlation.conftest import (
     MockHandlerA,
     MockHandlerB,
+    MockHandlerC,
+    assert_correlation_in_logs,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
+
+    # Type alias for async message handlers
+    AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
 
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.asyncio,
 ]
-
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
-
-def assert_correlation_in_logs(
-    records: list[logging.LogRecord],
-    correlation_id: UUID,
-    boundary: str,
-) -> None:
-    """Assert correlation ID appears in logs for given boundary.
-
-    Searches through captured log records for entries that contain the
-    specified correlation_id and have the given boundary in either the
-    message or the boundary attribute (from extra dict).
-
-    Args:
-        records: List of captured LogRecord objects from log_capture fixture.
-        correlation_id: The correlation ID to search for in log records.
-        boundary: A string that should appear in the boundary attribute or
-            log message at the boundary being tested.
-
-    Raises:
-        AssertionError: If no log record with the given correlation_id
-            matches the boundary.
-    """
-    matching = [
-        r
-        for r in records
-        if hasattr(r, "correlation_id")
-        and str(getattr(r, "correlation_id", "")) == str(correlation_id)
-    ]
-
-    # Check both message content and boundary attribute
-    found = any(
-        boundary in str(r.msg) or getattr(r, "boundary", "") == boundary
-        for r in matching
-    )
-
-    assert found, (
-        f"No log with correlation_id {correlation_id} at boundary '{boundary}'. "
-        f"Found {len(matching)} records with matching correlation_id."
-    )
 
 
 # =============================================================================
@@ -105,9 +65,7 @@ class SimpleAsyncEventBus:
 
     def __init__(self) -> None:
         """Initialize the event bus with empty subscriber registry."""
-        self._subscribers: dict[
-            str, list[Callable[[dict[str, object]], Coroutine[object, object, None]]]
-        ] = {}
+        self._subscribers: dict[str, list[AsyncMessageHandler]] = {}
 
     async def publish(self, topic: str, message: dict[str, object]) -> None:
         """Publish message to topic.
@@ -125,7 +83,7 @@ class SimpleAsyncEventBus:
     def subscribe(
         self,
         topic: str,
-        handler: Callable[[dict[str, object]], Coroutine[object, object, None]],
+        handler: AsyncMessageHandler,
     ) -> None:
         """Subscribe handler to topic.
 
@@ -138,58 +96,6 @@ class SimpleAsyncEventBus:
         if topic not in self._subscribers:
             self._subscribers[topic] = []
         self._subscribers[topic].append(handler)
-
-
-class MockHandlerC:
-    """Mock handler for third-leg chain testing.
-
-    Similar to MockHandlerB but used to verify correlation propagation
-    across three or more handler boundaries.
-
-    Attributes:
-        _logger: Logger instance for this handler.
-        received_messages: List of messages received by this handler.
-
-    Example:
-        >>> handler_c = MockHandlerC()
-        >>> await handler_c.handle({"correlation_id": "abc-123"})
-        >>> assert len(handler_c.received_messages) == 1
-    """
-
-    def __init__(self) -> None:
-        """Initialize handler with logger and message tracking."""
-        self._logger = logging.getLogger("omnibase_infra.test.handler_c")
-        self.received_messages: list[dict[str, object]] = []
-
-    async def handle(self, message: dict[str, object]) -> None:
-        """Handle incoming message with correlation tracking.
-
-        Extracts correlation_id from the message and logs entry/exit
-        points for verification.
-
-        Args:
-            message: The message to handle. Expected to have a
-                "correlation_id" key with a string UUID value.
-        """
-        correlation_id = message.get("correlation_id")
-
-        self._logger.info(
-            "Handler C received event",
-            extra={
-                "correlation_id": str(correlation_id),
-                "boundary": "handler_c_entry",
-            },
-        )
-
-        self.received_messages.append(message)
-
-        self._logger.info(
-            "Handler C completed",
-            extra={
-                "correlation_id": str(correlation_id),
-                "boundary": "handler_c_exit",
-            },
-        )
 
 
 # =============================================================================
