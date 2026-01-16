@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.runtime.util_version import normalize_version
+from omnibase_infra.utils import validate_policy_type_value
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -119,22 +120,9 @@ class ModelPolicyRegistration(BaseModel):
     def validate_policy_type(cls, v: str | EnumPolicyType) -> str | EnumPolicyType:
         """Validate policy_type is a valid EnumPolicyType value.
 
-        Args:
-            v: The policy_type value to validate
-
-        Returns:
-            The validated policy_type value
-
-        Raises:
-            ValueError: If policy_type is not a valid EnumPolicyType value
+        Delegates to shared utility for consistent validation across all models.
         """
-        if isinstance(v, EnumPolicyType):
-            return v
-        # If it's a string, validate it's a valid EnumPolicyType value
-        valid_values = {e.value for e in EnumPolicyType}
-        if v not in valid_values:
-            raise ValueError(f"policy_type must be one of {valid_values}, got '{v}'")
-        return v
+        return validate_policy_type_value(v)
 
 
 __all__: list[str] = ["ModelPolicyRegistration"]

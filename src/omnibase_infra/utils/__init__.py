@@ -8,6 +8,7 @@ This package provides common utilities used across the infrastructure:
     - util_dsn_validation: PostgreSQL DSN validation and sanitization
     - util_env_parsing: Type-safe environment variable parsing with validation
     - util_error_sanitization: Error message sanitization for secure logging and DLQ
+    - util_pydantic_validators: Shared Pydantic field validator utilities
     - util_semver: Semantic versioning validation utilities
 """
 
@@ -38,6 +39,14 @@ from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
     sanitize_error_string,
 )
+from omnibase_infra.utils.util_pydantic_validators import (
+    validate_contract_type_value,
+    validate_endpoint_urls_dict,
+    validate_policy_type_value,
+    validate_pool_sizes_constraint,
+    validate_timezone_aware_datetime,
+    validate_timezone_aware_datetime_optional,
+)
 from omnibase_infra.utils.util_semver import (
     SEMVER_PATTERN,
     validate_semver,
@@ -62,7 +71,13 @@ __all__: list[str] = [
     "sanitize_error_message",
     "sanitize_error_string",
     "set_correlation_id",
+    "validate_contract_type_value",
+    "validate_endpoint_urls_dict",
+    "validate_policy_type_value",
+    "validate_pool_sizes_constraint",
     "validate_semver",
+    "validate_timezone_aware_datetime",
+    "validate_timezone_aware_datetime_optional",
     "validate_version_lenient",
     "warn_if_naive_datetime",
 ]

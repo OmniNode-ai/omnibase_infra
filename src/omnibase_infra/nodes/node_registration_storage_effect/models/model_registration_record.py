@@ -35,6 +35,8 @@ from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.utils import validate_timezone_aware_datetime_optional
+
 
 class ModelRegistrationRecord(BaseModel):
     """Registration record for node storage operations.
@@ -189,21 +191,9 @@ class ModelRegistrationRecord(BaseModel):
     def validate_timestamp_timezone_aware(cls, v: datetime | None) -> datetime | None:
         """Validate that timestamps are timezone-aware when provided.
 
-        Args:
-            v: The timestamp value to validate (or None).
-
-        Returns:
-            The validated timestamp or None.
-
-        Raises:
-            ValueError: If timestamp is naive (no timezone info).
+        Delegates to shared utility for consistent validation across all models.
         """
-        if v is not None and v.tzinfo is None:
-            raise ValueError(
-                "Timestamp must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
-            )
-        return v
+        return validate_timezone_aware_datetime_optional(v)
 
 
 __all__ = ["ModelRegistrationRecord"]

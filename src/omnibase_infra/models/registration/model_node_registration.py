@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
-from urllib.parse import urlparse
 from uuid import UUID
 
 from omnibase_core.models.primitives.model_semver import ModelSemVer
@@ -20,6 +19,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
+from omnibase_infra.utils import validate_endpoint_urls_dict
 
 
 class ModelNodeRegistration(BaseModel):
@@ -136,20 +136,9 @@ class ModelNodeRegistration(BaseModel):
     def validate_endpoint_urls(cls, v: dict[str, str]) -> dict[str, str]:
         """Validate that all endpoint values are valid URLs.
 
-        Args:
-            v: Dictionary of endpoint names to URL strings.
-
-        Returns:
-            The validated endpoints dictionary.
-
-        Raises:
-            ValueError: If any endpoint URL is invalid (missing scheme or netloc).
+        Delegates to shared utility for consistent validation across all models.
         """
-        for name, url in v.items():
-            parsed = urlparse(url)
-            if not parsed.scheme or not parsed.netloc:
-                raise ValueError(f"Invalid URL for endpoint '{name}': {url}")
-        return v
+        return validate_endpoint_urls_dict(v)
 
     metadata: ModelNodeMetadata = Field(
         default_factory=ModelNodeMetadata, description="Additional node metadata"

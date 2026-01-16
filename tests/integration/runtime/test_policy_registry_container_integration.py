@@ -39,6 +39,7 @@ def _skip_if_service_registry_none(container: ModelONEXContainer) -> None:
 
 
 from omnibase_infra.enums import EnumPolicyType
+from omnibase_infra.errors.error_container_wiring import ServiceResolutionError
 from omnibase_infra.runtime.container_wiring import (
     get_handler_registry_from_container,
     get_or_create_policy_registry,
@@ -429,7 +430,7 @@ class TestContainerWiringErrorHandling:
 
     @pytest.mark.asyncio
     async def test_resolve_before_wire_raises_error(self) -> None:
-        """Test that resolving before wiring raises RuntimeError.
+        """Test that resolving before wiring raises ServiceResolutionError.
 
         This verifies proper error handling when services not wired.
         """
@@ -439,10 +440,10 @@ class TestContainerWiringErrorHandling:
         _skip_if_service_registry_none(container)
 
         # Attempt to resolve without wiring should fail
-        # Error may indicate PolicyRegistry not registered OR container missing resolve_service
+        # Error indicates PolicyRegistry not registered in container
         with pytest.raises(
-            RuntimeError,
-            match=r"(PolicyRegistry not registered|Container\.service_registry missing|Failed to resolve PolicyRegistry)",
+            ServiceResolutionError,
+            match=r"(PolicyRegistry not registered|Failed to resolve PolicyRegistry)",
         ):
             await get_policy_registry_from_container(container)
 

@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from omnibase_infra.dlq.constants_dlq import PATTERN_TABLE_NAME
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.utils import validate_pool_sizes_constraint
 from omnibase_infra.utils.util_env_parsing import parse_env_float, parse_env_int
 
 # Module-level defaults from environment variables
@@ -173,32 +174,13 @@ class ModelDlqTrackingConfig(BaseModel):
     def validate_pool_sizes(cls, v: int, info: ValidationInfo) -> int:
         """Validate that pool_max_size >= pool_min_size.
 
-        Args:
-            v: The pool_max_size value
-            info: Pydantic validation info containing other field values
-
-        Returns:
-            Validated pool_max_size
-
-        Raises:
-            ProtocolConfigurationError: If pool_max_size < pool_min_size
+        Delegates to shared utility for consistent validation across all config models.
         """
-        # Access validated data from info
         if info.data:
             pool_min_size = info.data.get("pool_min_size", 1)
-            if v < pool_min_size:
-                context = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.DATABASE,
-                    operation="validate_config",
-                    target_name="dlq_tracking_service",
-                    correlation_id=uuid4(),
-                )
-                raise ProtocolConfigurationError(
-                    f"pool_max_size ({v}) must be >= pool_min_size ({pool_min_size})",
-                    context=context,
-                    parameter="pool_max_size",
-                    value=v,
-                )
+            return validate_pool_sizes_constraint(
+                v, pool_min_size, target_name="dlq_tracking_service"
+            )
         return v
 
 

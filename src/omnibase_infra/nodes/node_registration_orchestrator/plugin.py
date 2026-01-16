@@ -272,6 +272,7 @@ class PluginRegistration:
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.DATABASE,
                     operation="create_postgres_pool",
+                    correlation_id=correlation_id,
                 )
                 raise ContainerWiringError(
                     "PostgreSQL pool creation returned None - connection may have failed",
