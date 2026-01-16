@@ -43,6 +43,9 @@ type PathInput = Path | str
 
 # Policy type with string fallback for API flexibility
 # Replaces 8 occurrences of: EnumPolicyType | str
+# NOTE: This is an INPUT type alias for API flexibility. Pydantic validators
+# using validate_policy_type_value() COERCE strings to EnumPolicyType, so
+# the actual stored value is always an enum, ensuring type-safe field access.
 type PolicyTypeInput = EnumPolicyType | str
 
 # AST function definition node types

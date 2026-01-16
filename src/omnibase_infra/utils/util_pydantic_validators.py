@@ -251,17 +251,18 @@ def validate_pool_sizes_constraint(
 
 def validate_policy_type_value(
     value: str | EnumPolicyType,
-) -> str | EnumPolicyType:
-    """Validate that a value is a valid EnumPolicyType value.
+) -> EnumPolicyType:
+    """Validate and coerce a value to EnumPolicyType.
 
     This is the SINGLE SOURCE OF TRUTH for policy type validation in
-    Pydantic field validators.
+    Pydantic field validators. String values are COERCED to the enum type,
+    ensuring type-safe access after validation.
 
     Args:
         value: The policy_type value to validate (string or enum).
 
     Returns:
-        The validated policy_type value (unchanged if valid).
+        The validated policy_type as EnumPolicyType (strings are coerced).
 
     Raises:
         ValueError: If value is not a valid EnumPolicyType value.
@@ -270,13 +271,13 @@ def validate_policy_type_value(
         >>> from omnibase_infra.utils import validate_policy_type_value
         >>> from omnibase_infra.enums import EnumPolicyType
         >>>
-        >>> # Valid: enum value
+        >>> # Valid: enum value returns as-is
         >>> validate_policy_type_value(EnumPolicyType.ORCHESTRATOR)
         <EnumPolicyType.ORCHESTRATOR: 'orchestrator'>
         >>>
-        >>> # Valid: string value
+        >>> # Valid: string value COERCED to enum
         >>> validate_policy_type_value("reducer")
-        'reducer'
+        <EnumPolicyType.REDUCER: 'reducer'>
         >>>
         >>> # Invalid: unknown value
         >>> validate_policy_type_value("invalid")  # doctest: +ELLIPSIS
@@ -287,18 +288,18 @@ def validate_policy_type_value(
     Usage in Pydantic model:
         @field_validator("policy_type")
         @classmethod
-        def validate_policy_type(cls, v: str | EnumPolicyType) -> str | EnumPolicyType:
+        def validate_policy_type(cls, v: PolicyTypeInput) -> EnumPolicyType:
             return validate_policy_type_value(v)
     """
     from omnibase_infra.enums import EnumPolicyType
 
     if isinstance(value, EnumPolicyType):
         return value
-    # If it's a string, validate it's a valid EnumPolicyType value
+    # If it's a string, validate it's a valid EnumPolicyType value and coerce
     valid_values = {e.value for e in EnumPolicyType}
     if value not in valid_values:
         raise ValueError(f"policy_type must be one of {valid_values}, got '{value}'")
-    return value
+    return EnumPolicyType(value)
 
 
 def validate_contract_type_value(

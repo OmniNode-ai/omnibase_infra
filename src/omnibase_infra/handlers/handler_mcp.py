@@ -657,7 +657,16 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Example:
             if not handler.register_tool(my_tool):
-                raise RuntimeError(f"Failed to register tool: {my_tool.name}")
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.MCP,
+                    operation="register_tool",
+                    target_name=my_tool.name,
+                    correlation_id=uuid4(),
+                )
+                raise ProtocolConfigurationError(
+                    f"Failed to register tool: {my_tool.name}",
+                    context=ctx,
+                )
         """
         if self._config and len(self._tool_registry) >= self._config.max_tools:
             logger.warning(

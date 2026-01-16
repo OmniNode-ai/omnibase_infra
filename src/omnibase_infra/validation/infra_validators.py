@@ -398,6 +398,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                    isinstance exclusion + type alias refactoring + PR #151 fixes
 # - 83 (2026-01-16): OMN-1181 structured errors merge with main
 #                    (+2 unions for EnumPolicyType | str in validate_policy_type_value)
+# - 82 (2026-01-16): OMN-1181 fix PolicyTypeInput validator coercion
+#                    (-1 union: changed return type from str | EnumPolicyType to EnumPolicyType)
+#                    Validators now coerce strings to EnumPolicyType, ensuring type-safe access.
 #
 # Soft ceiling guidance:
 # - 100-120: Healthy range, minor increments OK for legitimate features
@@ -411,7 +414,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # 4. Consider if a domain-specific type from omnibase_core would be cleaner
 #
 # Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
-INFRA_MAX_UNIONS = 83
+INFRA_MAX_UNIONS = 82
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

@@ -12,9 +12,14 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.runtime.util_version import normalize_version
 from omnibase_infra.types import PolicyTypeInput
 from omnibase_infra.utils import validate_policy_type_value
+
+# NOTE: PolicyTypeInput is the INPUT type (str | EnumPolicyType) for API flexibility.
+# The validator coerces strings to EnumPolicyType, so the actual stored value is
+# always an enum. This ensures type-safe access after model instantiation.
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -69,9 +74,11 @@ class ModelPolicyRegistration(BaseModel):
         ...,
         description="Policy implementation class that implements ProtocolPolicy",
     )
-    policy_type: PolicyTypeInput = Field(
+    # NOTE: Field accepts PolicyTypeInput (str | EnumPolicyType) via mode="before" coercion,
+    # but the validator always coerces to EnumPolicyType. We annotate with the coerced type.
+    policy_type: EnumPolicyType = Field(
         ...,
-        description="Policy type - either 'orchestrator' or 'reducer'",
+        description="Policy type (accepts string or enum, always stored as EnumPolicyType)",
     )
     version: str = Field(
         default="1.0.0",
@@ -116,12 +123,15 @@ class ModelPolicyRegistration(BaseModel):
         """
         return normalize_version(v)
 
-    @field_validator("policy_type")
+    @field_validator("policy_type", mode="before")
     @classmethod
-    def validate_policy_type(cls, v: PolicyTypeInput) -> PolicyTypeInput:
-        """Validate policy_type is a valid EnumPolicyType value.
+    def validate_policy_type(cls, v: PolicyTypeInput) -> EnumPolicyType:
+        """Validate and coerce policy_type to EnumPolicyType.
 
         Delegates to shared utility for consistent validation across all models.
+        String values are coerced to EnumPolicyType, ensuring type-safe access.
+
+        Note: mode="before" allows accepting str input before Pydantic validation.
         """
         return validate_policy_type_value(v)
 
