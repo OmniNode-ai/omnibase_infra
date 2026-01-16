@@ -149,7 +149,7 @@ Following the existing `any_types` validator pattern, implement AST-based detect
 ```python
 # scripts/validators/correlation_validator.py
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -193,59 +193,102 @@ def has_correlation_id_kwarg(node: ast.Call) -> bool:
     return any(kw.arg == "correlation_id" for kw in node.keywords)
 
 
-def validate_correlation_patterns(file_path: Path) -> list[Violation]:
-    """Detect anti-patterns in correlation ID handling."""
-    violations = []
-    source = file_path.read_text()
-    tree = ast.parse(source)
+@dataclass
+class CorrelationPatternVisitor(ast.NodeVisitor):
+    """Visitor that tracks scope for correlation pattern detection.
 
-    # Skip the factory method implementation itself
-    in_with_correlation_method = False
+    Uses proper scope tracking to skip violations ONLY within the
+    `with_correlation()` factory method, not all subsequent nodes.
 
-    for node in ast.walk(tree):
-        # Track if we're inside with_correlation method
-        if isinstance(node, ast.FunctionDef) and node.name == "with_correlation":
-            in_with_correlation_method = True
-            continue
+    Note: ast.walk() cannot track scope because it visits nodes in arbitrary
+    order without parent/child context. NodeVisitor.generic_visit() traverses
+    the tree depth-first, allowing us to track entry/exit of function scopes.
+    """
 
-        if isinstance(node, ast.Call) and not in_with_correlation_method:
-            # Check for uuid4() as correlation_id kwarg value
-            for keyword in node.keywords:
-                if keyword.arg == "correlation_id":
-                    # Pattern 1: correlation_id=uuid4()
-                    if is_uuid4_call(keyword.value):
-                        violations.append(
-                            Violation(
-                                file=file_path,
-                                line=node.lineno,
-                                message="Use ModelInfraErrorContext.with_correlation() instead of manual uuid4()",
-                                code="CORR_001",
-                            )
-                        )
-                    # Pattern 2: correlation_id=x or uuid4()
-                    elif is_uuid4_or_pattern(keyword.value):
-                        violations.append(
-                            Violation(
-                                file=file_path,
-                                line=node.lineno,
-                                message="Use ModelInfraErrorContext.with_correlation() instead of 'x or uuid4()' pattern",
-                                code="CORR_002",
-                            )
-                        )
+    file_path: Path
+    violations: list[Violation] = field(default_factory=list)
+    _in_factory_method: bool = field(default=False, repr=False)
 
-            # Pattern 3: ModelInfraErrorContext() without correlation_id
-            if is_model_infra_error_context_call(node):
-                if not has_correlation_id_kwarg(node):
-                    violations.append(
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Track entry/exit of with_correlation method scope."""
+        # Save current state before entering function
+        was_in_factory = self._in_factory_method
+
+        # Mark if we're entering the factory method
+        if node.name == "with_correlation":
+            self._in_factory_method = True
+
+        # Visit all children (function body)
+        self.generic_visit(node)
+
+        # Restore state after leaving function scope
+        self._in_factory_method = was_in_factory
+
+    # Handle async functions the same way
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """Check call nodes for anti-patterns, unless in factory method."""
+        if not self._in_factory_method:
+            self._check_call_for_violations(node)
+
+        # Continue visiting children (e.g., nested calls in arguments)
+        self.generic_visit(node)
+
+    def _check_call_for_violations(self, node: ast.Call) -> None:
+        """Check a Call node for correlation ID anti-patterns."""
+        # Check for uuid4() as correlation_id kwarg value
+        for keyword in node.keywords:
+            if keyword.arg == "correlation_id":
+                # Pattern 1: correlation_id=uuid4()
+                if is_uuid4_call(keyword.value):
+                    self.violations.append(
                         Violation(
-                            file=file_path,
+                            file=self.file_path,
                             line=node.lineno,
-                            message="ModelInfraErrorContext() missing correlation_id; use with_correlation() factory",
-                            code="CORR_003",
+                            message="Use ModelInfraErrorContext.with_correlation() instead of manual uuid4()",
+                            code="CORR_001",
+                        )
+                    )
+                # Pattern 2: correlation_id=x or uuid4()
+                elif is_uuid4_or_pattern(keyword.value):
+                    self.violations.append(
+                        Violation(
+                            file=self.file_path,
+                            line=node.lineno,
+                            message="Use ModelInfraErrorContext.with_correlation() instead of 'x or uuid4()' pattern",
+                            code="CORR_002",
                         )
                     )
 
-    return violations
+        # Pattern 3: ModelInfraErrorContext() without correlation_id
+        if is_model_infra_error_context_call(node):
+            if not has_correlation_id_kwarg(node):
+                self.violations.append(
+                    Violation(
+                        file=self.file_path,
+                        line=node.lineno,
+                        message="ModelInfraErrorContext() missing correlation_id; use with_correlation() factory",
+                        code="CORR_003",
+                    )
+                )
+
+
+def validate_correlation_patterns(file_path: Path) -> list[Violation]:
+    """Detect anti-patterns in correlation ID handling.
+
+    Uses CorrelationPatternVisitor with proper scope tracking to:
+    1. Skip violations ONLY within the with_correlation() method body
+    2. Correctly detect violations in all other parts of the file
+    3. Handle nested function definitions properly
+    """
+    source = file_path.read_text()
+    tree = ast.parse(source)
+
+    visitor = CorrelationPatternVisitor(file_path=file_path)
+    visitor.visit(tree)
+
+    return visitor.violations
 ```
 
 ### Validator Limitations
@@ -304,7 +347,7 @@ from omnibase_infra.models.errors import ModelInfraErrorContext
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.enums import EnumInfraTransportType
 
-def connect_to_database(host: str, connection_pool: ConnectionPool) -> None:
+def connect_to_database(host: str, connection_pool: object) -> None:
     """Attempt database connection with proper error context."""
     try:
         # Attempt connection using injected pool
