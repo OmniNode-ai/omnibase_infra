@@ -237,11 +237,13 @@ class SecretResolver:
 
         # Use async lock to serialize resolution (prevents duplicate fetches)
         if self._async_lock is None:
-            self._async_lock = asyncio.Lock()
+            with self._lock:
+                if self._async_lock is None:
+                    self._async_lock = asyncio.Lock()
 
         async with self._async_lock:
-            # Double-check cache after acquiring async lock
-            # (another coroutine may have resolved while we waited)
+            # Double-check cache after acquiring async lock - another coroutine may
+            # have resolved this secret while we were waiting on the lock
             with self._lock:
                 cached = self._get_from_cache(logical_name)
                 if cached is not None:
@@ -383,8 +385,7 @@ class SecretResolver:
 
         if cached.is_expired():
             del self._cache[logical_name]
-            if logical_name in self._hit_counts:
-                del self._hit_counts[logical_name]
+            self._hit_counts.pop(logical_name, None)
             self._expired_evictions += 1
             return None
 
