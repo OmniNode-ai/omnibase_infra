@@ -165,6 +165,15 @@ from omnibase_infra.validation.validator_execution_shape import (
     validate_execution_shapes_ci,
 )
 
+# LocalHandler import validation for production code policy (OMN-743)
+from omnibase_infra.validation.validator_localhandler import (
+    ModelLocalHandlerValidationResult,
+    ModelLocalHandlerViolation,
+    validate_localhandler,
+    validate_localhandler_ci,
+    validate_localhandler_in_file,
+)
+
 # Registration-time security validation for handlers (OMN-1098)
 from omnibase_infra.validation.validator_registration_security import (
     RegistrationSecurityValidator,
@@ -237,6 +246,8 @@ __all__: list[str] = [
     "ModelContractViolation",  # Contract violation model
     "ModelDetectedNodeInfo",  # Detected node info
     "ModelExecutionShapeValidationResult",  # Execution shape result
+    "ModelLocalHandlerValidationResult",  # LocalHandler validation result (OMN-743)
+    "ModelLocalHandlerViolation",  # LocalHandler violation model (OMN-743)
     "ModelModuleImportResult",  # Module import result (from omnibase_core)
     # Validators
     "AnyTypeDetector",  # Any type AST detector (OMN-1276)
@@ -282,6 +293,9 @@ __all__: list[str] = [
     "validate_infra_contracts",  # Infrastructure contracts
     "validate_infra_patterns",  # Infrastructure patterns
     "validate_infra_union_usage",  # Union usage validation
+    "validate_localhandler",  # LocalHandler validation (OMN-743)
+    "validate_localhandler_ci",  # LocalHandler CI validation (OMN-743)
+    "validate_localhandler_in_file",  # LocalHandler file validation (OMN-743)
     "validate_message_chain",  # Message chain validation
     "validate_message_on_topic",  # Topic message validation
     "validate_method_exposure",  # Method exposure validation
