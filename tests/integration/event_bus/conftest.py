@@ -132,13 +132,13 @@ def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
 
 
 # =============================================================================
-# Consumer Readiness Helper (shared implementation)
+# Kafka Helpers (shared implementations)
 # =============================================================================
 # Re-exported from tests.helpers.kafka_utils for convenience.
-# See tests/helpers/kafka_utils.py for the canonical implementation.
-from tests.helpers.kafka_utils import wait_for_consumer_ready
+# See tests/helpers/kafka_utils.py for the canonical implementations.
+from tests.helpers.kafka_utils import wait_for_consumer_ready, wait_for_topic_metadata
 
-__all__ = ["wait_for_consumer_ready"]
+__all__ = ["wait_for_consumer_ready", "wait_for_topic_metadata"]
 
 
 # =============================================================================
@@ -174,68 +174,6 @@ async def ensure_test_topic() -> AsyncGenerator[
 
     admin: AIOKafkaAdminClient | None = None
     created_topics: list[str] = []
-
-    async def _wait_for_topic_metadata(
-        admin_client: AIOKafkaAdminClient,
-        topic_name: str,
-        timeout: float = 10.0,
-        expected_partitions: int = 1,
-    ) -> bool:
-        """Wait for topic metadata with partitions to be available in the broker.
-
-        After topic creation, there's a delay before the broker metadata
-        is updated. This function polls until the topic appears with the
-        expected number of partitions available.
-
-        The describe_topics API returns a list of dicts with structure:
-        [{'error_code': 0, 'topic': 'name', 'is_internal': False, 'partitions': [...]}]
-
-        We must wait for:
-        1. error_code == 0 (no error)
-        2. partitions list is non-empty (metadata has propagated)
-
-        Args:
-            admin_client: The admin client to use for metadata checks.
-            topic_name: The topic to wait for.
-            timeout: Maximum time to wait in seconds.
-            expected_partitions: Minimum number of partitions to wait for.
-
-        Returns:
-            True if topic was found with partitions, False if timed out.
-        """
-        start_time = asyncio.get_running_loop().time()
-        while (asyncio.get_running_loop().time() - start_time) < timeout:
-            try:
-                # Describe topics to check if metadata is available
-                # This forces a metadata refresh
-                description = await admin_client.describe_topics([topic_name])
-                if description and len(description) > 0:
-                    topic_info = description[0]
-                    # Check for success (error_code 0) and partitions available
-                    error_code = topic_info.get("error_code", -1)
-                    partitions = topic_info.get("partitions", [])
-                    if error_code == 0 and len(partitions) >= expected_partitions:
-                        logger.debug(
-                            "Topic %s ready with %d partitions",
-                            topic_name,
-                            len(partitions),
-                        )
-                        return True
-                    logger.debug(
-                        "Topic %s not ready: error_code=%s, partitions=%d",
-                        topic_name,
-                        error_code,
-                        len(partitions),
-                    )
-            except Exception as e:
-                logger.debug("Topic %s metadata check failed: %s", topic_name, e)
-            await asyncio.sleep(0.5)  # Poll every 500ms
-        logger.warning(
-            "Timeout waiting for topic %s metadata after %.1fs",
-            topic_name,
-            timeout,
-        )
-        return False
 
     async def _create_topic(topic_name: str, partitions: int = 1) -> str:
         """Create a topic with the given name and partition count.
@@ -297,14 +235,14 @@ async def ensure_test_topic() -> AsyncGenerator[
             created_topics.append(topic_name)
 
             # Wait for topic metadata to propagate with expected partition count
-            await _wait_for_topic_metadata(
+            await wait_for_topic_metadata(
                 admin, topic_name, expected_partitions=partitions
             )
         except TopicAlreadyExistsError:
             # Topic already exists - this is acceptable in test environments
             # Still wait for metadata in case topic was just created by another process
             if admin is not None:
-                await _wait_for_topic_metadata(
+                await wait_for_topic_metadata(
                     admin, topic_name, timeout=5.0, expected_partitions=partitions
                 )
 
@@ -411,28 +349,6 @@ async def topic_factory() -> AsyncGenerator[
     admin: AIOKafkaAdminClient | None = None
     created_topics: list[str] = []
 
-    async def _wait_for_topic_metadata_factory(
-        admin_client: AIOKafkaAdminClient,
-        topic_name: str,
-        timeout: float = 10.0,
-        expected_partitions: int = 1,
-    ) -> bool:
-        """Wait for topic metadata with partitions to be available."""
-        start_time = asyncio.get_running_loop().time()
-        while (asyncio.get_running_loop().time() - start_time) < timeout:
-            try:
-                description = await admin_client.describe_topics([topic_name])
-                if description and len(description) > 0:
-                    topic_info = description[0]
-                    error_code = topic_info.get("error_code", -1)
-                    partitions = topic_info.get("partitions", [])
-                    if error_code == 0 and len(partitions) >= expected_partitions:
-                        return True
-            except Exception:
-                pass
-            await asyncio.sleep(0.5)
-        return False
-
     async def _create_topic(
         topic_name: str,
         partitions: int = 1,
@@ -493,13 +409,13 @@ async def topic_factory() -> AsyncGenerator[
 
             created_topics.append(topic_name)
             # Wait for topic metadata to propagate with expected partition count
-            await _wait_for_topic_metadata_factory(
+            await wait_for_topic_metadata(
                 admin, topic_name, expected_partitions=partitions
             )
         except TopicAlreadyExistsError:
             # Topic already exists - still wait for metadata
             if admin is not None:
-                await _wait_for_topic_metadata_factory(
+                await wait_for_topic_metadata(
                     admin, topic_name, timeout=5.0, expected_partitions=partitions
                 )
 

@@ -121,6 +121,143 @@ async def wait_for_consumer_ready(
     return True
 
 
+async def wait_for_topic_metadata(
+    admin_client: object,
+    topic_name: str,
+    timeout: float = 10.0,
+    expected_partitions: int = 1,
+) -> bool:
+    """Wait for topic metadata with partitions to be available in the broker.
+
+    After topic creation, there's a delay before the broker metadata is updated.
+    This function polls until the topic appears with the expected number of
+    partitions available.
+
+    This function handles both response formats from aiokafka's describe_topics():
+    - **List format** (older versions): `[{'error_code': 0, 'topic': 'name', 'partitions': [...]}]`
+    - **Dict format** (aiokafka 0.11.0+): `{'topic_name': TopicDescription(error_code=0, ...)}`
+
+    Args:
+        admin_client: The AIOKafkaAdminClient instance (typed as object to avoid
+            TYPE_CHECKING imports in callers).
+        topic_name: The topic to wait for.
+        timeout: Maximum time to wait in seconds.
+        expected_partitions: Minimum number of partitions to wait for.
+
+    Returns:
+        True if topic was found with expected partitions, False if timed out.
+
+    Example:
+        >>> admin = AIOKafkaAdminClient(bootstrap_servers="localhost:9092")
+        >>> await admin.start()
+        >>> await admin.create_topics([NewTopic(name="my-topic", ...)])
+        >>> await wait_for_topic_metadata(admin, "my-topic", expected_partitions=3)
+        True
+    """
+    start_time = asyncio.get_running_loop().time()
+
+    while (asyncio.get_running_loop().time() - start_time) < timeout:
+        try:
+            # describe_topics is a coroutine method on AIOKafkaAdminClient
+            # Admin client typed as object to avoid TYPE_CHECKING imports in callers
+            description = await admin_client.describe_topics([topic_name])  # type: ignore[attr-defined]
+
+            if not description:
+                logger.debug("Topic %s: empty describe_topics response", topic_name)
+                await asyncio.sleep(0.5)
+                continue
+
+            # Handle dict format (aiokafka 0.11.0+): {'topic_name': TopicDescription}
+            if isinstance(description, dict):
+                if topic_name in description:
+                    topic_info = description[topic_name]
+                    # TopicDescription may be an object with attributes or dict-like
+                    error_code = (
+                        getattr(topic_info, "error_code", None)
+                        if hasattr(topic_info, "error_code")
+                        else topic_info.get("error_code", -1)
+                        if isinstance(topic_info, dict)
+                        else -1
+                    )
+                    partitions = (
+                        getattr(topic_info, "partitions", [])
+                        if hasattr(topic_info, "partitions")
+                        else topic_info.get("partitions", [])
+                        if isinstance(topic_info, dict)
+                        else []
+                    )
+
+                    if (error_code is None or error_code == 0) and len(
+                        partitions
+                    ) >= expected_partitions:
+                        logger.debug(
+                            "Topic %s ready with %d partitions (dict format)",
+                            topic_name,
+                            len(partitions),
+                        )
+                        return True
+                    logger.debug(
+                        "Topic %s not ready: error_code=%s, partitions=%d (dict format)",
+                        topic_name,
+                        error_code,
+                        len(partitions),
+                    )
+                else:
+                    # Dict response but topic not found - may still be propagating
+                    logger.debug(
+                        "Topic %s not in dict response keys: %s",
+                        topic_name,
+                        list(description.keys()),
+                    )
+
+            # Handle list format (older aiokafka): [{'error_code': 0, 'topic': ..., 'partitions': [...]}]
+            elif isinstance(description, list) and len(description) > 0:
+                topic_info = description[0]
+                # List items are typically dicts
+                if isinstance(topic_info, dict):
+                    error_code = topic_info.get("error_code", -1)
+                    partitions = topic_info.get("partitions", [])
+                else:
+                    # Object with attributes
+                    error_code = getattr(topic_info, "error_code", -1)
+                    partitions = getattr(topic_info, "partitions", [])
+
+                if error_code == 0 and len(partitions) >= expected_partitions:
+                    logger.debug(
+                        "Topic %s ready with %d partitions (list format)",
+                        topic_name,
+                        len(partitions),
+                    )
+                    return True
+                logger.debug(
+                    "Topic %s not ready: error_code=%s, partitions=%d (list format)",
+                    topic_name,
+                    error_code,
+                    len(partitions),
+                )
+            else:
+                # Unknown format but truthy - accept as success for compatibility
+                logger.debug(
+                    "Topic %s: unknown response format, accepting as ready: %s",
+                    topic_name,
+                    type(description),
+                )
+                return True
+
+        except Exception as e:
+            logger.debug("Topic %s metadata check failed: %s", topic_name, e)
+
+        await asyncio.sleep(0.5)  # Poll every 500ms
+
+    logger.warning(
+        "Timeout waiting for topic %s metadata after %.1fs",
+        topic_name,
+        timeout,
+    )
+    return False
+
+
 __all__ = [
     "wait_for_consumer_ready",
+    "wait_for_topic_metadata",
 ]

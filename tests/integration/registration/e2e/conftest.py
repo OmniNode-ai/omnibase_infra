@@ -117,11 +117,11 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Consumer Readiness Helper (shared implementation)
+# Kafka Helpers (shared implementations)
 # =============================================================================
 # Imported from tests.helpers.kafka_utils for shared use across test modules.
-# See tests/helpers/kafka_utils.py for the canonical implementation.
-from tests.helpers.kafka_utils import wait_for_consumer_ready
+# See tests/helpers/kafka_utils.py for the canonical implementations.
+from tests.helpers.kafka_utils import wait_for_consumer_ready, wait_for_topic_metadata
 
 # =============================================================================
 # Envelope Helper
@@ -483,45 +483,6 @@ async def ensure_test_topic() -> AsyncGenerator[
     admin: AIOKafkaAdminClient | None = None
     created_topics: list[str] = []
 
-    async def _wait_for_topic_metadata(
-        admin_client: AIOKafkaAdminClient,
-        topic_name: str,
-        timeout: float = 10.0,
-    ) -> bool:
-        """Wait for topic metadata to be available in the broker.
-
-        Args:
-            admin_client: Kafka admin client for topic operations.
-            topic_name: Name of the topic to wait for.
-            timeout: Maximum time to wait in seconds.
-
-        Returns:
-            True if topic metadata is available, False on timeout.
-
-        Note:
-            aiokafka.describe_topics() returns dict[str, TopicDescription]
-            keyed by topic name. This function validates the dict response
-            and checks for error codes to ensure the topic is truly available.
-        """
-        start_time = asyncio.get_running_loop().time()
-        while (asyncio.get_running_loop().time() - start_time) < timeout:
-            try:
-                description = await admin_client.describe_topics([topic_name])
-                # describe_topics returns dict[str, TopicDescription] keyed by topic name
-                if isinstance(description, dict) and topic_name in description:
-                    topic_metadata = description[topic_name]
-                    # Verify no error code (0 means success, None means field not present)
-                    error_code = getattr(topic_metadata, "error_code", None)
-                    if error_code is None or error_code == 0:
-                        return True
-                elif description:
-                    # Non-dict format (legacy compatibility) - accept if truthy
-                    return True
-            except Exception:
-                pass  # Topic not yet available
-            await asyncio.sleep(0.5)
-        return False
-
     async def _create_topic(topic_name: str, partitions: int = 1) -> str:
         """Create a topic with the given name and partition count.
 
@@ -555,11 +516,18 @@ async def ensure_test_topic() -> AsyncGenerator[
             created_topics.append(unique_topic_name)
 
             # Wait for topic metadata to propagate
-            await _wait_for_topic_metadata(admin, unique_topic_name)
+            await wait_for_topic_metadata(
+                admin, unique_topic_name, expected_partitions=partitions
+            )
         except TopicAlreadyExistsError:
             # Topic already exists - still wait for metadata in case just created
             if admin is not None:
-                await _wait_for_topic_metadata(admin, unique_topic_name, timeout=5.0)
+                await wait_for_topic_metadata(
+                    admin,
+                    unique_topic_name,
+                    timeout=5.0,
+                    expected_partitions=partitions,
+                )
 
         return unique_topic_name
 
@@ -1292,6 +1260,7 @@ __all__ = [
     "SERVICE_REGISTRY_AVAILABLE",
     # Helper functions
     "wait_for_consumer_ready",
+    "wait_for_topic_metadata",
     # Database fixtures
     "postgres_pool",
     # Container fixtures

@@ -8,6 +8,10 @@ This module provides node implementations for the ONEX 4-node architecture:
 - REDUCER: State aggregation from multiple sources
 - ORCHESTRATOR: Workflow coordination across nodes
 
+Note: As of omnibase_core 0.7.0, the actual ``node_type`` contract values use the
+``_GENERIC`` suffix (e.g., ``EFFECT_GENERIC``, ``ORCHESTRATOR_GENERIC``). The names
+above refer to the conceptual architecture patterns.
+
 Available Submodules:
 - effects: Effect nodes for external I/O operations
 - reducers: Reducer nodes for state aggregation

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Architecture Validator Node - Declarative COMPUTE node for architecture validation.
+"""Architecture Validator Node - Declarative COMPUTE_GENERIC node for architecture validation.
 
-This COMPUTE node follows the ONEX declarative pattern:
+This COMPUTE_GENERIC node follows the ONEX declarative pattern:
     - DECLARATIVE node driven by contract.yaml
     - Zero custom routing logic - all behavior from validation_rules
     - Lightweight shell that delegates to validator implementations
@@ -71,7 +71,7 @@ _ValidatorFunc = Callable[[str], ModelFileValidationResult]
 
 
 class NodeArchitectureValidator(NodeCompute):
-    """Architecture Validator - COMPUTE node for architecture pattern validation.
+    """Architecture Validator - COMPUTE_GENERIC node for architecture pattern validation.
 
     This node validates ONEX architecture patterns by analyzing Python source
     code and contract files. It detects violations of three core rules:

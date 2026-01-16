@@ -542,7 +542,7 @@ class TestContractIOOperationsAreEffectNodes:
                 # These should NOT be effect nodes despite keyword matches
                 if node_type == "effect_generic":
                     misclassified_nodes.append(
-                        f"{node_id}: marked as 'effect_generic' but should be '{node['node_type']}'"
+                        f"{node_id}: marked as 'effect_generic' but performs pure computation (should be compute/reducer type)"
                     )
                 continue
 

@@ -126,11 +126,34 @@ POSTGRES_AVAILABLE = _check_postgres_reachable()
 # =============================================================================
 # Module-Level Markers
 # =============================================================================
-# NOTE: loop_scope="module" is CRITICAL for pytest-asyncio 0.25+ compatibility.
-# This ensures all async fixtures and tests in this module share the same event loop.
-# Without this, module-scoped fixtures like postgres_pool get created on one event loop
-# but function-scoped fixtures try to use them on a different loop, causing:
-# "RuntimeError: Task ... got Future ... attached to a different loop"
+#
+# +---------------------------------------------------------------------------+
+# | IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)          |
+# +---------------------------------------------------------------------------+
+# |                                                                           |
+# | The `loop_scope="module"` parameter below is CRITICAL for correct async   |
+# | fixture behavior. Starting with pytest-asyncio 0.25, the default event    |
+# | loop scope changed from "module" to "function", which breaks module-      |
+# | scoped async fixtures.                                                    |
+# |                                                                           |
+# | SYMPTOMS WITHOUT THIS FIX:                                                |
+# |   RuntimeError: Task <Task pending ...> got Future <Future ...>           |
+# |   attached to a different loop                                            |
+# |                                                                           |
+# | WHY IT HAPPENS:                                                           |
+# |   - Module-scoped fixtures (postgres_pool) are created on event loop A    |
+# |   - Function-scoped tests run on event loop B (new loop per test)         |
+# |   - Sharing async resources across loops causes the RuntimeError          |
+# |                                                                           |
+# | SOLUTION:                                                                 |
+# |   Set loop_scope="module" so all tests share the same event loop as the   |
+# |   module-scoped fixtures.                                                 |
+# |                                                                           |
+# | REFERENCE:                                                                |
+# |   https://pytest-asyncio.readthedocs.io/en/latest/concepts.html           |
+# |   See: "Event Loop Scope" and "Fixture Scope" sections                    |
+# |                                                                           |
+# +---------------------------------------------------------------------------+
 
 pytestmark = [
     pytest.mark.database,
