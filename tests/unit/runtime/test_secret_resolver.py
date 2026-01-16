@@ -1108,36 +1108,40 @@ class TestSecretResolverFileSecrets:
             assert result.get_secret_value() == "absolute_value"
 
     def test_file_permission_error_returns_none(self) -> None:
-        """Should return None when file cannot be read due to permissions."""
+        """Should return None when file cannot be read due to permissions.
+
+        Uses mocking instead of actual filesystem permissions to ensure
+        deterministic behavior in CI environments (where tests may run as
+        root or in containers with different permission semantics).
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             secret_file = Path(tmpdir) / "protected"
             secret_file.write_text("protected_value")
-            # Make unreadable (may not work on all platforms)
-            try:
-                secret_file.chmod(0o000)
 
-                config = ModelSecretResolverConfig(
-                    mappings=[
-                        ModelSecretMapping(
-                            logical_name="protected.secret",
-                            source=ModelSecretSourceSpec(
-                                source_type="file",
-                                source_path=str(secret_file),
-                            ),
+            config = ModelSecretResolverConfig(
+                mappings=[
+                    ModelSecretMapping(
+                        logical_name="protected.secret",
+                        source=ModelSecretSourceSpec(
+                            source_type="file",
+                            source_path=str(secret_file),
                         ),
-                    ],
-                    enable_convention_fallback=False,
-                )
-                resolver = SecretResolver(config=config)
+                    ),
+                ],
+                enable_convention_fallback=False,
+            )
+            resolver = SecretResolver(config=config)
 
+            # Mock Path.read_text to raise PermissionError
+            # This simulates file permission issues without relying on chmod
+            with patch.object(
+                Path, "read_text", side_effect=PermissionError("Permission denied")
+            ):
                 result = resolver.get_secret("protected.secret", required=False)
 
-                # Should return None (or the value if running as root)
-                # Just verify it doesn't raise an unhandled exception
-                assert result is None or isinstance(result, SecretStr)
-            finally:
-                # Restore permissions for cleanup
-                secret_file.chmod(0o644)
+            # Should return None when file cannot be read due to permissions
+            # (PermissionError is caught and treated as "not found")
+            assert result is None
 
 
 __all__: list[str] = [

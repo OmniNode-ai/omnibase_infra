@@ -29,15 +29,15 @@ class ModelCachedSecret(BaseModel):
         hit_count: Number of cache hits for this entry.
 
     Example:
-        >>> from datetime import datetime, timedelta
+        >>> from datetime import UTC, datetime, timedelta
         >>> from pydantic import SecretStr
         >>>
         >>> cached = ModelCachedSecret(
         ...     value=SecretStr("password123"),
         ...     source_type="env",
         ...     logical_name="db.password",
-        ...     cached_at=datetime.utcnow(),
-        ...     expires_at=datetime.utcnow() + timedelta(hours=24),
+        ...     cached_at=datetime.now(UTC),
+        ...     expires_at=datetime.now(UTC) + timedelta(hours=24),
         ... )
         >>> cached.is_expired()
         False
@@ -83,13 +83,22 @@ class ModelCachedSecret(BaseModel):
         Returns:
             True if the current UTC time is past the expiration time.
 
+        Note:
+            This method handles both timezone-aware and timezone-naive
+            datetimes. Naive datetimes are treated as UTC.
+
         Example:
             >>> cached = ModelCachedSecret(...)
             >>> if cached.is_expired():
             ...     # Refresh the secret
             ...     pass
         """
-        return datetime.now(UTC) > self.expires_at
+        now = datetime.now(UTC)
+        expires = self.expires_at
+        if expires.tzinfo is None:
+            # Treat naive datetime as UTC
+            expires = expires.replace(tzinfo=UTC)
+        return now > expires
 
 
 __all__: list[str] = ["ModelCachedSecret"]

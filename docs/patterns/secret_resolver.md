@@ -532,10 +532,10 @@ For bootstrap secrets or legacy code migration, add to `.secretresolver_allowlis
 
 ```text
 # .secretresolver_allowlist
-# Format: file_path:line_number:variable_name:ticket_reference
+# Format: filepath:line_number # ticket reason
 
-src/bootstrap.py:15:VAULT_TOKEN:OMN-764
-src/legacy/adapter.py:42:LEGACY_API_KEY:OMN-999
+src/bootstrap.py:15 # OMN-764 VAULT_TOKEN bootstrap
+src/legacy/adapter.py:42 # OMN-999 LEGACY_API_KEY migration pending
 ```
 
 **Note**: Allowlisted entries should include a ticket reference and be reviewed periodically.

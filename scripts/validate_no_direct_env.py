@@ -27,6 +27,7 @@ FORBIDDEN_PATTERNS = [
     re.compile(r"os\.getenv\s*\("),
     re.compile(r"os\.environ\s*\["),
     re.compile(r"os\.environ\.get\s*\("),
+    re.compile(r"os\.environ\.setdefault\s*\("),
 ]
 
 # Production paths to scan (relative to repo root)
@@ -48,8 +49,9 @@ EXCLUDE_PATHS = [
 ]
 
 # Bootstrap exception - these files may use os.getenv for Vault bootstrap only
-BOOTSTRAP_EXCEPTION_FILES = [
-    "secret_resolver.py",  # The resolver itself needs bootstrap access
+# Uses exact relative paths to prevent overly broad exemptions
+BOOTSTRAP_EXCEPTION_PATHS = [
+    "src/omnibase_infra/runtime/secret_resolver.py",  # The resolver itself needs bootstrap access
 ]
 
 ALLOWLIST_FILE = ".secretresolver_allowlist"
@@ -76,25 +78,62 @@ class Violation:
         return f"{self.filepath}:{self.line_number}"
 
 
-def load_allowlist(repo_root: Path) -> set[str]:
+class AllowlistValidationError(Exception):
+    """Raised when allowlist contains malformed entries."""
+
+    def __init__(self, malformed_entries: list[tuple[int, str]]) -> None:
+        self.malformed_entries = malformed_entries
+        super().__init__(f"Malformed allowlist entries: {len(malformed_entries)}")
+
+
+# Pattern for valid allowlist entries: filepath:line_number
+ALLOWLIST_ENTRY_PATTERN = re.compile(r"^[^:]+:\d+$")
+
+
+def load_allowlist(repo_root: Path, verbose: bool = False) -> set[str]:
     """Load allowlist entries from file.
 
     Format: filepath:line_number # optional comment
     Lines starting with # are comments.
+
+    Args:
+        repo_root: Repository root path.
+        verbose: If True, log warnings for file read errors.
+
+    Raises:
+        AllowlistValidationError: If any entries are malformed.
     """
     allowlist_path = repo_root / ALLOWLIST_FILE
     if not allowlist_path.exists():
         return set()
 
     allowlist: set[str] = set()
-    for line in allowlist_path.read_text().splitlines():
+    malformed_entries: list[tuple[int, str]] = []
+
+    try:
+        lines = allowlist_path.read_text().splitlines()
+    except (OSError, UnicodeDecodeError) as e:
+        if verbose:
+            print(f"WARNING: Could not read allowlist file: {e}")
+        return set()
+
+    for line_number, line in enumerate(lines, start=1):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         # Strip comments
         if " #" in line:
             line = line.split(" #")[0].strip()
+
+        # Validate format: filepath:line_number
+        if not ALLOWLIST_ENTRY_PATTERN.match(line):
+            malformed_entries.append((line_number, line))
+            continue
+
         allowlist.add(line)
+
+    if malformed_entries:
+        raise AllowlistValidationError(malformed_entries)
 
     return allowlist
 
@@ -125,9 +164,22 @@ def should_scan_file(filepath: Path, repo_root: Path) -> bool:
     return True
 
 
-def is_bootstrap_exception(filepath: Path) -> bool:
-    """Check if file is allowed bootstrap exception."""
-    return filepath.name in BOOTSTRAP_EXCEPTION_FILES
+def is_bootstrap_exception(filepath: Path, repo_root: Path) -> bool:
+    """Check if file is allowed bootstrap exception.
+
+    Uses exact relative path matching to prevent overly broad exemptions.
+    For example, only src/omnibase_infra/runtime/secret_resolver.py is exempt,
+    not any file named secret_resolver.py in other locations.
+
+    Args:
+        filepath: Absolute path to the file being checked.
+        repo_root: Repository root path for computing relative path.
+
+    Returns:
+        True if the file is in the bootstrap exception list.
+    """
+    relative = str(filepath.relative_to(repo_root))
+    return relative in BOOTSTRAP_EXCEPTION_PATHS
 
 
 def scan_file(filepath: Path, repo_root: Path) -> list[Violation]:
@@ -137,7 +189,8 @@ def scan_file(filepath: Path, repo_root: Path) -> list[Violation]:
 
     try:
         content = filepath.read_text()
-    except Exception:
+    except (OSError, UnicodeDecodeError):
+        # File unreadable (permissions, encoding) - skip without failing
         return violations
 
     for line_number, line in enumerate(content.splitlines(), start=1):
@@ -176,7 +229,7 @@ def scan_directory(scan_path: Path, repo_root: Path) -> list[Violation]:
         if not should_scan_file(filepath, repo_root):
             continue
 
-        if is_bootstrap_exception(filepath):
+        if is_bootstrap_exception(filepath, repo_root):
             continue
 
         violations.extend(scan_file(filepath, repo_root))
@@ -200,7 +253,21 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = find_repo_root()
-    allowlist = load_allowlist(repo_root)
+
+    try:
+        allowlist = load_allowlist(repo_root, verbose=args.verbose)
+    except AllowlistValidationError as e:
+        print(f"ERROR: Malformed allowlist entries in {ALLOWLIST_FILE}")
+        print()
+        print("Each entry must match format: filepath:line_number")
+        print()
+        print("Malformed entries:")
+        for line_number, entry in e.malformed_entries:
+            print(f"  Line {line_number}: {entry!r}")
+        print()
+        print("Example valid entry:")
+        print("  src/omnibase_infra/handlers/handler_foo.py:42 # OMN-764 migration")
+        return 2
 
     if args.verbose:
         print(f"Repository root: {repo_root}")

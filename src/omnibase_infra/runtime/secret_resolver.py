@@ -43,7 +43,7 @@ import os
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import SecretStr
 
@@ -62,6 +62,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Type alias for secret source types
+SourceType = Literal["env", "vault", "file"]
+
 
 class SecretResolver:
     """Centralized secret resolution. Dumb and deterministic.
@@ -76,9 +79,10 @@ class SecretResolver:
         4. Raise or return None based on required flag
 
     Thread Safety:
-        - Sync operations use threading.Lock for thread-safe cache access
-        - Async operations use asyncio.Lock for coroutine-safe cache access
-        - Both locks protect the same cache to prevent race conditions
+        - All cache operations use threading.Lock for thread-safe access
+        - Async operations additionally use asyncio.Lock to serialize resolution
+        - The threading lock protects cache reads/writes (fast, in-memory)
+        - The async lock prevents duplicate fetches for the same secret
 
     Example:
         >>> config = ModelSecretResolverConfig(
@@ -210,6 +214,11 @@ class SecretResolver:
         For Vault secrets, this uses async I/O. For env/file secrets,
         this wraps the sync call in a thread executor.
 
+        Thread Safety:
+            Uses threading.Lock for cache access to prevent race conditions
+            with sync callers. The async lock serializes resolution to prevent
+            duplicate fetches.
+
         Args:
             logical_name: Dotted path (e.g., "database.postgres.password")
             required: If True, raises SecretResolutionError when not found
@@ -220,20 +229,31 @@ class SecretResolver:
         Raises:
             SecretResolutionError: If required=True and secret not found
         """
-        if self._async_lock is None:
-            self._async_lock = asyncio.Lock()
-
-        async with self._async_lock:
-            # Check cache first (sync, fast)
+        # Use threading lock for cache check (fast operation, prevents race with sync)
+        with self._lock:
             cached = self._get_from_cache(logical_name)
             if cached is not None:
                 return cached
 
+        # Use async lock to serialize resolution (prevents duplicate fetches)
+        if self._async_lock is None:
+            self._async_lock = asyncio.Lock()
+
+        async with self._async_lock:
+            # Double-check cache after acquiring async lock
+            # (another coroutine may have resolved while we waited)
+            with self._lock:
+                cached = self._get_from_cache(logical_name)
+                if cached is not None:
+                    return cached
+
             # Resolve from source (potentially async for Vault)
+            # Note: _resolve_secret_async handles its own locking for cache writes
             result = await self._resolve_secret_async(logical_name)
 
             if result is None:
-                self._misses += 1
+                with self._lock:
+                    self._misses += 1
                 if required:
                     context = ModelInfraErrorContext.with_correlation(
                         transport_type=EnumInfraTransportType.RUNTIME,
@@ -335,14 +355,16 @@ class SecretResolver:
         # Mask sensitive parts of the path
         masked_path = self._mask_source_path(source)
 
-        cached_entry = self._cache.get(logical_name)
-        return ModelSecretSourceInfo(
-            logical_name=logical_name,
-            source_type=source.source_type,
-            source_path_masked=masked_path,
-            is_cached=cached_entry is not None,
-            expires_at=cached_entry.expires_at if cached_entry else None,
-        )
+        # Use lock for thread-safe cache access
+        with self._lock:
+            cached_entry = self._cache.get(logical_name)
+            return ModelSecretSourceInfo(
+                logical_name=logical_name,
+                source_type=source.source_type,
+                source_path_masked=masked_path,
+                is_cached=cached_entry is not None,
+                expires_at=cached_entry.expires_at if cached_entry else None,
+            )
 
     # === Internal Methods ===
 
@@ -410,6 +432,10 @@ class SecretResolver:
     async def _resolve_secret_async(self, logical_name: str) -> SecretStr | None:
         """Resolve secret from source asynchronously.
 
+        Thread Safety:
+            Uses threading.Lock for cache writes to prevent race conditions
+            with sync callers. I/O operations are performed outside the lock.
+
         Args:
             logical_name: The logical name to resolve
 
@@ -422,6 +448,7 @@ class SecretResolver:
 
         value: str | None = None
 
+        # I/O operations - NOT under lock to avoid blocking
         if source.source_type == "env":
             value = os.environ.get(source.source_path)
         elif source.source_type == "file":
@@ -440,7 +467,9 @@ class SecretResolver:
             return None
 
         secret = SecretStr(value)
-        self._cache_secret(logical_name, secret, source.source_type)
+        # Use threading lock for cache write (fast operation, prevents race with sync)
+        with self._lock:
+            self._cache_secret(logical_name, secret, source.source_type)
         return secret
 
     def _get_source_spec(self, logical_name: str) -> ModelSecretSourceSpec | None:
@@ -488,7 +517,7 @@ class SecretResolver:
             path: Path to the secret file (absolute or relative to secrets_dir)
 
         Returns:
-            Secret value with whitespace stripped, or None if not found
+            Secret value with whitespace stripped, or None if not found or unreadable
         """
         secret_path = Path(path)
 
@@ -499,7 +528,16 @@ class SecretResolver:
         if not secret_path.exists() or not secret_path.is_file():
             return None
 
-        return secret_path.read_text().strip()
+        try:
+            return secret_path.read_text().strip()
+        except PermissionError:
+            # Treat permission errors as "not found" - the secret is not accessible
+            logger.warning(
+                "Permission denied reading secret file: %s",
+                secret_path,
+                extra={"path": str(secret_path)},
+            )
+            return None
 
     def _read_vault_secret_sync(self, path: str) -> str | None:
         """Read secret from Vault synchronously.
@@ -589,7 +627,7 @@ class SecretResolver:
         self,
         logical_name: str,
         value: SecretStr,
-        source_type: str,
+        source_type: SourceType,
     ) -> None:
         """Cache a resolved secret with appropriate TTL.
 
@@ -603,13 +641,13 @@ class SecretResolver:
 
         self._cache[logical_name] = ModelCachedSecret(
             value=value,
-            source_type=source_type,  # type: ignore[arg-type]
+            source_type=source_type,
             logical_name=logical_name,
             cached_at=now,
             expires_at=now + timedelta(seconds=ttl_seconds),
         )
 
-    def _get_ttl(self, logical_name: str, source_type: str) -> int:
+    def _get_ttl(self, logical_name: str, source_type: SourceType) -> int:
         """Get TTL for a secret based on source type or override.
 
         Args:
@@ -659,4 +697,4 @@ class SecretResolver:
         return "***"
 
 
-__all__: list[str] = ["SecretResolver"]
+__all__: list[str] = ["SecretResolver", "SourceType"]
