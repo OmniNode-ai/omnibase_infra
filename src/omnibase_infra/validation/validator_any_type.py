@@ -55,6 +55,7 @@ from omnibase_infra.models.validation.model_any_type_validation_result import (
 from omnibase_infra.models.validation.model_any_type_violation import (
     ModelAnyTypeViolation,
 )
+from omnibase_infra.types import ASTFunctionDef
 from omnibase_infra.validation.mixin_any_type_classification import (
     MixinAnyTypeClassification,
 )
@@ -138,7 +139,7 @@ class AnyTypeDetector(
         """Visit an async function definition."""
         self._check_function_def(node)
 
-    def _check_function_def(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+    def _check_function_def(self, node: ASTFunctionDef) -> None:
         """Check a function definition for Any type violations.
 
         Checks:

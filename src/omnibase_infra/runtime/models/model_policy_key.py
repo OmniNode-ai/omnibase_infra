@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.runtime.util_version import normalize_version
+from omnibase_infra.types import PolicyTypeInput
 
 
 class ModelPolicyKey(BaseModel):
@@ -43,7 +44,7 @@ class ModelPolicyKey(BaseModel):
     """
 
     policy_id: str = Field(..., description="Unique policy identifier")
-    policy_type: str | EnumPolicyType = Field(
+    policy_type: PolicyTypeInput = Field(
         ...,
         description="Policy type (EnumPolicyType or 'orchestrator'/'reducer' string)",
     )
@@ -94,7 +95,7 @@ class ModelPolicyKey(BaseModel):
 
     @field_validator("policy_type")
     @classmethod
-    def validate_policy_type(cls, v: str | EnumPolicyType) -> str | EnumPolicyType:
+    def validate_policy_type(cls, v: PolicyTypeInput) -> PolicyTypeInput:
         """Validate policy_type is a valid EnumPolicyType value.
 
         Args:

@@ -66,12 +66,15 @@ class TestInfraValidatorConstants:
         - 122 (2026-01-15): OMN-1203 corpus capture service, OMN-1346 extract registration domain plugin
         - 142 (2026-01-16): OMN-1305 ruff UP038 isinstance union syntax modernization (+20 unions)
         - 121 (2026-01-16): OMN-1305 isinstance union exclusion (-21 isinstance unions now excluded)
-        - 123 (2026-01-16): OMN-1305 PR #151 release ready + merge with main
+        - 70 (2026-01-16): OMN-1358 reduce union complexity with type aliases (PR #157)
+          - Introduced type aliases for common union patterns
+          - Reduced non-optional unions from 122 to 70
+        - 81 (2026-01-16): OMN-1305 PR #151 merge with main - combined changes
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 123, (
-            "INFRA_MAX_UNIONS should be 123 (excluding both X | None and isinstance unions)"
+        assert INFRA_MAX_UNIONS == 81, (
+            "INFRA_MAX_UNIONS should be 81 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

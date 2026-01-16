@@ -49,6 +49,9 @@ from omnibase_core.validation import (
     validate_yaml_file,
 )
 
+# Local imports
+from omnibase_infra.types import PathInput
+
 # Module-level initialization (AFTER all imports)
 logger = logging.getLogger(__name__)
 
@@ -389,10 +392,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 121 (2026-01-16): OMN-1305 isinstance union exclusion (excluding 21 isinstance unions)
 #   - Updated validator to exclude isinstance(x, A | B) patterns
 #   - These are runtime checks, not type annotations
-#   - Current breakdown: ~1088 optionals, ~21 isinstance, ~121 threshold unions
-# - 123 (2026-01-16): OMN-1305 PR #151 release ready + merge with main (OMN-1203 corpus capture)
-#   - +1 union from policy validation (PR #151)
-#   - Current breakdown: ~1104 optionals, ~21 isinstance, ~123 threshold unions
+# - 70 (2026-01-16): OMN-1358 type alias replacements reduced from 122 to 63 non-optional unions
+#                    Applied HandlerMap, NodeId, PayloadDict, EventMetadata, MetadataDict type aliases
+# - 81 (2026-01-16): OMN-1305 PR #151 merge with main - combined changes
+#                    isinstance exclusion + type alias refactoring + PR #151 fixes
 #
 # Soft ceiling guidance:
 # - 100-120: Healthy range, minor increments OK for legitimate features
@@ -406,7 +409,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # 4. Consider if a domain-specific type from omnibase_core would be cleaner
 #
 # Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
-INFRA_MAX_UNIONS = 123
+INFRA_MAX_UNIONS = 81
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -425,7 +428,7 @@ INFRA_UNIONS_STRICT = True
 
 
 def validate_infra_architecture(
-    directory: str | Path = INFRA_SRC_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
     max_violations: int = INFRA_MAX_VIOLATIONS,
 ) -> ValidationResult:
     """
@@ -464,7 +467,7 @@ def validate_infra_architecture(
 
 
 def validate_infra_contracts(
-    directory: str | Path = INFRA_NODES_PATH,
+    directory: PathInput = INFRA_NODES_PATH,
 ) -> ValidationResult:
     """
     Validate all infrastructure node contracts.
@@ -481,7 +484,7 @@ def validate_infra_contracts(
 
 
 def validate_infra_patterns(
-    directory: str | Path = INFRA_SRC_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
     strict: bool = INFRA_PATTERNS_STRICT,
 ) -> ValidationResult:
     """
@@ -689,7 +692,7 @@ def _create_filtered_result(
 
 
 def validate_infra_contract_deep(
-    contract_path: str | Path,
+    contract_path: PathInput,
 ) -> ModelContractValidationResult:
     """
     Perform deep contract validation for ONEX compliance.
@@ -1220,7 +1223,7 @@ def _count_non_optional_unions(
 
 
 def validate_infra_union_usage(
-    directory: str | Path = INFRA_SRC_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
     max_unions: int = INFRA_MAX_UNIONS,
     strict: bool = INFRA_UNIONS_STRICT,
 ) -> ValidationResult:
@@ -1322,7 +1325,7 @@ def validate_infra_union_usage(
 
 
 def validate_infra_circular_imports(
-    directory: str | Path = INFRA_SRC_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
 ) -> ModelModuleImportResult:
     """
     Check for circular imports in infrastructure code.
@@ -1342,8 +1345,8 @@ def validate_infra_circular_imports(
 
 
 def validate_infra_all(
-    directory: str | Path = INFRA_SRC_PATH,
-    nodes_directory: str | Path = INFRA_NODES_PATH,
+    directory: PathInput = INFRA_SRC_PATH,
+    nodes_directory: PathInput = INFRA_NODES_PATH,
 ) -> dict[str, ValidationResult | ModelModuleImportResult]:
     """
     Run all validations on infrastructure code.

@@ -86,6 +86,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from omnibase_core.types import PrimitiveValue
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -231,7 +232,7 @@ class ModelLogContext(BaseModel):
         """Check if error_type is set (not empty string)."""
         return self.error_type != _SENTINEL_STR
 
-    def to_dict(self) -> dict[str, str | int | float]:
+    def to_dict(self) -> dict[str, PrimitiveValue]:
         """
         Convert to dictionary for use with logging formatters.
 
@@ -257,7 +258,7 @@ class ModelLogContext(BaseModel):
 
         .. versionadded:: 0.6.0
         """
-        result: dict[str, str | int | float] = {"operation": self.operation}
+        result: dict[str, PrimitiveValue] = {"operation": self.operation}
 
         if self.has_correlation_id:
             result["correlation_id"] = self.correlation_id

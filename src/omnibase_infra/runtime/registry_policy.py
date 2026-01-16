@@ -91,6 +91,8 @@ from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationErro
 from omnibase_infra.runtime.mixin_policy_validation import MixinPolicyValidation
 from omnibase_infra.runtime.mixin_semver_cache import MixinSemverCache
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
+from omnibase_infra.runtime.util_version import normalize_version
+from omnibase_infra.types import PolicyTypeInput
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -442,6 +444,111 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         # Maps policy_id -> list of ModelPolicyKey instances
         self._policy_id_index: dict[str, list[ModelPolicyKey]] = {}
 
+    # Note: _validate_protocol_implementation and _validate_sync_enforcement
+    # are inherited from MixinPolicyValidation with the correct signatures.
+    # Do not override them here.
+
+    def _normalize_policy_type(
+        self,
+        policy_type: PolicyTypeInput,
+    ) -> str:
+        """Normalize policy type to string value and validate against EnumPolicyType.
+
+        This method provides centralized policy type validation logic used by all
+        registration and query methods. It accepts both EnumPolicyType enum values
+        and string literals, normalizing them to their string representation while
+        ensuring they match valid EnumPolicyType values.
+
+        Validation Process:
+            1. If policy_type is EnumPolicyType instance, extract .value
+            2. If policy_type is string, validate against EnumPolicyType values
+            3. Raise PolicyRegistryError if string doesn't match any enum value
+            4. Return normalized string value
+
+        This centralized validation ensures consistent policy type handling across
+        all registry operations (register, get, list_keys, is_registered, unregister).
+
+        Args:
+            policy_type: Policy type as EnumPolicyType enum or string literal.
+                        Valid values: "orchestrator", "reducer"
+
+        Returns:
+            Normalized string value for the policy type (e.g., "orchestrator", "reducer")
+
+        Raises:
+            PolicyRegistryError: If policy_type is a string that doesn't match any
+                                EnumPolicyType value. Error includes the invalid value
+                                and list of valid options.
+
+        Example:
+            >>> from omnibase_infra.enums import EnumPolicyType
+            >>> registry = PolicyRegistry()
+            >>> # Enum to string
+            >>> registry._normalize_policy_type(EnumPolicyType.ORCHESTRATOR)
+            'orchestrator'
+            >>> # Valid string passthrough
+            >>> registry._normalize_policy_type("reducer")
+            'reducer'
+            >>> # Invalid string raises error
+            >>> registry._normalize_policy_type("invalid")
+            PolicyRegistryError: Invalid policy_type: 'invalid'.
+                                 Must be one of: ['orchestrator', 'reducer']
+        """
+        if isinstance(policy_type, EnumPolicyType):
+            return policy_type.value
+
+        # Validate string against enum values
+        valid_types = {e.value for e in EnumPolicyType}
+        if policy_type not in valid_types:
+            raise PolicyRegistryError(
+                f"Invalid policy_type: {policy_type!r}. "
+                f"Must be one of: {sorted(valid_types)}",
+                policy_id=None,
+                policy_type=policy_type,
+            )
+
+        return policy_type
+
+    @staticmethod
+    def _normalize_version(version: str) -> str:
+        """Normalize version string for consistent lookups.
+
+        Delegates to the shared normalize_version utility which is the
+        SINGLE SOURCE OF TRUTH for version normalization in omnibase_infra.
+
+        This method wraps the shared utility to convert ValueError to
+        ProtocolConfigurationError for PolicyRegistry's error contract.
+
+        Normalization rules:
+            1. Strip leading/trailing whitespace
+            2. Strip leading 'v' or 'V' prefix
+            3. Expand partial versions (1 -> 1.0.0, 1.0 -> 1.0.0)
+            4. Parse with ModelSemVer.parse() for validation
+            5. Preserve prerelease suffix if present
+
+        Args:
+            version: The version string to normalize
+
+        Returns:
+            Normalized version string in "x.y.z" or "x.y.z-prerelease" format
+
+        Raises:
+            ProtocolConfigurationError: If the version format is invalid
+
+        Example:
+            >>> PolicyRegistry._normalize_version("1.0")
+            '1.0.0'
+            >>> PolicyRegistry._normalize_version("v2.1")
+            '2.1.0'
+        """
+        try:
+            return normalize_version(version)
+        except ValueError as e:
+            raise ProtocolConfigurationError(
+                str(e),
+                version=version,
+            ) from e
+
     def register(
         self,
         registration: ModelPolicyRegistration,
@@ -525,7 +632,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         self,
         policy_id: str,
         policy_class: type[ProtocolPolicy],
-        policy_type: str | EnumPolicyType,
+        policy_type: PolicyTypeInput,
         version: str = "1.0.0",
         allow_async: bool = False,
     ) -> None:
@@ -610,7 +717,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
     def get(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
         version: str | None = None,
     ) -> type[ProtocolPolicy]:
         """Get policy class by ID, type, and optional version.
@@ -750,7 +857,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
 
     def list_keys(
         self,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
     ) -> list[tuple[str, str, str]]:
         """List registered policy keys as (id, type, version) tuples.
 
@@ -827,7 +934,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
     def is_registered(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
         version: str | None = None,
     ) -> bool:
         """Check if a policy is registered.
@@ -876,7 +983,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
     def unregister(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: PolicyTypeInput | None = None,
         version: str | None = None,
     ) -> int:
         """Unregister policy plugins.
