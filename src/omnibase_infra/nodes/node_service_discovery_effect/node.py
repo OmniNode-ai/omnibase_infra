@@ -15,7 +15,7 @@ Capability-Oriented Design:
 
 Pluggable Backend Support:
     This node delegates actual service discovery operations to implementations
-    of ProtocolServiceDiscoveryHandler. Supported backends include:
+    of ProtocolDiscoveryOperations. Supported backends include:
     - Consul: HashiCorp Consul service discovery
     - Kubernetes: K8s native service discovery
     - Etcd: CoreOS etcd service discovery
@@ -38,7 +38,7 @@ Usage:
         # Create container with handler dependency
         container = ModelONEXContainer()
         container.register(
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
             consul_handler_instance,
         )
 
@@ -47,7 +47,7 @@ Usage:
 
 Related:
     - contract.yaml: ONEX contract with capabilities and I/O definitions
-    - ProtocolServiceDiscoveryHandler: Backend handler protocol
+    - ProtocolDiscoveryOperations: Backend handler protocol
     - ModelServiceRegistration: Input model for registration
     - ModelDiscoveryResult: Output model for discovery queries
     - OMN-1131: Capability-oriented node architecture
@@ -75,11 +75,11 @@ class NodeServiceDiscoveryEffect(NodeEffect):
     All behavior is declarative and defined in contract.yaml:
     - io_operations: register_service, deregister_service, discover_services
     - capabilities: service.discovery, service.registration, etc.
-    - dependencies: ProtocolServiceDiscoveryHandler
+    - dependencies: ProtocolDiscoveryOperations
 
     Attributes:
         container: ONEX dependency injection container providing access
-            to the configured ProtocolServiceDiscoveryHandler implementation.
+            to the configured ProtocolDiscoveryOperations implementation.
 
     Example:
         .. code-block:: python
@@ -103,7 +103,7 @@ class NodeServiceDiscoveryEffect(NodeEffect):
         Args:
             container: ONEX dependency injection container providing
                 access to infrastructure dependencies including the
-                configured ProtocolServiceDiscoveryHandler implementation.
+                configured ProtocolDiscoveryOperations implementation.
         """
         super().__init__(container)
 

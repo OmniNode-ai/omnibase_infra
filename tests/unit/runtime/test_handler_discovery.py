@@ -36,19 +36,19 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.handler_plugin_loader import HANDLER_CONTRACT_FILENAME
 from omnibase_infra.runtime.handler_registry import (
-    ProtocolBindingRegistry,
+    RegistryProtocolBinding,
 )
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
 # =============================================================================
 # Constants for Handler Contract Templates
 # =============================================================================
 
 # Real handler class path from omnibase_infra.handlers
-REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HttpRestHandler"
+REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HandlerHttpRest"
 
 # Valid handler contract template (matches schema from contracts/handlers/)
 # Uses canonical ONEX field names with required security metadata
@@ -144,13 +144,13 @@ security:
 
 
 @pytest.fixture
-def isolated_handler_registry() -> ProtocolBindingRegistry:
+def isolated_handler_registry() -> RegistryProtocolBinding:
     """Create an isolated handler registry for testing.
 
     Returns:
-        Fresh ProtocolBindingRegistry instance that is not the singleton.
+        Fresh RegistryProtocolBinding instance that is not the singleton.
     """
-    return ProtocolBindingRegistry()
+    return RegistryProtocolBinding()
 
 
 @pytest.fixture
@@ -350,9 +350,9 @@ class TestDiscoverHandlersFromContracts:
         When contract_paths is provided, RuntimeHostProcess should call
         _discover_handlers_from_contracts() instead of wire_handlers().
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -390,9 +390,9 @@ class TestDiscoverHandlersFromContracts:
         The method should instantiate ContractHandlerDiscovery with
         HandlerPluginLoader and the handler registry.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -421,9 +421,9 @@ class TestDiscoverHandlersFromContracts:
 
         The discovery should scan all configured contract_paths.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -460,9 +460,9 @@ class TestDiscoverHandlersFromContracts:
         Invalid contracts should be logged as warnings/errors,
         but valid contracts should still be registered.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -523,9 +523,9 @@ class TestInvalidContractYamlHandling:
         """
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -568,9 +568,9 @@ class TestInvalidContractYamlHandling:
         """
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -605,9 +605,9 @@ class TestInvalidContractYamlHandling:
         """
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -642,9 +642,9 @@ class TestInvalidContractYamlHandling:
         """
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -672,9 +672,9 @@ class TestInvalidContractYamlHandling:
         """
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -707,9 +707,9 @@ class TestInvalidContractYamlHandling:
 
         nonexistent_path = tmp_path / "does_not_exist"
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -759,9 +759,9 @@ class TestNoHandlersRegisteredHealthCheck:
         """
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry to prevent interference from other tests
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -790,9 +790,9 @@ class TestNoHandlersRegisteredHealthCheck:
         When valid handlers are discovered and registered,
         no_handlers_registered should be False.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -827,9 +827,9 @@ class TestNoHandlersRegisteredHealthCheck:
         """
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -857,9 +857,9 @@ class TestNoHandlersRegisteredHealthCheck:
 
         Even if some contracts fail, valid ones should be registered.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -888,9 +888,9 @@ class TestNoHandlersRegisteredHealthCheck:
 
         Before start() is called, there should be no handlers.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -915,9 +915,9 @@ class TestNoHandlersRegisteredHealthCheck:
         After stop(), handlers should still be in the registry
         (they're just not processing).
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -952,9 +952,9 @@ class TestNoHandlersRegisteredHealthCheck:
         The no_handlers_registered field should be True when len(_handlers) == 0
         and False otherwise.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -989,9 +989,9 @@ class TestNoHandlersRegisteredHealthCheck:
         When handlers are registered, the healthy status should not be
         negatively impacted by no_handlers_registered.
         """
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1039,9 +1039,9 @@ class TestHandlerDiscoveryLogging:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify discovery logs the contract paths being scanned."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1069,9 +1069,9 @@ class TestHandlerDiscoveryLogging:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify discovery logs successful handler registrations."""
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1104,9 +1104,9 @@ class TestHandlerDiscoveryLogging:
         """Verify discovery logs error details for failed handlers."""
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         # Use isolated registry
-        isolated_registry = ProtocolBindingRegistry()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1177,8 +1177,8 @@ class TestDiscoverHandlersFromContractsUnit:
         create a ContractHandlerDiscovery service with HandlerPluginLoader and
         the handler registry.
         """
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1242,8 +1242,8 @@ class TestDiscoverHandlersFromContractsUnit:
             )
         )
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1299,8 +1299,8 @@ class TestDiscoverHandlersFromContractsUnit:
             )
         )
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1329,8 +1329,8 @@ class TestDiscoverHandlersFromContractsUnit:
         - Only successfully loaded handlers appear in handlers_discovered
         - handlers_registered equals handlers_discovered when all loaded handlers register
         """
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1386,8 +1386,8 @@ class TestDiscoverHandlersFromContractsUnit:
         (handlers_dir / "notes.md").write_text("# Some Notes")
         (handlers_dir / "config.json").write_text('{"key": "value"}')
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1416,8 +1416,8 @@ class TestDiscoverHandlersFromContractsUnit:
         When called multiple times, each call should create a new discovery
         service instance (not cached).
         """
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1450,8 +1450,8 @@ class TestDiscoverHandlersFromContractsUnit:
         When contract_paths is an empty list, discovery should complete
         without errors but find no handlers.
         """
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1492,8 +1492,8 @@ class TestDiscoverHandlersFromContractsErrorHandling:
         When handlers fail to load, the plugin loader logs warnings with
         error codes (e.g., HANDLER_LOADER_010, HANDLER_LOADER_011).
         """
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1534,8 +1534,8 @@ class TestDiscoverHandlersFromContractsErrorHandling:
         When handlers fail during discovery, each failure should be
         logged as a warning by the plugin loader.
         """
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1578,8 +1578,8 @@ class TestDiscoverHandlersFromContractsErrorHandling:
 
         nonexistent_path = tmp_path / "does_not_exist"
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         # Put invalid path first to ensure processing continues
         process = RuntimeHostProcess(
@@ -1613,8 +1613,8 @@ class TestDiscoverHandlersFromContractsErrorHandling:
         When a contract fails to load, the warning log should include the
         path to the problematic contract file.
         """
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1683,8 +1683,8 @@ class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
         symlink_dir = tmp_path / "handlers_symlink"
         symlink_dir.symlink_to(real_dir)
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1732,8 +1732,8 @@ class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
         symlink_file = tmp_path / "contract_symlink.yaml"
         symlink_file.symlink_to(contract_file)
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1767,8 +1767,8 @@ class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
         broken_symlink = tmp_path / "broken_symlink"
         broken_symlink.symlink_to(tmp_path / "nonexistent_target")
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1809,8 +1809,8 @@ class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
             )
         )
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1852,8 +1852,8 @@ class TestDiscoverHandlersFromContractsFileSystemEdgeCases:
             )
         )
 
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,
@@ -1889,8 +1889,8 @@ class TestDiscoverHandlersFromContractsCorrelationTracking:
         The discovery process should auto-generate a correlation ID
         for tracing purposes.
         """
-        event_bus = InMemoryEventBus()
-        isolated_registry = ProtocolBindingRegistry()
+        event_bus = EventBusInmemory()
+        isolated_registry = RegistryProtocolBinding()
 
         process = RuntimeHostProcess(
             event_bus=event_bus,

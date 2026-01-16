@@ -6,14 +6,14 @@ Runtime Registry Module.
 This module provides registry implementations for the ONEX runtime infrastructure:
 
 Protocol Binding Registry:
-    - **ProtocolBindingRegistry**: Handler registration and resolution
+    - **RegistryProtocolBinding**: Handler registration and resolution
     - **RegistryError**: Error raised when registry operations fail
 
 Event Bus Binding Registry:
-    - **EventBusBindingRegistry**: Event bus implementation registration
+    - **RegistryEventBusBinding**: Event bus implementation registration
 
 Message Type Registry:
-    - **MessageTypeRegistry**: Central registry mapping message types to handlers
+    - **RegistryMessageType**: Central registry mapping message types to handlers
     - **ModelMessageTypeEntry**: Registry entry model for message type registrations
     - **ModelDomainConstraint**: Domain constraint and ownership rules
     - **ProtocolMessageTypeRegistry**: Protocol definition for the registry interface
@@ -36,7 +36,7 @@ Thread Safety:
 Related:
     - OMN-937: Central Message Type Registry implementation
     - OMN-934: Message Dispatch Engine (prerequisite)
-    - OMN-1271: ProtocolBindingRegistry and EventBusBindingRegistry extraction
+    - OMN-1271: RegistryProtocolBinding and RegistryEventBusBinding extraction
     - MessageDispatchEngine: Uses this registry for handler resolution
 
 .. versionadded:: 0.5.0
@@ -51,31 +51,43 @@ from omnibase_infra.models.registry.model_message_type_entry import (
 from omnibase_infra.protocols.protocol_message_type_registry import (
     ProtocolMessageTypeRegistry,
 )
+from omnibase_infra.runtime.registry.mixin_message_type_query import (
+    MixinMessageTypeQuery,
+)
+from omnibase_infra.runtime.registry.mixin_message_type_registration import (
+    MixinMessageTypeRegistration,
+)
 from omnibase_infra.runtime.registry.registry_event_bus_binding import (
-    EventBusBindingRegistry,
+    RegistryEventBusBinding,
 )
 from omnibase_infra.runtime.registry.registry_message_type import (
-    MessageTypeRegistry,
     MessageTypeRegistryError,
+    RegistryMessageType,
+    extract_domain_from_topic,
 )
 from omnibase_infra.runtime.registry.registry_protocol_binding import (
-    ProtocolBindingRegistry,
     RegistryError,
+    RegistryProtocolBinding,
 )
 
 __all__: list[str] = [
-    # Event bus binding registry
-    "EventBusBindingRegistry",
-    # Registry implementation
-    "MessageTypeRegistry",
     "MessageTypeRegistryError",
+    # Mixins
+    "MixinMessageTypeQuery",
+    "MixinMessageTypeRegistration",
     "ModelDomainConstraint",
     # Models
     "ModelMessageTypeEntry",
-    # Protocol binding registry
-    "ProtocolBindingRegistry",
     # Protocol
     "ProtocolMessageTypeRegistry",
     # Registry error
     "RegistryError",
+    # Event bus binding registry
+    "RegistryEventBusBinding",
+    # Registry implementation
+    "RegistryMessageType",
+    # Protocol binding registry
+    "RegistryProtocolBinding",
+    # Utility functions
+    "extract_domain_from_topic",
 ]

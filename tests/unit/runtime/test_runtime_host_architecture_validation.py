@@ -68,7 +68,7 @@ from omnibase_infra.nodes.architecture_validator import (
 )
 
 # Import RuntimeHostProcess (should always be available)
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.conftest import seed_mock_handlers
 
 # =============================================================================
@@ -154,7 +154,7 @@ class TestNoRulesConfigured:
         # Mock the rest of start() to prevent actual startup
         with (
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),
@@ -176,7 +176,7 @@ class TestNoRulesConfigured:
 
         with (
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),
@@ -236,7 +236,7 @@ class TestErrorSeverityBlocksStartup:
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),
@@ -364,7 +364,7 @@ class TestWarningSeverityDoesntBlock:
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),
@@ -409,7 +409,7 @@ class TestWarningSeverityDoesntBlock:
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),
@@ -476,7 +476,7 @@ class TestValidationOrder:
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch(
-                "omnibase_infra.runtime.runtime_host_process.wire_handlers",
+                "omnibase_infra.runtime.service_runtime_host_process.wire_handlers",
                 side_effect=track_wire_handlers,
             ),
             patch.object(
@@ -526,7 +526,7 @@ class TestContainerHandling:
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),
@@ -576,7 +576,7 @@ class TestContainerHandling:
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),
@@ -641,7 +641,7 @@ class TestPassingValidation:
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),
@@ -676,7 +676,7 @@ class TestPassingValidation:
         with (
             patch.object(process, "_get_handler_registry") as mock_get_registry,
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
-            patch("omnibase_infra.runtime.runtime_host_process.wire_handlers"),
+            patch("omnibase_infra.runtime.service_runtime_host_process.wire_handlers"),
             patch.object(
                 process, "_populate_handlers_from_registry", new_callable=AsyncMock
             ),

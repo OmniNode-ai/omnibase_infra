@@ -15,26 +15,22 @@ Architecture:
 
 Related:
     - NodeRegistrationStorageEffect: Effect node that uses these dependencies
-    - ProtocolRegistrationStorageHandler: Protocol for storage backends
+    - ProtocolRegistrationPersistence: Protocol for storage backends
     - ModelONEXContainer: ONEX dependency injection container
 """
 
 from __future__ import annotations
 
-__all__ = ["RegistryInfraRegistrationStorage"]
-
 from typing import TYPE_CHECKING, cast
-from uuid import uuid4
-
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
     from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
-        ProtocolRegistrationStorageHandler,
+        ProtocolRegistrationPersistence,
     )
+
+__all__ = ["RegistryInfraRegistrationStorage"]
 
 
 class RegistryInfraRegistrationStorage:
@@ -70,7 +66,8 @@ class RegistryInfraRegistrationStorage:
     """
 
     # Protocol key for container registration
-    PROTOCOL_KEY = "protocol_registration_storage_handler"
+    # Aligned with protocol name: ProtocolRegistrationPersistence
+    PROTOCOL_KEY = "protocol_registration_persistence"
 
     # Default handler type when multiple are registered
     DEFAULT_HANDLER_TYPE = "postgresql"
@@ -96,7 +93,7 @@ class RegistryInfraRegistrationStorage:
             container.service_registry[
                 RegistryInfraRegistrationStorage.PROTOCOL_KEY
             ] = {
-                "protocol": "ProtocolRegistrationStorageHandler",
+                "protocol": "ProtocolRegistrationPersistence",
                 "module": "omnibase_infra.nodes.node_registration_storage_effect.protocols",
                 "description": "Protocol for registration storage backends",
                 "pluggable": True,
@@ -106,42 +103,45 @@ class RegistryInfraRegistrationStorage:
     @staticmethod
     def register_handler(
         container: ModelONEXContainer,
-        handler: ProtocolRegistrationStorageHandler,
+        handler: ProtocolRegistrationPersistence,
     ) -> None:
         """Register a specific storage handler with the container.
 
         Binds a concrete handler implementation to the protocol key.
-        The handler must implement ProtocolRegistrationStorageHandler.
+        The handler must implement ProtocolRegistrationPersistence.
 
         Args:
             container: ONEX dependency injection container.
             handler: Handler implementation to register.
 
         Raises:
-            ProtocolConfigurationError: If handler does not implement ProtocolRegistrationStorageHandler.
+            TypeError: If handler does not implement ProtocolRegistrationPersistence.
 
         Example:
             >>> from omnibase_infra.handlers.registration_storage import (
-            ...     HandlerPostgresRegistrationStorage,
+            ...     HandlerRegistrationStoragePostgres,
             ... )
-            >>> handler = HandlerPostgresRegistrationStorage(pool, config)
+            >>> handler = HandlerRegistrationStoragePostgres(pool, config)
             >>> RegistryInfraRegistrationStorage.register_handler(container, handler)
         """
         # Import at runtime for isinstance check (protocol is @runtime_checkable)
         from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
-            ProtocolRegistrationStorageHandler,
+            ProtocolRegistrationPersistence,
         )
 
-        if not isinstance(handler, ProtocolRegistrationStorageHandler):
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="register_handler",
-                correlation_id=uuid4(),
-            )
-            raise ProtocolConfigurationError(
-                f"Handler must implement ProtocolRegistrationStorageHandler, "
-                f"got {type(handler).__name__}",
-                context=context,
+        # NOTE: isinstance() is intentionally used here instead of duck typing for:
+        # 1. Fail-fast validation: Immediately reject invalid handlers at registration
+        #    time rather than discovering missing methods at runtime during operations
+        # 2. Type safety: The @runtime_checkable decorator enables structural subtyping
+        #    checks that verify all required Protocol methods exist
+        # 3. Clear error messages: TypeError with specific protocol name aids debugging
+        # Duck typing (hasattr checks) would defer validation to method call time,
+        # making it harder to diagnose misconfigured handlers.
+        # See: conftest.py "Protocol Compliance Strategy" for when to use each approach.
+        if not isinstance(handler, ProtocolRegistrationPersistence):
+            raise TypeError(
+                f"Handler must implement ProtocolRegistrationPersistence, "
+                f"got {type(handler).__name__}"
             )
 
         if container.service_registry is None:
@@ -165,7 +165,7 @@ class RegistryInfraRegistrationStorage:
     def get_handler(
         container: ModelONEXContainer,
         handler_type: str | None = None,
-    ) -> ProtocolRegistrationStorageHandler | None:
+    ) -> ProtocolRegistrationPersistence | None:
         """Retrieve a registered storage handler from the container.
 
         Args:
@@ -192,4 +192,4 @@ class RegistryInfraRegistrationStorage:
             handler_key = RegistryInfraRegistrationStorage.PROTOCOL_KEY + ".default"
 
         result = container.service_registry.get(handler_key)
-        return cast("ProtocolRegistrationStorageHandler | None", result)
+        return cast("ProtocolRegistrationPersistence | None", result)

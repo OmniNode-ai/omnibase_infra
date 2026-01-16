@@ -34,7 +34,7 @@ Enums:
     EnumHealthStatus: Health status values (HEALTHY, UNHEALTHY, UNKNOWN).
 
 Protocol:
-    ProtocolServiceDiscoveryHandler: Protocol for pluggable backends.
+    ProtocolDiscoveryOperations: Protocol for pluggable backends.
 
 Registry:
     RegistryInfraServiceDiscovery: DI registry for node dependencies.
@@ -87,7 +87,7 @@ from .node import (
     NodeServiceDiscoveryEffect,
 )
 from .protocols import (
-    ProtocolServiceDiscoveryHandler,
+    ProtocolDiscoveryOperations,
 )
 from .registry import (
     RegistryInfraServiceDiscovery,
@@ -105,7 +105,7 @@ __all__ = [
     "ModelServiceInfo",
     "ModelServiceRegistration",
     # Protocol
-    "ProtocolServiceDiscoveryHandler",
+    "ProtocolDiscoveryOperations",
     # Registry
     "RegistryInfraServiceDiscovery",
 ]

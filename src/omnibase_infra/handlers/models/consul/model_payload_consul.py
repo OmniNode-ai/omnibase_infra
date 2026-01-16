@@ -55,7 +55,7 @@ class ModelPayloadConsul(BaseModel):
         - EnumConsulOperationType: Enum of valid operation types
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     operation_type: str
     """Operation type identifier used for type discrimination."""

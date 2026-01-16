@@ -214,7 +214,7 @@ def run_contracts(verbose: bool = False) -> bool:
 
     # Phase 2: Infrastructure contract linting
     try:
-        from omnibase_infra.validation.contract_linter import (
+        from omnibase_infra.validation.linter_contract import (
             EnumContractViolationSeverity,
             lint_contracts_in_directory,
         )
@@ -324,7 +324,7 @@ def run_any_types(verbose: bool = False) -> bool:
         return True
 
     try:
-        from omnibase_infra.validation.any_type_validator import validate_any_types_ci
+        from omnibase_infra.validation.validator_any_type import validate_any_types_ci
 
         result = validate_any_types_ci(src_path)
 

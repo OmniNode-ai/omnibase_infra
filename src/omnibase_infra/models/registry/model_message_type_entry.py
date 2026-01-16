@@ -15,7 +15,7 @@ Design Principles:
 Related:
     - OMN-937: Central Message Type Registry implementation
     - ModelDomainConstraint: Domain ownership rules
-    - MessageTypeRegistry: Uses entries for handler resolution
+    - RegistryMessageType: Uses entries for handler resolution
 
 .. versionadded:: 0.5.0
 """

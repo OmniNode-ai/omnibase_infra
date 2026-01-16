@@ -16,11 +16,13 @@ Supported transport types:
     - RUNTIME: Runtime host internal transport
     - MCP: Model Context Protocol (AI agent tool interface)
     - FILESYSTEM: Local filesystem operations
+    - INMEMORY: In-memory transport for testing/local development
 
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
     - HandlerVault: Secret retrieval, token management, lease renewal
-    - KafkaEventBus: Event publishing/subscription, consumer groups
+    - EventBusKafka: Event publishing/subscription, consumer groups
+    - EventBusInmemory: In-memory event bus for testing and local development
     - PostgresConnectionManager: Connection pooling, query execution
     - HandlerMCP: MCP server for exposing ONEX nodes as AI agent tools
     - HandlerFileSystem: File read/write, directory operations
@@ -46,6 +48,7 @@ class EnumInfraTransportType(str, Enum):
         RUNTIME: Runtime host process internal transport
         MCP: Model Context Protocol transport for AI agent integration
         FILESYSTEM: Local filesystem transport
+        INMEMORY: In-memory transport for testing and local development
     """
 
     HTTP = "http"
@@ -58,6 +61,7 @@ class EnumInfraTransportType(str, Enum):
     RUNTIME = "runtime"
     MCP = "mcp"
     FILESYSTEM = "filesystem"
+    INMEMORY = "inmemory"
 
 
 __all__ = ["EnumInfraTransportType"]

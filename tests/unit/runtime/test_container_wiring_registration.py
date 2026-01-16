@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from omnibase_infra.runtime.container_wiring import (
+from omnibase_infra.runtime.util_container_wiring import (
     get_handler_node_introspected_from_container,
     get_handler_node_registration_acked_from_container,
     get_handler_runtime_tick_from_container,
@@ -329,7 +329,9 @@ class TestWireInfrastructureServicesValidation:
     async def test_raises_error_on_missing_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+        from omnibase_infra.runtime.util_container_wiring import (
+            wire_infrastructure_services,
+        )
 
         mock_container = MagicMock(spec=[])  # No service_registry attribute
         del mock_container.service_registry
@@ -344,7 +346,9 @@ class TestWireInfrastructureServicesValidation:
     async def test_raises_error_on_none_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry is None."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+        from omnibase_infra.runtime.util_container_wiring import (
+            wire_infrastructure_services,
+        )
 
         mock_container = MagicMock()
         mock_container.service_registry = None
@@ -359,7 +363,9 @@ class TestWireInfrastructureServicesValidation:
     async def test_error_contains_operation_name(self) -> None:
         """Test that error message includes operation context."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+        from omnibase_infra.runtime.util_container_wiring import (
+            wire_infrastructure_services,
+        )
 
         mock_container = MagicMock()
         mock_container.service_registry = None
@@ -371,14 +377,14 @@ class TestWireInfrastructureServicesValidation:
         assert "wire_infrastructure_services" in str(exc_info.value)
 
 
-class TestGetPolicyRegistryFromContainerValidation:
+class TestGetRegistryPolicyFromContainerValidation:
     """Tests for get_policy_registry_from_container service_registry validation."""
 
     @pytest.mark.asyncio
     async def test_raises_error_on_missing_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_policy_registry_from_container,
         )
 
@@ -395,7 +401,7 @@ class TestGetPolicyRegistryFromContainerValidation:
     async def test_raises_error_on_none_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry is None."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_policy_registry_from_container,
         )
 
@@ -412,7 +418,7 @@ class TestGetPolicyRegistryFromContainerValidation:
     async def test_error_contains_operation_name(self) -> None:
         """Test that error message includes operation context."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_policy_registry_from_container,
         )
 
@@ -423,7 +429,7 @@ class TestGetPolicyRegistryFromContainerValidation:
             await get_policy_registry_from_container(mock_container)
 
         # Verify operation name is in the error message
-        assert "resolve PolicyRegistry" in str(exc_info.value)
+        assert "resolve RegistryPolicy" in str(exc_info.value)
 
 
 class TestGetComputeRegistryFromContainerValidation:
@@ -433,7 +439,7 @@ class TestGetComputeRegistryFromContainerValidation:
     async def test_raises_error_on_missing_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_compute_registry_from_container,
         )
 
@@ -450,7 +456,7 @@ class TestGetComputeRegistryFromContainerValidation:
     async def test_raises_error_on_none_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry is None."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_compute_registry_from_container,
         )
 
@@ -467,7 +473,7 @@ class TestGetComputeRegistryFromContainerValidation:
     async def test_error_contains_operation_name(self) -> None:
         """Test that error message includes operation context."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_compute_registry_from_container,
         )
 
@@ -488,7 +494,7 @@ class TestGetHandlerRegistryFromContainerValidation:
     async def test_raises_error_on_missing_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_handler_registry_from_container,
         )
 
@@ -505,7 +511,7 @@ class TestGetHandlerRegistryFromContainerValidation:
     async def test_raises_error_on_none_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry is None."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_handler_registry_from_container,
         )
 
@@ -522,7 +528,7 @@ class TestGetHandlerRegistryFromContainerValidation:
     async def test_error_contains_operation_name(self) -> None:
         """Test that error message includes operation context."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_handler_registry_from_container,
         )
 
@@ -533,22 +539,22 @@ class TestGetHandlerRegistryFromContainerValidation:
             await get_handler_registry_from_container(mock_container)
 
         # Verify operation name is in the error message
-        assert "resolve ProtocolBindingRegistry" in str(exc_info.value)
+        assert "resolve RegistryProtocolBinding" in str(exc_info.value)
 
 
-class TestGetOrCreatePolicyRegistryValidation:
+class TestGetOrCreateRegistryPolicyValidation:
     """Tests for get_or_create_policy_registry service_registry validation.
 
     OMN-1021: Added tests for None service_registry handling in
     get_or_create_policy_registry, which calls _validate_service_registry
-    before attempting to resolve or create the PolicyRegistry.
+    before attempting to resolve or create the RegistryPolicy.
     """
 
     @pytest.mark.asyncio
     async def test_raises_error_on_missing_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_or_create_policy_registry,
         )
 
@@ -565,7 +571,7 @@ class TestGetOrCreatePolicyRegistryValidation:
     async def test_raises_error_on_none_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry is None."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_or_create_policy_registry,
         )
 
@@ -582,7 +588,7 @@ class TestGetOrCreatePolicyRegistryValidation:
     async def test_error_contains_operation_name(self) -> None:
         """Test that error message includes operation context."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_or_create_policy_registry,
         )
 
@@ -593,7 +599,7 @@ class TestGetOrCreatePolicyRegistryValidation:
             await get_or_create_policy_registry(mock_container)
 
         # Verify operation name is in the error message
-        assert "get_or_create PolicyRegistry" in str(exc_info.value)
+        assert "get_or_create RegistryPolicy" in str(exc_info.value)
 
 
 class TestGetOrCreateComputeRegistryValidation:
@@ -608,7 +614,7 @@ class TestGetOrCreateComputeRegistryValidation:
     async def test_raises_error_on_missing_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry attribute is missing."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_or_create_compute_registry,
         )
 
@@ -625,7 +631,7 @@ class TestGetOrCreateComputeRegistryValidation:
     async def test_raises_error_on_none_service_registry(self) -> None:
         """Test ServiceRegistryUnavailableError when service_registry is None."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_or_create_compute_registry,
         )
 
@@ -642,7 +648,7 @@ class TestGetOrCreateComputeRegistryValidation:
     async def test_error_contains_operation_name(self) -> None:
         """Test that error message includes operation context."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             get_or_create_compute_registry,
         )
 
@@ -667,7 +673,7 @@ class TestWireRegistrationDispatchersValidation:
         before attempting to wire dispatchers.
         """
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             wire_registration_dispatchers,
         )
 
@@ -689,7 +695,7 @@ class TestWireRegistrationDispatchersValidation:
         attribute exists but is set to None (e.g., when enable_service_registry=False).
         """
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             wire_registration_dispatchers,
         )
 
@@ -707,7 +713,7 @@ class TestWireRegistrationDispatchersValidation:
     async def test_error_contains_operation_name(self) -> None:
         """Test that error message includes operation context."""
         from omnibase_infra.errors import ServiceRegistryUnavailableError
-        from omnibase_infra.runtime.container_wiring import (
+        from omnibase_infra.runtime.util_container_wiring import (
             wire_registration_dispatchers,
         )
 

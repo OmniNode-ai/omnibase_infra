@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Shared pytest fixtures for idempotency store tests.
 
-Provides common fixtures for PostgresIdempotencyStore testing including
+Provides common fixtures for StoreIdempotencyPostgres testing including
 configuration objects and initialized store instances with mocked asyncpg pools.
 """
 
@@ -16,7 +16,7 @@ import pytest
 
 from omnibase_infra.idempotency import (
     ModelPostgresIdempotencyStoreConfig,
-    PostgresIdempotencyStore,
+    StoreIdempotencyPostgres,
 )
 
 
@@ -50,40 +50,40 @@ def postgres_config_extended() -> ModelPostgresIdempotencyStoreConfig:
 @pytest.fixture
 def postgres_store(
     postgres_config: ModelPostgresIdempotencyStoreConfig,
-) -> PostgresIdempotencyStore:
+) -> StoreIdempotencyPostgres:
     """Create PostgreSQL idempotency store for tests.
 
     Returns an uninitialized store instance.
     """
-    return PostgresIdempotencyStore(postgres_config)
+    return StoreIdempotencyPostgres(postgres_config)
 
 
 @pytest.fixture
 def store(
     postgres_config: ModelPostgresIdempotencyStoreConfig,
-) -> PostgresIdempotencyStore:
+) -> StoreIdempotencyPostgres:
     """Alias for postgres_store fixture for convenience.
 
     Returns an uninitialized store instance.
     """
-    return PostgresIdempotencyStore(postgres_config)
+    return StoreIdempotencyPostgres(postgres_config)
 
 
 @pytest.fixture
 def postgres_store_extended(
     postgres_config_extended: ModelPostgresIdempotencyStoreConfig,
-) -> PostgresIdempotencyStore:
+) -> StoreIdempotencyPostgres:
     """Create PostgreSQL idempotency store with extended config.
 
     Returns an uninitialized store instance with extended configuration.
     """
-    return PostgresIdempotencyStore(postgres_config_extended)
+    return StoreIdempotencyPostgres(postgres_config_extended)
 
 
 @pytest.fixture
 async def initialized_postgres_store(
     postgres_config: ModelPostgresIdempotencyStoreConfig,
-) -> AsyncIterator[PostgresIdempotencyStore]:
+) -> AsyncIterator[StoreIdempotencyPostgres]:
     """Create and initialize PostgreSQL idempotency store with mocked pool.
 
     Yields an initialized store with mocked asyncpg pool for testing
@@ -91,7 +91,7 @@ async def initialized_postgres_store(
 
     The store is properly shut down after the test completes.
     """
-    store = PostgresIdempotencyStore(postgres_config)
+    store = StoreIdempotencyPostgres(postgres_config)
     mock_pool = MagicMock(spec=asyncpg.Pool)
     mock_conn = AsyncMock()
     mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)

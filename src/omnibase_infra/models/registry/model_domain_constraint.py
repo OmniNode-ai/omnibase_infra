@@ -21,7 +21,7 @@ Topic Domain Extraction:
 
 Related:
     - OMN-937: Central Message Type Registry implementation
-    - MessageTypeRegistry: Uses domain constraints for validation
+    - RegistryMessageType: Uses domain constraints for validation
 
 .. versionadded:: 0.5.0
 """

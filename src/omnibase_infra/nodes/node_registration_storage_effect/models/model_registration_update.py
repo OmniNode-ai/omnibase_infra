@@ -54,7 +54,7 @@ class ModelRegistrationUpdate(BaseModel):
         ... )
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     endpoints: dict[str, str] | None = Field(
         default=None,

@@ -45,7 +45,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from tests.chaos.conftest import (
     ChaosConfig,
     ChaosEffectExecutor,
@@ -74,7 +74,7 @@ class TimeoutEffectExecutor:
     def __init__(
         self,
         timeout_seconds: float,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         backend_client: MagicMock,
     ) -> None:
         """Initialize the timeout effect executor.
@@ -176,9 +176,9 @@ class TimeoutEffectExecutor:
 
 
 @pytest.fixture
-def timeout_idempotency_store() -> InMemoryIdempotencyStore:
+def timeout_idempotency_store() -> StoreIdempotencyInmemory:
     """Create in-memory idempotency store for timeout testing."""
-    return InMemoryIdempotencyStore()
+    return StoreIdempotencyInmemory()
 
 
 @pytest.fixture
@@ -191,7 +191,7 @@ def mock_backend() -> MagicMock:
 
 @pytest.fixture
 def fast_timeout_executor(
-    timeout_idempotency_store: InMemoryIdempotencyStore,
+    timeout_idempotency_store: StoreIdempotencyInmemory,
     mock_backend: MagicMock,
 ) -> TimeoutEffectExecutor:
     """Create executor with fast (0.1s) timeout."""
@@ -204,7 +204,7 @@ def fast_timeout_executor(
 
 @pytest.fixture
 def slow_timeout_executor(
-    timeout_idempotency_store: InMemoryIdempotencyStore,
+    timeout_idempotency_store: StoreIdempotencyInmemory,
     mock_backend: MagicMock,
 ) -> TimeoutEffectExecutor:
     """Create executor with slow (1.0s) timeout."""
@@ -342,7 +342,7 @@ class TestTimeoutHandling:
     @pytest.mark.asyncio
     async def test_timeout_does_not_prevent_retry(
         self,
-        timeout_idempotency_store: InMemoryIdempotencyStore,
+        timeout_idempotency_store: StoreIdempotencyInmemory,
         mock_backend: MagicMock,
     ) -> None:
         """Test that timeout does not prevent subsequent retry.
@@ -383,7 +383,7 @@ class TestTimeoutHandling:
     @pytest.mark.asyncio
     async def test_concurrent_timeouts_are_independent(
         self,
-        timeout_idempotency_store: InMemoryIdempotencyStore,
+        timeout_idempotency_store: StoreIdempotencyInmemory,
         mock_backend: MagicMock,
     ) -> None:
         """Test that concurrent operations have independent timeouts.
@@ -470,7 +470,7 @@ class TestTimeoutCleanup:
     @pytest.mark.asyncio
     async def test_backend_not_called_after_timeout(
         self,
-        timeout_idempotency_store: InMemoryIdempotencyStore,
+        timeout_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Test that backend is not called after timeout is raised.
 
@@ -549,7 +549,7 @@ class TestTimeoutWithIdempotency:
     @pytest.mark.asyncio
     async def test_idempotency_check_before_timeout(
         self,
-        timeout_idempotency_store: InMemoryIdempotencyStore,
+        timeout_idempotency_store: StoreIdempotencyInmemory,
         mock_backend: MagicMock,
     ) -> None:
         """Test that idempotency is checked before timeout can occur.
@@ -588,7 +588,7 @@ class TestTimeoutWithIdempotency:
     @pytest.mark.asyncio
     async def test_timeout_after_idempotency_records_attempt(
         self,
-        timeout_idempotency_store: InMemoryIdempotencyStore,
+        timeout_idempotency_store: StoreIdempotencyInmemory,
         mock_backend: MagicMock,
     ) -> None:
         """Test that idempotency records the attempt even on timeout.

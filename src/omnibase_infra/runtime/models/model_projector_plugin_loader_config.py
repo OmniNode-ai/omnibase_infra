@@ -33,7 +33,7 @@ class ModelProjectorPluginLoaderConfig(BaseModel):
             If None, uses the paths provided to discovery methods.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     graceful_mode: bool = Field(
         default=False,

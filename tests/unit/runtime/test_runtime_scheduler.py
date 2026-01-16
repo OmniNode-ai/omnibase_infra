@@ -56,10 +56,10 @@ from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
 
 @pytest.fixture
 def mock_event_bus() -> AsyncMock:
-    """Mock KafkaEventBus for testing.
+    """Mock EventBusKafka for testing.
 
     Returns:
-        AsyncMock configured to simulate KafkaEventBus behavior.
+        AsyncMock configured to simulate EventBusKafka behavior.
     """
     bus = AsyncMock()
     bus.publish = AsyncMock(return_value=None)

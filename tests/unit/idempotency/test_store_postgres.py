@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # mypy: disable-error-code="index, operator, arg-type"
-"""Unit tests for PostgresIdempotencyStore.
+"""Unit tests for StoreIdempotencyPostgres.
 
 Comprehensive test suite covering initialization, atomic check-and-record,
 idempotency verification, cleanup, error handling, and lifecycle management.
@@ -35,15 +35,15 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.idempotency import (
     ModelPostgresIdempotencyStoreConfig,
-    PostgresIdempotencyStore,
+    StoreIdempotencyPostgres,
 )
 
 
 class TestPostgresIdempotencyStoreInitialization:
-    """Test suite for PostgresIdempotencyStore initialization."""
+    """Test suite for StoreIdempotencyPostgres initialization."""
 
     def test_store_init_default_state(
-        self, postgres_store_extended: PostgresIdempotencyStore
+        self, postgres_store_extended: StoreIdempotencyPostgres
     ) -> None:
         """Test store initializes in uninitialized state."""
         assert postgres_store_extended.is_initialized is False
@@ -51,7 +51,7 @@ class TestPostgresIdempotencyStoreInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_creates_pool_and_table(
-        self, store: PostgresIdempotencyStore
+        self, store: StoreIdempotencyPostgres
     ) -> None:
         """Test initialize creates asyncpg pool and ensures table exists."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
@@ -79,7 +79,7 @@ class TestPostgresIdempotencyStoreInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_creates_domain_index(
-        self, store: PostgresIdempotencyStore
+        self, store: StoreIdempotencyPostgres
     ) -> None:
         """Test initialize creates index on domain column for query performance."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
@@ -108,7 +108,7 @@ class TestPostgresIdempotencyStoreInitialization:
         await store.shutdown()
 
     @pytest.mark.asyncio
-    async def test_initialize_idempotent(self, store: PostgresIdempotencyStore) -> None:
+    async def test_initialize_idempotent(self, store: StoreIdempotencyPostgres) -> None:
         """Test calling initialize multiple times is safe."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -128,7 +128,7 @@ class TestPostgresIdempotencyStoreInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_auth_error_raises_infra_connection_error(
-        self, store: PostgresIdempotencyStore
+        self, store: StoreIdempotencyPostgres
     ) -> None:
         """Test initialize with auth failure raises InfraConnectionError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -141,7 +141,7 @@ class TestPostgresIdempotencyStoreInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_database_not_found_raises_error(
-        self, store: PostgresIdempotencyStore
+        self, store: StoreIdempotencyPostgres
     ) -> None:
         """Test initialize with invalid database raises InfraConnectionError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -154,7 +154,7 @@ class TestPostgresIdempotencyStoreInitialization:
 
     @pytest.mark.asyncio
     async def test_initialize_connection_error_raises_infra_connection_error(
-        self, store: PostgresIdempotencyStore
+        self, store: StoreIdempotencyPostgres
     ) -> None:
         """Test initialize with network error raises InfraConnectionError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
@@ -188,7 +188,7 @@ class TestPostgresIdempotencyStoreTableNameValidation:
                 table_name=name,
             )
             # Should not raise - constructor succeeds
-            store = PostgresIdempotencyStore(config)
+            store = StoreIdempotencyPostgres(config)
             assert store._config.table_name == name
 
     def test_invalid_table_name_raises_protocol_configuration_error(self) -> None:
@@ -212,7 +212,7 @@ class TestPostgresIdempotencyStoreTableNameValidation:
                     dsn="postgresql://user:pass@localhost:5432/db",
                     table_name=name,
                 )
-                PostgresIdempotencyStore(config)
+                StoreIdempotencyPostgres(config)
 
     def test_sql_injection_attempt_rejected(self) -> None:
         """Test SQL injection attempts are rejected by table name validation."""
@@ -229,7 +229,7 @@ class TestPostgresIdempotencyStoreTableNameValidation:
                     dsn="postgresql://user:pass@localhost:5432/db",
                     table_name=name,
                 )
-                PostgresIdempotencyStore(config)
+                StoreIdempotencyPostgres(config)
 
 
 class TestPostgresIdempotencyStoreCheckAndRecord:
@@ -237,7 +237,7 @@ class TestPostgresIdempotencyStoreCheckAndRecord:
 
     @pytest.mark.asyncio
     async def test_check_and_record_new_message_returns_true(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test check_and_record returns True for new message."""
         mock_conn = AsyncMock()
@@ -258,7 +258,7 @@ class TestPostgresIdempotencyStoreCheckAndRecord:
 
     @pytest.mark.asyncio
     async def test_check_and_record_duplicate_returns_false(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test check_and_record returns False for duplicate message."""
         mock_conn = AsyncMock()
@@ -278,7 +278,7 @@ class TestPostgresIdempotencyStoreCheckAndRecord:
 
     @pytest.mark.asyncio
     async def test_check_and_record_without_domain(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test check_and_record works with None domain."""
         mock_conn = AsyncMock()
@@ -300,7 +300,7 @@ class TestPostgresIdempotencyStoreCheckAndRecord:
 
     @pytest.mark.asyncio
     async def test_check_and_record_not_initialized_raises_error(
-        self, postgres_store: PostgresIdempotencyStore
+        self, postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test check_and_record raises error if not initialized."""
         with pytest.raises(RuntimeHostError) as exc_info:
@@ -310,7 +310,7 @@ class TestPostgresIdempotencyStoreCheckAndRecord:
 
     @pytest.mark.asyncio
     async def test_check_and_record_timeout_raises_infra_timeout_error(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test check_and_record raises InfraTimeoutError on timeout."""
         mock_conn = AsyncMock()
@@ -326,7 +326,7 @@ class TestPostgresIdempotencyStoreCheckAndRecord:
 
     @pytest.mark.asyncio
     async def test_check_and_record_connection_lost_raises_error(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test check_and_record raises InfraConnectionError on connection loss."""
         mock_conn = AsyncMock()
@@ -348,7 +348,7 @@ class TestPostgresIdempotencyStoreIsProcessed:
 
     @pytest.mark.asyncio
     async def test_is_processed_returns_true_when_exists(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test is_processed returns True when record exists."""
         mock_conn = AsyncMock()
@@ -363,7 +363,7 @@ class TestPostgresIdempotencyStoreIsProcessed:
 
     @pytest.mark.asyncio
     async def test_is_processed_returns_false_when_not_exists(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test is_processed returns False when record does not exist."""
         mock_conn = AsyncMock()
@@ -382,7 +382,7 @@ class TestPostgresIdempotencyStoreMarkProcessed:
 
     @pytest.mark.asyncio
     async def test_mark_processed_inserts_record(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test mark_processed inserts new record."""
         mock_conn = AsyncMock()
@@ -402,7 +402,7 @@ class TestPostgresIdempotencyStoreMarkProcessed:
 
     @pytest.mark.asyncio
     async def test_mark_processed_with_naive_datetime_raises_error(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test mark_processed raises RuntimeHostError for naive datetime.
 
@@ -426,7 +426,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
 
     @pytest.mark.asyncio
     async def test_cleanup_expired_removes_old_records(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test cleanup_expired removes records older than TTL."""
         mock_conn = AsyncMock()
@@ -442,7 +442,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
 
     @pytest.mark.asyncio
     async def test_cleanup_expired_returns_zero_when_nothing_to_delete(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test cleanup_expired returns 0 when no records match."""
         mock_conn = AsyncMock()
@@ -473,7 +473,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
             dsn="postgresql://user:pass@localhost:5432/testdb",
             clock_skew_tolerance_seconds=120,  # 2 minutes tolerance
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
 
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -519,7 +519,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
             dsn="postgresql://user:pass@localhost:5432/testdb",
             clock_skew_tolerance_seconds=0,  # No tolerance
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
 
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -561,7 +561,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
             cleanup_batch_size=100,  # Small batch size for testing
             cleanup_max_iterations=10,
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
 
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -604,7 +604,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
             cleanup_batch_size=100,
             cleanup_max_iterations=10,
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
 
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -642,7 +642,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
             cleanup_batch_size=100,
             cleanup_max_iterations=3,  # Limit to 3 iterations
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
 
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -678,7 +678,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
             cleanup_batch_size=10000,  # Default
             cleanup_max_iterations=100,
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
 
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -717,7 +717,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
             cleanup_batch_size=100,
             cleanup_max_iterations=100,  # Default high
         )
-        store = PostgresIdempotencyStore(config)
+        store = StoreIdempotencyPostgres(config)
 
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -748,7 +748,7 @@ class TestPostgresIdempotencyStoreCleanupExpired:
 
     @pytest.mark.asyncio
     async def test_cleanup_expired_batched_sql_uses_limit(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test cleanup_expired uses LIMIT clause for batched deletion.
 
@@ -783,7 +783,7 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_returns_true_when_read_and_table_check_succeed(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test health_check returns True when read and table check both work.
 
@@ -809,7 +809,7 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_when_table_not_found(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test health_check returns False when table does not exist."""
         mock_conn = AsyncMock()
@@ -828,7 +828,7 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_when_not_initialized(
-        self, postgres_store: PostgresIdempotencyStore
+        self, postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test health_check returns False when not initialized."""
         result = await postgres_store.health_check()
@@ -838,7 +838,7 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_on_read_error(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test health_check returns False when read check fails."""
         mock_conn = AsyncMock()
@@ -855,7 +855,7 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_on_table_check_error(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test health_check returns False when table check fails.
 
@@ -877,7 +877,7 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_on_acquire_error(
-        self, initialized_postgres_store: PostgresIdempotencyStore
+        self, initialized_postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test health_check returns False when acquiring connection fails."""
         initialized_postgres_store._pool.acquire.return_value.__aenter__ = AsyncMock(
@@ -896,7 +896,7 @@ class TestPostgresIdempotencyStoreLifecycle:
 
     @pytest.mark.asyncio
     async def test_shutdown_closes_pool(
-        self, postgres_store: PostgresIdempotencyStore
+        self, postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test shutdown closes the connection pool."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
@@ -920,7 +920,7 @@ class TestPostgresIdempotencyStoreLifecycle:
 
     @pytest.mark.asyncio
     async def test_shutdown_idempotent(
-        self, postgres_store: PostgresIdempotencyStore
+        self, postgres_store: StoreIdempotencyPostgres
     ) -> None:
         """Test shutdown can be called multiple times safely."""
         # Shutdown without initialization should be safe

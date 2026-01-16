@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Race condition and concurrent access tests for InMemoryEventBus.
+"""Race condition and concurrent access tests for EventBusInmemory.
 
 This module provides comprehensive async race condition tests for:
 - Concurrent publish operations
@@ -28,7 +28,7 @@ from collections.abc import Awaitable, Callable
 import pytest
 
 from omnibase_infra.errors import InfraUnavailableError
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
 
 # =============================================================================
@@ -37,9 +37,9 @@ from omnibase_infra.event_bus.models import ModelEventMessage
 
 
 @pytest.fixture
-def event_bus() -> InMemoryEventBus:
-    """Create a fresh InMemoryEventBus instance for each test."""
-    return InMemoryEventBus(
+def event_bus() -> EventBusInmemory:
+    """Create a fresh EventBusInmemory instance for each test."""
+    return EventBusInmemory(
         environment="test",
         group="test-group",
         max_history=10000,  # Large history to avoid truncation during tests
@@ -57,7 +57,7 @@ class TestConcurrentPublishOperations:
 
     @pytest.mark.asyncio
     async def test_concurrent_publish_same_topic(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test concurrent publishes to the same topic maintain data integrity."""
         await event_bus.start()
@@ -88,7 +88,7 @@ class TestConcurrentPublishOperations:
 
     @pytest.mark.asyncio
     async def test_concurrent_publish_multiple_topics(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test concurrent publishes to different topics are isolated."""
         await event_bus.start()
@@ -120,7 +120,7 @@ class TestConcurrentPublishOperations:
 
     @pytest.mark.asyncio
     async def test_concurrent_publish_with_subscribers(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test concurrent publish with active subscribers receiving all messages."""
         await event_bus.start()
@@ -156,7 +156,7 @@ class TestConcurrentPublishOperations:
 
     @pytest.mark.asyncio
     async def test_concurrent_publish_offset_uniqueness(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test that concurrent publishes get unique sequential offsets."""
         await event_bus.start()
@@ -197,7 +197,7 @@ class TestConcurrentSubscribeUnsubscribe:
 
     @pytest.mark.asyncio
     async def test_concurrent_subscribe_same_topic(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test concurrent subscriptions to the same topic."""
         await event_bus.start()
@@ -228,7 +228,7 @@ class TestConcurrentSubscribeUnsubscribe:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_concurrent_unsubscribe(self, event_bus: InMemoryEventBus) -> None:
+    async def test_concurrent_unsubscribe(self, event_bus: EventBusInmemory) -> None:
         """Test concurrent unsubscription operations."""
         await event_bus.start()
 
@@ -264,7 +264,7 @@ class TestConcurrentSubscribeUnsubscribe:
 
     @pytest.mark.asyncio
     async def test_concurrent_subscribe_unsubscribe_interleaved(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test interleaved subscribe and unsubscribe operations."""
         await event_bus.start()
@@ -293,7 +293,7 @@ class TestConcurrentSubscribeUnsubscribe:
 
     @pytest.mark.asyncio
     async def test_concurrent_double_unsubscribe_safety(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test that concurrent double unsubscribe is safe."""
         await event_bus.start()
@@ -331,7 +331,7 @@ class TestCircuitBreakerRaceConditions:
     @pytest.mark.asyncio
     async def test_concurrent_failures_trigger_circuit_open(self) -> None:
         """Test that concurrent failures properly trigger circuit breaker."""
-        event_bus = InMemoryEventBus(
+        event_bus = EventBusInmemory(
             environment="test",
             group="test-group",
             circuit_breaker_threshold=5,
@@ -370,7 +370,7 @@ class TestCircuitBreakerRaceConditions:
     @pytest.mark.asyncio
     async def test_concurrent_success_resets_circuit_breaker(self) -> None:
         """Test that successful operations reset failure count correctly."""
-        event_bus = InMemoryEventBus(
+        event_bus = EventBusInmemory(
             environment="test",
             group="test-group",
             circuit_breaker_threshold=5,
@@ -411,7 +411,7 @@ class TestCircuitBreakerRaceConditions:
     @pytest.mark.asyncio
     async def test_concurrent_circuit_reset_operations(self) -> None:
         """Test concurrent circuit reset operations are safe."""
-        event_bus = InMemoryEventBus(
+        event_bus = EventBusInmemory(
             environment="test",
             group="test-group",
             circuit_breaker_threshold=3,
@@ -456,7 +456,7 @@ class TestEventHistoryConsistency:
 
     @pytest.mark.asyncio
     async def test_concurrent_publish_and_history_read(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test reading history while publishing doesn't cause issues."""
         await event_bus.start()
@@ -494,7 +494,7 @@ class TestEventHistoryConsistency:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_concurrent_clear_history(self, event_bus: InMemoryEventBus) -> None:
+    async def test_concurrent_clear_history(self, event_bus: EventBusInmemory) -> None:
         """Test concurrent history clear operations."""
         await event_bus.start()
 
@@ -515,7 +515,7 @@ class TestEventHistoryConsistency:
     async def test_history_max_limit_under_concurrent_writes(self) -> None:
         """Test that max_history is respected under concurrent writes."""
         max_history = 100
-        event_bus = InMemoryEventBus(
+        event_bus = EventBusInmemory(
             environment="test",
             group="test-group",
             max_history=max_history,
@@ -551,7 +551,7 @@ class TestLifecycleRaceConditions:
     """Tests for lifecycle method race conditions."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_start_calls(self, event_bus: InMemoryEventBus) -> None:
+    async def test_concurrent_start_calls(self, event_bus: EventBusInmemory) -> None:
         """Test concurrent start calls are idempotent."""
         # Multiple concurrent starts should be safe
         await asyncio.gather(*[event_bus.start() for _ in range(10)])
@@ -562,7 +562,7 @@ class TestLifecycleRaceConditions:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_concurrent_close_calls(self, event_bus: InMemoryEventBus) -> None:
+    async def test_concurrent_close_calls(self, event_bus: EventBusInmemory) -> None:
         """Test concurrent close calls are safe."""
         await event_bus.start()
 
@@ -573,7 +573,7 @@ class TestLifecycleRaceConditions:
         assert health["started"] is False
 
     @pytest.mark.asyncio
-    async def test_publish_during_close(self, event_bus: InMemoryEventBus) -> None:
+    async def test_publish_during_close(self, event_bus: EventBusInmemory) -> None:
         """Test publish operations during close are handled gracefully."""
         await event_bus.start()
 
@@ -610,7 +610,7 @@ class TestLifecycleRaceConditions:
         assert success_count > 0
 
     @pytest.mark.asyncio
-    async def test_subscribe_during_close(self, event_bus: InMemoryEventBus) -> None:
+    async def test_subscribe_during_close(self, event_bus: EventBusInmemory) -> None:
         """Test subscribe operations during close."""
         await event_bus.start()
 
@@ -659,7 +659,7 @@ class TestHealthCheckRaceConditions:
     """Tests for health check consistency under concurrent operations."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_health_checks(self, event_bus: InMemoryEventBus) -> None:
+    async def test_concurrent_health_checks(self, event_bus: EventBusInmemory) -> None:
         """Test concurrent health checks return consistent data."""
         await event_bus.start()
 
@@ -683,7 +683,7 @@ class TestHealthCheckRaceConditions:
 
     @pytest.mark.asyncio
     async def test_health_check_during_operations(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Test health checks during concurrent publish/subscribe operations."""
         await event_bus.start()
@@ -730,11 +730,11 @@ class TestHealthCheckRaceConditions:
 
 
 class TestInMemoryEventBusStress:
-    """High-volume stress tests for InMemoryEventBus."""
+    """High-volume stress tests for EventBusInmemory."""
 
     @pytest.mark.asyncio
     async def test_high_volume_publish_stress(
-        self, event_bus: InMemoryEventBus
+        self, event_bus: EventBusInmemory
     ) -> None:
         """Stress test with high volume of concurrent publishes."""
         await event_bus.start()
@@ -759,7 +759,7 @@ class TestInMemoryEventBusStress:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_mixed_operations_stress(self, event_bus: InMemoryEventBus) -> None:
+    async def test_mixed_operations_stress(self, event_bus: EventBusInmemory) -> None:
         """Stress test with mixed concurrent operations."""
         await event_bus.start()
 

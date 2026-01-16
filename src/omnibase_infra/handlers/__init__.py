@@ -10,7 +10,7 @@ Handlers are responsible for:
 - Error handling and logging
 
 Available Handlers:
-- HttpRestHandler: HTTP/REST protocol handler (MVP: GET, POST only)
+- HandlerHttpRest: HTTP/REST protocol handler (MVP: GET, POST only)
 - HandlerDb: PostgreSQL database handler (MVP: query, execute only)
 - HandlerVault: HashiCorp Vault secret management handler (MVP: KV v2 secrets)
 - HandlerConsul: HashiCorp Consul service discovery handler (MVP: KV, service registration)
@@ -29,7 +29,7 @@ Response Models:
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
-from omnibase_infra.handlers.handler_http import HttpRestHandler
+from omnibase_infra.handlers.handler_http import HandlerHttpRest
 from omnibase_infra.handlers.handler_manifest_persistence import (
     HandlerManifestPersistence,
 )
@@ -50,7 +50,7 @@ __all__: list[str] = [
     "HandlerManifestPersistence",
     "HandlerMCP",
     "HandlerVault",
-    "HttpRestHandler",
+    "HandlerHttpRest",
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",
     "ModelDbDescribeResponse",

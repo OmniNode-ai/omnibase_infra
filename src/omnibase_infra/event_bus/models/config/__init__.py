@@ -6,7 +6,7 @@ This module provides Pydantic configuration models for event bus implementations
 supporting environment variable overrides and YAML-based configuration loading.
 
 Exports:
-    ModelKafkaEventBusConfig: Configuration model for KafkaEventBus
+    ModelKafkaEventBusConfig: Configuration model for EventBusKafka
 """
 
 from __future__ import annotations

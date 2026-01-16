@@ -162,7 +162,9 @@ class ModelDispatchOutputs(BaseModel):
         """
         return len(self.topics)
 
-    def __iter__(self) -> Iterator[str]:  # type: ignore[override]
+    # NOTE: Intentionally overrides BaseModel.__iter__ which iterates over field names.
+    # For ModelDispatchOutputs, iteration semantics are over topic strings instead.
+    def __iter__(self) -> Iterator[str]:  # type: ignore[override]  # NOTE: intentional semantic override
         """Iterate over output topics.
 
         This intentionally overrides Pydantic's BaseModel.__iter__ which iterates

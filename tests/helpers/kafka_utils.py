@@ -16,14 +16,14 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
 # Module-level logger for diagnostics
 logger = logging.getLogger(__name__)
 
 
 async def wait_for_consumer_ready(
-    event_bus: KafkaEventBus,
+    event_bus: EventBusKafka,
     topic: str,
     max_wait: float = 10.0,
     initial_backoff: float = 0.1,
@@ -59,7 +59,7 @@ async def wait_for_consumer_ready(
         - Reduces flakiness compared to fixed-duration sleeps
 
     Args:
-        event_bus: The KafkaEventBus instance to check for readiness.
+        event_bus: The EventBusKafka instance to check for readiness.
         topic: The topic to wait for (used for logging only, not filtering).
         max_wait: Maximum time in seconds to poll before giving up. The function
             will return True regardless of whether consumer became ready.

@@ -25,7 +25,7 @@ Design Pattern:
 
 Thread Safety:
     Individual ModelDlqMetrics instances are safe to share across threads
-    since update operations return new instances. The KafkaEventBus uses
+    since update operations return new instances. The EventBusKafka uses
     a lock to ensure atomic read-modify-write cycles when updating the
     shared metrics reference.
 
