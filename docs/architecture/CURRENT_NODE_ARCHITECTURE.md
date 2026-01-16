@@ -920,7 +920,7 @@ The new **Runtime Host** model addresses these limitations by:
 This document captures the current ONEX node architecture with:
 
 1. **1-container-per-node deployment** - Each node runs independently
-2. **4 node types** - EFFECT, COMPUTE, REDUCER, ORCHESTRATOR
+2. **4 node types** - EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, ORCHESTRATOR_GENERIC
 3. **Standard directory structure** - `nodes/<name>/v1_0_0/`
 4. **Contract-driven configuration** - `contract.yaml` defines everything
 5. **Base classes from omnibase_core** - Consistent inheritance patterns

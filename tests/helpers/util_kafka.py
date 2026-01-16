@@ -352,12 +352,13 @@ async def wait_for_consumer_ready(
     initial_backoff: float = 0.1,
     max_backoff: float = 1.0,
     backoff_multiplier: float = 1.5,
+    strict: bool = False,
 ) -> bool:
     """Wait for Kafka consumer to be ready to receive messages using polling.
 
-    This is a **best-effort** readiness check that always returns True. It attempts
-    to detect when the consumer is ready by polling health checks, but falls back
-    gracefully on timeout to avoid blocking tests indefinitely.
+    This is a **best-effort** readiness check that by default always returns True.
+    It attempts to detect when the consumer is ready by polling health checks, but
+    falls back gracefully on timeout to avoid blocking tests indefinitely.
 
     Kafka consumers require time to join the consumer group and start receiving
     messages after subscription. This helper polls the event bus health check
@@ -366,12 +367,20 @@ async def wait_for_consumer_ready(
     Behavior Summary:
         1. Polls event_bus.health_check() with exponential backoff
         2. If consumer_count increases within max_wait: returns True (early exit)
-        3. If max_wait exceeded: returns True anyway (graceful fallback)
+        3. If max_wait exceeded:
+           - strict=False (default): returns True anyway (graceful fallback)
+           - strict=True: raises TimeoutError (fail-fast mode)
 
-    Why Always Return True?
+    Why Always Return True (default)?
         The purpose is to REDUCE flakiness by waiting for actual readiness when
         possible, not to DETECT failures. Test assertions should verify expected
         outcomes, not this helper's return value.
+
+    Strict Mode:
+        When strict=True, the function raises TimeoutError if the consumer does
+        not become ready within max_wait. This is useful for tests that require
+        the consumer to be ready before proceeding, and prefer a clear failure
+        over a silent fallback.
 
     Implementation:
         Uses exponential backoff polling (initial_backoff * backoff_multiplier^n)
@@ -384,17 +393,26 @@ async def wait_for_consumer_ready(
     Args:
         event_bus: The EventBusKafka instance to check for readiness.
         topic: The topic to wait for (used for logging only, not filtering).
-        max_wait: Maximum time in seconds to poll before giving up. The function
-            will return True regardless of whether consumer became ready.
+        max_wait: Maximum time in seconds to poll before giving up. With
+            strict=False (default), the function will return True regardless of
+            whether consumer became ready. With strict=True, raises TimeoutError.
             Default: 10.0s. Actual wait may exceed max_wait by up to max_backoff
             (on timeout) or +0.1s stabilization delay (on success).
         initial_backoff: Initial polling delay in seconds (default 0.1s).
         max_backoff: Maximum polling delay cap in seconds (default 1.0s).
         backoff_multiplier: Multiplier for exponential backoff (default 1.5).
+        strict: If True, raise TimeoutError when consumer doesn't become ready
+            within max_wait. If False (default), return True on timeout for
+            graceful fallback. Default: False.
 
     Returns:
-        Always True. Do not use return value for failure detection.
-        Use test assertions to verify expected outcomes.
+        True when consumer is ready or when timeout occurs with strict=False.
+        With strict=False, always returns True - do not use return value for
+        failure detection. Use test assertions to verify expected outcomes.
+
+    Raises:
+        TimeoutError: If strict=True and consumer does not become ready within
+            max_wait seconds.
 
     Example:
         # Best-effort wait for consumer readiness (default max_wait=10.0s)
@@ -403,8 +421,11 @@ async def wait_for_consumer_ready(
         # Shorter wait for fast tests
         await wait_for_consumer_ready(bus, topic, max_wait=2.0)
 
-        # Consumer MAY be ready here, but test should not rely on this
-        # Use assertions on actual test outcomes instead
+        # Fail-fast mode: raise TimeoutError if consumer not ready
+        await wait_for_consumer_ready(bus, topic, strict=True)
+
+        # Consumer MAY be ready here (with strict=False), but test should not
+        # rely on this. Use assertions on actual test outcomes instead.
     """
     start_time = asyncio.get_running_loop().time()
     current_backoff = initial_backoff
@@ -434,13 +455,20 @@ async def wait_for_consumer_ready(
         await asyncio.sleep(current_backoff)
         current_backoff = min(current_backoff * backoff_multiplier, max_backoff)
 
-    # Return True even on timeout (graceful fallback)
     # Log at debug level for diagnostics
     logger.debug(
         "wait_for_consumer_ready timed out after %.2fs for topic %s",
         max_wait,
         topic,
     )
+
+    # Strict mode: raise TimeoutError for fail-fast behavior
+    if strict:
+        raise TimeoutError(
+            f"Consumer did not become ready for topic '{topic}' within {max_wait}s"
+        )
+
+    # Default: return True even on timeout (graceful fallback)
     return True
 
 

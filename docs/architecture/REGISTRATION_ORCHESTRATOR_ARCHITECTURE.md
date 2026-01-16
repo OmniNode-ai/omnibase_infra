@@ -7,7 +7,7 @@
 
 ## Overview
 
-The Node Registration Orchestrator is an ONEX **ORCHESTRATOR** node that coordinates node lifecycle registration workflows. It uses a **declarative pattern** where 100% of workflow behavior is driven by `contract.yaml`, not Python code.
+The Node Registration Orchestrator is an ONEX **ORCHESTRATOR_GENERIC** node that coordinates node lifecycle registration workflows. It uses a **declarative pattern** where 100% of workflow behavior is driven by `contract.yaml`, not Python code.
 
 **Location**: `src/omnibase_infra/nodes/node_registration_orchestrator/`
 
@@ -38,7 +38,7 @@ The Node Registration Orchestrator is an ONEX **ORCHESTRATOR** node that coordin
     │                           └────────────┘                        │
     └─────────────────────────────────────────────────────────────────┘
 
-    The Registration Orchestrator is an ORCHESTRATOR node that:
+    The Registration Orchestrator is an ORCHESTRATOR_GENERIC node that:
     1. Receives introspection events
     2. Delegates to reducer to compute intents
     3. Executes intents via effect nodes
@@ -51,10 +51,10 @@ The Registration Orchestrator implements the ONEX 4-node pattern by coordinating
 
 | Node Type | Role in Registration Workflow | Component |
 |-----------|-------------------------------|-----------|
-| **ORCHESTRATOR** | Workflow coordination and step sequencing | `NodeRegistrationOrchestrator` |
-| **REDUCER** | Compute registration intents from events | `ProtocolReducer` implementation (OMN-889) |
-| **EFFECT** | Execute Consul/PostgreSQL registrations | `node_registry_effect` (OMN-890) |
-| **COMPUTE** | Aggregate results, evaluate timeouts | Inline workflow steps |
+| **ORCHESTRATOR_GENERIC** | Workflow coordination and step sequencing | `NodeRegistrationOrchestrator` |
+| **REDUCER_GENERIC** | Compute registration intents from events | `ProtocolReducer` implementation (OMN-889) |
+| **EFFECT_GENERIC** | Execute Consul/PostgreSQL registrations | `node_registry_effect` (OMN-890) |
+| **COMPUTE_GENERIC** | Aggregate results, evaluate timeouts | Inline workflow steps |
 
 ### Reducer-Effect Separation Pattern
 
