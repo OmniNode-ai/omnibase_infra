@@ -8,6 +8,7 @@ and capabilities responses.
 
 from __future__ import annotations
 
+from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -25,6 +26,7 @@ class ModelDbDescribeResponse(BaseModel):
         timeout_seconds: Query timeout in seconds
         initialized: Whether the handler has been initialized
         version: Handler version string
+        circuit_breaker: Circuit breaker state information (optional)
 
     Example:
         >>> describe = ModelDbDescribeResponse(
@@ -35,6 +37,7 @@ class ModelDbDescribeResponse(BaseModel):
         ...     timeout_seconds=30.0,
         ...     initialized=True,
         ...     version="0.1.0-mvp",
+        ...     circuit_breaker={"state": "closed", "failures": 0},
         ... )
         >>> print(describe.supported_operations)
         ['db.query', 'db.execute']
@@ -69,6 +72,10 @@ class ModelDbDescribeResponse(BaseModel):
     )
     version: str = Field(
         description="Handler version string",
+    )
+    circuit_breaker: dict[str, JsonType] | None = Field(
+        default=None,
+        description="Circuit breaker state information (state, failures, threshold, etc.)",
     )
 
 

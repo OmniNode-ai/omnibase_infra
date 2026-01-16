@@ -84,7 +84,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
+from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
 )
@@ -594,6 +596,192 @@ class TestHandlerNodeIntrospectedBusIsolation:
         # Domain handlers use handle() instead of execute()
         assert hasattr(introspection_handler, "handle"), "Must have handle method"
         assert callable(introspection_handler.handle), "handle must be callable"
+
+
+# ============================================================================
+# Test HandlerQdrant Bus Isolation
+# ============================================================================
+
+
+class TestHandlerQdrantBusIsolation:
+    """Validate no-publish constraint for HandlerQdrant.
+
+    Constraint Under Test
+    ---------------------
+    **No-Publish Constraint**: HandlerQdrant MUST NOT have any capability
+    to directly publish events to the event bus. Handlers return data
+    structures; orchestrators decide what to publish.
+
+    Why This Constraint Matters
+    ---------------------------
+    - **Testability**: Handlers can be unit tested without event bus mocking
+    - **Single Responsibility**: Publishing logic centralized in orchestrators
+    - **Predictability**: Handler output is deterministic (input -> output)
+    - **Composability**: Handlers can be reused across different workflows
+
+    Validation Strategy
+    -------------------
+    1. Constructor signature analysis - no bus-related parameters accepted
+    2. Instance attribute inspection - no bus-related attributes present
+    3. Method signature validation - returns data, not publish actions
+    4. Source code pattern matching - no direct bus access patterns
+
+    The primary enforcement is dependency injection (no bus injected).
+    These tests provide defense-in-depth validation.
+    """
+
+    def test_constructor_takes_no_bus_parameters(self) -> None:
+        """HandlerQdrant.__init__ does not accept bus-related parameters.
+
+        This test focuses on the no-publish constraint: the constructor must not
+        accept bus, dispatcher, or publisher parameters. The test does NOT enforce
+        a specific parameter list, allowing the handler to evolve while maintaining
+        the constraint.
+        """
+        sig = inspect.signature(HandlerQdrant.__init__)
+        params = list(sig.parameters.keys())
+
+        # First parameter must be 'self'
+        assert params[0] == "self", "First parameter must be 'self'"
+
+        # Verify no bus-related parameters are accepted
+        for forbidden in FORBIDDEN_BUS_PARAMETERS:
+            assert forbidden not in params, (
+                f"HandlerQdrant.__init__ must not accept '{forbidden}' parameter - "
+                f"handlers must not have bus access"
+            )
+
+    def test_no_bus_attribute_after_instantiation(self) -> None:
+        """Handler class has no bus-related attributes.
+
+        Note: HandlerQdrant requires connection config for instantiation,
+        so we check class-level attributes rather than instance attributes.
+        """
+        # Check class-level attributes for bus-related names
+        class_attrs = set(dir(HandlerQdrant))
+        bus_attrs = {"_bus", "_event_bus", "_publisher", "_message_bus"}
+        found_bus_attrs = class_attrs & bus_attrs
+
+        assert not found_bus_attrs, (
+            f"HandlerQdrant should not have bus attributes: {found_bus_attrs}"
+        )
+
+    def test_no_publish_methods_exist(self) -> None:
+        """Handler has no publish/emit/dispatch methods."""
+        for method_name in FORBIDDEN_PUBLISH_METHODS:
+            assert not hasattr(HandlerQdrant, method_name), (
+                f"HandlerQdrant should not have '{method_name}' method - "
+                f"handlers must not publish directly"
+            )
+
+    def test_handler_has_no_messaging_infrastructure_attributes(self) -> None:
+        """Handler has no messaging/bus-related internal state in class definition."""
+        internal_attrs = [attr for attr in dir(HandlerQdrant) if attr.startswith("_")]
+        handler_attrs = [attr for attr in internal_attrs if not attr.startswith("__")]
+
+        # Check that no internal attributes are bus/messaging-related.
+        for attr in handler_attrs:
+            if callable(getattr(HandlerQdrant, attr, None)):
+                continue
+            attr_lower = attr.lower()
+            for keyword in BUS_INFRASTRUCTURE_KEYWORDS:
+                assert keyword not in attr_lower, (
+                    f"Found bus-related attribute '{attr}' - "
+                    f"handler must not have messaging infrastructure"
+                )
+
+
+# ============================================================================
+# Test HandlerGraph Bus Isolation
+# ============================================================================
+
+
+class TestHandlerGraphBusIsolation:
+    """Validate no-publish constraint for HandlerGraph.
+
+    Constraint Under Test
+    ---------------------
+    **No-Publish Constraint**: HandlerGraph MUST NOT have any capability
+    to directly publish events to the event bus. Handlers return data
+    structures; orchestrators decide what to publish.
+
+    Why This Constraint Matters
+    ---------------------------
+    - **Testability**: Handlers can be unit tested without event bus mocking
+    - **Single Responsibility**: Publishing logic centralized in orchestrators
+    - **Predictability**: Handler output is deterministic (input -> output)
+    - **Composability**: Handlers can be reused across different workflows
+
+    Validation Strategy
+    -------------------
+    1. Constructor signature analysis - no bus-related parameters accepted
+    2. Instance attribute inspection - no bus-related attributes present
+    3. Method signature validation - returns data, not publish actions
+    4. Source code pattern matching - no direct bus access patterns
+
+    The primary enforcement is dependency injection (no bus injected).
+    These tests provide defense-in-depth validation.
+    """
+
+    def test_constructor_takes_no_bus_parameters(self) -> None:
+        """HandlerGraph.__init__ does not accept bus-related parameters.
+
+        This test focuses on the no-publish constraint: the constructor must not
+        accept bus, dispatcher, or publisher parameters. The test does NOT enforce
+        a specific parameter list, allowing the handler to evolve while maintaining
+        the constraint.
+        """
+        sig = inspect.signature(HandlerGraph.__init__)
+        params = list(sig.parameters.keys())
+
+        # First parameter must be 'self'
+        assert params[0] == "self", "First parameter must be 'self'"
+
+        # Verify no bus-related parameters are accepted
+        for forbidden in FORBIDDEN_BUS_PARAMETERS:
+            assert forbidden not in params, (
+                f"HandlerGraph.__init__ must not accept '{forbidden}' parameter - "
+                f"handlers must not have bus access"
+            )
+
+    def test_no_bus_attribute_after_instantiation(self) -> None:
+        """Handler class has no bus-related attributes.
+
+        Note: HandlerGraph requires connection URI for instantiation,
+        so we check class-level attributes rather than instance attributes.
+        """
+        # Check class-level attributes for bus-related names
+        class_attrs = set(dir(HandlerGraph))
+        bus_attrs = {"_bus", "_event_bus", "_publisher", "_message_bus"}
+        found_bus_attrs = class_attrs & bus_attrs
+
+        assert not found_bus_attrs, (
+            f"HandlerGraph should not have bus attributes: {found_bus_attrs}"
+        )
+
+    def test_no_publish_methods_exist(self) -> None:
+        """Handler has no publish/emit/dispatch methods."""
+        for method_name in FORBIDDEN_PUBLISH_METHODS:
+            assert not hasattr(HandlerGraph, method_name), (
+                f"HandlerGraph should not have '{method_name}' method - "
+                f"handlers must not publish directly"
+            )
+
+    def test_handler_has_no_messaging_infrastructure_attributes(self) -> None:
+        """Handler has no messaging/bus-related internal state in class definition."""
+        internal_attrs = [attr for attr in dir(HandlerGraph) if attr.startswith("_")]
+        handler_attrs = [attr for attr in internal_attrs if not attr.startswith("__")]
+
+        # Check that no internal attributes are bus/messaging-related.
+        for attr in handler_attrs:
+            if callable(getattr(HandlerGraph, attr, None)):
+                continue
+            attr_lower = attr.lower()
+            for keyword in BUS_INFRASTRUCTURE_KEYWORDS:
+                assert keyword not in attr_lower, (
+                    f"Found bus-related attribute '{attr}' - "
+                    f"handler must not have messaging infrastructure"
+                )
 
 
 # ============================================================================
@@ -1287,6 +1475,8 @@ __all__: list[str] = [
     "introspection_handler",
     "TestHandlerHttpRestBusIsolation",
     "TestHandlerNodeIntrospectedBusIsolation",
+    "TestHandlerQdrantBusIsolation",
+    "TestHandlerGraphBusIsolation",
     "TestHandlerNoPublishConstraintCrossValidation",
     "TestHandlerProtocolCompliance",
     "TestOrchestratorBusAccessVerification",

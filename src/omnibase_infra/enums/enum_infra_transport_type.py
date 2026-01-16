@@ -17,6 +17,8 @@ Supported transport types:
     - MCP: Model Context Protocol (AI agent tool interface)
     - FILESYSTEM: Local filesystem operations
     - INMEMORY: In-memory transport for testing/local development
+    - QDRANT: Qdrant vector database operations
+    - GRAPH: Graph database (Memgraph/Neo4j) operations
 
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
@@ -49,6 +51,8 @@ class EnumInfraTransportType(str, Enum):
         MCP: Model Context Protocol transport for AI agent integration
         FILESYSTEM: Local filesystem transport
         INMEMORY: In-memory transport for testing and local development
+        QDRANT: Qdrant vector database transport
+        GRAPH: Graph database (Memgraph/Neo4j) transport
     """
 
     HTTP = "http"
@@ -62,6 +66,8 @@ class EnumInfraTransportType(str, Enum):
     MCP = "mcp"
     FILESYSTEM = "filesystem"
     INMEMORY = "inmemory"
+    QDRANT = "qdrant"
+    GRAPH = "graph"
 
 
 __all__ = ["EnumInfraTransportType"]

@@ -27,6 +27,7 @@ from omnibase_core.models.errors import ModelOnexError
 
 from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.errors import MessageTypeRegistryError
+from omnibase_infra.models.errors import ModelMessageTypeRegistryErrorContext
 from omnibase_infra.models.registry.model_message_type_entry import (
     ModelMessageTypeEntry,
 )
@@ -127,7 +128,9 @@ class MixinMessageTypeQuery:
             raise MessageTypeRegistryError(
                 f"No handler mapping for message type '{message_type}'. "
                 f"Registered types: {registered}{suffix}",
-                message_type=message_type,
+                registry_context=ModelMessageTypeRegistryErrorContext(
+                    message_type=message_type,
+                ),
                 registered_types=registered,
             )
 
@@ -135,7 +138,9 @@ class MixinMessageTypeQuery:
         if not entry.enabled:
             raise MessageTypeRegistryError(
                 f"Message type '{message_type}' is registered but disabled.",
-                message_type=message_type,
+                registry_context=ModelMessageTypeRegistryErrorContext(
+                    message_type=message_type,
+                ),
             )
 
         # Validate category constraint
@@ -144,8 +149,10 @@ class MixinMessageTypeQuery:
             raise MessageTypeRegistryError(
                 category_outcome.error_message
                 or f"Category validation failed for '{message_type}'",
-                message_type=message_type,
-                category=topic_category,
+                registry_context=ModelMessageTypeRegistryErrorContext(
+                    message_type=message_type,
+                    category=topic_category,
+                ),
             )
 
         # Validate domain constraint
@@ -157,8 +164,10 @@ class MixinMessageTypeQuery:
             raise MessageTypeRegistryError(
                 domain_outcome.error_message
                 or f"Domain validation failed for '{message_type}'",
-                message_type=message_type,
-                domain=topic_domain,
+                registry_context=ModelMessageTypeRegistryErrorContext(
+                    message_type=message_type,
+                    domain=topic_domain,
+                ),
             )
 
         return list(entry.handler_ids)

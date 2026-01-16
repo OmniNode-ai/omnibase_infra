@@ -18,6 +18,8 @@ Exports:
     ModelExecutionShapeValidation: Validates message category to node kind routing
     ModelExecutionShapeValidationResult: Aggregate result of execution shape validation
     ModelExecutionShapeViolationResult: Result of violation detection
+    ModelLocalHandlerValidationResult: Aggregate result of LocalHandler validation for CI
+    ModelLocalHandlerViolation: Result of LocalHandler import violation detection
     ModelOutputValidationParams: Parameters for output validation
     ModelValidateAndRaiseParams: Parameters for validate and raise operations
     ModelValidationErrorParams: Parameters for security validation error creation
@@ -49,6 +51,12 @@ from omnibase_infra.models.validation.model_execution_shape_validation_result im
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
+from omnibase_infra.models.validation.model_localhandler_validation_result import (
+    ModelLocalHandlerValidationResult,
+)
+from omnibase_infra.models.validation.model_localhandler_violation import (
+    ModelLocalHandlerViolation,
+)
 from omnibase_infra.models.validation.model_output_validation_params import (
     ModelOutputValidationParams,
 )
@@ -72,6 +80,8 @@ __all__ = [
     "ModelExecutionShapeValidation",
     "ModelExecutionShapeValidationResult",
     "ModelExecutionShapeViolationResult",
+    "ModelLocalHandlerValidationResult",
+    "ModelLocalHandlerViolation",
     "ModelOutputValidationParams",
     "ModelValidateAndRaiseParams",
     "ModelValidationErrorParams",

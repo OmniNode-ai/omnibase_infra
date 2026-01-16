@@ -41,6 +41,24 @@ Vault Models:
     ModelVaultRenewTokenPayload: Payload for vault.renew_token result
     VaultPayload: Discriminated union of all Vault payload types
 
+Qdrant Models:
+    ModelQdrantHandlerPayload: Payload containing Qdrant operation results
+    ModelQdrantHandlerResponse: Full Qdrant handler response envelope
+    EnumQdrantOperationType: Discriminator enum for Qdrant operation types
+    ModelQdrantSearchPayload: Payload for qdrant.search result
+    ModelQdrantUpsertPayload: Payload for qdrant.upsert result
+    ModelQdrantDeletePayload: Payload for qdrant.delete result
+    ModelQdrantCollectionPayload: Payload for qdrant.collection operations
+    QdrantPayload: Discriminated union of all Qdrant payload types
+
+Graph Models:
+    ModelGraphHandlerPayload: Payload containing Graph operation results
+    ModelGraphHandlerResponse: Full Graph handler response envelope
+    EnumGraphOperationType: Discriminator enum for Graph operation types
+    ModelGraphQueryPayload: Payload for graph.query result
+    ModelGraphExecutePayload: Payload for graph.execute result
+    GraphPayload: Discriminated union of all Graph payload types
+
 HTTP Models:
     ModelHttpHandlerPayload: Payload containing HTTP operation results
     ModelHttpHandlerResponse: Full HTTP handler response envelope
@@ -138,6 +156,9 @@ from omnibase_infra.handlers.models.model_filesystem_write_payload import (
 from omnibase_infra.handlers.models.model_filesystem_write_result import (
     ModelWriteFileResult,
 )
+from omnibase_infra.handlers.models.model_graph_handler_response import (
+    ModelGraphHandlerResponse,
+)
 from omnibase_infra.handlers.models.model_handler_response import (
     ModelHandlerResponse,
 )
@@ -172,6 +193,9 @@ from omnibase_infra.handlers.models.model_manifest_store_result import (
 )
 from omnibase_infra.handlers.models.model_operation_context import (
     ModelOperationContext,
+)
+from omnibase_infra.handlers.models.model_qdrant_handler_response import (
+    ModelQdrantHandlerResponse,
 )
 from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
 from omnibase_infra.handlers.models.model_vault_handler_response import (
@@ -213,6 +237,8 @@ __all__: list[str] = [
     "ModelDbDescribeResponse",
     # Generic response model
     "ModelHandlerResponse",
+    # Graph wrapper models
+    "ModelGraphHandlerResponse",
     # HTTP models
     "ModelHttpBodyContent",
     "ModelHttpGetPayload",
@@ -222,6 +248,8 @@ __all__: list[str] = [
     "ModelHttpPostPayload",
     # Common models for retry and operation tracking
     "ModelOperationContext",
+    # Qdrant wrapper models
+    "ModelQdrantHandlerResponse",
     "ModelRetryState",
     # Vault models
     "ModelVaultDeletePayload",
