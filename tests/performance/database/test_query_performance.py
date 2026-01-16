@@ -41,23 +41,6 @@ import pytest
 from tests.performance.database.conftest import QueryAnalyzer
 
 # =============================================================================
-# Module-Level Markers
-# =============================================================================
-# NOTE: The 'performance' marker is automatically applied by
-# tests/performance/conftest.py via pytest_collection_modifyitems hook.
-# Only additional markers (like 'database') need to be specified here.
-#
-# CRITICAL: loop_scope="module" is required for pytest-asyncio 0.25+ to ensure
-# all tests in this module share the same event loop as the module-scoped
-# fixtures (postgres_pool, schema_initialized, seeded_test_data). Without this,
-# tests fail with "RuntimeError: Task got Future attached to a different loop".
-
-pytestmark = [
-    pytest.mark.database,
-    pytest.mark.asyncio(loop_scope="module"),
-]
-
-# =============================================================================
 # Updated_At Index Tests (PR #101 Requirement)
 # =============================================================================
 

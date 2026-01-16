@@ -43,6 +43,95 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:2
 
 
 # =============================================================================
+# Kafka Error Code Remediation Hints
+# =============================================================================
+# Common Kafka/Redpanda error codes with actionable remediation hints.
+# Reference: https://kafka.apache.org/protocol.html#protocol_error_codes
+#
+# These hints help developers quickly diagnose and fix common issues when
+# running integration tests against Kafka/Redpanda brokers.
+# =============================================================================
+
+KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
+    # Topic management errors
+    36: (
+        "Topic already exists. This is usually harmless in test environments. "
+        "If you need a fresh topic, use a unique name with UUID suffix."
+    ),
+    37: (
+        "Invalid number of partitions. "
+        "Hint: Ensure partitions >= 1. For Redpanda, check that the broker has "
+        "sufficient memory allocated (see Docker memory limits or "
+        "'redpanda.developer_mode' setting)."
+    ),
+    38: (
+        "Invalid replication factor. "
+        "Hint: Replication factor cannot exceed the number of brokers. "
+        "For single-node test setups, use replication_factor=1."
+    ),
+    39: (
+        "Invalid replica assignment. "
+        "Hint: Check that all specified broker IDs exist in the cluster."
+    ),
+    40: (
+        "Invalid topic configuration. "
+        "Hint: Check topic config parameters (retention.ms, segment.bytes, etc.). "
+        "Some Redpanda/Kafka versions have different config key names."
+    ),
+    # Cluster state errors
+    41: (
+        "Not the cluster controller. This is retriable. "
+        "Hint: The cluster may be electing a new controller. Retry after a brief delay."
+    ),
+    # Authorization errors
+    29: (
+        "Cluster authorization failed. "
+        "Hint: Check that your client has ClusterAction permission. "
+        "For Redpanda, verify ACL configuration or disable authorization for tests."
+    ),
+    30: (
+        "Group authorization failed. "
+        "Hint: Check that your client has access to the consumer group. "
+        "Verify KAFKA_SASL_* environment variables if using SASL authentication."
+    ),
+    # Resource errors
+    89: (
+        "Out of memory or resource exhausted on broker. "
+        "Hint: For Redpanda in Docker, increase container memory limit "
+        "(e.g., 'docker update --memory 2g <container>'). "
+        "Check 'docker stats' for current memory usage."
+    ),
+}
+
+
+def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
+    """Get a remediation hint for a Kafka error code.
+
+    Args:
+        error_code: The Kafka protocol error code.
+        error_message: Optional error message from the broker (for context).
+
+    Returns:
+        A formatted error message with remediation hints if available.
+    """
+    base_msg = f"Kafka error_code={error_code}"
+    if error_message:
+        base_msg += f", message='{error_message}'"
+
+    hint = KAFKA_ERROR_REMEDIATION_HINTS.get(error_code)
+    if hint:
+        return f"{base_msg}. {hint}"
+
+    # Generic hint for unknown errors
+    return (
+        f"{base_msg}. "
+        "Hint: Check Kafka/Redpanda broker logs for details. "
+        "Verify broker is running: 'docker ps | grep redpanda' or "
+        "'curl -s http://<host>:9644/v1/status/ready' for Redpanda health."
+    )
+
+
+# =============================================================================
 # Consumer Readiness Helper (shared implementation)
 # =============================================================================
 # Re-exported from tests.helpers.kafka_utils for convenience.
@@ -163,7 +252,21 @@ async def ensure_test_topic() -> AsyncGenerator[
         # Lazy initialization of admin client
         if admin is None:
             admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-            await admin.start()
+            try:
+                await admin.start()
+            except Exception as conn_err:
+                admin = None  # Reset to allow retry
+                raise RuntimeError(
+                    f"Failed to connect to Kafka broker at {KAFKA_BOOTSTRAP_SERVERS}. "
+                    f"Hint: Verify the broker is running and accessible:\n"
+                    f"  1. Check container status: 'docker ps | grep redpanda'\n"
+                    f"  2. Test connectivity: 'nc -zv {KAFKA_BOOTSTRAP_SERVERS.split(':')[0]} "
+                    f"{KAFKA_BOOTSTRAP_SERVERS.split(':')[1] if ':' in KAFKA_BOOTSTRAP_SERVERS else '29092'}'\n"
+                    f"  3. For Redpanda, check health: 'curl -s http://<host>:9644/v1/status/ready'\n"
+                    f"  4. Verify KAFKA_BOOTSTRAP_SERVERS env var is correct\n"
+                    f"  5. If using Docker, ensure network connectivity to {KAFKA_BOOTSTRAP_SERVERS}\n"
+                    f"Original error: {conn_err}"
+                ) from conn_err
 
         try:
             response = await admin.create_topics(
@@ -185,9 +288,10 @@ async def ensure_test_topic() -> AsyncGenerator[
                         # Error code 36 = TopicAlreadyExistsError (handled below)
                         if error_code == 36:
                             raise TopicAlreadyExistsError
+                        # Provide actionable remediation hints for common errors
                         raise RuntimeError(
-                            f"Failed to create topic {topic_name}: "
-                            f"error_code={error_code}, message='{error_message}'"
+                            f"Failed to create topic '{topic_name}': "
+                            f"{get_kafka_error_hint(error_code, error_message)}"
                         )
 
             created_topics.append(topic_name)
@@ -348,7 +452,21 @@ async def topic_factory() -> AsyncGenerator[
 
         if admin is None:
             admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-            await admin.start()
+            try:
+                await admin.start()
+            except Exception as conn_err:
+                admin = None  # Reset to allow retry
+                raise RuntimeError(
+                    f"Failed to connect to Kafka broker at {KAFKA_BOOTSTRAP_SERVERS}. "
+                    f"Hint: Verify the broker is running and accessible:\n"
+                    f"  1. Check container status: 'docker ps | grep redpanda'\n"
+                    f"  2. Test connectivity: 'nc -zv {KAFKA_BOOTSTRAP_SERVERS.split(':')[0]} "
+                    f"{KAFKA_BOOTSTRAP_SERVERS.split(':')[1] if ':' in KAFKA_BOOTSTRAP_SERVERS else '29092'}'\n"
+                    f"  3. For Redpanda, check health: 'curl -s http://<host>:9644/v1/status/ready'\n"
+                    f"  4. Verify KAFKA_BOOTSTRAP_SERVERS env var is correct\n"
+                    f"  5. If using Docker, ensure network connectivity to {KAFKA_BOOTSTRAP_SERVERS}\n"
+                    f"Original error: {conn_err}"
+                ) from conn_err
 
         try:
             response = await admin.create_topics(
@@ -367,9 +485,10 @@ async def topic_factory() -> AsyncGenerator[
                     if error_code != 0:
                         if error_code == 36:  # TopicAlreadyExistsError
                             raise TopicAlreadyExistsError
+                        # Provide actionable remediation hints for common errors
                         raise RuntimeError(
-                            f"Failed to create topic {topic_name}: "
-                            f"error_code={error_code}, message='{error_message}'"
+                            f"Failed to create topic '{topic_name}': "
+                            f"{get_kafka_error_hint(error_code, error_message)}"
                         )
 
             created_topics.append(topic_name)
