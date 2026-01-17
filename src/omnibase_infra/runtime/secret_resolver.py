@@ -802,19 +802,21 @@ class SecretResolver:
                 )
                 return None
 
-        # Avoid TOCTOU race: catch exceptions during read instead of pre-checking
+        # Avoid TOCTOU race: read atomically with size limit instead of stat() then read()
+        # This prevents an attacker from swapping the file between size check and read
         try:
-            # Check file size to prevent memory exhaustion from large files
-            file_size = resolved_path.stat().st_size
-            if file_size > MAX_SECRET_FILE_SIZE:
-                logger.warning(
-                    "Secret file exceeds size limit (%d bytes): %s",
-                    file_size,
-                    logical_name,
-                    extra={"logical_name": logical_name, "file_size": file_size},
-                )
-                return None
-            return resolved_path.read_text().strip()
+            # Read up to MAX_SECRET_FILE_SIZE + 1 bytes atomically
+            # If we got more than MAX_SECRET_FILE_SIZE, the file is too large
+            with resolved_path.open("r") as f:
+                content = f.read(MAX_SECRET_FILE_SIZE + 1)
+                if len(content) > MAX_SECRET_FILE_SIZE:
+                    logger.warning(
+                        "Secret file exceeds size limit: %s",
+                        logical_name,
+                        extra={"logical_name": logical_name},
+                    )
+                    return None
+                return content.strip()
         except FileNotFoundError:
             # File does not exist - this is expected for optional secrets
             # SECURITY: Don't log the actual path to avoid information disclosure

@@ -29,6 +29,20 @@ import re
 import sys
 from pathlib import Path
 
+# Detection Coverage:
+# | Pattern                          | Regex | AST |
+# |----------------------------------|-------|-----|
+# | os.environ["VAR"]                | Yes   | Yes |
+# | os.environ.get("VAR")            | Yes   | Yes |
+# | os.getenv("VAR")                 | Yes   | Yes |
+# | os.environ.setdefault()          | Yes   | Yes |
+# | os.environ.pop()                 | Yes   | Yes |
+# | os.environ.clear()               | Yes   | Yes |
+# | os.environ.update()              | Yes   | Yes |
+# | from os import environ as e      | No    | Yes |
+# | import os as o; o.environ        | No    | Yes |
+# | Aliased function calls           | No    | Yes |
+
 # Patterns to detect direct environment variable access.
 #
 # Pattern Categories:
@@ -353,7 +367,7 @@ class AllowlistValidationError(Exception):
 
 
 # Pattern for valid allowlist entries: filepath:line_number
-ALLOWLIST_ENTRY_PATTERN = re.compile(r"^[^:]+:\d+$")
+ALLOWLIST_ENTRY_PATTERN: re.Pattern[str] = re.compile(r"^[^:]+:\d+$")
 
 
 def load_allowlist(repo_root: Path, verbose: bool = False) -> set[str]:

@@ -468,16 +468,7 @@ resolver.get_secret("vault.sourced.secret")
 - Returns `None` (graceful degradation)
 - Logs warning with logical name only (no path)
 
-**Vault Integration Implementation Plan** (for follow-up ticket):
-1. Create envelope for `vault.read_secret` operation with correlation_id
-2. Call `HandlerVault.execute()` for KV v2 secret retrieval
-3. Parse path to extract mount/path/field from `"secret/data/path#field"` format
-4. Handle error responses:
-   - 404 (NotFound): Return `None`
-   - 403 (Forbidden): Raise `InfraAuthenticationError`
-   - Timeout: Raise `InfraTimeoutError` with `ModelTimeoutErrorContext`
-   - Other: Raise `SecretResolutionError` with sanitized message
-5. Extract `data[field]` from response or first value if no field specified
+See [OMN-1374](https://linear.app/omninode/issue/OMN-1374) for the Vault integration implementation plan.
 
 ### Memory Handling
 
