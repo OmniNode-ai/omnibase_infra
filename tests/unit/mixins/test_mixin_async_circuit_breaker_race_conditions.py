@@ -223,27 +223,41 @@ class TestConcurrentFailureRecording:
         assert state["open"] is False  # Below threshold
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Flaky in CI: concurrent failure recording has inherent race conditions. "
-        "Circuit may not open immediately due to asyncio scheduling variability. "
-        "Test validates race condition handling but timing is non-deterministic.",
-        strict=True,
-    )
-    async def test_concurrent_failures_trigger_circuit_open(
-        self, low_threshold_service: MockServiceWithCircuitBreaker
-    ) -> None:
-        """Test that concurrent failures properly trigger circuit open."""
+    async def test_concurrent_failures_trigger_circuit_open(self) -> None:
+        """Test that concurrent failures properly trigger circuit open.
+
+        This test verifies that when failures exceed threshold, the circuit
+        breaker opens. We use a long reset_timeout to prevent auto-transition
+        to HALF_OPEN during test execution.
+
+        The test validates circuit breaker behavior by checking that EITHER:
+        1. The final state shows circuit is open, OR
+        2. At least one operation received InfraUnavailableError (circuit opened
+           during execution and blocked subsequent operations)
+
+        Note: Uses its own service instance with long reset_timeout (60s) to
+        prevent timing-related flakiness in CI environments where the default
+        0.1s timeout could elapse during concurrent operation execution.
+        """
+        # Use long reset_timeout to prevent auto-transition to HALF_OPEN
+        # during test execution (prevents CI flakiness)
+        service = MockServiceWithCircuitBreaker(threshold=3, reset_timeout=60.0)
+
         num_concurrent = 5  # More than threshold (3)
         errors: list[Exception] = []
+        circuit_open_count = 0
         lock = asyncio.Lock()
 
         async def fail_operation() -> None:
+            nonlocal circuit_open_count
             try:
-                await low_threshold_service.perform_operation(should_fail=True)
+                await service.perform_operation(should_fail=True)
             except ValueError:
-                pass  # Expected failure
+                pass  # Expected failure before circuit opened
             except InfraUnavailableError:
-                pass  # Circuit opened during concurrent operations
+                # Circuit opened during concurrent operations - this is success!
+                async with lock:
+                    circuit_open_count += 1
             except Exception as e:
                 async with lock:
                     errors.append(e)
@@ -252,9 +266,17 @@ class TestConcurrentFailureRecording:
 
         assert len(errors) == 0, f"Unexpected errors: {errors}"
 
-        # Verify circuit is open
-        state = await low_threshold_service.get_circuit_state()
-        assert state["open"] is True
+        # Verify circuit breaker behavior: EITHER circuit is open now OR
+        # we observed it open during execution (InfraUnavailableError)
+        state = await service.get_circuit_state()
+        circuit_triggered = state["open"] is True or circuit_open_count > 0
+
+        assert circuit_triggered, (
+            f"Circuit breaker should have triggered: "
+            f"final_state_open={state['open']}, "
+            f"failures={state['failures']}, "
+            f"circuit_open_errors_seen={circuit_open_count}"
+        )
 
 
 # =============================================================================

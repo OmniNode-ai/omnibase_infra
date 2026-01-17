@@ -16,11 +16,25 @@ Performance Thresholds:
     - Batch publishing: > 5000 events/sec
     - Concurrent publishers: > 2000 events/sec total
 
+CI Behavior:
+    Some tests in this module are automatically skipped in CI environments
+    (detected via CI or GITHUB_ACTIONS environment variables). These tests
+    have high absolute throughput thresholds (e.g., >5000 events/sec) that
+    may not be achievable on shared CI runners with variable resources.
+
+    Skipped in CI:
+        - test_10000_sequential_publishes (5000 events/sec threshold)
+        - test_batch_publish_1000_messages (5000 events/sec threshold)
+        - test_50_concurrent_publishers (5000 events/sec aggregate threshold)
+
+    These tests run locally and provide value for detecting performance
+    regressions during development.
+
 Usage:
-    Run throughput tests:
+    Run throughput tests locally:
         poetry run pytest tests/performance/event_bus/test_event_bus_throughput.py -v
 
-    Skip in normal CI (use marker):
+    Force-skip performance tests (marker-based):
         poetry run pytest -m "not performance" tests/
 
 Related:
@@ -31,6 +45,7 @@ Related:
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections.abc import Awaitable, Callable
 
@@ -39,6 +54,14 @@ import pytest
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
 from tests.performance.event_bus.conftest import generate_unique_topic
+
+# CI environment detection for skipping flaky performance tests
+# High-throughput tests with absolute thresholds (e.g., >5000 events/sec) are unreliable
+# in CI due to variable CPU/memory resources on shared runners.
+# These tests provide value locally but should be skipped in CI to prevent flakiness.
+IS_CI = os.getenv("CI", "").lower() in ("true", "1", "yes") or os.getenv(
+    "GITHUB_ACTIONS", ""
+).lower() in ("true", "1")
 
 # -----------------------------------------------------------------------------
 # Single Publisher Throughput Tests
@@ -89,10 +112,10 @@ class TestSinglePublisherThroughput:
         print(f"  Throughput: {events_per_sec:.0f} events/sec")
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Environment-dependent throughput: CI runners may not achieve 5000 events/sec "
-        "due to variable CPU/memory resources. Test still runs to capture metrics.",
-        strict=False,
+    @pytest.mark.skipif(
+        IS_CI,
+        reason="Environment-dependent throughput: CI runners may not achieve 5000 "
+        "events/sec due to variable CPU/memory resources. Runs locally only.",
     )
     async def test_10000_sequential_publishes(
         self,
@@ -209,11 +232,11 @@ class TestBatchPublishing:
         print(f"  Throughput: {100 / elapsed:.0f} events/sec")
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Environment-dependent throughput: CI runners may not achieve 5000 events/sec "
-        "due to variable CPU/memory resources (observed 3220/sec in CI). "
-        "Test still runs to capture metrics.",
-        strict=False,
+    @pytest.mark.skipif(
+        IS_CI,
+        reason="Environment-dependent throughput: CI runners may not achieve 5000 "
+        "events/sec due to variable CPU/memory resources (observed 3220/sec in CI). "
+        "Runs locally only.",
     )
     async def test_batch_publish_1000_messages(
         self,
@@ -342,10 +365,10 @@ class TestConcurrentPublishers:
         print(f"  Throughput: {events_per_sec:.0f} events/sec")
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Environment-dependent throughput: CI runners may not achieve 5000 events/sec "
-        "aggregate due to variable CPU/memory resources. Test still runs to capture metrics.",
-        strict=False,
+    @pytest.mark.skipif(
+        IS_CI,
+        reason="Environment-dependent throughput: CI runners may not achieve 5000 "
+        "events/sec aggregate due to variable CPU/memory resources. Runs locally only.",
     )
     async def test_50_concurrent_publishers(
         self,
