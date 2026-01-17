@@ -24,7 +24,7 @@ Thread-Safety:
     errors that would occur with concurrent first-access to the same metric.
 
 Usage Example:
-    >>> from omnibase_core.models.observability import ModelMetricsPolicy
+    >>> from omnibase_infra.observability.models import ModelMetricsPolicy
     >>> from omnibase_infra.observability.sinks import SinkMetricsPrometheus
     >>>
     >>> # Create with default policy (warns and drops on violation)
@@ -52,12 +52,12 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from prometheus_client import Counter, Gauge, Histogram
 
 if TYPE_CHECKING:
-    from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability.models import ModelMetricsPolicy
 
 _logger = logging.getLogger(__name__)
 
@@ -164,8 +164,10 @@ class SinkMetricsPrometheus:
             >>> sink = SinkMetricsPrometheus()
             >>>
             >>> # Strict policy - raises on any violation
-            >>> from omnibase_core.models.observability import ModelMetricsPolicy
-            >>> from omnibase_core.enums import EnumMetricsPolicyViolationAction
+            >>> from omnibase_infra.observability.models import (
+            ...     ModelMetricsPolicy,
+            ...     EnumMetricsPolicyViolationAction,
+            ... )
             >>> strict_policy = ModelMetricsPolicy(
             ...     on_violation=EnumMetricsPolicyViolationAction.RAISE,
             ... )
@@ -175,7 +177,8 @@ class SinkMetricsPrometheus:
             >>> sink = SinkMetricsPrometheus(metric_prefix="onex_infra")
         """
         # Import here to avoid circular imports and allow TYPE_CHECKING
-        from omnibase_core.models.observability import ModelMetricsPolicy as _Policy
+        # NOTE: Using local model until omnibase_core release includes OMN-1367
+        from omnibase_infra.observability.models import ModelMetricsPolicy as _Policy
 
         self._policy: ModelMetricsPolicy = policy if policy is not None else _Policy()
         self._histogram_buckets = (
@@ -229,9 +232,11 @@ class SinkMetricsPrometheus:
         Raises:
             ModelOnexError: If policy on_violation is RAISE and violations found.
         """
-        # Cast needed because omnibase_core doesn't provide type stubs
-        result = self._policy.enforce_labels(labels)
-        return cast("dict[str, str] | None", result)
+        # enforce_labels returns dict[str, str] | None directly
+        # - Returns labels (possibly stripped) if allowed
+        # - Returns None if metric should be dropped
+        # - Raises ModelOnexError if on_violation=RAISE
+        return self._policy.enforce_labels(labels)
 
     def _get_or_create_counter(
         self,

@@ -20,8 +20,10 @@ from prometheus_client import REGISTRY, CollectorRegistry
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from omnibase_core.enums import EnumMetricsPolicyViolationAction
-    from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability.models import (
+        EnumMetricsPolicyViolationAction,
+        ModelMetricsPolicy,
+    )
 
 
 # =============================================================================
@@ -94,7 +96,7 @@ def default_metrics_policy() -> ModelMetricsPolicy:
     Returns:
         ModelMetricsPolicy with default forbidden labels and warn_and_drop behavior.
     """
-    from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability.models import ModelMetricsPolicy
 
     return ModelMetricsPolicy()
 
@@ -109,8 +111,8 @@ def strict_metrics_policy() -> ModelMetricsPolicy:
     Returns:
         ModelMetricsPolicy configured to raise errors on any violation.
     """
-    from omnibase_core.enums import EnumMetricsPolicyViolationAction
-    from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability.models import EnumMetricsPolicyViolationAction
+    from omnibase_infra.observability.models import ModelMetricsPolicy
 
     return ModelMetricsPolicy(
         on_violation=EnumMetricsPolicyViolationAction.RAISE,
@@ -127,8 +129,8 @@ def silent_drop_metrics_policy() -> ModelMetricsPolicy:
     Returns:
         ModelMetricsPolicy configured to silently drop violating metrics.
     """
-    from omnibase_core.enums import EnumMetricsPolicyViolationAction
-    from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability.models import EnumMetricsPolicyViolationAction
+    from omnibase_infra.observability.models import ModelMetricsPolicy
 
     return ModelMetricsPolicy(
         on_violation=EnumMetricsPolicyViolationAction.DROP_SILENT,
@@ -145,8 +147,8 @@ def warn_and_strip_metrics_policy() -> ModelMetricsPolicy:
     Returns:
         ModelMetricsPolicy configured to warn and strip violating labels.
     """
-    from omnibase_core.enums import EnumMetricsPolicyViolationAction
-    from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability.models import EnumMetricsPolicyViolationAction
+    from omnibase_infra.observability.models import ModelMetricsPolicy
 
     return ModelMetricsPolicy(
         on_violation=EnumMetricsPolicyViolationAction.WARN_AND_STRIP,
@@ -169,7 +171,7 @@ def create_metrics_policy(
     Returns:
         Configured ModelMetricsPolicy instance.
     """
-    from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability.models import ModelMetricsPolicy
 
     kwargs: dict[str, object] = {
         "on_violation": on_violation,

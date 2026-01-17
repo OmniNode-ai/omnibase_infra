@@ -61,7 +61,7 @@ See Also:
     - SinkMetricsPrometheus: Prometheus metrics sink implementation
     - SinkLoggingStructured: Structured logging sink implementation
     - HookObservability: Observability pipeline hook
-    - omnibase_core.models.observability.ModelMetricsPolicy: Cardinality policy
+    - omnibase_infra.observability.models.ModelMetricsPolicy: Cardinality policy
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ from omnibase_infra.observability.sinks import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability.models import ModelMetricsPolicy
     from omnibase_spi.protocols.observability import ProtocolHotPathMetricsSink
 
 _logger = logging.getLogger(__name__)
@@ -185,7 +185,7 @@ class FactoryObservabilitySink:
             sink = factory.create_metrics_sink(config=config)
 
             # With custom policy
-            from omnibase_core.models.observability import ModelMetricsPolicy
+            from omnibase_infra.observability.models import ModelMetricsPolicy
             policy = ModelMetricsPolicy(max_label_value_length=64)
             sink = factory.create_metrics_sink(policy=policy)
             ```

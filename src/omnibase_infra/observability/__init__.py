@@ -94,7 +94,7 @@ Usage:
 
 See Also:
     - omnibase_spi.protocols.observability: Protocol definitions
-    - omnibase_core.models.observability: Data models
+    - omnibase_infra.observability.models: Configuration and policy models
 """
 
 from omnibase_infra.observability.factory_observability_sink import (
