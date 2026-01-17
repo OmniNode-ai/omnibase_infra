@@ -36,8 +36,8 @@ For local development or alternative infrastructure, set these environment
 variables to override the defaults:
 
     REMOTE_INFRA_HOST: Override the infrastructure server IP
-        Default: 192.168.86.200 (ONEX dev server)
-        Example: REMOTE_INFRA_HOST=localhost
+        Default: localhost (CI-friendly default)
+        Example: REMOTE_INFRA_HOST=your-server-ip
 
     Individual service overrides (take precedence over REMOTE_INFRA_HOST):
         POSTGRES_HOST: PostgreSQL server hostname
@@ -108,9 +108,11 @@ import os
 #   export REMOTE_INFRA_HOST=your-server-ip
 # =============================================================================
 
-# Default infrastructure server IP (ONEX development server)
+# Default infrastructure server host for CI environments
 # Override with REMOTE_INFRA_HOST environment variable
-_DEFAULT_REMOTE_INFRA_HOST = "192.168.86.200"
+# Default is "localhost" for CI compatibility - tests skip gracefully when unreachable
+# For ONEX dev server access, set: export REMOTE_INFRA_HOST=<your-infra-server-ip>
+_DEFAULT_REMOTE_INFRA_HOST = "localhost"
 
 REMOTE_INFRA_HOST: str = os.getenv("REMOTE_INFRA_HOST", _DEFAULT_REMOTE_INFRA_HOST)
 """Infrastructure server hostname/IP.
@@ -118,7 +120,7 @@ REMOTE_INFRA_HOST: str = os.getenv("REMOTE_INFRA_HOST", _DEFAULT_REMOTE_INFRA_HO
 This is the primary infrastructure server used for integration tests.
 Can be overridden via the REMOTE_INFRA_HOST environment variable.
 
-Default: 192.168.86.200 (ONEX development server)
+Default: localhost (CI-friendly default, tests skip when unreachable)
 """
 
 # =============================================================================
@@ -188,7 +190,7 @@ def get_vault_addr() -> str | None:
     Tests should explicitly require VAULT_ADDR to be set.
 
     Returns:
-        Vault URL (e.g., 'http://192.168.86.200:8200') if configured, None otherwise.
+        Vault URL (e.g., 'http://localhost:8200') if configured, None otherwise.
     """
     return os.getenv("VAULT_ADDR")
 
@@ -204,7 +206,7 @@ def get_kafka_bootstrap_servers() -> str | None:
     Tests should explicitly require KAFKA_BOOTSTRAP_SERVERS to be set.
 
     Returns:
-        Kafka bootstrap servers (e.g., '192.168.86.200:29092') if configured,
+        Kafka bootstrap servers (e.g., 'localhost:29092') if configured,
         None otherwise.
     """
     return os.getenv("KAFKA_BOOTSTRAP_SERVERS")
@@ -221,7 +223,7 @@ def build_default_vault_url() -> str:
 
     Example:
         >>> build_default_vault_url()
-        'http://192.168.86.200:8200'
+        'http://localhost:8200'
     """
     return f"http://{REMOTE_INFRA_HOST}:{DEFAULT_VAULT_PORT}"
 
@@ -237,6 +239,6 @@ def build_default_kafka_servers() -> str:
 
     Example:
         >>> build_default_kafka_servers()
-        '192.168.86.200:29092'
+        'localhost:29092'
     """
     return f"{REMOTE_INFRA_HOST}:{DEFAULT_KAFKA_PORT}"

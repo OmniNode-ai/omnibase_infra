@@ -9,7 +9,6 @@ in the ONEX registration and discovery patterns.
 from __future__ import annotations
 
 from datetime import datetime
-from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -27,6 +26,10 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
+from omnibase_infra.utils import (
+    validate_endpoint_urls_dict,
+    validate_timezone_aware_datetime,
+)
 
 
 class ModelNodeIntrospectionEvent(BaseModel):
@@ -107,20 +110,9 @@ class ModelNodeIntrospectionEvent(BaseModel):
     def validate_endpoint_urls(cls, v: dict[str, str]) -> dict[str, str]:
         """Validate that all endpoint values are valid URLs.
 
-        Args:
-            v: Dictionary of endpoint names to URL strings.
-
-        Returns:
-            The validated endpoints dictionary.
-
-        Raises:
-            ValueError: If any endpoint URL is invalid (missing scheme or netloc).
+        Delegates to shared utility for consistent validation across all models.
         """
-        for name, url in v.items():
-            parsed = urlparse(url)
-            if not parsed.scheme or not parsed.netloc:
-                raise ValueError(f"Invalid URL for endpoint '{name}': {url}")
-        return v
+        return validate_endpoint_urls_dict(v)
 
     current_state: str | None = Field(
         default=None,
@@ -146,21 +138,9 @@ class ModelNodeIntrospectionEvent(BaseModel):
     def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
         """Validate that timestamp is timezone-aware.
 
-        Args:
-            v: The timestamp value to validate.
-
-        Returns:
-            The validated timestamp.
-
-        Raises:
-            ValueError: If timestamp is naive (no timezone info).
+        Delegates to shared utility for consistent validation across all models.
         """
-        if v.tzinfo is None:
-            raise ValueError(
-                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
-            )
-        return v
+        return validate_timezone_aware_datetime(v)
 
     # Optional registration fields
     node_role: str | None = Field(

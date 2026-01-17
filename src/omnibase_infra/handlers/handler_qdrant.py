@@ -1045,7 +1045,7 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
                 last_error=f"Health check failed: {type(e).__name__}",
             )
 
-    async def describe(self) -> ModelVectorHandlerMetadata:
+    async def describe(self) -> ModelVectorHandlerMetadata:  # type: ignore[override]
         """Return handler metadata and capabilities.
 
         Returns:

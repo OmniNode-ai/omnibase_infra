@@ -24,7 +24,7 @@ node_version:
   minor: 0
   patch: 0
 # Node type
-node_type: "EFFECT"
+node_type: "EFFECT_GENERIC"
 # Description
 description: >
   Effect node for dual-backend node registration. Executes registration operations against both Consul (service discovery) and PostgreSQL (registration record persistence), with support for partial failure handling and targeted retries.

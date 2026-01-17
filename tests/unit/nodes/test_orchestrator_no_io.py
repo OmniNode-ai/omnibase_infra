@@ -520,7 +520,7 @@ class TestContractIOOperationsAreEffectNodes:
 
         for node in execution_graph:
             node_id = node["node_id"]
-            node_type = node["node_type"]
+            node_type = node["node_type"].lower()  # Normalize case for comparison
             description = node.get("description", "").lower()
 
             # Check if node_id or description suggests I/O
@@ -538,23 +538,44 @@ class TestContractIOOperationsAreEffectNodes:
             }
 
             if node_id in non_io_exceptions:
-                # These should NOT be effect nodes despite keyword matches
-                if node_type == "effect":
+                # These should NOT be effect nodes - they are pure computation
+                # Use .lower() for case-insensitive comparison (contracts use UPPERCASE)
+                if node_type.lower() == "effect_generic":
+                    keyword_note = (
+                        " (Note: node_id or description matched I/O keywords like "
+                        f"'{[kw for kw in io_operation_keywords if kw in node_id.lower() or kw in description][:2]}', "
+                        "but this node is known to perform pure computation, not external I/O)"
+                        if suggests_io
+                        else ""
+                    )
                     misclassified_nodes.append(
-                        f"{node_id}: marked as 'effect' but should be '{node['node_type']}'"
+                        f"{node_id}: Node in 'non_io_exceptions' has conflicting EFFECT_GENERIC type.\n"
+                        f"  FAILURE CONDITION: Test allowlist says pure computation, but contract says external I/O.\n"
+                        f"  CONTRACT: node_type='{node['node_type']}' (indicates external I/O operations)\n"
+                        f"  TEST: Node is in 'non_io_exceptions' set (expects no external I/O)\n"
+                        f"  {keyword_note}\n"
+                        f"  RESOLUTION - Verify what '{node_id}' actually does:\n"
+                        f"    A) If node performs pure computation (no network/database/filesystem):\n"
+                        f"       -> Update contract.yaml: Change node_type to 'COMPUTE_GENERIC' or 'REDUCER_GENERIC'\n"
+                        f"    B) If node performs external I/O (network, database, filesystem):\n"
+                        f"       -> Update this test: Remove '{node_id}' from non_io_exceptions set"
                     )
                 continue
 
             # I/O operations should be effect nodes
-            if suggests_io and node_type != "effect":
+            # Use .lower() for case-insensitive comparison (contracts use UPPERCASE)
+            if suggests_io and node_type.lower() != "effect_generic":
                 misclassified_nodes.append(
-                    f"{node_id}: performs I/O but marked as '{node_type}' instead of 'effect'"
+                    f"{node_id}: performs I/O but marked as '{node['node_type']}' instead of "
+                    f"'EFFECT_GENERIC' (comparison is case-insensitive)"
                 )
 
         assert not misclassified_nodes, (
             "Contract has misclassified nodes:\n"
             + "\n".join(f"  - {msg}" for msg in misclassified_nodes)
-            + "\n\nAll I/O operations must use node_type: effect"
+            + "\n\nNode classification rules:"
+            + "\n  - I/O operations (network, database, filesystem) MUST use node_type: EFFECT_GENERIC"
+            + "\n  - Pure computation nodes (in non_io_exceptions allowlist) MUST use COMPUTE_GENERIC or REDUCER_GENERIC"
         )
 
     def test_effect_nodes_handle_external_systems(self, contract_data: dict) -> None:
@@ -570,7 +591,9 @@ class TestContractIOOperationsAreEffectNodes:
             "execution_graph"
         ]["nodes"]
 
-        effect_nodes = [n for n in execution_graph if n["node_type"] == "effect"]
+        effect_nodes = [
+            n for n in execution_graph if n["node_type"].lower() == "effect_generic"
+        ]
         effect_node_ids = {n["node_id"] for n in effect_nodes}
 
         # Expected effect nodes for external system interaction
@@ -595,13 +618,15 @@ class TestContractIOOperationsAreEffectNodes:
             "execution_graph"
         ]["nodes"]
 
-        non_effect_nodes = [n for n in execution_graph if n["node_type"] != "effect"]
+        non_effect_nodes = [
+            n for n in execution_graph if n["node_type"].lower() != "effect_generic"
+        ]
 
         # Pure node types
-        pure_types = {"compute", "reducer"}
+        pure_types = {"compute_generic", "reducer_generic"}
 
         for node in non_effect_nodes:
-            node_type = node["node_type"]
+            node_type = node["node_type"].lower()  # Normalize case for comparison
             assert node_type in pure_types, (
                 f"Node '{node['node_id']}' has type '{node_type}' which is not a pure type.\n"
                 f"Non-effect nodes must be 'compute' or 'reducer'."

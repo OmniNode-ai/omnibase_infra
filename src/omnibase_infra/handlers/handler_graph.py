@@ -170,7 +170,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
         """
         return True
 
-    async def initialize(
+    async def initialize(  # type: ignore[override]
         self,
         connection_uri: str,
         auth: tuple[str, str] | None = None,
@@ -427,7 +427,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
                 f"Query execution failed: {type(e).__name__}", context=ctx
             ) from e
 
-    async def execute_query_batch(
+    async def execute_query_batch(  # type: ignore[override]
         self,
         queries: list[tuple[str, Mapping[str, JsonType] | None]],
         transaction: bool = True,
@@ -1088,7 +1088,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
                 server_info = await self._driver.get_server_info()
                 version = server_info.agent if server_info else None
             except Exception:
-                pass  # Version info is optional
+                pass
 
             health = ModelGraphHealthStatus(
                 healthy=True,
@@ -1115,7 +1115,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
                 connection_count=0,
             )
 
-    async def describe(self) -> ModelGraphHandlerMetadata:
+    async def describe(self) -> ModelGraphHandlerMetadata:  # type: ignore[override]
         """Return handler metadata and capabilities.
 
         Returns:

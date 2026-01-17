@@ -53,6 +53,7 @@ from omnibase_infra.dlq import (
     ServiceDlqTracking,
 )
 from omnibase_infra.enums import EnumNonRetryableErrorCategory
+from omnibase_infra.utils.util_datetime import is_timezone_aware
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -199,7 +200,7 @@ def parse_datetime_with_timezone(dt_string: str) -> datetime:
     dt = datetime.fromisoformat(normalized)
 
     # Ensure timezone-aware (assume UTC if not specified)
-    if dt.tzinfo is None:
+    if not is_timezone_aware(dt):
         dt = dt.replace(tzinfo=UTC)
 
     return dt

@@ -7,9 +7,9 @@ orchestrator against real infrastructure (Kafka, Consul, PostgreSQL).
 
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:
-    - PostgreSQL: 192.168.86.200:5436 (database: omninode_bridge)
-    - Consul: 192.168.86.200:28500
-    - Kafka/Redpanda: 192.168.86.200:29092
+    - PostgreSQL: POSTGRES_HOST:5436 (database: omninode_bridge)
+    - Consul: CONSUL_HOST:28500
+    - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 
     Environment variables required:
     - POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
@@ -47,7 +47,6 @@ Related Tickets:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import socket
@@ -55,6 +54,7 @@ from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import pytest
@@ -117,11 +117,16 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Consumer Readiness Helper (shared implementation)
+# Kafka Helpers (shared implementations)
 # =============================================================================
-# Imported from tests.helpers.kafka_utils for shared use across test modules.
-# See tests/helpers/kafka_utils.py for the canonical implementation.
-from tests.helpers.kafka_utils import wait_for_consumer_ready
+# Imported from tests.helpers.util_kafka for shared use across test modules.
+# See tests/helpers/util_kafka.py for the canonical implementations.
+from tests.helpers.util_kafka import (
+    KafkaTopicManager,
+    create_topic_factory_function,
+    wait_for_consumer_ready,
+    wait_for_topic_metadata,
+)
 
 # =============================================================================
 # Envelope Helper
@@ -245,15 +250,43 @@ SCHEMA_FILE = (
 def _build_postgres_dsn() -> str:
     """Build PostgreSQL DSN from environment variables.
 
+    Credentials (user and password) are URL-encoded using quote_plus() to handle
+    special characters like @, :, /, %, etc. that would otherwise break the DSN
+    format.
+
     Returns:
         PostgreSQL connection string in standard format.
+
+    Raises:
+        ValueError: If POSTGRES_HOST or POSTGRES_PASSWORD is not set.
 
     Note:
         This function should only be called after verifying
         POSTGRES_PASSWORD is set.
+
+    Example:
+        >>> # With special characters in credentials
+        >>> # user="user@domain", password="p@ss:word#123"
+        >>> dsn = _build_postgres_dsn()
+        >>> # Returns: postgresql://user%40domain:p%40ss%3Aword%23123@host:port/db
     """
+    if not POSTGRES_HOST:
+        raise ValueError(
+            "POSTGRES_HOST is required but not set. "
+            "Set POSTGRES_HOST environment variable to enable E2E tests."
+        )
+    if not POSTGRES_PASSWORD:
+        raise ValueError(
+            "POSTGRES_PASSWORD is required but not set. "
+            "Set POSTGRES_PASSWORD environment variable to enable E2E tests."
+        )
+
+    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
+    encoded_user = quote_plus(POSTGRES_USER, safe="")
+    encoded_password = quote_plus(POSTGRES_PASSWORD, safe="")
+
     return (
-        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
+        f"postgresql://{encoded_user}:{encoded_password}"
         f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
     )
 
@@ -467,6 +500,10 @@ async def ensure_test_topic() -> AsyncGenerator[
     isolation, preventing cross-test pollution when multiple test processes
     run concurrently.
 
+    Implementation:
+        Uses KafkaTopicManager from tests.helpers.util_kafka for centralized
+        topic lifecycle management and error handling.
+
     Yields:
         Async function that creates a topic with the given name and partition count.
         Returns the topic name (with UUID suffix) for convenience.
@@ -476,113 +513,15 @@ async def ensure_test_topic() -> AsyncGenerator[
             topic = await ensure_test_topic("test.e2e.introspection")
             # Topic now exists as "test.e2e.introspection-<uuid>" and can be used
     """
-    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-    from aiokafka.errors import TopicAlreadyExistsError
+    if not KAFKA_BOOTSTRAP_SERVERS:
+        pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
 
-    admin: AIOKafkaAdminClient | None = None
-    created_topics: list[str] = []
-
-    async def _wait_for_topic_metadata(
-        admin_client: AIOKafkaAdminClient,
-        topic_name: str,
-        timeout: float = 10.0,
-    ) -> bool:
-        """Wait for topic metadata to be available in the broker.
-
-        Args:
-            admin_client: Kafka admin client for topic operations.
-            topic_name: Name of the topic to wait for.
-            timeout: Maximum time to wait in seconds.
-
-        Returns:
-            True if topic metadata is available, False on timeout.
-
-        Note:
-            aiokafka.describe_topics() returns dict[str, TopicDescription]
-            keyed by topic name. This function validates the dict response
-            and checks for error codes to ensure the topic is truly available.
-        """
-        start_time = asyncio.get_running_loop().time()
-        while (asyncio.get_running_loop().time() - start_time) < timeout:
-            try:
-                description = await admin_client.describe_topics([topic_name])
-                # describe_topics returns dict[str, TopicDescription] keyed by topic name
-                if isinstance(description, dict) and topic_name in description:
-                    topic_metadata = description[topic_name]
-                    # Verify no error code (0 means success, None means field not present)
-                    error_code = getattr(topic_metadata, "error_code", None)
-                    if error_code is None or error_code == 0:
-                        return True
-                elif description:
-                    # Non-dict format (legacy compatibility) - accept if truthy
-                    return True
-            except Exception:
-                pass  # Topic not yet available
-            await asyncio.sleep(0.5)
-        return False
-
-    async def _create_topic(topic_name: str, partitions: int = 1) -> str:
-        """Create a topic with the given name and partition count.
-
-        Args:
-            topic_name: Base name of the topic to create (UUID will be appended).
-            partitions: Number of partitions (default: 1).
-
-        Returns:
-            The full topic name with UUID suffix.
-        """
-        nonlocal admin, created_topics
-
-        # Append UUID for parallel test isolation
-        unique_topic_name = f"{topic_name}-{uuid4().hex[:12]}"
-
-        # Lazy initialization of admin client
-        if admin is None:
-            admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-            await admin.start()
-
-        try:
-            await admin.create_topics(
-                [
-                    NewTopic(
-                        name=unique_topic_name,
-                        num_partitions=partitions,
-                        replication_factor=1,
-                    )
-                ]
-            )
-            created_topics.append(unique_topic_name)
-
-            # Wait for topic metadata to propagate
-            await _wait_for_topic_metadata(admin, unique_topic_name)
-        except TopicAlreadyExistsError:
-            # Topic already exists - still wait for metadata in case just created
-            if admin is not None:
-                await _wait_for_topic_metadata(admin, unique_topic_name, timeout=5.0)
-
-        return unique_topic_name
-
-    yield _create_topic
-
-    # Cleanup: delete created topics
-    if admin is not None:
-        if created_topics:
-            try:
-                await admin.delete_topics(created_topics)
-                logger.debug("Cleaned up test topics: %s", created_topics)
-            except Exception as e:
-                logger.warning(
-                    "Cleanup failed for Kafka topics %s: %s",
-                    created_topics,
-                    sanitize_error_message(e),
-                )
-        try:
-            await admin.close()
-        except Exception as e:
-            logger.warning(
-                "Failed to close Kafka admin client: %s",
-                sanitize_error_message(e),
-            )
+    # Use the shared KafkaTopicManager for topic lifecycle management
+    # Use create_topic_factory_function to avoid duplicating topic creation logic
+    async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
+        # UUID suffix for E2E test isolation (parallel test execution)
+        yield create_topic_factory_function(manager, add_uuid_suffix=True)
+        # Cleanup is handled automatically by KafkaTopicManager context exit
 
 
 @pytest.fixture
@@ -1291,6 +1230,7 @@ __all__ = [
     "SERVICE_REGISTRY_AVAILABLE",
     # Helper functions
     "wait_for_consumer_ready",
+    "wait_for_topic_metadata",
     # Database fixtures
     "postgres_pool",
     # Container fixtures

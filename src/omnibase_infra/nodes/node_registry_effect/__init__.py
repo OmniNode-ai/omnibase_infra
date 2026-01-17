@@ -17,7 +17,7 @@ Architecture (OMN-1103 Refactoring):
     All operation routing is defined in contract.yaml and handlers are resolved
     via container dependency injection.
 
-Node Type: EFFECT
+Node Type: EFFECT_GENERIC
 Purpose: Execute infrastructure I/O operations (Consul registration, PostgreSQL upsert)
          based on requests from the registration orchestrator.
 

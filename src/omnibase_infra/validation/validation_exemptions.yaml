@@ -804,7 +804,7 @@ pattern_exemptions:
   # MessageTypeRegistryError Exemptions (OMN-983)
   # ==========================================================================
   # Error classes require multiple context parameters for comprehensive error reporting.
-  - file_pattern: 'registry_message_type\.py'
+  - file_pattern: 'error_message_type_registry\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'
     reason: >

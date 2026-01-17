@@ -37,7 +37,7 @@ Environment Variables
 =====================
 
     QDRANT_URL: Qdrant server URL (required - skip if not set)
-        Example: http://localhost:6333 or http://192.168.86.200:6333
+        Example: http://localhost:6333 or http://your-server-ip:6333
     QDRANT_API_KEY: Optional API key for authentication
 
 Related Ticket: OMN-1142

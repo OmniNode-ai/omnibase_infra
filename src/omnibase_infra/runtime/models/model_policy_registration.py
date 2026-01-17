@@ -15,6 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.runtime.util_version import normalize_version
 from omnibase_infra.types import PolicyTypeInput
+from omnibase_infra.utils import validate_policy_type_value
+
+# NOTE: PolicyTypeInput is the INPUT type (str | EnumPolicyType) for API flexibility.
+# The validator coerces strings to EnumPolicyType, so the actual stored value is
+# always an enum. This ensures type-safe access after model instantiation.
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -69,9 +74,11 @@ class ModelPolicyRegistration(BaseModel):
         ...,
         description="Policy implementation class that implements ProtocolPolicy",
     )
-    policy_type: PolicyTypeInput = Field(
+    # NOTE: Field accepts PolicyTypeInput (str | EnumPolicyType) via mode="before" coercion,
+    # but the validator always coerces to EnumPolicyType. We annotate with the coerced type.
+    policy_type: EnumPolicyType = Field(
         ...,
-        description="Policy type - either 'orchestrator' or 'reducer'",
+        description="Policy type (accepts string or enum, always stored as EnumPolicyType)",
     )
     version: str = Field(
         default="1.0.0",
@@ -116,27 +123,17 @@ class ModelPolicyRegistration(BaseModel):
         """
         return normalize_version(v)
 
-    @field_validator("policy_type")
+    @field_validator("policy_type", mode="before")
     @classmethod
-    def validate_policy_type(cls, v: PolicyTypeInput) -> PolicyTypeInput:
-        """Validate policy_type is a valid EnumPolicyType value.
+    def validate_policy_type(cls, v: PolicyTypeInput) -> EnumPolicyType:
+        """Validate and coerce policy_type to EnumPolicyType.
 
-        Args:
-            v: The policy_type value to validate
+        Delegates to shared utility for consistent validation across all models.
+        String values are coerced to EnumPolicyType, ensuring type-safe access.
 
-        Returns:
-            The validated policy_type value
-
-        Raises:
-            ValueError: If policy_type is not a valid EnumPolicyType value
+        Note: mode="before" allows accepting str input before Pydantic validation.
         """
-        if isinstance(v, EnumPolicyType):
-            return v
-        # If it's a string, validate it's a valid EnumPolicyType value
-        valid_values = {e.value for e in EnumPolicyType}
-        if v not in valid_values:
-            raise ValueError(f"policy_type must be one of {valid_values}, got '{v}'")
-        return v
+        return validate_policy_type_value(v)
 
 
 __all__: list[str] = ["ModelPolicyRegistration"]

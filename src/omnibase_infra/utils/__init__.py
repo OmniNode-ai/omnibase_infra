@@ -8,6 +8,7 @@ This package provides common utilities used across the infrastructure:
     - util_dsn_validation: PostgreSQL DSN validation and sanitization
     - util_env_parsing: Type-safe environment variable parsing with validation
     - util_error_sanitization: Error message sanitization for secure logging and DLQ
+    - util_pydantic_validators: Shared Pydantic field validator utilities
     - util_semver: Semantic versioning validation utilities
 """
 
@@ -21,6 +22,7 @@ from omnibase_infra.utils.correlation import (
 from omnibase_infra.utils.util_datetime import (
     ensure_timezone_aware,
     is_timezone_aware,
+    validate_timezone_aware_with_context,
     warn_if_naive_datetime,
 )
 from omnibase_infra.utils.util_dsn_validation import (
@@ -35,8 +37,18 @@ from omnibase_infra.utils.util_error_sanitization import (
     SAFE_ERROR_PATTERNS,
     SENSITIVE_PATTERNS,
     sanitize_backend_error,
+    sanitize_consul_key,
     sanitize_error_message,
     sanitize_error_string,
+    sanitize_secret_path,
+)
+from omnibase_infra.utils.util_pydantic_validators import (
+    validate_contract_type_value,
+    validate_endpoint_urls_dict,
+    validate_policy_type_value,
+    validate_pool_sizes_constraint,
+    validate_timezone_aware_datetime,
+    validate_timezone_aware_datetime_optional,
 )
 from omnibase_infra.utils.util_semver import (
     SEMVER_PATTERN,
@@ -58,11 +70,20 @@ __all__: list[str] = [
     "parse_env_float",
     "parse_env_int",
     "sanitize_backend_error",
+    "sanitize_consul_key",
     "sanitize_dsn",
     "sanitize_error_message",
     "sanitize_error_string",
+    "sanitize_secret_path",
     "set_correlation_id",
+    "validate_contract_type_value",
+    "validate_endpoint_urls_dict",
+    "validate_policy_type_value",
+    "validate_pool_sizes_constraint",
     "validate_semver",
+    "validate_timezone_aware_datetime",
+    "validate_timezone_aware_datetime_optional",
+    "validate_timezone_aware_with_context",
     "validate_version_lenient",
     "warn_if_naive_datetime",
 ]

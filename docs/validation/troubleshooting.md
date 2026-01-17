@@ -151,7 +151,7 @@ Contracts: FAIL
    # Required fields
    contract_version: "1.0.0"
    node_version: "1.0.0"
-   node_type: "EFFECT"  # MISSING
+   node_type: "EFFECT_GENERIC"  # Use _GENERIC variants
    node_name: "infrastructure_consul_adapter"
    input_model: "ModelConsulAdapterInput"
    output_model: "ModelConsulAdapterOutput"
@@ -159,8 +159,8 @@ Contracts: FAIL
 
 2. **Add missing fields**:
    ```yaml
-   node_type: "EFFECT"  # For service adapters
-   # or "COMPUTE", "REDUCER", "ORCHESTRATOR"
+   node_type: "EFFECT_GENERIC"  # For service adapters
+   # Other valid types: COMPUTE_GENERIC, REDUCER_GENERIC, ORCHESTRATOR_GENERIC
    ```
 
 3. **Re-validate**:

@@ -15,10 +15,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.enums import EnumContractType
 from omnibase_infra.models.projection.model_registration_projection import (
     ContractTypeWithUnknown,
 )
+from omnibase_infra.utils import validate_contract_type_value
 
 
 class ModelCapabilityFields(BaseModel):
@@ -82,36 +82,14 @@ class ModelCapabilityFields(BaseModel):
     def validate_contract_type(cls, v: str | None) -> str | None:
         """Validate contract_type is a valid node contract type.
 
-        Provides validation for contract_type to catch invalid values at model
-        instantiation time. The special value 'unknown' is allowed for backfill
-        scenarios but will be rejected at persistence time unless explicitly
-        permitted via the `allow_unknown_backfill` flag.
-
-        Args:
-            v: The contract_type value to validate
-
-        Returns:
-            The validated value (unchanged if valid)
-
-        Raises:
-            ValueError: If v is not None and not a valid contract type or 'unknown'
+        Delegates to shared utility for consistent validation across all models.
 
         Note:
             The 'unknown' value is accepted here to allow model construction for
             backfill scenarios. However, `persist_state_transition()` will reject
             'unknown' unless `allow_unknown_backfill=True` is explicitly passed.
         """
-        if v is None:
-            return v
-        # Allow 'unknown' for backfill scenarios (validated at persistence layer)
-        if v == EnumContractType.UNKNOWN.value:
-            return v
-        if v not in EnumContractType.valid_type_values():
-            raise ValueError(
-                f"contract_type must be one of {EnumContractType.valid_type_values()}, "
-                f"got: {v!r}"
-            )
-        return v
+        return validate_contract_type_value(v)
 
     intent_types: list[str] | None = Field(
         default=None,

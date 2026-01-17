@@ -7,81 +7,24 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
+# Prevent auto-cancellation of running workflows when new commits are pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   POETRY_VERSION: "2.2.1"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.4.0"
 
 jobs:
-  # Full test suite - runs all unit tests
-  test:
-    name: Full Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install Poetry
-        run: |
-          pipx install poetry==${{ env.POETRY_VERSION }}
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}-${{ env.CACHE_VERSION }}
-          restore-keys: |
-            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
-
-      - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: |
-          poetry install --no-interaction --no-root || {
-            echo "Dependency install failed"
-            exit 1
-          }
-
-      - name: Install project
-        run: |
-          poetry install --no-interaction || {
-            echo "Project install failed"
-            exit 1
-          }
-
-      # Run fast test suite, excluding Docker integration tests and slow/chaos tests
-      # Docker tests run in dedicated docker-build.yml workflow with proper Buildx setup
-      # Slow and chaos tests run in nightly-tests.yml on schedule (too slow for CI)
-      # This prevents pytest-xdist worker crashes during Docker builds
-      - name: Run fast test suite
-        run: |
-          poetry run pytest tests/ \
-            --ignore=tests/integration/docker \
-            -m "not slow and not chaos" \
-            -n auto \
-            --timeout=60 \
-            --timeout-method=thread \
-            --tb=short \
-            --junitxml=junit.xml
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: junit.xml
-          retention-days: 7
+  # =============================================================================
+  # Phase 1 - Quick Validation (parallel, ~2-3 min)
+  # =============================================================================
+  # Phase 2 - Parallel Test Suite (after Phase 1 completes)
+  #   10 splits of ~927 tests each (~3 min per split)
+  # Phase 3 - Aggregation
+  # =============================================================================
 
   lint:
     name: Lint
@@ -181,55 +124,115 @@ jobs:
             exit 1
           }
 
-      # Architecture layer verification - run separately for clear visibility
-      # This check ensures omnibase_core doesn't import infrastructure packages
-      # like kafka, httpx, asyncpg, etc.
       - name: Run architecture layer check
         run: |
           echo "================================================================"
           echo "Architecture Layer Verification (OMN-255)"
           echo "================================================================"
-          echo ""
-          echo "This check verifies that omnibase_core maintains proper layer"
-          echo "separation by not importing infrastructure-specific packages."
-          echo ""
-          echo "LIMITATION: The bash script uses grep-based matching and CANNOT"
-          echo "detect inline imports inside functions. For comprehensive AST-based"
-          echo "analysis, see tests/ci/test_architecture_compliance.py"
-          echo ""
-          echo "================================================================"
-          # Run via validate.py for consistent exit code handling
           poetry run python scripts/validate.py architecture_layers --verbose
 
-      # Run all remaining ONEX validators
       - name: Run ONEX validators
         run: |
           poetry run python scripts/validate.py all --verbose
 
+  # Parallel test execution - 10 splits for ~927 tests each
+  # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
+  test-parallel:
+    name: Tests (Split ${{ matrix.split }}/10)
+    needs: [lint, onex-validation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        split: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==${{ env.POETRY_VERSION }}
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: |
+          poetry install --no-interaction --no-root || {
+            echo "Dependency install failed"
+            exit 1
+          }
+
+      - name: Install project
+        run: |
+          poetry install --no-interaction || {
+            echo "Project install failed"
+            exit 1
+          }
+
+      - name: Run test split ${{ matrix.split }}/10
+        run: |
+          poetry run pytest tests/ \
+            --ignore=tests/integration/docker \
+            -m "not slow and not chaos" \
+            --splits 10 \
+            --group ${{ matrix.split }} \
+            -n auto \
+            --timeout=60 \
+            --timeout-method=thread \
+            --tb=short \
+            --junitxml=junit-${{ matrix.split }}.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.split }}
+          path: junit-${{ matrix.split }}.xml
+          retention-days: 7
+
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [test, lint, onex-validation]
+    needs: [test-parallel, lint, onex-validation]
     if: always()
 
     steps:
       - name: Check test results
         run: |
-          test="${{ needs.test.result }}"
+          parallel="${{ needs.test-parallel.result }}"
           lint="${{ needs.lint.result }}"
           onex="${{ needs.onex-validation.result }}"
 
-          if [[ "$test" == "success" ]] && \
+          if [[ "$parallel" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
              [[ "$onex" == "success" ]]; then
             echo "All tests passed successfully"
-            echo "Full Tests: Passed"
+            echo "Parallel Tests (10 splits): Passed"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
             exit 0
           else
             echo "Tests failed"
-            echo "Full Tests: $test"
+            echo "Parallel Tests: $parallel"
             echo "Lint: $lint"
             echo "ONEX Validators: $onex"
             exit 1

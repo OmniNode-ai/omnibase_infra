@@ -168,7 +168,12 @@ class ModelHandlerValidationError(BaseModel):
         Example:
             >>> error = ModelHandlerValidationError.from_contract_error(...)
             >>> if error.is_blocking():
-            ...     raise RuntimeError("Cannot start with validation errors")
+            ...     from omnibase_infra.errors import ProtocolConfigurationError
+            ...     raise ProtocolConfigurationError(
+            ...         "Cannot start with validation errors",
+            ...         code="HANDLER_VALIDATION_FAILED",
+            ...         errors=[error.to_structured_dict()],
+            ...     )
         """
         return self.severity == EnumValidationSeverity.ERROR
 

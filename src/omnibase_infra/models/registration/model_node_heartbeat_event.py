@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.utils import validate_timezone_aware_datetime
 
 
 class ModelNodeHeartbeatEvent(BaseModel):
@@ -117,21 +118,9 @@ class ModelNodeHeartbeatEvent(BaseModel):
     def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
         """Validate that timestamp is timezone-aware.
 
-        Args:
-            v: The timestamp value to validate.
-
-        Returns:
-            The validated timestamp.
-
-        Raises:
-            ValueError: If timestamp is naive (no timezone info).
+        Delegates to shared utility for consistent validation across all models.
         """
-        if v.tzinfo is None:
-            raise ValueError(
-                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
-            )
-        return v
+        return validate_timezone_aware_datetime(v)
 
 
 __all__ = ["ModelNodeHeartbeatEvent"]
