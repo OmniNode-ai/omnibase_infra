@@ -115,10 +115,10 @@ import logging
 import os
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
 from pydantic import SecretStr
@@ -145,7 +145,6 @@ from omnibase_infra.runtime.models.model_secret_source_spec import (
 if TYPE_CHECKING:
     from omnibase_infra.handlers.handler_vault import HandlerVault
 
-from typing import Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +163,17 @@ class ProtocolSecretResolverMetrics(Protocol):
     the metric simply won't be recorded.
 
     Thread Safety:
-        Implementations MUST be thread-safe. Metrics may be recorded from
-        concurrent resolution operations.
+        Implementations MUST be thread-safe because SecretResolver's
+        ``_record_resolution_success`` and ``_record_resolution_failure`` methods
+        may be called concurrently from multiple threads during parallel
+        secret resolution operations. This includes:
+
+        - Multiple sync callers resolving different secrets simultaneously
+        - Async callers running in parallel via ``asyncio.gather``
+        - Mixed sync/async access patterns during bootstrap and runtime
+
+        Use thread-safe primitives (locks, atomic counters, thread-safe
+        collectors like prometheus_client) in your implementation.
 
     Example Implementation::
 
@@ -344,8 +352,8 @@ class SecretResolver:
         self._async_key_locks: dict[str, asyncio.Lock] = {}
 
         # === Metrics Tracking (OMN-1374) ===
-        # Resolution latency tracking (list of (source_type, latency_ms) tuples)
-        self._resolution_latencies: list[tuple[str, float]] = []
+        # Resolution latency tracking (deque of (source_type, latency_ms) tuples)
+        self._resolution_latencies: deque[tuple[str, float]] = deque(maxlen=1000)
         # Resolution success/failure counts by source type
         self._resolution_success_counts: defaultdict[str, int] = defaultdict(int)
         self._resolution_failure_counts: defaultdict[str, int] = defaultdict(int)
@@ -375,6 +383,13 @@ class SecretResolver:
             2. Try explicit mapping
             3. Try convention fallback (if enabled)
             4. Raise or return None based on required flag
+
+        Warning:
+            This synchronous method cannot resolve Vault secrets from within
+            an async context (e.g., from inside an async function or coroutine).
+            If you need to resolve Vault secrets in async code, use
+            ``get_secret_async()`` instead. Calling this method from async
+            context when resolving Vault secrets will raise SecretResolutionError.
 
         Args:
             logical_name: Dotted path (e.g., "database.postgres.password")
@@ -698,9 +713,7 @@ class SecretResolver:
         with self._lock:
             self._resolution_success_counts[source_type] += 1
             if start_time is not None:
-                # Keep last 1000 samples to avoid unbounded growth
-                if len(self._resolution_latencies) >= 1000:
-                    self._resolution_latencies.pop(0)
+                # deque with maxlen=1000 automatically rotates (O(1) vs O(n) for list.pop(0))
                 self._resolution_latencies.append((source_type, latency_ms))
 
         # External metrics collector
@@ -1468,6 +1481,7 @@ class SecretResolver:
             "secret/myapp/db#password" -> ("secret", "myapp/db", "password")
             "secret/myapp/db" -> ("secret", "myapp/db", None)
             "kv/prod/config#api_key" -> ("kv", "prod/config", "api_key")
+            "secret#password" -> ("secret", "", "password")  # Edge case - unusual format
 
         Args:
             path: Full Vault path with optional field specifier
@@ -1486,7 +1500,11 @@ class SecretResolver:
         # First component is always the mount_point
         parts = path_without_field.split("/", 1)
         if len(parts) == 1:
-            # No slash - entire path is the mount_point (edge case)
+            # Edge case: No slash in path - entire path is treated as mount_point
+            # with empty vault_path. This format (e.g., "secret#field") is unusual
+            # and may not be supported by Vault's KV v2 engine which expects
+            # paths like "mount/path". This case is preserved for backwards
+            # compatibility but callers should use full paths like "secret/data#field".
             return parts[0], "", field
 
         mount_point = parts[0]
