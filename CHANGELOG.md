@@ -5,7 +5,7 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-01-17
 
 ### Breaking Changes
 
@@ -265,6 +265,19 @@ class MyNode(MixinNodeIntrospection):
   - **Migration**: Update any references from `HANDLER_TYPE_REDIS` to `HANDLER_TYPE_VALKEY`
   - **Rationale**: Valkey is the correct service name for the Redis-compatible cache used in the infrastructure. This aligns the codebase with the actual service naming.
 
+#### Dependency Updates (OMN-1361, PR #156)
+- **omnibase_core upgraded to 0.7.0**: Breaking changes in core dependency
+- **omnibase_spi upgraded to 0.5.0**: Breaking changes in SPI dependency
+- **pytest-asyncio 0.25+ compatibility**: Test framework compatibility updates, requires `asyncio_mode = "auto"` in pyproject.toml
+- **Infrastructure IP defaults changed to localhost**: Default infrastructure IPs changed from remote server to localhost for local development
+
+#### Error Handling (OMN-1181, PR #158)
+- **RuntimeError replaced with structured domain errors**: All generic `RuntimeError` raises have been replaced with specific domain errors from the error taxonomy. If you were catching `RuntimeError`, update to catch the specific error types:
+  - `ProtocolConfigurationError` for configuration issues
+  - `InfraConnectionError` for connection failures
+  - `InfraTimeoutError` for timeout issues
+  - `InfraUnavailableError` for unavailable resources
+
 ### Added
 
 #### Node Introspection (OMN-881, PR #54)
@@ -288,6 +301,12 @@ class MyNode(MixinNodeIntrospection):
   - `DEFAULT_INTROSPECTION_TOPIC = "node.introspection"`
   - `DEFAULT_HEARTBEAT_TOPIC = "node.heartbeat"`
   - `DEFAULT_REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"`
+
+#### Documentation
+- **Protocol Patterns Documentation** (OMN-1079, PR #166): Added comprehensive documentation for protocol design patterns, cross-mixin composition, and TYPE_CHECKING patterns in `docs/patterns/protocol_patterns.md`
+
+#### Testing
+- **Correlation ID Integration Tests** (OMN-1349, PR #160): Added integration tests for correlation ID propagation across service boundaries
 
 #### Handlers
 - **HttpHandler** (OMN-237, PR #26): HTTP REST protocol handler for MVP
@@ -354,45 +373,10 @@ The codebase has migrated from "handler" to "dispatcher" terminology for message
 #### CI/CD
 - **Pre-commit Configuration**: Migrated to fix deprecated stage warnings (PR #25)
 
-## [0.1.0] - Unreleased
-
-### Planned
-
-This version represents the MVP (Minimum Viable Product) for ONEX Runtime Host Infrastructure.
-
-#### Core Components (MVP)
-- **BaseRuntimeHostProcess** (OMN-249): Infrastructure wrapper owning event bus and driving NodeRuntime
-- **HandlerDb** (OMN-238): PostgreSQL database protocol handler
-- **wiring.py** (OMN-240): Handler registration module ✅ (implemented as ProtocolBindingRegistry)
-
-#### Testing (MVP)
-- **E2E Flow Test** (OMN-254): InMemoryEventBus -> Runtime -> Handler flow
-- **Architecture Verification** (OMN-255): Architectural invariant checks
-
-#### Deployment (MVP)
-- **Dockerfile** (OMN-256): Basic container image for runtime host
-- **docker-compose** (OMN-264): Local development configuration
-
-#### Documentation (MVP)
-- **CLAUDE.md Updates** (OMN-265): Runtime Host architecture documentation
-
-### MVP Philosophy
-
-> **MVP (v0.1.0)**: Prove the architecture works end-to-end with minimal scope
-> - InMemoryEventBus only (no Kafka complexity)
-> - HTTP + DB handlers only (no Vault, no Consul)
-> - Simplified contract format
-> - Basic error handling
-> - Unit tests with mocks
-
-### Deferred to Beta (v0.2.0)
-
-- KafkaEventBus with backpressure
-- HandlerVault and HandlerConsul
-- Retry logic and rate limiting
-- Full graceful shutdown with drain
-- Integration tests with real services
-- Observability layer (structured logging, metrics)
+#### Dependencies
+- **omnibase_core**: Updated from 0.6.x to 0.7.0
+- **omnibase_spi**: Updated from 0.4.x to 0.5.0
+- **pytest-asyncio**: Updated compatibility for 0.25+
 
 ---
 
