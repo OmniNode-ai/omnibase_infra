@@ -112,8 +112,14 @@ class TestWireRegistrationHandlers:
         assert ack_handler_reg["metadata"]["liveness_interval_seconds"] == 120
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_on_registration_failure(self) -> None:
-        """Test that RuntimeError is raised if registration fails."""
+    async def test_raises_container_wiring_error_on_registration_failure(self) -> None:
+        """Test that ContainerWiringError is raised if registration fails.
+
+        OMN-1181: Changed from RuntimeError to ContainerWiringError
+        for clearer error messages and structured error handling.
+        """
+        from omnibase_infra.errors import ContainerWiringError
+
         mock_registry = MagicMock()
         mock_registry.register_instance = AsyncMock(
             side_effect=Exception("Registry error")
@@ -124,7 +130,9 @@ class TestWireRegistrationHandlers:
 
         mock_pool = MagicMock()
 
-        with pytest.raises(RuntimeError, match="Failed to wire registration handlers"):
+        with pytest.raises(
+            ContainerWiringError, match="Failed to wire registration handlers"
+        ):
             await wire_registration_handlers(mock_container, mock_pool)
 
     @pytest.mark.asyncio
@@ -192,8 +200,14 @@ class TestGetProjectionReaderFromContainer:
         )
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_if_not_registered(self) -> None:
-        """Test that RuntimeError is raised if reader not registered."""
+    async def test_raises_service_resolution_error_if_not_registered(self) -> None:
+        """Test that ServiceResolutionError is raised if reader not registered.
+
+        OMN-1181: Changed from RuntimeError to ServiceResolutionError
+        for clearer error messages and structured error handling.
+        """
+        from omnibase_infra.errors import ServiceResolutionError
+
         mock_registry = MagicMock()
         mock_registry.resolve_service = AsyncMock(side_effect=Exception("Not found"))
 
@@ -201,7 +215,7 @@ class TestGetProjectionReaderFromContainer:
         mock_container.service_registry = mock_registry
 
         with pytest.raises(
-            RuntimeError, match="ProjectionReaderRegistration not registered"
+            ServiceResolutionError, match="ProjectionReaderRegistration not registered"
         ):
             await get_projection_reader_from_container(mock_container)
 
@@ -230,8 +244,14 @@ class TestGetHandlerNodeIntrospectedFromContainer:
         mock_registry.resolve_service.assert_awaited_once_with(HandlerNodeIntrospected)
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_if_not_registered(self) -> None:
-        """Test that RuntimeError is raised if handler not registered."""
+    async def test_raises_service_resolution_error_if_not_registered(self) -> None:
+        """Test that ServiceResolutionError is raised if handler not registered.
+
+        OMN-1181: Changed from RuntimeError to ServiceResolutionError
+        for clearer error messages and structured error handling.
+        """
+        from omnibase_infra.errors import ServiceResolutionError
+
         mock_registry = MagicMock()
         mock_registry.resolve_service = AsyncMock(side_effect=Exception("Not found"))
 
@@ -239,7 +259,7 @@ class TestGetHandlerNodeIntrospectedFromContainer:
         mock_container.service_registry = mock_registry
 
         with pytest.raises(
-            RuntimeError, match="HandlerNodeIntrospected not registered"
+            ServiceResolutionError, match="HandlerNodeIntrospected not registered"
         ):
             await get_handler_node_introspected_from_container(mock_container)
 
@@ -268,15 +288,23 @@ class TestGetHandlerRuntimeTickFromContainer:
         mock_registry.resolve_service.assert_awaited_once_with(HandlerRuntimeTick)
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_if_not_registered(self) -> None:
-        """Test that RuntimeError is raised if handler not registered."""
+    async def test_raises_service_resolution_error_if_not_registered(self) -> None:
+        """Test that ServiceResolutionError is raised if handler not registered.
+
+        OMN-1181: Changed from RuntimeError to ServiceResolutionError
+        for clearer error messages and structured error handling.
+        """
+        from omnibase_infra.errors import ServiceResolutionError
+
         mock_registry = MagicMock()
         mock_registry.resolve_service = AsyncMock(side_effect=Exception("Not found"))
 
         mock_container = MagicMock()
         mock_container.service_registry = mock_registry
 
-        with pytest.raises(RuntimeError, match="HandlerRuntimeTick not registered"):
+        with pytest.raises(
+            ServiceResolutionError, match="HandlerRuntimeTick not registered"
+        ):
             await get_handler_runtime_tick_from_container(mock_container)
 
 
@@ -308,8 +336,14 @@ class TestGetHandlerNodeRegistrationAckedFromContainer:
         )
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_if_not_registered(self) -> None:
-        """Test that RuntimeError is raised if handler not registered."""
+    async def test_raises_service_resolution_error_if_not_registered(self) -> None:
+        """Test that ServiceResolutionError is raised if handler not registered.
+
+        OMN-1181: Changed from RuntimeError to ServiceResolutionError
+        for clearer error messages and structured error handling.
+        """
+        from omnibase_infra.errors import ServiceResolutionError
+
         mock_registry = MagicMock()
         mock_registry.resolve_service = AsyncMock(side_effect=Exception("Not found"))
 
@@ -317,7 +351,7 @@ class TestGetHandlerNodeRegistrationAckedFromContainer:
         mock_container.service_registry = mock_registry
 
         with pytest.raises(
-            RuntimeError, match="HandlerNodeRegistrationAcked not registered"
+            ServiceResolutionError, match="HandlerNodeRegistrationAcked not registered"
         ):
             await get_handler_node_registration_acked_from_container(mock_container)
 

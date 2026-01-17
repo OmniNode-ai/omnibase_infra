@@ -220,7 +220,7 @@ class TestModelHandlerValidationError:
             rule_id="CONTRACT-003",
             message="Missing node_type field",
             file_path="nodes/test/contract.yaml",
-            remediation_hint="Add node_type: EFFECT to contract",
+            remediation_hint="Add node_type: EFFECT_GENERIC to contract",
             handler_identity=handler_id,
         )
 
@@ -445,7 +445,7 @@ class TestModelHandlerValidationErrorIntegration:
                 handler_identity=handler_id,
                 source_type=EnumHandlerSourceType.CONTRACT,
                 message="Invalid node_type",
-                remediation_hint="Use EFFECT, COMPUTE, REDUCER, or ORCHESTRATOR",
+                remediation_hint="Use EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, or ORCHESTRATOR_GENERIC",
             ),
         ]
 

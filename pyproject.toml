@@ -26,13 +26,10 @@ python = "^3.12"
 # - Breaking changes are communicated through semver major versions
 # - Internal packages are co-developed with this codebase
 #
-# omnibase-core v0.6.6: Adds handler routing models for OMN-1102.
-# - ModelHandlerRoutingEntry, ModelHandlerRoutingSubcontract (OMN-1295)
-# - Package-level imports recommended for forward compatibility
-# - Fixes circular import bug (OMN-1257)
-omnibase-core = "^0.6.6"
-# omnibase-spi v0.4.2: Adds ProtocolCapabilityQuery interface (OMN-1135)
-omnibase-spi = "^0.4.2"
+# omnibase-core v0.7.0: Major breaking changes release
+omnibase-core = "^0.7.0"
+# omnibase-spi v0.5.0: Protocol updates for omnibase-core 0.7.0 compatibility
+omnibase-spi = "^0.5.0"
 
 # ============================================================================
 # External Dependency Security Guidance
@@ -135,6 +132,7 @@ pytest-httpserver = "^1.1.0"  # Local mock HTTP server for integration tests
 types-aiofiles = "^23.2.0.20240403"
 types-requests = "^2.32.0.20250914"
 hypothesis = "^6.148.7"
+pytest-split = "^0.10.0"
 
 [tool.ruff]
 target-version = "py312"
@@ -269,6 +267,12 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
+# pytest-asyncio 0.25+ requires explicit fixture loop scope configuration.
+# Set to "function" (default) to make configuration explicit and avoid deprecation warnings.
+# Test modules using session/module-scoped async fixtures must override via pytestmark:
+#   pytestmark = [pytest.mark.asyncio(loop_scope="session")]
+# See: tests/conftest.py for detailed documentation on loop_scope configuration.
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "unit: Unit tests that test individual components in isolation",
     "integration: Integration tests that test multiple components together",

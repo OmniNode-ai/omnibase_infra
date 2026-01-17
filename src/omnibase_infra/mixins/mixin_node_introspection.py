@@ -81,7 +81,7 @@ Security Considerations:
     - **FSM state information**: Current state value if FSM attributes exist
       (e.g., ``connected``, ``authenticated``, ``processing``).
     - **Endpoint URLs**: Health, API, and metrics endpoint paths.
-    - **Node metadata**: Node ID (UUID), type (EFFECT/COMPUTE/etc.), and version.
+    - **Node metadata**: Node ID (UUID), type via ``EnumNodeKind`` (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR), and version.
 
     **What is NOT Exposed**:
 
@@ -710,7 +710,7 @@ class MixinNodeIntrospection:
         of public entry point methods.
 
         Raises:
-            RuntimeError: If initialize_introspection() was not called.
+            ProtocolConfigurationError: If initialize_introspection() was not called.
 
         Example:
             ```python
@@ -720,13 +720,19 @@ class MixinNodeIntrospection:
             ```
         """
         # Use getattr with sentinel to avoid AttributeError if initialize_introspection()
-        # was never called. This ensures we always raise RuntimeError, not AttributeError.
+        # was never called. This ensures we always raise structured error, not AttributeError.
         _not_set = object()
         node_id = getattr(self, "_introspection_node_id", _not_set)
         if node_id is _not_set or node_id is None:
-            raise RuntimeError(
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="_ensure_initialized",
+                target_name="node_introspection_mixin",
+            )
+            raise ProtocolConfigurationError(
                 "MixinNodeIntrospection not initialized. "
-                "Call initialize_introspection() before using introspection methods."
+                "Call initialize_introspection() before using introspection methods.",
+                context=ctx,
             )
 
     def _get_class_method_signatures(self) -> dict[str, str]:
@@ -1003,7 +1009,7 @@ class MixinNodeIntrospection:
             - method_signatures: Dict of method names to signature strings
 
         Raises:
-            RuntimeError: If initialize_introspection() was not called.
+            ProtocolConfigurationError: If initialize_introspection() was not called.
 
         Example:
             ```python
@@ -1082,7 +1088,7 @@ class MixinNodeIntrospection:
             Common keys: health, api, metrics, readiness, liveness
 
         Raises:
-            RuntimeError: If initialize_introspection() was not called.
+            ProtocolConfigurationError: If initialize_introspection() was not called.
 
         Example:
             ```python
@@ -1152,7 +1158,7 @@ class MixinNodeIntrospection:
             Current state string if FSM state is found, None otherwise.
 
         Raises:
-            RuntimeError: If initialize_introspection() was not called.
+            ProtocolConfigurationError: If initialize_introspection() was not called.
 
         Example:
             ```python
@@ -1186,7 +1192,7 @@ class MixinNodeIntrospection:
             ModelNodeIntrospectionEvent containing full introspection data.
 
         Raises:
-            RuntimeError: If initialize_introspection() was not called.
+            ProtocolConfigurationError: If initialize_introspection() was not called.
 
         Example:
             ```python
@@ -1404,7 +1410,7 @@ class MixinNodeIntrospection:
             True if published successfully, False otherwise
 
         Raises:
-            RuntimeError: If initialize_introspection() was not called.
+            ProtocolConfigurationError: If initialize_introspection() was not called.
 
         Example:
             ```python
@@ -2098,7 +2104,7 @@ class MixinNodeIntrospection:
             enable_registry_listener: Whether to start the registry listener
 
         Raises:
-            RuntimeError: If initialize_introspection() was not called.
+            ProtocolConfigurationError: If initialize_introspection() was not called.
 
         Example:
             ```python
@@ -2156,7 +2162,7 @@ class MixinNodeIntrospection:
                 See ModelIntrospectionTaskConfig for available options.
 
         Raises:
-            RuntimeError: If initialize_introspection() was not called.
+            ProtocolConfigurationError: If initialize_introspection() was not called.
 
         Example:
             ```python

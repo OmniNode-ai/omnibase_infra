@@ -85,7 +85,7 @@ class MixinSemverCache:
                      Each entry uses ~100 bytes.
 
         Raises:
-            RuntimeError: If cache already initialized (first parse already occurred)
+            ProtocolConfigurationError: If cache already initialized (first parse already occurred)
 
         Example:
             >>> # Configure before any registry operations
@@ -98,7 +98,7 @@ class MixinSemverCache:
         """
         with cls._semver_cache_lock:
             if cls._semver_cache is not None:
-                raise RuntimeError(
+                raise ProtocolConfigurationError(
                     "Cannot reconfigure semver cache after first use. "
                     "Set SEMVER_CACHE_SIZE before creating any "
                     "registry instances, or use _reset_semver_cache() for testing."

@@ -34,7 +34,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 name: "node_registration_orchestrator"
-node_type: "ORCHESTRATOR"
+node_type: "ORCHESTRATOR_GENERIC"
 description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
 input_model:
   name: "ModelOrchestratorInput"
@@ -110,14 +110,14 @@ workflow_coordination:
     execution_graph:
       nodes:
         - node_id: "receive_introspection"
-          node_type: effect
+          node_type: EFFECT_GENERIC
           description: "Receive introspection, tick, or ack events"
           step_config:
             event_pattern: ["node-introspection.*", "registry-request-introspection.*", "runtime-tick.*", "node-registration-acked.*"]
         # OMN-930: Reads current registration state via ProtocolProjectionReader.
         # Uses ProjectionReaderRegistration to query node_registration_state.
         - node_id: "read_projection"
-          node_type: effect
+          node_type: EFFECT_GENERIC
           description: "Read current registration state from projection"
           depends_on: ["receive_introspection"]
           step_config:
@@ -127,41 +127,41 @@ workflow_coordination:
         # OMN-973: Evaluates timeout using injected `now` from dispatch context.
         # The DispatchContextEnforcer injects time from RuntimeTick events.
         - node_id: "evaluate_timeout"
-          node_type: compute
+          node_type: COMPUTE_GENERIC
           description: "Evaluate timeout based on injected now from RuntimeTick"
           depends_on: ["read_projection"]
           step_config:
             time_injection: true
             timeout_evaluation: true
         - node_id: "compute_intents"
-          node_type: reducer
+          node_type: REDUCER_GENERIC
           description: "Compute registration intents from introspection event"
           depends_on: ["evaluate_timeout"]
           step_config:
             reducer_protocol: "ProtocolReducer"
             output_type: "list[ModelRegistrationIntent]"
         - node_id: "execute_consul_registration"
-          node_type: effect
+          node_type: EFFECT_GENERIC
           description: "Execute Consul registration intent"
           depends_on: ["compute_intents"]
           step_config:
             effect_node: "node_registry_effect"
             intent_filter: "consul.*"
         - node_id: "execute_postgres_registration"
-          node_type: effect
+          node_type: EFFECT_GENERIC
           description: "Execute PostgreSQL registration intent"
           depends_on: ["compute_intents"]
           step_config:
             effect_node: "node_registry_effect"
             intent_filter: "postgres.*"
         - node_id: "aggregate_results"
-          node_type: compute
+          node_type: COMPUTE_GENERIC
           description: "Aggregate registration results"
           depends_on: ["execute_consul_registration", "execute_postgres_registration"]
           step_config:
             aggregation_strategy: "all_or_partial"
         - node_id: "publish_outcome"
-          node_type: effect
+          node_type: EFFECT_GENERIC
           description: "Publish registration outcome event"
           depends_on: ["aggregate_results"]
           step_config:

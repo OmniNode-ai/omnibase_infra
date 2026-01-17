@@ -13,7 +13,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 name: "node_service_discovery_effect"
-node_type: "EFFECT"
+node_type: "EFFECT_GENERIC"
 description: >
   Effect node for service discovery operations. Provides capability-oriented service registration, deregistration, and discovery with pluggable backend support (Consul, Kubernetes, Etcd). Named by capability, not vendor.
 

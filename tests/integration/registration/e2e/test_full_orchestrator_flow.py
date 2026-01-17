@@ -23,10 +23,10 @@ Architecture Notes:
 
     This validates the REAL message flow, not just handler logic.
 
-Infrastructure Requirements:
-    - Kafka: 192.168.86.200:29092
-    - Consul: 192.168.86.200:28500
-    - PostgreSQL: 192.168.86.200:5436
+Infrastructure Requirements (configured via environment variables):
+    - Kafka: KAFKA_BOOTSTRAP_SERVERS (e.g., localhost:29092)
+    - Consul: CONSUL_HTTP_ADDR (e.g., localhost:8500)
+    - PostgreSQL: POSTGRES_HOST, POSTGRES_PORT (e.g., localhost:5432)
 
 Related Tickets:
     - OMN-892: E2E Registration Tests
@@ -97,7 +97,7 @@ pytestmark = [
 # =============================================================================
 
 # Pre-existing topic used for E2E tests. This topic must exist in Kafka/Redpanda
-# before running tests. The ensure_test_topic_exists fixture validates topic
+# before running tests. The validate_test_topic_exists fixture validates topic
 # existence and fails fast with clear error messages if the topic is missing.
 #
 # Test Isolation Strategy:
@@ -125,28 +125,62 @@ TEST_INTROSPECTION_TOPIC = "e2e-test.node.introspection.v1"
 
 
 def coerce_to_node_kind(node_type: str | EnumNodeKind | None) -> EnumNodeKind:
-    """Safely coerce a node type string or enum to EnumNodeKind.
+    """Coerce a node type string or enum to EnumNodeKind.
 
-    Uses Enum-first pattern with type guard for safer runtime behavior:
-    1. If already an enum, return as-is
-    2. If string, validate and convert
-    3. If None or other types, raise appropriate error
+    This function handles the string-to-enum coercion needed when processing
+    deserialized Kafka messages. aiokafka deserializes JSON payloads, which
+    converts enum values to their string representations (e.g., "effect"
+    instead of EnumNodeKind.EFFECT).
+
+    Why This Exists:
+        When Kafka messages are serialized to JSON (via Pydantic's model_dump),
+        enum values become strings. Upon deserialization, these remain as strings
+        rather than being automatically converted back to enum instances. This
+        function provides safe, validated coercion back to EnumNodeKind.
+
+    Use Cases:
+        - Processing deserialized Kafka messages with node_type fields
+        - Handling external API responses where enums are serialized as strings
+        - Converting Pydantic model dumps back to typed enums
+
+    When NOT to Use:
+        - For direct enum construction from known literal values, use
+          EnumNodeKind("effect") directly (simpler, no None handling)
+        - When the value is already guaranteed to be an EnumNodeKind instance
+        - In code paths that don't involve deserialization boundaries
+
+    Implementation Pattern:
+        Uses Enum-first pattern with type guard for safer runtime behavior:
+        1. Handle None explicitly with TypeError
+        2. If already an enum, return as-is (fast path)
+        3. If string, validate against known values and convert
+        4. For other types, raise TypeError with detailed message
 
     Args:
-        node_type: Node type as string literal or enum value.
+        node_type: Either a string representation (e.g., "effect", "compute")
+            or an EnumNodeKind instance. None values raise TypeError.
 
     Returns:
-        EnumNodeKind enum value.
+        EnumNodeKind: The coerced enum value.
 
     Raises:
         TypeError: If node_type is None or not a string/EnumNodeKind.
-        ValueError: If string value is not a valid EnumNodeKind member.
+        ValueError: If the string value doesn't match any EnumNodeKind member.
 
     Example:
+        >>> # From deserialized Kafka message
         >>> coerce_to_node_kind("effect")
         <EnumNodeKind.EFFECT: 'effect'>
+
+        >>> # Pass-through for already-typed values
         >>> coerce_to_node_kind(EnumNodeKind.COMPUTE)
         <EnumNodeKind.COMPUTE: 'compute'>
+
+        >>> # Error handling
+        >>> coerce_to_node_kind(None)
+        TypeError: node_type cannot be None...
+        >>> coerce_to_node_kind("invalid")
+        ValueError: Invalid node_type 'invalid'...
     """
     # Handle None explicitly
     if node_type is None:
@@ -692,7 +726,7 @@ async def orchestrator_pipeline(
 
 
 @pytest.fixture
-async def ensure_test_topic_exists(
+async def validate_test_topic_exists(
     real_kafka_event_bus: EventBusKafka,
 ) -> str:
     """Validate and return the pre-existing test topic name.
@@ -738,7 +772,7 @@ async def ensure_test_topic_exists(
         pytest.fail(
             "KAFKA_BOOTSTRAP_SERVERS environment variable not set.\n"
             "Set it to your Kafka/Redpanda cluster address, e.g.:\n"
-            "  export KAFKA_BOOTSTRAP_SERVERS=192.168.86.200:29092"
+            "  export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
         )
 
     admin_client: AIOKafkaAdminClient | None = None
@@ -806,16 +840,15 @@ async def ensure_test_topic_exists(
             )
 
         # Get the topic description from describe_topics response.
-        # aiokafka.describe_topics() returns Dict[str, TopicDescription] keyed by topic name.
-        # We handle the expected dict format and fail fast for unexpected formats.
+        # aiokafka 0.11.0+ returns dict format: {'topic_name': TopicDescription(...)}
         if not isinstance(topic_descriptions, dict):
             pytest.fail(
                 f"Unexpected describe_topics response type: {type(topic_descriptions).__name__}.\n"
-                f"Expected dict[str, TopicDescription], got: {topic_descriptions!r}"
+                f"Expected dict (aiokafka 0.11.0+ format), got: {topic_descriptions!r}"
                 f"{topic_creation_hint}"
             )
 
-        topic_metadata = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
+        topic_metadata: object | None = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
         if topic_metadata is None:
             pytest.fail(
                 f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
@@ -952,7 +985,7 @@ async def ensure_test_topic_exists(
 async def running_orchestrator_consumer(
     real_kafka_event_bus: EventBusKafka,
     orchestrator_pipeline: OrchestratorTestContext,
-    ensure_test_topic_exists: str,  # Ensures topic exists before subscribing
+    validate_test_topic_exists: str,  # Ensures topic exists before subscribing
 ) -> AsyncGenerator[OrchestratorTestContext, None]:
     """Start a Kafka consumer that routes messages through the pipeline.
 
@@ -971,7 +1004,7 @@ async def running_orchestrator_consumer(
     Args:
         real_kafka_event_bus: Real Kafka event bus (configured with enable_auto_commit=False).
         orchestrator_pipeline: Context containing pipeline and connected mocks.
-        ensure_test_topic_exists: Fixture that validates the topic is ready.
+        validate_test_topic_exists: Fixture that validates the topic is ready.
 
     Yields:
         OrchestratorTestContext with pipeline, mocks, and unsubscribe function.
@@ -985,14 +1018,14 @@ async def running_orchestrator_consumer(
     unique_group_id = f"e2e-orchestrator-test-{uuid4().hex[:8]}"
     # Subscribe to the introspection topic (topic is guaranteed to exist)
     unsubscribe = await real_kafka_event_bus.subscribe(
-        topic=ensure_test_topic_exists,  # Use the ensured topic name
+        topic=validate_test_topic_exists,  # Use the ensured topic name
         group_id=unique_group_id,
         on_message=orchestrator_pipeline.pipeline.process_message,
     )
 
     # Wait for consumer to be ready to receive messages.
     # See wait_for_consumer_ready docstring for known limitations.
-    await wait_for_consumer_ready(real_kafka_event_bus, ensure_test_topic_exists)
+    await wait_for_consumer_ready(real_kafka_event_bus, validate_test_topic_exists)
 
     # Create a new context with the unsubscribe function included
     context = OrchestratorTestContext(
@@ -1272,7 +1305,7 @@ class TestFullOrchestratorFlow:
         # 1. Pipeline.wait_until_idle() method that tracks in-flight messages
         # 2. Counter-based approach: wait until processed_count increments
         # 3. Expose processing completion via asyncio.Event per message
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2.0)
 
         # Publish a valid message after the malformed one
         # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent
@@ -1502,7 +1535,7 @@ class TestPipelineLifecycle:
         self,
         real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
-        ensure_test_topic_exists: str,
+        validate_test_topic_exists: str,
     ) -> None:
         """Test that consumer starts and receives messages.
 
@@ -1515,9 +1548,9 @@ class TestPipelineLifecycle:
             received_messages.append(msg)
             message_received.set()
 
-        # Subscribe (topic is guaranteed to exist via ensure_test_topic_exists fixture)
+        # Subscribe (topic is guaranteed to exist via validate_test_topic_exists fixture)
         unsubscribe = await real_kafka_event_bus.subscribe(
-            topic=ensure_test_topic_exists,
+            topic=validate_test_topic_exists,
             group_id=f"lifecycle-test-{unique_correlation_id.hex[:8]}",
             on_message=handler,
         )
@@ -1526,7 +1559,7 @@ class TestPipelineLifecycle:
             # Wait for consumer to be ready to receive messages.
             # See wait_for_consumer_ready docstring for known limitations.
             await wait_for_consumer_ready(
-                real_kafka_event_bus, ensure_test_topic_exists
+                real_kafka_event_bus, validate_test_topic_exists
             )
 
             # Publish test message
@@ -1538,7 +1571,7 @@ class TestPipelineLifecycle:
             )
 
             await real_kafka_event_bus.publish(
-                topic=ensure_test_topic_exists,
+                topic=validate_test_topic_exists,
                 key=b"test-key",
                 value=b'{"test": true}',
                 headers=headers,
@@ -1559,7 +1592,7 @@ class TestPipelineLifecycle:
         self,
         real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
-        ensure_test_topic_exists: str,
+        validate_test_topic_exists: str,
     ) -> None:
         """Test that consumer handles shutdown without errors.
 
@@ -1573,7 +1606,7 @@ class TestPipelineLifecycle:
 
         # Subscribe and immediately unsubscribe (topic is guaranteed to exist)
         unsubscribe = await real_kafka_event_bus.subscribe(
-            topic=ensure_test_topic_exists,
+            topic=validate_test_topic_exists,
             group_id=f"shutdown-test-{unique_correlation_id.hex[:8]}",
             on_message=handler,
         )
@@ -1581,7 +1614,7 @@ class TestPipelineLifecycle:
         # Brief wait before testing shutdown (tests cleanup, not message receipt).
         # Using wait_for_consumer_ready for consistency, though this test doesn't
         # actually need to receive messages.
-        await wait_for_consumer_ready(real_kafka_event_bus, ensure_test_topic_exists)
+        await wait_for_consumer_ready(real_kafka_event_bus, validate_test_topic_exists)
 
         # Unsubscribe should not raise
         await unsubscribe()

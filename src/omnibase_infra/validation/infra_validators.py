@@ -397,6 +397,11 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                    Applied HandlerMap, NodeId, PayloadDict, EventMetadata, MetadataDict type aliases
 # - 81 (2026-01-16): OMN-1305 PR #151 merge with main - combined changes
 #                    isinstance exclusion + type alias refactoring + PR #151 fixes
+# - 83 (2026-01-16): OMN-1181 structured errors merge with main
+#                    (+2 unions for EnumPolicyType | str in validate_policy_type_value)
+# - 82 (2026-01-16): OMN-1181 fix PolicyTypeInput validator coercion
+#                    (-1 union: changed return type from str | EnumPolicyType to EnumPolicyType)
+#                    Validators now coerce strings to EnumPolicyType, ensuring type-safe access.
 #
 # Soft ceiling guidance:
 # - 100-120: Healthy range, minor increments OK for legitimate features
@@ -410,12 +415,15 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # 4. Consider if a domain-specific type from omnibase_core would be cleaner
 #
 # Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
-# Threshold increased from 81 to 95 to accommodate legitimate patterns in Qdrant/Graph handlers:
-# - str | int for graph node IDs (5 occurrences in handler_graph.py)
-# - UUID | str for Qdrant point IDs (2 occurrences in Qdrant models)
-# - float | int for score fields (1 occurrence)
-# See OMN-1142 for handler implementation context.
-INFRA_MAX_UNIONS = 95
+# - 95 (2026-01-16): OMN-1142 Qdrant/Graph handlers (+14 legitimate union patterns)
+#                    - str | int for graph node IDs (5 occurrences in handler_graph.py)
+#                    - UUID | str for Qdrant point IDs (2 occurrences in Qdrant models)
+#                    - float | int for score fields (1 occurrence)
+# - 96 (2026-01-16): OMN-1181 structured errors merge with main (+1 net)
+#                    (+2 unions for EnumPolicyType | str in validate_policy_type_value)
+#                    (-1 union: fix PolicyTypeInput validator coercion, changed return
+#                    type from str | EnumPolicyType to EnumPolicyType)
+INFRA_MAX_UNIONS = 96
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

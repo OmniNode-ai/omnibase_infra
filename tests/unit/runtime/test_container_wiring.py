@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from omnibase_infra.enums import EnumPolicyType
+from omnibase_infra.errors import ServiceRegistrationError, ServiceResolutionError
 from omnibase_infra.runtime.registry_policy import RegistryPolicy
 from omnibase_infra.runtime.util_container_wiring import (
     get_or_create_policy_registry,
@@ -62,7 +63,7 @@ class TestGetPolicyRegistryFromContainer:
     async def test_resolve_raises_error_if_not_registered(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that resolve raises RuntimeError if RegistryPolicy not registered."""
+        """Test that resolve raises ServiceResolutionError if RegistryPolicy not registered."""
         # Configure mock to raise exception (not side_effect which would return coroutine)
         mock_container.service_registry.resolve_service.return_value = None
 
@@ -71,7 +72,9 @@ class TestGetPolicyRegistryFromContainer:
 
         mock_container.service_registry.resolve_service = raise_error
 
-        with pytest.raises(RuntimeError, match="RegistryPolicy not registered"):
+        with pytest.raises(
+            ServiceResolutionError, match="RegistryPolicy not registered"
+        ):
             await get_policy_registry_from_container(mock_container)
 
 
@@ -112,7 +115,7 @@ class TestGetOrCreateRegistryPolicy:
     async def test_raises_error_if_registration_fails(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that RuntimeError is raised if registration fails."""
+        """Test that ServiceRegistrationError is raised if registration fails."""
         # Configure mock to raise exception on resolve, and on register_instance
         mock_container.service_registry.resolve_service.side_effect = ValueError(
             "Service not registered"
@@ -122,7 +125,8 @@ class TestGetOrCreateRegistryPolicy:
         )
 
         with pytest.raises(
-            RuntimeError, match="Failed to create and register RegistryPolicy"
+            ServiceRegistrationError,
+            match="Failed to create and register RegistryPolicy",
         ):
             await get_or_create_policy_registry(mock_container)
 

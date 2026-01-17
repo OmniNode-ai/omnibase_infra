@@ -21,8 +21,8 @@ import hvac
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraVaultError,
     ModelInfraErrorContext,
-    RuntimeHostError,
 )
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
@@ -150,7 +150,7 @@ class MixinVaultToken:
             correlation_id: Correlation ID for tracing
 
         Raises:
-            RuntimeHostError: If handler not initialized
+            InfraVaultError: If handler not initialized
         """
         if self._client is None or self._config is None:
             ctx = ModelInfraErrorContext(
@@ -160,7 +160,7 @@ class MixinVaultToken:
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
-            raise RuntimeHostError(
+            raise InfraVaultError(
                 "HandlerVault not initialized",
                 context=ctx,
             )
@@ -278,9 +278,19 @@ class MixinVaultToken:
         assert self._client is not None
         assert self._config is not None
 
+        # Capture namespace for use in closure
+        namespace = self._config.namespace
+
         def renew_func() -> dict[str, object]:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="vault.renew_token",
+                    target_name="vault_handler",
+                    correlation_id=correlation_id,
+                    namespace=namespace,
+                )
+                raise InfraVaultError("Vault client not initialized", context=ctx)
             result: dict[str, object] = self._client.auth.token.renew_self()
             return result
 

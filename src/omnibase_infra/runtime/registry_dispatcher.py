@@ -110,7 +110,7 @@ class RegistryDispatcher:
     Example:
         .. code-block:: python
 
-            from omnibase_core.runtime import RegistryDispatcher
+            from omnibase_infra.runtime import RegistryDispatcher
 
             # 1. Create registry and register dispatchers
             registry = RegistryDispatcher()

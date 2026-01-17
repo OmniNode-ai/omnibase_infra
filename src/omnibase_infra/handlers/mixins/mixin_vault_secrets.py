@@ -15,7 +15,11 @@ import hvac
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.errors import (
+    InfraVaultError,
+    ModelInfraErrorContext,
+    RuntimeHostError,
+)
 from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
 
 T = TypeVar("T")
@@ -70,13 +74,14 @@ class MixinVaultSecrets:
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.read_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
+            # Payload validation error (bad request) - not an infrastructure failure
             raise RuntimeHostError(
                 "Missing or invalid 'path' in payload",
                 context=ctx,
@@ -87,11 +92,34 @@ class MixinVaultSecrets:
             mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
-            raise RuntimeError("Client not initialized")
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.VAULT,
+                operation="vault.read_secret",
+                target_name="vault_handler",
+                namespace=self._config.namespace if self._config else None,
+            )
+            raise InfraVaultError(
+                "Vault client not initialized for operation 'vault.read_secret'",
+                context=ctx,
+            )
+
+        # Capture namespace for use in closure
+        namespace = self._config.namespace if self._config else None
 
         def read_func() -> dict[str, object]:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="vault.read_secret",
+                    target_name="vault_handler",
+                    namespace=namespace,
+                )
+                raise InfraVaultError(
+                    "Vault client not initialized for operation 'vault.read_secret'",
+                    context=ctx,
+                )
             result: dict[str, object] = self._client.secrets.kv.v2.read_secret_version(
                 path=path,
                 mount_point=mount_point,
@@ -145,11 +173,11 @@ class MixinVaultSecrets:
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
@@ -159,11 +187,11 @@ class MixinVaultSecrets:
 
         data = payload.get("data")
         if not isinstance(data, dict):
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
@@ -176,11 +204,34 @@ class MixinVaultSecrets:
             mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
-            raise RuntimeError("Client not initialized")
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.VAULT,
+                operation="vault.write_secret",
+                target_name="vault_handler",
+                namespace=self._config.namespace if self._config else None,
+            )
+            raise InfraVaultError(
+                "Vault client not initialized for operation 'vault.write_secret'",
+                context=ctx,
+            )
+
+        # Capture namespace for use in closure
+        namespace = self._config.namespace if self._config else None
 
         def write_func() -> dict[str, object]:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="vault.write_secret",
+                    target_name="vault_handler",
+                    namespace=namespace,
+                )
+                raise InfraVaultError(
+                    "Vault client not initialized for operation 'vault.write_secret'",
+                    context=ctx,
+                )
             result: dict[str, object] = (
                 self._client.secrets.kv.v2.create_or_update_secret(
                     path=path,
@@ -234,11 +285,11 @@ class MixinVaultSecrets:
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.delete_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
@@ -251,11 +302,34 @@ class MixinVaultSecrets:
             mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
-            raise RuntimeError("Client not initialized")
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.VAULT,
+                operation="vault.delete_secret",
+                target_name="vault_handler",
+                namespace=self._config.namespace if self._config else None,
+            )
+            raise InfraVaultError(
+                "Vault client not initialized for operation 'vault.delete_secret'",
+                context=ctx,
+            )
+
+        # Capture namespace for use in closure
+        namespace = self._config.namespace if self._config else None
 
         def delete_func() -> None:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="vault.delete_secret",
+                    target_name="vault_handler",
+                    namespace=namespace,
+                )
+                raise InfraVaultError(
+                    "Vault client not initialized for operation 'vault.delete_secret'",
+                    context=ctx,
+                )
             # Delete latest version
             self._client.secrets.kv.v2.delete_latest_version_of_secret(
                 path=path,
@@ -299,11 +373,11 @@ class MixinVaultSecrets:
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.list_secrets",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
@@ -316,11 +390,34 @@ class MixinVaultSecrets:
             mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
-            raise RuntimeError("Client not initialized")
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.VAULT,
+                operation="vault.list_secrets",
+                target_name="vault_handler",
+                namespace=self._config.namespace if self._config else None,
+            )
+            raise InfraVaultError(
+                "Vault client not initialized for operation 'vault.list_secrets'",
+                context=ctx,
+            )
+
+        # Capture namespace for use in closure
+        namespace = self._config.namespace if self._config else None
 
         def list_func() -> dict[str, object]:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="vault.list_secrets",
+                    target_name="vault_handler",
+                    namespace=namespace,
+                )
+                raise InfraVaultError(
+                    "Vault client not initialized for operation 'vault.list_secrets'",
+                    context=ctx,
+                )
             result: dict[str, object] = self._client.secrets.kv.v2.list_secrets(
                 path=path,
                 mount_point=mount_point,

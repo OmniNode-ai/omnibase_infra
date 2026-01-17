@@ -5,6 +5,25 @@
 This module provides fixtures for testing PostgreSQL query performance
 using EXPLAIN ANALYZE to verify index usage and query efficiency.
 
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+================================================================
+This module requires ``loop_scope="module"`` for the asyncio marker to prevent
+event loop mismatch errors. Without this, module-scoped async fixtures will
+fail with::
+
+    RuntimeError: Task <Task pending ...> got Future <Future ...>
+    attached to a different loop
+
+The configuration is set via pytestmark::
+
+    pytestmark = [
+        pytest.mark.database,
+        pytest.mark.asyncio(loop_scope="module"),
+    ]
+
+This ensures all async fixtures in this module share the same event loop.
+See: https://pytest-asyncio.readthedocs.io/en/latest/concepts.html#event-loop-scope
+
 PRODUCTION SAFETY WARNING:
     This module uses EXPLAIN ANALYZE which EXECUTES the query to get actual
     timing and row counts. While this is safe for SELECT queries (no mutations),
@@ -39,11 +58,12 @@ Related:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -55,6 +75,28 @@ from dotenv import load_dotenv
 
 from omnibase_infra.utils import sanitize_error_message
 
+# =============================================================================
+# Cross-Module Import: Shared Test Helpers
+# =============================================================================
+# From tests/helpers/util_postgres:
+#   - PostgresConfig: Configuration dataclass for PostgreSQL connections
+#   - check_postgres_reachable: TCP reachability check
+#   - should_skip_migration: Check if migration contains CONCURRENTLY DDL
+#
+# From tests/infrastructure_config.py:
+#   - DEFAULT_POSTGRES_PORT: Standard PostgreSQL port (5436) on infrastructure server
+#
+# This ensures consistent configuration and eliminates code duplication.
+# =============================================================================
+from tests.helpers.util_postgres import (
+    PostgresConfig,
+    check_postgres_reachable,
+    should_skip_migration,
+)
+from tests.infrastructure_config import (
+    DEFAULT_POSTGRES_PORT,
+)
+
 _logger = logging.getLogger(__name__)
 
 # Load environment configuration
@@ -63,20 +105,10 @@ _env_file = _project_root / ".env"
 if _env_file.exists():
     load_dotenv(_env_file)
 
-# =============================================================================
-# Cross-Module Import: Infrastructure Configuration
-# =============================================================================
-# From tests/infrastructure_config.py:
-#   - DEFAULT_POSTGRES_PORT: Standard PostgreSQL port (5436) on infrastructure server
-#
-# This import ensures consistent port configuration across all database
-# performance tests. See tests/infrastructure_config.py for full documentation.
-# =============================================================================
-from tests.infrastructure_config import (
-    DEFAULT_POSTGRES_PORT,
-)
-
 if TYPE_CHECKING:
+    # TYPE_CHECKING imports: These imports are only used for type annotations.
+    # asyncpg is imported lazily at runtime only when PostgreSQL is available,
+    # but we need the type hints at static analysis time for fixture signatures.
     import asyncpg
 
 
@@ -84,51 +116,54 @@ if TYPE_CHECKING:
 # Infrastructure Availability
 # =============================================================================
 
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+# Use shared PostgresConfig for consistent configuration management
+_postgres_config = PostgresConfig.from_env()
 
-# Normalize empty password to None
-if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
-    POSTGRES_PASSWORD = None
+# Export individual values for backwards compatibility with existing code
+POSTGRES_HOST = _postgres_config.host
+POSTGRES_PORT = _postgres_config.port
+POSTGRES_DATABASE = _postgres_config.database
+POSTGRES_USER = _postgres_config.user
+POSTGRES_PASSWORD = _postgres_config.password
 
-
-def _check_postgres_reachable() -> bool:
-    """Check if PostgreSQL server is reachable via TCP connection.
-
-    This function verifies actual network connectivity to the PostgreSQL server,
-    not just whether environment variables are set. This prevents tests from
-    failing with connection errors when the database is unreachable (e.g., when
-    running outside the Docker network where hostname resolution may fail).
-
-    Returns:
-        bool: True if PostgreSQL is reachable, False otherwise.
-    """
-    if not POSTGRES_HOST or not POSTGRES_PASSWORD:
-        return False
-
-    import socket
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5.0)
-            result = sock.connect_ex((POSTGRES_HOST, POSTGRES_PORT))
-            return result == 0
-    except (OSError, TimeoutError, socket.gaierror):
-        return False
-
-
-# Check PostgreSQL reachability at module import time
-POSTGRES_AVAILABLE = _check_postgres_reachable()
+# Check PostgreSQL reachability at module import time using shared helper
+POSTGRES_AVAILABLE = check_postgres_reachable(_postgres_config)
 
 # =============================================================================
 # Module-Level Markers
 # =============================================================================
+#
+# +---------------------------------------------------------------------------+
+# | IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)          |
+# +---------------------------------------------------------------------------+
+# |                                                                           |
+# | The `loop_scope="module"` parameter below is CRITICAL for correct async   |
+# | fixture behavior. Starting with pytest-asyncio 0.25, the default event    |
+# | loop scope changed from "module" to "function", which breaks module-      |
+# | scoped async fixtures.                                                    |
+# |                                                                           |
+# | SYMPTOMS WITHOUT THIS FIX:                                                |
+# |   RuntimeError: Task <Task pending ...> got Future <Future ...>           |
+# |   attached to a different loop                                            |
+# |                                                                           |
+# | WHY IT HAPPENS:                                                           |
+# |   - Module-scoped fixtures (postgres_pool) are created on event loop A    |
+# |   - Function-scoped tests run on event loop B (new loop per test)         |
+# |   - Sharing async resources across loops causes the RuntimeError          |
+# |                                                                           |
+# | SOLUTION:                                                                 |
+# |   Set loop_scope="module" so all tests share the same event loop as the   |
+# |   module-scoped fixtures.                                                 |
+# |                                                                           |
+# | REFERENCE:                                                                |
+# |   https://pytest-asyncio.readthedocs.io/en/latest/concepts.html           |
+# |   See: "Event Loop Scope" and "Fixture Scope" sections                    |
+# |                                                                           |
+# +---------------------------------------------------------------------------+
 
 pytestmark = [
     pytest.mark.database,
+    pytest.mark.asyncio(loop_scope="module"),
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
         reason=(
@@ -140,6 +175,40 @@ pytestmark = [
         ),
     ),
 ]
+
+
+# =============================================================================
+# Event Loop Fixture (pytest-asyncio 0.25+ compatibility)
+# =============================================================================
+#
+# This fixture overrides the default function-scoped event_loop fixture with
+# a module-scoped one. Required because:
+#
+#   1. Module-scoped async fixtures (postgres_pool, schema_initialized, etc.)
+#      need to run on the same event loop throughout the module
+#   2. pytest-asyncio 0.25+ changed the default event_loop scope to "function"
+#   3. Without this override, module-scoped fixtures get ScopeMismatch errors
+#
+# Error without this fix:
+#   ScopeMismatch: You tried to access the function scoped fixture event_loop
+#   with a module scoped request object.
+#
+# Reference: https://pytest-asyncio.readthedocs.io/en/latest/concepts.html
+
+
+@pytest.fixture(scope="module")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create module-scoped event loop for async fixtures.
+
+    This fixture ensures all module-scoped async fixtures share the same
+    event loop, preventing ScopeMismatch errors with pytest-asyncio 0.25+.
+
+    Yields:
+        asyncio.AbstractEventLoop: Event loop for the test module.
+    """
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 # =============================================================================
@@ -155,11 +224,11 @@ MIGRATIONS_DIR = Path(__file__).parent.parent.parent.parent / "docker" / "migrat
 
 
 def _build_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables."""
-    return (
-        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
-    )
+    """Build PostgreSQL DSN from environment variables.
+
+    Uses the shared PostgresConfig for consistent DSN building.
+    """
+    return _postgres_config.build_dsn()
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -208,7 +277,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
     await pool.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="module")
 async def schema_initialized(
     postgres_pool: asyncpg.Pool,
 ) -> asyncpg.Pool:
@@ -250,6 +319,11 @@ async def schema_initialized(
         for migration_file in migration_files:
             filename = migration_file.name
 
+            # Skip validation scripts (not migrations)
+            if filename == "validate_migration_state.sql":
+                _logger.debug("Skipping validation script: %s", filename)
+                continue
+
             # Check if migration was already applied
             already_applied = await conn.fetchval(
                 "SELECT 1 FROM _migration_history WHERE filename = $1",
@@ -264,8 +338,30 @@ async def schema_initialized(
             try:
                 sql = migration_file.read_text()
 
+                # Skip migrations containing CONCURRENTLY DDL statements - these are for
+                # production and cannot run inside a transaction block. The non-concurrent
+                # versions (e.g., 003_capability_fields.sql) create the same indexes.
+                # Uses shared should_skip_migration() helper for consistent pattern matching.
+                if should_skip_migration(sql):
+                    _logger.debug(
+                        "Skipping %s: contains CONCURRENTLY DDL statement "
+                        "(production-only migration, not compatible with test transactions)",
+                        filename,
+                    )
+                    # Mark as applied so we don't try again
+                    await conn.execute(
+                        """
+                        INSERT INTO _migration_history (filename, checksum)
+                        VALUES ($1, $2)
+                        ON CONFLICT (filename) DO NOTHING
+                        """,
+                        filename,
+                        "skipped-concurrent",
+                    )
+                    continue
+
                 # Calculate simple checksum for tracking
-                checksum = hashlib.md5(sql.encode()).hexdigest()
+                checksum = hashlib.sha256(sql.encode()).hexdigest()
 
                 _logger.info("Applying migration: %s", filename)
                 await conn.execute(sql)
@@ -294,10 +390,38 @@ async def schema_initialized(
                     f"Migration {filename} failed: {sanitize_error_message(e)}"
                 ) from e
 
+        # Ensure required indexes exist for query performance tests.
+        # This handles cases where:
+        # 1. The migration was marked "applied" but indexes weren't created
+        # 2. The database existed before the migration system
+        # 3. Indexes were dropped
+        _logger.debug("Ensuring required indexes exist...")
+        await conn.execute("""
+            -- Index for time-range audit queries (from 002_updated_at_audit_index.sql)
+            CREATE INDEX IF NOT EXISTS idx_registration_updated_at
+                ON registration_projections (updated_at DESC);
+
+            -- Composite index for state-based audit queries
+            CREATE INDEX IF NOT EXISTS idx_registration_state_updated_at
+                ON registration_projections (current_state, updated_at DESC);
+
+            -- Index for state filtering (from 001_registration_projection.sql)
+            CREATE INDEX IF NOT EXISTS idx_registration_current_state
+                ON registration_projections (current_state);
+
+            -- Index for domain + state filtering
+            CREATE INDEX IF NOT EXISTS idx_registration_domain_state
+                ON registration_projections (domain, current_state);
+        """)
+
+        # Update statistics so PostgreSQL's query planner can use indexes optimally
+        await conn.execute("ANALYZE registration_projections")
+        _logger.debug("Required indexes verified/created and table statistics updated")
+
     return postgres_pool
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="module")
 async def seeded_test_data(
     schema_initialized: asyncpg.Pool,
 ) -> AsyncGenerator[dict[str, list], None]:
@@ -371,6 +495,11 @@ async def seeded_test_data(
                 now,
                 updated_at,
             )
+
+        # Update statistics after seeding test data
+        # This ensures PostgreSQL's query planner has accurate row counts and
+        # data distribution info for choosing optimal query plans.
+        await conn.execute("ANALYZE registration_projections")
 
     yield test_data
 
@@ -808,6 +937,7 @@ __all__ = [
     "POSTGRES_AVAILABLE",
     "QueryAnalyzer",
     "QueryAnalyzerError",
+    "event_loop",
     "postgres_pool",
     "query_analyzer",
     "schema_initialized",

@@ -217,7 +217,7 @@ class CaptureLifecycleFSM:
 
 class CorpusCapture:
     """
-    Service for capturing production executions into a corpus.
+    Engine for capturing production executions into a corpus.
 
     This service provides:
     - Configurable filtering (handler whitelist, time window, sample rate)

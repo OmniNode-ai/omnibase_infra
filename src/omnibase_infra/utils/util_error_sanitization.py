@@ -56,6 +56,27 @@ SENSITIVE_PATTERNS: tuple[str, ...] = (
     "private_key",
     "privatekey",
     "private-key",
+    # SSH credentials
+    "ssh_key",
+    "sshkey",
+    "ssh-key",
+    # OAuth/OIDC credentials
+    "client_secret",
+    "clientsecret",
+    "client-secret",
+    "access_token",
+    "accesstoken",
+    "access-token",
+    "refresh_token",
+    "refreshtoken",
+    "refresh-token",
+    "id_token",
+    "idtoken",
+    "id-token",
+    # Session identifiers (hijacking prevention)
+    "session_id",
+    "sessionid",
+    "session-id",
     # Authentication
     "credential",
     "auth",
@@ -73,6 +94,18 @@ SENSITIVE_PATTERNS: tuple[str, ...] = (
     # AWS-specific
     "aws_secret",
     "aws_access",
+    # Vault-specific
+    "vault_token",
+    "vaulttoken",
+    "vault-token",
+    "x-vault-token",
+    # Consul-specific
+    "consul_token",
+    "consultoken",
+    "consul-token",
+    "consul_http_token",
+    "consul-http-token",
+    "x-consul-token",
     # Database-specific
     "db_password",
     "database_password",
@@ -291,10 +324,134 @@ def sanitize_backend_error(backend_name: str, raw_error: object) -> str:
     return f"{backend_name} operation failed"
 
 
+def sanitize_secret_path(path: str | None) -> str | None:
+    """Sanitize a Vault secret path to avoid exposing infrastructure details.
+
+    Secret paths often reveal infrastructure topology, application names,
+    and credential organization. This function masks sensitive portions
+    while preserving enough information for debugging.
+
+    Sanitization rules:
+        1. If path is None or empty, return as-is
+        2. Preserve the mount point (first segment)
+        3. Mask subsequent path segments with asterisks
+        4. Preserve the final segment (key name) in generic form
+
+    Args:
+        path: The secret path to sanitize (e.g., "secret/data/myapp/database/creds")
+
+    Returns:
+        Sanitized path safe for error messages and logging.
+        Format: "{mount}/***/***" or "{mount}/***/***/{leaf}" for deep paths
+
+    Examples:
+        >>> sanitize_secret_path("secret/data/myapp/database/credentials")
+        'secret/***/***'
+
+        >>> sanitize_secret_path("kv/production/api-keys/stripe")
+        'kv/***/***'
+
+        >>> sanitize_secret_path("secret")
+        'secret'
+
+        >>> sanitize_secret_path(None)
+
+        >>> sanitize_secret_path("")
+        ''
+
+    Security:
+        This function prevents exposure of:
+        - Application names and environments (e.g., "production", "myapp")
+        - Service and database names (e.g., "postgres", "redis")
+        - Credential types and purposes (e.g., "api-keys", "certificates")
+    """
+    if path is None:
+        return None
+
+    if not path:
+        return ""
+
+    # Split path into segments
+    segments = path.split("/")
+
+    if len(segments) <= 1:
+        # Just mount point or single segment - return as-is
+        return path
+
+    # Keep first segment (mount point like "secret", "kv", etc.)
+    # Replace everything else with masked indicator
+    mount = segments[0]
+    return f"{mount}/***/***"
+
+
+def sanitize_consul_key(key: str | None) -> str | None:
+    """Sanitize a Consul key path to avoid exposing infrastructure details.
+
+    Consul keys often reveal infrastructure topology, service names,
+    configuration structures, and potentially sensitive data paths.
+    This function masks sensitive portions while preserving enough
+    information for debugging.
+
+    Sanitization rules:
+        1. If key is None or empty, return as-is
+        2. Preserve the first segment (typically namespace/service type)
+        3. Mask subsequent path segments with asterisks
+        4. Indicate depth with masked segments
+
+    Args:
+        key: The Consul key path to sanitize (e.g., "config/database/connection")
+
+    Returns:
+        Sanitized key safe for error messages and logging.
+        Format: "{prefix}/***/***" for multi-segment keys
+
+    Examples:
+        >>> sanitize_consul_key("config/database/connection")
+        'config/***/***'
+
+        >>> sanitize_consul_key("services/api-gateway/endpoints")
+        'services/***/***'
+
+        >>> sanitize_consul_key("config")
+        'config'
+
+        >>> sanitize_consul_key(None)
+
+        >>> sanitize_consul_key("")
+        ''
+
+    Security:
+        This function prevents exposure of:
+        - Service and application names (e.g., "api-gateway", "user-service")
+        - Database and infrastructure names (e.g., "postgres-primary")
+        - Configuration paths that reveal architecture
+        - Environment identifiers (e.g., "production", "staging")
+    """
+    if key is None:
+        return None
+
+    if not key:
+        return ""
+
+    # Split key into segments
+    segments = key.split("/")
+
+    if len(segments) <= 1:
+        # Just prefix or single segment - return as-is
+        return key
+
+    # Keep first segment (namespace like "config", "services", etc.)
+    # Replace everything else with masked indicator
+    prefix = segments[0]
+    return f"{prefix}/***/***"
+
+
 __all__: list[str] = [
     "SAFE_ERROR_PATTERNS",
     "SENSITIVE_PATTERNS",
     "sanitize_backend_error",
+    "sanitize_consul_key",
     "sanitize_error_message",
     "sanitize_error_string",
+    "sanitize_secret_path",
 ]

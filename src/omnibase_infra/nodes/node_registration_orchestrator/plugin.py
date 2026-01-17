@@ -78,6 +78,11 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ContainerWiringError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.runtime.protocol_domain_plugin import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
@@ -264,8 +269,14 @@ class PluginRegistration:
             # Validate pool creation succeeded - asyncpg.create_pool() can return None
             # in edge cases (e.g., connection issues during pool warmup)
             if self._pool is None:
-                raise RuntimeError(
-                    "PostgreSQL pool creation returned None - connection may have failed"
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="create_postgres_pool",
+                )
+                raise ContainerWiringError(
+                    "PostgreSQL pool creation returned None - connection may have failed",
+                    context=context,
                 )
             resources_created.append("postgres_pool")
             logger.info(
@@ -579,6 +590,7 @@ class PluginRegistration:
                 self._pool,
                 projector=self._projector,
                 consul_handler=self._consul_handler,
+                correlation_id=correlation_id,
             )
             duration = time.time() - start_time
 

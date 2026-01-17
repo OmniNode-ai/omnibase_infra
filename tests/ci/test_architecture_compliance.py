@@ -894,13 +894,12 @@ class TestArchitectureCompliance:
     # Update this list when:
     # - Adding a new xfail marker to individual tests (add pattern here)
     # - Resolving a ticket (remove pattern from here AND remove xfail marker)
-    KNOWN_VIOLATION_PATTERNS: frozenset[str] = frozenset(
-        {
-            "aiohttp",  # OMN-1015: Known violation - async HTTP client needs migration
-            "redis",  # OMN-1295: Known violation - Redis client needs migration
-            "consul",  # OMN-1015: Known violation - Consul TYPE_CHECKING import
-        }
-    )
+    #
+    # Previously tracked violations (now resolved):
+    # - aiohttp: OMN-1015 (resolved - removed from omnibase_core)
+    # - redis: OMN-1295 (resolved - removed from omnibase_core)
+    # - consul: OMN-1015 (resolved - removed from omnibase_core)
+    KNOWN_VIOLATION_PATTERNS: frozenset[str] = frozenset()
 
     @pytest.mark.parametrize(
         ("pattern", "description"),
@@ -908,35 +907,11 @@ class TestArchitectureCompliance:
             pytest.param("kafka", "event streaming", id="no-kafka"),
             pytest.param("httpx", "HTTP client", id="no-httpx"),
             pytest.param("asyncpg", "database driver", id="no-asyncpg"),
-            pytest.param(
-                "aiohttp",
-                "async HTTP",
-                marks=pytest.mark.xfail(
-                    reason="OMN-1015: Known violation - async HTTP client needs migration to infra",
-                    strict=False,
-                ),
-                id="no-aiohttp",
-            ),
-            pytest.param(
-                "redis",
-                "cache",
-                marks=pytest.mark.xfail(
-                    reason="OMN-1295: Known violation - Redis client needs migration to infra",
-                    strict=False,
-                ),
-                id="no-redis",
-            ),
+            pytest.param("aiohttp", "async HTTP", id="no-aiohttp"),
+            pytest.param("redis", "cache", id="no-redis"),
             pytest.param("psycopg", "PostgreSQL driver (v3)", id="no-psycopg"),
             pytest.param("psycopg2", "PostgreSQL driver (v2)", id="no-psycopg2"),
-            pytest.param(
-                "consul",
-                "service discovery client",
-                marks=pytest.mark.xfail(
-                    reason="OMN-1015: Known violation - Consul TYPE_CHECKING import needs migration",
-                    strict=False,
-                ),
-                id="no-consul",
-            ),
+            pytest.param("consul", "service discovery client", id="no-consul"),
             pytest.param("hvac", "Vault client", id="no-hvac"),
             pytest.param("aiokafka", "async Kafka client", id="no-aiokafka"),
             pytest.param(

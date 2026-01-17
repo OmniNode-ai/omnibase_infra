@@ -308,7 +308,7 @@ Confirmation Event Flow:
             - correlation_id: UUID linking to original introspection
             - node_id: UUID of the registered node
             - success: bool
-            - error_message: Optional[str]
+            - error_message: str | None
             - timestamp: datetime
 
     7. IDEMPOTENCY:

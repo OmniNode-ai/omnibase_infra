@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Architecture Validator Node Package.
 
-This package provides architecture validation COMPUTE nodes for validating
+This package provides architecture validation COMPUTE_GENERIC nodes for validating
 ONEX architecture patterns and compliance rules.
 
 Available Validators:
@@ -24,7 +24,7 @@ Example:
     ... )
     >>>
     >>> # Create validator with rules
-    >>> container = ModelONEXContainer.minimal()
+    >>> container = ModelONEXContainer()
     >>> validator = NodeArchitectureValidatorCompute(container, rules=my_rules)
     >>>
     >>> # Validate architecture

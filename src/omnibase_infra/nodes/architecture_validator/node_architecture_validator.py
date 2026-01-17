@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""COMPUTE node for validating architecture compliance.
+"""COMPUTE_GENERIC node for validating architecture compliance.
 
 This module implements NodeArchitectureValidatorCompute, a pure transformation node
 that validates nodes and handlers against architecture rules. The validator can be
 invoked at startup (pre-runtime), during runtime (via orchestrator), or from CI/CD.
 
 Design Pattern:
-    NodeArchitectureValidatorCompute follows the COMPUTE node pattern from the
-    ONEX 4-node architecture. As a COMPUTE node:
+    NodeArchitectureValidatorCompute follows the COMPUTE_GENERIC node pattern from the
+    ONEX 4-node architecture. As a COMPUTE_GENERIC node:
     - Pure transformation: input -> output, no side effects
     - Deterministic: same input always produces same output
     - Stateless validation: rules are injected, not stored
@@ -30,7 +30,7 @@ Example:
     ... )
     >>>
     >>> # Create validator with rules
-    >>> container = ModelONEXContainer.minimal()
+    >>> container = ModelONEXContainer()
     >>> validator = NodeArchitectureValidatorCompute(
     ...     container=container,
     ...     rules=(no_handler_publishing_rule, no_workflow_in_reducer_rule),
@@ -96,7 +96,7 @@ __all__ = ["NodeArchitectureValidatorCompute", "SUPPORTED_RULE_IDS"]
 class NodeArchitectureValidatorCompute(
     NodeCompute[ModelArchitectureValidationRequest, ModelArchitectureValidationResult]
 ):
-    """COMPUTE node for validating architecture compliance.
+    """COMPUTE_GENERIC node for validating architecture compliance.
 
     Validates nodes and handlers against architecture rules. This is a pure
     transformation node: input -> output, no side effects.
@@ -120,7 +120,21 @@ class NodeArchitectureValidatorCompute(
         >>> validator = NodeArchitectureValidatorCompute(container, rules=rules)
         >>> result = validator.compute(request)
         >>> if not result:
-        ...     raise RuntimeError(f"Validation failed: {result.violation_count} violations")
+        ...     from omnibase_infra.enums import EnumInfraTransportType
+        ...     from omnibase_infra.errors import (
+        ...         ModelInfraErrorContext,
+        ...         ProtocolConfigurationError,
+        ...     )
+        ...     context = ModelInfraErrorContext.with_correlation(
+        ...         transport_type=EnumInfraTransportType.RUNTIME,
+        ...         operation="architecture_validation",
+        ...     )
+        ...     raise ProtocolConfigurationError(
+        ...         f"Validation failed: {result.violation_count} violations",
+        ...         context=context,
+        ...         code="ARCHITECTURE_VALIDATION_FAILED",
+        ...         violations=[v.to_structured_dict() for v in result.violations],
+        ...     )
 
         >>> # CI/CD pipeline validation
         >>> result = validator.compute(ModelArchitectureValidationRequest(
@@ -149,7 +163,7 @@ class NodeArchitectureValidatorCompute(
             >>> from omnibase_core.models.container import ModelONEXContainer
             >>> from my_rules import NoHandlerPublishingRule, NoWorkflowInReducerRule
             >>>
-            >>> container = ModelONEXContainer.minimal()
+            >>> container = ModelONEXContainer()
             >>> validator = NodeArchitectureValidatorCompute(
             ...     container=container,
             ...     rules=(NoHandlerPublishingRule(), NoWorkflowInReducerRule()),
@@ -199,7 +213,7 @@ class NodeArchitectureValidatorCompute(
         """
         for rule in rules:
             if rule.rule_id not in SUPPORTED_RULE_IDS:
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="validate_rules_against_contract",
                 )
@@ -253,7 +267,7 @@ class NodeArchitectureValidatorCompute(
             >>> # Check specific rules only
             >>> result = validator.compute(ModelArchitectureValidationRequest(
             ...     nodes=all_nodes,
-            ...     rule_ids=("NO_HANDLER_PUBLISHING", "NO_ANY_TYPES"),
+            ...     rule_ids=("NO_HANDLER_PUBLISHING", "PURE_REDUCERS"),
             ...     fail_fast=True,
             ... ))
 

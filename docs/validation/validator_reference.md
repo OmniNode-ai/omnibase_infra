@@ -137,7 +137,7 @@ contract_version: "1.0.0"
 **Fix**: Add required fields:
 ```yaml
 contract_version: "1.0.0"
-node_type: "EFFECT"
+node_type: "EFFECT_GENERIC"  # Use _GENERIC variants for node_type
 node_name: "infrastructure_consul_adapter"
 input_model: "ModelConsulAdapterInput"
 output_model: "ModelConsulAdapterOutput"
