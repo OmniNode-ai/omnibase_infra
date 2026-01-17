@@ -8,6 +8,7 @@
 - `error_recovery_patterns.md` - Backoff, circuit breakers, degradation
 - `circuit_breaker_implementation.md` - Circuit breaker details
 - `dispatcher_resilience.md` - Dispatcher-owned resilience pattern
+- `protocol_patterns.md` - Protocol design patterns, cross-mixin composition, TYPE_CHECKING
 - `security_patterns.md` - Node introspection security, input validation, secrets
 - `handler_plugin_loader.md` - Plugin-based handler loading, security trade-offs
 
