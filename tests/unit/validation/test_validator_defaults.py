@@ -70,16 +70,18 @@ class TestInfraValidatorConstants:
           - Introduced type aliases for common union patterns
           - Reduced non-optional unions from 122 to 70
         - 81 (2026-01-16): OMN-1305 PR #151 merge with main - combined changes
-        - 95 (2026-01-16): OMN-1142 Qdrant/Graph handlers (+8 legitimate union patterns)
+        - 95 (2026-01-16): OMN-1142 Qdrant/Graph handlers (+14 legitimate union patterns)
           - str | int for graph node IDs (5 occurrences in handler_graph.py)
           - UUID | str for Qdrant point IDs (2 occurrences in Qdrant models)
           - float | int for score fields (1 occurrence)
-          - Buffer of 4 above 90 baseline for handler growth
+        - 96 (2026-01-16): OMN-1181 structured errors merge with main (+1 net)
+          - (+2 unions for EnumPolicyType | str in validate_policy_type_value)
+          - (-1 union: fix PolicyTypeInput validator coercion)
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 95, (
-            "INFRA_MAX_UNIONS should be 95 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 96, (
+            "INFRA_MAX_UNIONS should be 96 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

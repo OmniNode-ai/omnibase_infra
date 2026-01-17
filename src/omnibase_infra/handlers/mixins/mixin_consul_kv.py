@@ -21,6 +21,7 @@ T = TypeVar("T")
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraConsulError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -138,13 +139,33 @@ class MixinConsulKV:
         recurse_bool = recurse is True or recurse == "true"
 
         if self._client is None:
-            raise RuntimeError("Client not initialized")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="consul.kv_get",
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraConsulError(
+                "Consul client not initialized",
+                context=context,
+                consul_key=key,
+            )
 
         def get_func() -> tuple[
             int, list[dict[str, object]] | dict[str, object] | None
         ]:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_get",
+                    target_name="consul_handler",
+                    correlation_id=correlation_id,
+                )
+                raise InfraConsulError(
+                    "Consul client not initialized",
+                    context=ctx,
+                    consul_key=key,
+                )
             index, data = self._client.kv.get(key, recurse=recurse_bool)
             return index, data
 
@@ -271,11 +292,31 @@ class MixinConsulKV:
         cas_int: int | None = cas if isinstance(cas, int) else None
 
         if self._client is None:
-            raise RuntimeError("Client not initialized")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="consul.kv_put",
+                target_name="consul_handler",
+                correlation_id=correlation_id,
+            )
+            raise InfraConsulError(
+                "Consul client not initialized",
+                context=context,
+                consul_key=key,
+            )
 
         def put_func() -> bool:
             if self._client is None:
-                raise RuntimeError("Client not initialized")
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_put",
+                    target_name="consul_handler",
+                    correlation_id=correlation_id,
+                )
+                raise InfraConsulError(
+                    "Consul client not initialized",
+                    context=ctx,
+                    consul_key=key,
+                )
             result: bool = self._client.kv.put(key, value, flags=flags_int, cas=cas_int)
             return result
 

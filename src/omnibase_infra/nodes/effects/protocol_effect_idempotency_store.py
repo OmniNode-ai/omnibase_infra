@@ -92,7 +92,7 @@ class ProtocolEffectIdempotencyStore(Protocol):
             backend: Backend identifier (e.g., "consul", "postgres").
 
         Raises:
-            RuntimeError: If the store is unavailable.
+            InfraUnavailableError: If the store is unavailable.
         """
         ...
 
@@ -107,7 +107,7 @@ class ProtocolEffectIdempotencyStore(Protocol):
             True if the backend is completed, False otherwise.
 
         Raises:
-            RuntimeError: If the store is unavailable.
+            InfraUnavailableError: If the store is unavailable.
         """
         ...
 
@@ -121,7 +121,7 @@ class ProtocolEffectIdempotencyStore(Protocol):
             Set of completed backend identifiers. Empty set if none.
 
         Raises:
-            RuntimeError: If the store is unavailable.
+            InfraUnavailableError: If the store is unavailable.
         """
         ...
 
@@ -135,7 +135,7 @@ class ProtocolEffectIdempotencyStore(Protocol):
             correlation_id: The correlation ID to clear.
 
         Raises:
-            RuntimeError: If the store is unavailable.
+            InfraUnavailableError: If the store is unavailable.
         """
         ...
 

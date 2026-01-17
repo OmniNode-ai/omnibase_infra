@@ -18,7 +18,7 @@ ONEX naming convention: mixin_<name>.py -> Mixin<Name>.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, overload
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
@@ -87,6 +87,23 @@ class MixinPolicyValidation:
                 policy_class=policy_class.__name__ if policy_class else None,
                 policy_type=policy_type,
             )
+
+    @overload
+    @staticmethod
+    def _validate_policy_type_param(
+        policy_type: str | EnumPolicyType | None,
+        policy_id: str | None = None,
+        allow_none: Literal[True] = True,
+    ) -> str | None: ...
+
+    @overload
+    @staticmethod
+    def _validate_policy_type_param(
+        policy_type: str | EnumPolicyType | None,
+        policy_id: str | None = None,
+        *,
+        allow_none: Literal[False],
+    ) -> str: ...
 
     @staticmethod
     def _validate_policy_type_param(
@@ -444,11 +461,10 @@ class MixinPolicyValidation:
                                  Must be one of: ['orchestrator', 'reducer']
         """
         # Validate policy_type using shared helper (requires non-None)
+        # With allow_none=False, the overloaded return type is str (never None)
         normalized = self._validate_policy_type_param(
             policy_type, policy_id=None, allow_none=False
         )
-        # At this point normalized is guaranteed to be a non-None string
-        assert normalized is not None  # Type narrowing for mypy
 
         # Validate string against enum values
         valid_types = {e.value for e in EnumPolicyType}

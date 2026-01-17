@@ -116,13 +116,12 @@ from omnibase_infra.enums import (
     EnumRetryErrorCategory,
 )
 from omnibase_infra.errors import (
-    InfraConnectionError,
     InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
+from omnibase_infra.handlers.models import ModelRetryState
 from omnibase_infra.handlers.models.model_manifest_metadata import ModelManifestMetadata
 from omnibase_infra.handlers.models.model_manifest_query_result import (
     ModelManifestQueryResult,
@@ -670,7 +669,16 @@ class HandlerManifestPersistence(
         # Should never reach here, but satisfy type checker
         if last_error is not None:
             raise last_error
-        raise RuntimeError(f"Retry loop completed without result for {operation}")
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation=operation,
+            target_name="manifest_persistence_handler",
+            correlation_id=correlation_id,
+        )
+        raise InfraUnavailableError(
+            f"Retry loop completed without result for {operation}",
+            context=ctx,
+        )
 
     def _get_manifest_path(self, manifest_id: UUID, created_at: datetime) -> Path:
         """Get the file path for a manifest based on ID and creation date.

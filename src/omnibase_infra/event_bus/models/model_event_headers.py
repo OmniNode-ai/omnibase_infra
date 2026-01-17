@@ -12,6 +12,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.utils import validate_timezone_aware_datetime
+
 
 class ModelEventHeaders(BaseModel):
     """Headers for ONEX event bus messages implementing ProtocolEventHeaders.
@@ -71,21 +73,9 @@ class ModelEventHeaders(BaseModel):
     def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
         """Validate that timestamp is timezone-aware.
 
-        Args:
-            v: The timestamp value to validate.
-
-        Returns:
-            The validated timestamp.
-
-        Raises:
-            ValueError: If timestamp is naive (no timezone info).
+        Delegates to shared utility for consistent validation across all models.
         """
-        if v.tzinfo is None:
-            raise ValueError(
-                "timestamp must be timezone-aware. Use datetime.now(UTC) or "
-                "datetime(..., tzinfo=timezone.utc) instead of naive datetime."
-            )
-        return v
+        return validate_timezone_aware_datetime(v)
 
     source: str
     event_type: str

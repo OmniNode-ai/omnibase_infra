@@ -24,7 +24,7 @@ Example:
     ... )
     >>>
     >>> # Create validator with rules
-    >>> container = ModelONEXContainer.minimal()
+    >>> container = ModelONEXContainer()
     >>> validator = NodeArchitectureValidatorCompute(container, rules=my_rules)
     >>>
     >>> # Validate architecture

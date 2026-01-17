@@ -232,7 +232,11 @@ class RegistryMessageType(MixinMessageTypeRegistration, MixinMessageTypeQuery):
         >>> registry.freeze()
         >>> errors = registry.validate_startup()
         >>> if errors:
-        ...     raise RuntimeError(f"Validation failed: {errors}")
+        ...     from omnibase_infra.errors import ProtocolConfigurationError
+        ...     raise ProtocolConfigurationError(
+        ...         f"Validation failed: {errors}",
+        ...         code="REGISTRY_VALIDATION_FAILED",
+        ...     )
         >>>
         >>> # Query handlers (thread-safe after freeze)
         >>> handlers = registry.get_handlers(
@@ -302,9 +306,14 @@ class RegistryMessageType(MixinMessageTypeRegistration, MixinMessageTypeQuery):
             ...     available_handler_ids={"user-handler", "order-handler"},
             ... )
             >>> if errors:
+            ...     from omnibase_infra.errors import ProtocolConfigurationError
             ...     for error in errors:
             ...         print(f"Validation error: {error}")
-            ...     raise RuntimeError("Registry validation failed")
+            ...     raise ProtocolConfigurationError(
+            ...         "Registry validation failed",
+            ...         code="REGISTRY_VALIDATION_FAILED",
+            ...         errors=errors,
+            ...     )
 
         .. versionadded:: 0.5.0
         """

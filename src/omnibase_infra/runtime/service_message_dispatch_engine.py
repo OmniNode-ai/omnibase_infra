@@ -364,7 +364,7 @@ class MessageDispatchEngine:
         - **ERROR**: Dispatcher exceptions, validation failures
 
     Example:
-        >>> from omnibase_core.runtime import MessageDispatchEngine
+        >>> from omnibase_infra.runtime import MessageDispatchEngine
         >>> from omnibase_infra.models.dispatch import ModelDispatchRoute
         >>> from omnibase_infra.enums import EnumMessageCategory
         >>>
