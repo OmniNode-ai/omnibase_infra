@@ -118,8 +118,8 @@ class TestContractIntegration:
             assert part.isdigit()
 
     def test_node_type_is_orchestrator(self, contract_data: dict) -> None:
-        """Test that node_type is ORCHESTRATOR."""
-        assert contract_data["node_type"] == EnumNodeKind.ORCHESTRATOR.name
+        """Test that node_type is ORCHESTRATOR_GENERIC."""
+        assert contract_data["node_type"] == "ORCHESTRATOR_GENERIC"
 
     def test_input_model_importable(self, contract_data: dict) -> None:
         """Test that input model specified in contract is importable and valid.
@@ -315,7 +315,12 @@ class TestWorkflowGraphIntegration:
             "execution_graph"
         ]["nodes"]
 
-        valid_types = {"effect", "compute", "reducer", "orchestrator"}
+        valid_types = {
+            "effect_generic",
+            "compute_generic",
+            "reducer_generic",
+            "orchestrator_generic",
+        }
 
         for node in nodes:
             node_type = node.get("node_type", "").lower()
@@ -332,12 +337,12 @@ class TestWorkflowGraphIntegration:
         # Find the registration nodes
         for node in nodes:
             if "consul" in node["node_id"].lower():
-                assert node["node_type"] == "effect", (
-                    "Consul registration should be effect type"
+                assert node["node_type"].lower() == "effect_generic", (
+                    "Consul registration should be effect_generic type"
                 )
             if "postgres" in node["node_id"].lower():
-                assert node["node_type"] == "effect", (
-                    "Postgres registration should be effect type"
+                assert node["node_type"].lower() == "effect_generic", (
+                    "Postgres registration should be effect_generic type"
                 )
 
     def test_compute_intents_is_reducer(self, contract_data: dict) -> None:
@@ -348,8 +353,8 @@ class TestWorkflowGraphIntegration:
 
         for node in nodes:
             if node["node_id"] == "compute_intents":
-                assert node["node_type"] == "reducer", (
-                    "compute_intents should be reducer type"
+                assert node["node_type"].lower() == "reducer_generic", (
+                    "compute_intents should be reducer_generic type"
                 )
                 break
         else:
@@ -412,43 +417,43 @@ class TestWorkflowGraphIntegration:
         expected_node_properties = {
             # Node 1: Entry point - receives introspection, tick, or ack events
             "receive_introspection": {
-                "node_type": "effect",
+                "node_type": "effect_generic",
                 "depends_on": [],
                 "description": "Receive introspection, tick, or ack events",
             },
             # Node 2: Read projection state (OMN-930)
             "read_projection": {
-                "node_type": "effect",
+                "node_type": "effect_generic",
                 "depends_on": ["receive_introspection"],
                 "description": "Read current registration state from projection",
             },
             # Node 3: Evaluate timeout using injected time (OMN-973)
             "evaluate_timeout": {
-                "node_type": "compute",
+                "node_type": "compute_generic",
                 "depends_on": ["read_projection"],
                 "description": "Evaluate timeout based on injected now from RuntimeTick",
             },
             # Node 4: Compute intents via reducer
             "compute_intents": {
-                "node_type": "reducer",
+                "node_type": "reducer_generic",
                 "depends_on": ["evaluate_timeout"],
                 "description": "Compute registration intents from introspection event",
             },
             # Node 5: Execute Consul registration
             "execute_consul_registration": {
-                "node_type": "effect",
+                "node_type": "effect_generic",
                 "depends_on": ["compute_intents"],
                 "description": "Execute Consul registration intent",
             },
             # Node 6: Execute PostgreSQL registration
             "execute_postgres_registration": {
-                "node_type": "effect",
+                "node_type": "effect_generic",
                 "depends_on": ["compute_intents"],
                 "description": "Execute PostgreSQL registration intent",
             },
             # Node 7: Aggregate registration results
             "aggregate_results": {
-                "node_type": "compute",
+                "node_type": "compute_generic",
                 "depends_on": [
                     "execute_consul_registration",
                     "execute_postgres_registration",
@@ -457,7 +462,7 @@ class TestWorkflowGraphIntegration:
             },
             # Node 8: Publish outcome event
             "publish_outcome": {
-                "node_type": "effect",
+                "node_type": "effect_generic",
                 "depends_on": ["aggregate_results"],
                 "description": "Publish registration outcome event",
             },
@@ -472,8 +477,8 @@ class TestWorkflowGraphIntegration:
             assert node_id in node_map, f"Missing node: {node_id}"
             node = node_map[node_id]
 
-            # Validate node_type
-            assert node["node_type"] == expected["node_type"], (
+            # Validate node_type (case-insensitive comparison)
+            assert node["node_type"].lower() == expected["node_type"], (
                 f"Node '{node_id}' has type '{node['node_type']}', "
                 f"expected '{expected['node_type']}'"
             )

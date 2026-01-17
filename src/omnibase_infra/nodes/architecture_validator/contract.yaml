@@ -35,7 +35,7 @@ contract_version:
   patch: 0
 node_version: "0.1.0"
 # Node type - COMPUTE for pure validation logic
-node_type: "COMPUTE"
+node_type: "COMPUTE_GENERIC"
 # Description
 description: >
   COMPUTE node for validating ONEX architecture patterns. Analyzes Python source code and module structures to detect architecture violations. Validates three core rules: ARCH-001 (no direct handler dispatch), ARCH-002 (no handler publishing events), and ARCH-003 (no workflow FSM in orchestrators duplicating reducer transitions). Returns a structured validation result with violations grouped by rule and severity.

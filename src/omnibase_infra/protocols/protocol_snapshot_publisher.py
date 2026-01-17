@@ -171,7 +171,7 @@ class ProtocolSnapshotPublisher(Protocol):
                     try:
                         await self.publish_snapshot(snapshot)
                         count += 1
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - batch continues on single failure
                         # Log and continue with batch
                         pass
                 return count

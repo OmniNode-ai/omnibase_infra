@@ -207,11 +207,18 @@ output_model:
             and v.severity == EnumContractViolationSeverity.ERROR
         ]
         assert len(invalid_type_errors) == 1
-        assert "EFFECT" in invalid_type_errors[0].message  # Should suggest valid types
+        assert (
+            "EFFECT_GENERIC" in invalid_type_errors[0].message
+        )  # Should suggest valid types
 
     def test_lint_valid_node_types(self, tmp_path: Path) -> None:
         """Test all valid node types are accepted."""
-        valid_types = ["EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"]
+        valid_types = [
+            "EFFECT_GENERIC",
+            "COMPUTE_GENERIC",
+            "REDUCER_GENERIC",
+            "ORCHESTRATOR_GENERIC",
+        ]
 
         for node_type in valid_types:
             contract_file = tmp_path / f"contract_{node_type}.yaml"
@@ -252,7 +259,7 @@ output_model:
         contract_file.write_text(
             """
 name: test_node
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version: "1.0.0"
 input_model:
   name: ModelInput
@@ -282,7 +289,7 @@ output_model:
         contract_file.write_text(
             """
 name: test_node
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
 input_model:
@@ -313,7 +320,7 @@ output_model:
         contract_file.write_text(
             """
 name: test_node
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -343,7 +350,7 @@ output_model:
         contract_file.write_text(
             """
 name: test_node
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -374,7 +381,7 @@ output_model:
         contract_file.write_text(
             """
 name: test_node
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -407,7 +414,7 @@ output_model:
         contract_file.write_text(
             """
 name: TestNode
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -440,7 +447,7 @@ output_model:
         contract_file.write_text(
             """
 name: test_node
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -473,7 +480,7 @@ output_model:
         contract_file.write_text(
             """
 name: TestNode
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -503,7 +510,7 @@ output_model:
         contract_file.write_text(
             """
 name: test_node
-node_type: ORCHESTRATOR
+node_type: ORCHESTRATOR_GENERIC
 description: A test node for validation
 node_version: "1.0.0"
 contract_version:
@@ -554,7 +561,7 @@ class TestContractLinterDirectory:
         (node1_dir / "contract.yaml").write_text(
             """
 name: node_one
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -573,7 +580,7 @@ output_model:
         (node2_dir / "contract.yaml").write_text(
             """
 name: node_two
-node_type: COMPUTE
+node_type: COMPUTE_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -601,7 +608,7 @@ output_model:
         (node1_dir / "contract.yaml").write_text(
             """
 name: node_one
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -644,7 +651,7 @@ class TestConvenienceFunctions:
         contract_file.write_text(
             """
 name: test_node
-node_type: EFFECT
+node_type: EFFECT_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -666,7 +673,7 @@ output_model:
         (tmp_path / "contract.yaml").write_text(
             """
 name: test_node
-node_type: REDUCER
+node_type: REDUCER_GENERIC
 contract_version:
   major: 1
   minor: 0
@@ -764,7 +771,7 @@ class TestStructuredErrorConversion:
         violation = ModelContractViolation(
             file_path="nodes/test/contract.yaml",
             field_path="node_type",
-            message="Invalid node_type 'INVALID'. Must be one of: EFFECT, COMPUTE",
+            message="Invalid node_type 'INVALID'. Must be one of: EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, ORCHESTRATOR_GENERIC",
             severity=EnumContractViolationSeverity.ERROR,
         )
 
@@ -877,7 +884,7 @@ node_type: INVALID_TYPE
             field_path="node_type",
             message="Invalid node_type",
             severity=EnumContractViolationSeverity.ERROR,
-            suggestion="Use EFFECT, COMPUTE, REDUCER, or ORCHESTRATOR",
+            suggestion="Use EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, or ORCHESTRATOR_GENERIC",
         )
 
         error = convert_violation_to_handler_error(violation)

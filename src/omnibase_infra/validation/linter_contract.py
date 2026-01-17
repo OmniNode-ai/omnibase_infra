@@ -7,7 +7,7 @@ Validates contract.yaml files against ONEX infrastructure requirements:
 - Required fields: name, node_type, contract_version, input_model, output_model
 - Type consistency: input_model/output_model module references are importable
 - YAML syntax validity
-- Node type constraints (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
+- Node type constraints (EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, ORCHESTRATOR_GENERIC)
 
 This linter complements omnibase_core.validation.validate_contracts by adding
 infrastructure-specific validation that is not covered by the base validator.
@@ -84,8 +84,10 @@ from omnibase_infra.validation.models.model_contract_violation import (
 logger = logging.getLogger(__name__)
 
 
-# Valid node types per ONEX 4-node architecture
-VALID_NODE_TYPES = frozenset({"EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"})
+# Valid node types per ONEX 4-node architecture (omnibase_core 0.7.0+)
+VALID_NODE_TYPES = frozenset(
+    {"EFFECT_GENERIC", "COMPUTE_GENERIC", "REDUCER_GENERIC", "ORCHESTRATOR_GENERIC"}
+)
 
 
 # Rule ID mapping for contract violations
@@ -309,7 +311,7 @@ class ContractLinter:
 
     Required Fields:
         - name: Node identifier (snake_case)
-        - node_type: One of EFFECT, COMPUTE, REDUCER, ORCHESTRATOR
+        - node_type: One of EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, ORCHESTRATOR_GENERIC
         - contract_version: Semantic version dict with major, minor, patch
         - input_model: Dict with name and module fields
         - output_model: Dict with name and module fields

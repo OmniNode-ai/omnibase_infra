@@ -41,22 +41,10 @@ import pytest
 from tests.performance.database.conftest import QueryAnalyzer
 
 # =============================================================================
-# Module-Level Markers
-# =============================================================================
-# NOTE: The 'performance' marker is automatically applied by
-# tests/performance/conftest.py via pytest_collection_modifyitems hook.
-# Only additional markers (like 'database') need to be specified here.
-
-pytestmark = [
-    pytest.mark.database,
-]
-
-# =============================================================================
 # Updated_At Index Tests (PR #101 Requirement)
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestUpdatedAtIndexUsage:
     """Test that updated_at index is used for audit queries."""
 
@@ -230,7 +218,6 @@ class TestUpdatedAtIndexUsage:
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestExistingIndexUsage:
     """Test that existing indexes are used correctly."""
 
@@ -360,7 +347,6 @@ class TestExistingIndexUsage:
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestQueryPerformanceThresholds:
     """Test that queries meet performance thresholds."""
 
@@ -500,7 +486,6 @@ class TestQueryPerformanceThresholds:
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestQueryPlanAnalysis:
     """Test query plan characteristics for optimization insights."""
 
@@ -580,7 +565,6 @@ class TestQueryPlanAnalysis:
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestQueryPlanStability:
     """Test that query plans remain stable and optimal."""
 

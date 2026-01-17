@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""COMPUTE node for validating architecture compliance.
+"""COMPUTE_GENERIC node for validating architecture compliance.
 
 This module implements NodeArchitectureValidatorCompute, a pure transformation node
 that validates nodes and handlers against architecture rules. The validator can be
 invoked at startup (pre-runtime), during runtime (via orchestrator), or from CI/CD.
 
 Design Pattern:
-    NodeArchitectureValidatorCompute follows the COMPUTE node pattern from the
-    ONEX 4-node architecture. As a COMPUTE node:
+    NodeArchitectureValidatorCompute follows the COMPUTE_GENERIC node pattern from the
+    ONEX 4-node architecture. As a COMPUTE_GENERIC node:
     - Pure transformation: input -> output, no side effects
     - Deterministic: same input always produces same output
     - Stateless validation: rules are injected, not stored
@@ -96,7 +96,7 @@ __all__ = ["NodeArchitectureValidatorCompute", "SUPPORTED_RULE_IDS"]
 class NodeArchitectureValidatorCompute(
     NodeCompute[ModelArchitectureValidationRequest, ModelArchitectureValidationResult]
 ):
-    """COMPUTE node for validating architecture compliance.
+    """COMPUTE_GENERIC node for validating architecture compliance.
 
     Validates nodes and handlers against architecture rules. This is a pure
     transformation node: input -> output, no side effects.

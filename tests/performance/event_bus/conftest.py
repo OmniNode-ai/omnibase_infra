@@ -8,6 +8,61 @@ Provides fixtures for performance testing including:
 - Latency measurement utilities
 - Concurrent subscriber simulation
 
+==============================================================================
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+==============================================================================
+
+This module provides **function-scoped** async fixtures for performance testing.
+With pytest-asyncio 0.25+, the default event loop scope is "function", which
+provides proper isolation between performance test runs.
+
+Fixture Scoping for Performance Tests
+-------------------------------------
+All fixtures in this module are **function-scoped** to ensure:
+
+1. **Test isolation**: Each performance test gets a fresh event bus instance
+2. **Accurate measurements**: No cross-test state pollution
+3. **Reproducible benchmarks**: Consistent starting conditions
+
+The function-scoped fixtures work with the default event loop configuration.
+
+When to Configure loop_scope
+----------------------------
+If you create **module-scoped or session-scoped** performance fixtures (e.g.,
+for expensive setup that should be shared across benchmark iterations), you
+must configure loop_scope in your test module:
+
+.. code-block:: python
+
+    # For module-scoped fixtures (shared within a performance test module)
+    pytestmark = [
+        pytest.mark.performance,
+        pytest.mark.asyncio(loop_scope="module"),
+    ]
+
+Fixtures Provided
+-----------------
+Function-scoped (work with default settings):
+    - event_bus: Standard EventBusInmemory for general tests
+    - high_volume_event_bus: High-capacity (100k) for stress testing
+    - low_latency_event_bus: Minimal overhead for latency benchmarks
+    - counting_handler: Handler that counts received messages
+    - latency_tracking_handler: Handler that records receipt timestamps
+
+Why loop_scope Matters for Performance Tests
+--------------------------------------------
+Event loops are bound to async resources at creation time. Sharing async
+fixtures across tests with mismatched loop_scope causes:
+
+    - RuntimeError: "attached to a different event loop"
+    - RuntimeError: "Event loop is closed"
+    - Unpredictable benchmark results due to resource contention
+
+Reference Documentation
+-----------------------
+- https://pytest-asyncio.readthedocs.io/en/latest/concepts.html#event-loop-scope
+- https://pytest-asyncio.readthedocs.io/en/latest/how-to-guides/change_default_loop_scope.html
+
 Usage:
     Fixtures are automatically available to all tests in this package.
 
@@ -20,8 +75,9 @@ Supported Event Bus Implementations:
     For Kafka-based testing, see tests/integration/event_bus/conftest.py and
     tests/integration/registration/e2e/conftest.py.
 
-Related:
+Related Tickets:
     - OMN-57: Event bus performance testing requirements
+    - OMN-1361: pytest-asyncio 0.25+ upgrade and loop_scope configuration
 """
 
 from __future__ import annotations

@@ -1,4 +1,63 @@
-"""Pytest configuration and shared fixtures for omnibase_infra tests."""
+"""Pytest configuration and shared fixtures for omnibase_infra tests.
+
+==============================================================================
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+==============================================================================
+
+This module provides session-scoped and function-scoped async fixtures. With
+pytest-asyncio 0.25+, the default event loop scope changed from "session" to
+"function", which can cause "attached to a different loop" errors when sharing
+async resources across tests.
+
+Global Configuration (pyproject.toml)
+-------------------------------------
+This project uses ``asyncio_mode = "auto"`` in ``[tool.pytest.ini_options]``.
+This auto-detects async tests but does NOT set a global loop scope.
+
+When to Configure loop_scope
+----------------------------
+**Test modules that use session-scoped async fixtures** must explicitly set
+the loop_scope via pytestmark:
+
+.. code-block:: python
+
+    # For session-scoped fixtures (shared across entire test session)
+    pytestmark = [pytest.mark.asyncio(loop_scope="session")]
+
+    # For module-scoped fixtures (shared within a single test module)
+    pytestmark = [pytest.mark.asyncio(loop_scope="module")]
+
+    # For function-scoped fixtures only (default - no config needed)
+    # Each test gets its own event loop
+
+Why This Matters
+----------------
+- **Session/Module-scoped async fixtures**: Require matching loop_scope to
+  share async resources (database connections, Kafka producers, etc.)
+- **Function-scoped async fixtures**: Work with default settings (each test
+  gets isolated event loop)
+- **RuntimeError symptoms**: "attached to a different loop" or "Event loop is
+  closed" typically indicate loop_scope mismatch
+
+Fixture Scope Reference
+-----------------------
+This module provides the following async fixtures:
+
+Session-scoped (require loop_scope="session" in test modules):
+    - (none currently - add here if session-scoped fixtures are added)
+
+Function-scoped (work with default settings):
+    - event_bus: In-memory event bus for testing
+    - container_with_registries: Real ONEX container with wired services
+
+Reference Documentation
+-----------------------
+- https://pytest-asyncio.readthedocs.io/en/latest/concepts.html#event-loop-scope
+- https://pytest-asyncio.readthedocs.io/en/latest/how-to-guides/change_default_loop_scope.html
+
+Related Tickets:
+    - OMN-1361: pytest-asyncio 0.25+ upgrade and loop_scope configuration
+"""
 
 from __future__ import annotations
 
@@ -17,6 +76,11 @@ from omnibase_infra.utils import sanitize_error_message
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    # TYPE_CHECKING imports: These imports are only used for type annotations.
+    # They are NOT imported at runtime, which:
+    # 1. Avoids circular import issues (container modules may import test utilities)
+    # 2. Reduces import overhead during test collection
+    # 3. Prevents runtime errors if these modules have heavy dependencies
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
     from omnibase_infra.runtime.registry_policy import RegistryPolicy
@@ -134,7 +198,7 @@ def assert_has_methods(
         ...     protocol_name="RegistryPolicy",
         ... )
     """
-    name = protocol_name or obj.__class__.__name__
+    name: str = protocol_name or obj.__class__.__name__
     for method_name in required_methods:
         assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
         # __len__ and __iter__ are special - they are callable via len()/iter()
@@ -170,10 +234,10 @@ def assert_has_async_methods(
         ...     protocol_name="ProtocolReducer",
         ... )
     """
-    name = protocol_name or obj.__class__.__name__
+    name: str = protocol_name or obj.__class__.__name__
     for method_name in required_methods:
         assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
-        method = getattr(obj, method_name)
+        method: object = getattr(obj, method_name)
         assert callable(method), f"{name}.{method_name} must be callable"
         assert asyncio.iscoroutinefunction(method), (
             f"{name}.{method_name} must be async (coroutine function)"
@@ -209,12 +273,12 @@ def assert_method_signature(
         ...     protocol_name="ProtocolReducer",
         ... )
     """
-    name = protocol_name or obj.__class__.__name__
+    name: str = protocol_name or obj.__class__.__name__
     assert hasattr(obj, method_name), f"{name} must have '{method_name}' method"
 
-    method = getattr(obj, method_name)
-    sig = inspect.signature(method)
-    params = list(sig.parameters.keys())
+    method: object = getattr(obj, method_name)
+    sig: inspect.Signature = inspect.signature(method)
+    params: list[str] = list(sig.parameters.keys())
 
     assert len(params) == len(expected_params), (
         f"{name}.{method_name} must have {len(expected_params)} parameters "

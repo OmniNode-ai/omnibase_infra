@@ -1646,7 +1646,7 @@ Minimal contracts for effect and compute nodes to contextualize handler usage.
 schema_version: "1.0.0"
 node_version: "1.0.0"
 name: "user_service_effect"
-node_type: "EFFECT"
+node_type: "EFFECT_GENERIC"  # Use _GENERIC variants in contracts
 description: "Fetches user data from external API"
 
 input_model:
@@ -1680,7 +1680,7 @@ dependencies: []
 schema_version: "1.0.0"
 node_version: "1.0.0"
 name: "order_calculator_compute"
-node_type: "COMPUTE"
+node_type: "COMPUTE_GENERIC"  # Use _GENERIC variants in contracts
 description: "Calculates order totals and discounts"
 
 input_model:
@@ -1712,7 +1712,7 @@ dependencies: []
 **Key Differences**:
 | Aspect | Effect Node | Compute Node |
 |--------|-------------|--------------|
-| `node_type` | `EFFECT` | `COMPUTE` |
+| `node_type` | `EFFECT_GENERIC` | `COMPUTE_GENERIC` |
 | `io_operations` | Lists external I/O | Empty (pure) |
 | Handler usage | Uses HttpHandler, HandlerDb | No handlers (pure logic) |
 | Side effects | Yes (external calls) | No (deterministic) |

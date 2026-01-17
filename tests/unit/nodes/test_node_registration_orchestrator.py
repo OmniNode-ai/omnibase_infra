@@ -177,7 +177,7 @@ class TestContractValidation:
         assert contract_data is not None
         assert "name" in contract_data
         assert "node_type" in contract_data
-        assert contract_data["node_type"] == EnumNodeKind.ORCHESTRATOR.name
+        assert contract_data["node_type"] == "ORCHESTRATOR_GENERIC"
 
     def test_contract_has_required_metadata(self, contract_data: dict) -> None:
         """Test that contract has required metadata fields."""
