@@ -121,9 +121,18 @@ class NodeArchitectureValidatorCompute(
         >>> validator = NodeArchitectureValidatorCompute(container, rules=rules)
         >>> result = validator.compute(request)
         >>> if not result:
-        ...     from omnibase_infra.errors import ProtocolConfigurationError
+        ...     from omnibase_infra.enums import EnumInfraTransportType
+        ...     from omnibase_infra.errors import (
+        ...         ModelInfraErrorContext,
+        ...         ProtocolConfigurationError,
+        ...     )
+        ...     context = ModelInfraErrorContext.with_correlation(
+        ...         transport_type=EnumInfraTransportType.RUNTIME,
+        ...         operation="architecture_validation",
+        ...     )
         ...     raise ProtocolConfigurationError(
         ...         f"Validation failed: {result.violation_count} violations",
+        ...         context=context,
         ...         code="ARCHITECTURE_VALIDATION_FAILED",
         ...         violations=[v.to_dict() for v in result.violations],
         ...     )
