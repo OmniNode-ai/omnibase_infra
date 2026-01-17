@@ -28,8 +28,8 @@ python = "^3.12"
 #
 # omnibase-core v0.7.0: Major breaking changes release
 omnibase-core = "^0.7.0"
-# omnibase-spi v0.4.2: Adds ProtocolCapabilityQuery interface (OMN-1135)
-omnibase-spi = "^0.4.2"
+# omnibase-spi v0.5.0: Protocol updates for omnibase-core 0.7.0 compatibility
+omnibase-spi = "^0.5.0"
 
 # ============================================================================
 # External Dependency Security Guidance

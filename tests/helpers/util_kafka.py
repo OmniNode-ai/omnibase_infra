@@ -56,6 +56,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from aiokafka.admin import AIOKafkaAdminClient
+    from aiokafka.errors import KafkaError
 
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
@@ -64,76 +65,18 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Kafka Error Code Remediation Hints
-# =============================================================================
-# Common Kafka/Redpanda error codes with actionable remediation hints.
-# Reference: https://kafka.apache.org/protocol.html#protocol_error_codes
-#
-# These hints help developers quickly diagnose and fix common issues when
-# running integration tests against Kafka/Redpanda brokers.
-# =============================================================================
-
-KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
-    # Topic management errors
-    36: (
-        "Topic already exists. This is usually harmless in test environments. "
-        "If you need a fresh topic, use a unique name with UUID suffix."
-    ),
-    37: (
-        "Invalid number of partitions. "
-        "Hint: Ensure partitions >= 1. For Redpanda, check that the broker has "
-        "sufficient memory allocated (see Docker memory limits or "
-        "'redpanda.developer_mode' setting)."
-    ),
-    38: (
-        "Invalid replication factor. "
-        "Hint: Replication factor cannot exceed the number of brokers. "
-        "For single-node test setups, use replication_factor=1."
-    ),
-    39: (
-        "Invalid replica assignment. "
-        "Hint: Check that all specified broker IDs exist in the cluster."
-    ),
-    40: (
-        "Invalid topic configuration. "
-        "Hint: Check topic config parameters (retention.ms, segment.bytes, etc.). "
-        "Some Redpanda/Kafka versions have different config key names."
-    ),
-    # Cluster state errors
-    41: (
-        "Not the cluster controller. This is retriable. "
-        "Hint: The cluster may be electing a new controller. Retry after a brief delay."
-    ),
-    # Authorization errors
-    29: (
-        "Cluster authorization failed. "
-        "Hint: Check that your client has ClusterAction permission. "
-        "For Redpanda, verify ACL configuration or disable authorization for tests."
-    ),
-    30: (
-        "Group authorization failed. "
-        "Hint: Check that your client has access to the consumer group. "
-        "Verify KAFKA_SASL_* environment variables if using SASL authentication."
-    ),
-    # Resource errors
-    89: (
-        "Out of memory or resource exhausted on broker. "
-        "Hint: For Redpanda in Docker, increase container memory limit "
-        "(e.g., 'docker update --memory 2g <container>'). "
-        "Check 'docker stats' for current memory usage."
-    ),
-}
-
-# =============================================================================
 # Kafka Error Code Constants
 # =============================================================================
-# Named constants for Kafka error codes (for readable conditionals).
+# Named constants for Kafka error codes (for readable conditionals and dict keys).
 # Reference: https://kafka.apache.org/protocol.html#protocol_error_codes
 #
 # Using named constants instead of magic numbers improves:
 # - Code readability: "if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS" is clearer
 # - Maintainability: Single source of truth for error code values
 # - Searchability: Easy to find all usages of a specific error code
+#
+# These constants are defined BEFORE KAFKA_ERROR_REMEDIATION_HINTS so they can
+# be used as dictionary keys.
 # =============================================================================
 
 KAFKA_ERROR_TOPIC_ALREADY_EXISTS = 36
@@ -156,6 +99,75 @@ KAFKA_ERROR_NOT_CONTROLLER = 41
 
 KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED = 29
 """Cluster authorization failed (error_code=29). Client lacks ClusterAction permission."""
+
+KAFKA_ERROR_GROUP_AUTHORIZATION_FAILED = 30
+"""Group authorization failed (error_code=30). Client lacks access to consumer group."""
+
+KAFKA_ERROR_BROKER_RESOURCE_EXHAUSTED = 89
+"""Broker resource exhausted (error_code=89). Out of memory or resource limit reached."""
+
+# =============================================================================
+# Kafka Error Code Remediation Hints
+# =============================================================================
+# Common Kafka/Redpanda error codes with actionable remediation hints.
+# Reference: https://kafka.apache.org/protocol.html#protocol_error_codes
+#
+# These hints help developers quickly diagnose and fix common issues when
+# running integration tests against Kafka/Redpanda brokers.
+#
+# Dictionary keys use the named constants defined above for consistency.
+# =============================================================================
+
+KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
+    # Topic management errors
+    KAFKA_ERROR_TOPIC_ALREADY_EXISTS: (
+        "Topic already exists. This is usually harmless in test environments. "
+        "If you need a fresh topic, use a unique name with UUID suffix."
+    ),
+    KAFKA_ERROR_INVALID_PARTITIONS: (
+        "Invalid number of partitions. "
+        "Hint: Ensure partitions >= 1. For Redpanda, check that the broker has "
+        "sufficient memory allocated (see Docker memory limits or "
+        "'redpanda.developer_mode' setting)."
+    ),
+    KAFKA_ERROR_INVALID_REPLICATION_FACTOR: (
+        "Invalid replication factor. "
+        "Hint: Replication factor cannot exceed the number of brokers. "
+        "For single-node test setups, use replication_factor=1."
+    ),
+    KAFKA_ERROR_INVALID_REPLICA_ASSIGNMENT: (
+        "Invalid replica assignment. "
+        "Hint: Check that all specified broker IDs exist in the cluster."
+    ),
+    KAFKA_ERROR_INVALID_CONFIG: (
+        "Invalid topic configuration. "
+        "Hint: Check topic config parameters (retention.ms, segment.bytes, etc.). "
+        "Some Redpanda/Kafka versions have different config key names."
+    ),
+    # Cluster state errors
+    KAFKA_ERROR_NOT_CONTROLLER: (
+        "Not the cluster controller. This is retriable. "
+        "Hint: The cluster may be electing a new controller. Retry after a brief delay."
+    ),
+    # Authorization errors
+    KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED: (
+        "Cluster authorization failed. "
+        "Hint: Check that your client has ClusterAction permission. "
+        "For Redpanda, verify ACL configuration or disable authorization for tests."
+    ),
+    KAFKA_ERROR_GROUP_AUTHORIZATION_FAILED: (
+        "Group authorization failed. "
+        "Hint: Check that your client has access to the consumer group. "
+        "Verify KAFKA_SASL_* environment variables if using SASL authentication."
+    ),
+    # Resource errors
+    KAFKA_ERROR_BROKER_RESOURCE_EXHAUSTED: (
+        "Out of memory or resource exhausted on broker. "
+        "Hint: For Redpanda in Docker, increase container memory limit "
+        "(e.g., 'docker update --memory 2g <container>'). "
+        "Check 'docker stats' for current memory usage."
+    ),
+}
 
 # =============================================================================
 # Default Configuration Constants
@@ -899,16 +911,26 @@ async def wait_for_topic_metadata(
                     len(list_partitions),
                 )
             else:
-                # Unknown format but truthy - accept as success for compatibility
-                logger.debug(
-                    "Topic %s: unknown response format, accepting as ready: %s",
+                # Unknown format but truthy - log warning and accept for compatibility
+                # This may indicate a new aiokafka version with different response format
+                logger.warning(
+                    "Topic %s: unknown describe_topics response format (type=%s). "
+                    "Accepting as ready for compatibility, but this may indicate a new "
+                    "aiokafka version. Consider updating util_kafka.py to handle this format. "
+                    "Response: %r",
                     topic_name,
-                    type(description),
+                    type(description).__name__,
+                    description,
                 )
                 return True
 
         except Exception as e:
-            logger.debug("Topic %s metadata check failed: %s", topic_name, e)
+            # Log exception type for diagnostics - helps identify if specific
+            # Kafka exceptions should be added to the handler
+            exc_type_name = type(e).__name__
+            logger.debug(
+                "Topic %s metadata check failed (%s): %s", topic_name, exc_type_name, e
+            )
 
         await asyncio.sleep(0.5)  # Poll every 500ms
 
@@ -995,8 +1017,11 @@ class KafkaTopicManager:
             host: str
             port: str
             host, port = parse_bootstrap_servers(self.bootstrap_servers)
+            # Include exception type in error message for better diagnostics
+            exc_type_name = type(conn_err).__name__
             raise RuntimeError(
-                f"Failed to connect to Kafka broker at {self.bootstrap_servers}. "
+                f"Failed to connect to Kafka broker at {self.bootstrap_servers} "
+                f"({exc_type_name}). "
                 f"Hint: Verify the broker is running and accessible:\n"
                 f"  1. Check container status: 'docker ps | grep redpanda'\n"
                 f"  2. Test connectivity: 'nc -zv {host} {port}'\n"
@@ -1123,9 +1148,13 @@ class KafkaTopicManager:
                 try:
                     await self._admin.delete_topics(self.created_topics)
                 except Exception as e:
+                    # Log exception type for diagnostics - helps identify if specific
+                    # Kafka exceptions should be handled differently
+                    exc_type_name = type(e).__name__
                     logger.warning(
-                        "Cleanup failed for Kafka topics %s: %s",
+                        "Cleanup failed for Kafka topics %s (%s): %s",
                         self.created_topics,
+                        exc_type_name,
                         e,
                         exc_info=True,
                     )
@@ -1134,8 +1163,11 @@ class KafkaTopicManager:
             try:
                 await self._admin.close()
             except Exception as e:
+                # Log exception type for diagnostics
+                exc_type_name = type(e).__name__
                 logger.warning(
-                    "Failed to close Kafka admin client: %s",
+                    "Failed to close Kafka admin client (%s): %s",
+                    exc_type_name,
                     e,
                     exc_info=True,
                 )
@@ -1173,6 +1205,8 @@ __all__ = [
     "KAFKA_ERROR_INVALID_CONFIG",
     "KAFKA_ERROR_NOT_CONTROLLER",
     "KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED",
+    "KAFKA_ERROR_GROUP_AUTHORIZATION_FAILED",
+    "KAFKA_ERROR_BROKER_RESOURCE_EXHAUSTED",
     "get_kafka_error_hint",
     # Configuration constants
     "KAFKA_DEFAULT_PORT",

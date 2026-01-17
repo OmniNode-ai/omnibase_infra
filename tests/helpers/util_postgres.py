@@ -35,7 +35,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass
-from urllib.parse import quote
+from urllib.parse import quote_plus
 
 from tests.infrastructure_config import DEFAULT_POSTGRES_PORT, REMOTE_INFRA_HOST
 
@@ -243,8 +243,9 @@ class PostgresConfig:
             host = os.getenv("REMOTE_INFRA_HOST", REMOTE_INFRA_HOST)
 
         password: str | None = os.getenv(password_var)
-        # Normalize empty password to None
-        if password and not password.strip():
+        # Normalize empty or whitespace-only password to None
+        # This prevents malformed DSN like "postgresql://user:@host:5432/db"
+        if password is not None and not password.strip():
             password = None
 
         return cls(
@@ -267,9 +268,9 @@ class PostgresConfig:
     def build_dsn(self) -> str:
         """Build PostgreSQL DSN from configuration.
 
-        Credentials (user and password) are URL-encoded to handle special
-        characters like @, :, #, %, etc. that would otherwise break the DSN
-        format.
+        Credentials (user and password) are URL-encoded using quote_plus() to
+        handle special characters like @, :, /, %, etc. that would otherwise
+        break the DSN format.
 
         Returns:
             PostgreSQL connection string in standard format.
@@ -286,6 +287,10 @@ class PostgresConfig:
             ...     database="test", user="user@domain", password="p@ss:word#123")
             >>> config.build_dsn()
             'postgresql://user%40domain:p%40ss%3Aword%23123@localhost:5432/test'
+            >>> config = PostgresConfig(host="localhost", port=5432,
+            ...     database="test", user="postgres", password="p@ss/word")
+            >>> config.build_dsn()
+            'postgresql://postgres:p%40ss%2Fword@localhost:5432/test'
         """
         if not self.is_configured:
             missing: list[str] = []
@@ -297,11 +302,12 @@ class PostgresConfig:
                 f"PostgreSQL configuration incomplete. Missing: {', '.join(missing)}"
             )
 
-        # URL-encode credentials to handle special characters (@, :, #, %, etc.)
+        # URL-encode credentials to handle special characters (@, :, /, %, etc.)
+        # Using quote_plus for robust encoding of all special characters in credentials
         # Assert to help mypy understand is_configured ensures password is not None
         assert self.password is not None  # Verified by is_configured check above
-        encoded_user: str = quote(self.user, safe="")
-        encoded_password: str = quote(self.password, safe="")
+        encoded_user: str = quote_plus(self.user, safe="")
+        encoded_password: str = quote_plus(self.password, safe="")
 
         return (
             f"postgresql://{encoded_user}:{encoded_password}"
@@ -314,15 +320,15 @@ def build_postgres_dsn(
     port: int,
     database: str,
     user: str,
-    password: str,
+    password: str | None,
 ) -> str:
     """Build PostgreSQL DSN from individual components.
 
     This is a standalone function for cases where a full PostgresConfig
     is not needed.
 
-    Credentials (user and password) are URL-encoded to handle special
-    characters like @, :, #, %, etc. that would otherwise break the DSN
+    Credentials (user and password) are URL-encoded using quote_plus() to handle
+    special characters like @, :, /, %, etc. that would otherwise break the DSN
     format.
 
     Args:
@@ -330,23 +336,38 @@ def build_postgres_dsn(
         port: PostgreSQL server port.
         database: Database name.
         user: Database username.
-        password: Database password.
+        password: Database password. Empty strings are normalized to None.
 
     Returns:
         PostgreSQL connection string in standard format.
+
+    Raises:
+        ValueError: If password is None or empty (after normalization).
 
     Example:
         >>> build_postgres_dsn("localhost", 5432, "test", "postgres", "secret")
         'postgresql://postgres:secret@localhost:5432/test'
         >>> build_postgres_dsn("localhost", 5432, "test", "user@domain", "p@ss:word#123")
         'postgresql://user%40domain:p%40ss%3Aword%23123@localhost:5432/test'
-        >>> build_postgres_dsn("localhost", 5432, "test", "postgres", "")
-        'postgresql://postgres:@localhost:5432/test'
+        >>> build_postgres_dsn("localhost", 5432, "test", "postgres", "p@ss/word")
+        'postgresql://postgres:p%40ss%2Fword@localhost:5432/test'
     """
-    # URL-encode credentials to handle special characters (@, :, #, %, etc.)
-    # An empty password is valid in PostgreSQL (e.g., trust authentication)
-    encoded_user: str = quote(user, safe="")
-    encoded_password: str = quote(password, safe="") if password else ""
+    # Normalize empty or whitespace-only password to None
+    # This prevents malformed DSN like "postgresql://user:@host:5432/db"
+    normalized_password: str | None = password
+    if normalized_password is not None and not normalized_password.strip():
+        normalized_password = None
+
+    if normalized_password is None:
+        raise ValueError(
+            "PostgreSQL password is required. Empty or whitespace-only passwords "
+            "are not supported to prevent malformed DSN construction."
+        )
+
+    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
+    # Using quote_plus for robust encoding of all special characters in credentials
+    encoded_user: str = quote_plus(user, safe="")
+    encoded_password: str = quote_plus(normalized_password, safe="")
 
     return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
 

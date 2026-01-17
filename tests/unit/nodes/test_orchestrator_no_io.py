@@ -542,16 +542,19 @@ class TestContractIOOperationsAreEffectNodes:
                 # Use .lower() for case-insensitive comparison (contracts use UPPERCASE)
                 if node_type.lower() == "effect_generic":
                     keyword_note = (
-                        " (Note: this node matched I/O keywords but is known to be pure computation)"
+                        " (Note: node_id or description matched I/O keywords like "
+                        f"'{[kw for kw in io_operation_keywords if kw in node_id.lower() or kw in description][:2]}', "
+                        "but this node is known to perform pure computation, not external I/O)"
                         if suggests_io
                         else ""
                     )
                     misclassified_nodes.append(
-                        f"{node_id}: marked as '{node['node_type']}' but this node is in the "
-                        f"known pure-computation allowlist.{keyword_note} "
-                        f"Nodes performing pure computation should use "
-                        f"'COMPUTE_GENERIC' or 'REDUCER_GENERIC', not 'EFFECT_GENERIC'. "
-                        f"If this node truly performs external I/O, remove it from non_io_exceptions."
+                        f"{node_id}: incorrectly marked as '{node['node_type']}' (EFFECT) "
+                        f"but this node is in the pure-computation allowlist (non_io_exceptions).{keyword_note} "
+                        f"Pure computation nodes should use 'COMPUTE_GENERIC' or 'REDUCER_GENERIC', "
+                        f"not 'EFFECT_GENERIC'. "
+                        f"If this node actually performs external I/O (network, database, filesystem), "
+                        f"remove it from non_io_exceptions set in this test."
                     )
                 continue
 
@@ -567,8 +570,8 @@ class TestContractIOOperationsAreEffectNodes:
             "Contract has misclassified nodes:\n"
             + "\n".join(f"  - {msg}" for msg in misclassified_nodes)
             + "\n\nNode classification rules:"
-            + "\n  - I/O operations MUST use node_type: effect_generic"
-            + "\n  - Non-I/O exceptions (pure computation) MUST NOT use effect_generic"
+            + "\n  - I/O operations (network, database, filesystem) MUST use node_type: EFFECT_GENERIC"
+            + "\n  - Pure computation nodes (in non_io_exceptions allowlist) MUST use COMPUTE_GENERIC or REDUCER_GENERIC"
         )
 
     def test_effect_nodes_handle_external_systems(self, contract_data: dict) -> None:

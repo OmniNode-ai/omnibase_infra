@@ -105,6 +105,9 @@ if _env_file.exists():
     load_dotenv(_env_file)
 
 if TYPE_CHECKING:
+    # TYPE_CHECKING imports: These imports are only used for type annotations.
+    # asyncpg is imported lazily at runtime only when PostgreSQL is available,
+    # but we need the type hints at static analysis time for fixture signatures.
     import asyncpg
 
 

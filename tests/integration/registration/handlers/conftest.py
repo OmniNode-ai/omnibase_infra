@@ -88,6 +88,11 @@ from tests.integration.projectors.conftest import (
 )
 
 if TYPE_CHECKING:
+    # TYPE_CHECKING imports: These imports are only used for type annotations.
+    # They are NOT imported at runtime, which:
+    # 1. Avoids circular import issues (handler modules may reference test utilities)
+    # 2. Allows fixtures to declare return types without importing at collection time
+    # 3. Enables IDE autocompletion for fixture parameters and return types
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )

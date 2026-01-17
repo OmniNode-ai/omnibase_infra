@@ -68,6 +68,11 @@ from omnibase_core.models.projectors import ModelProjectorContract
 from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
 
 if TYPE_CHECKING:
+    # TYPE_CHECKING imports: These imports are only used for type annotations.
+    # They are NOT imported at runtime, which:
+    # 1. Avoids circular import issues (projector modules may import test utilities)
+    # 2. Allows type hints without requiring all projector dependencies at collection time
+    # 3. Enables IDE autocompletion and type checking for fixture return types
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
 

@@ -159,7 +159,7 @@ class TestPublishLatency:
     @pytest.mark.xfail(
         reason="Flaky in CI: header overhead ratio varies with shared resources. "
         "Observed 4128.6% overhead in CI vs expected <50%. Test provides value locally.",
-        strict=True,
+        strict=False,
     )
     async def test_publish_latency_with_headers(
         self,
@@ -281,7 +281,7 @@ class TestEndToEndLatency:
     @pytest.mark.xfail(
         reason="Flaky in CI: subscriber latency ratio varies with shared resources. "
         "Observed 31.1x ratio in CI vs expected <5x. Test provides value locally.",
-        strict=True,
+        strict=False,
     )
     async def test_e2e_latency_with_multiple_subscribers(
         self,
@@ -353,7 +353,7 @@ class TestEndToEndLatency:
     @pytest.mark.xfail(
         reason="Flaky in CI: latency varies significantly with shared resources. "
         "Observed 113.7x degradation in CI vs expected <2x. Test provides value locally.",
-        strict=True,
+        strict=False,
     )
     async def test_latency_consistency_over_time(
         self,

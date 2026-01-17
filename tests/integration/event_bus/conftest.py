@@ -91,6 +91,9 @@ pytestmark = [
 ]
 
 if TYPE_CHECKING:
+    # TYPE_CHECKING imports: These imports are only used for type annotations.
+    # AIOKafkaAdminClient is heavy (imports Kafka protocol, etc.) and only
+    # needed for type hints in this fixture module, not runtime execution.
     from aiokafka.admin import AIOKafkaAdminClient
 
 # =============================================================================
@@ -100,6 +103,17 @@ if TYPE_CHECKING:
 # KAFKA_BOOTSTRAP_SERVERS must be set via environment variable.
 # No hardcoded default to ensure portability across CI/CD environments.
 # Tests will skip via fixture if not set. Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092
+#
+# VALIDATION: The value is validated at module load time via validate_bootstrap_servers().
+# This validation checks for:
+# - None or empty string values
+# - Whitespace-only values
+# - Malformed port numbers (non-numeric, out of range 1-65535)
+# - Comma-separated server lists (each entry is validated)
+# - IPv6 addresses (both bracketed [::1]:port and bare :: formats)
+#
+# Fixtures that depend on this value MUST check _kafka_config_validation before use.
+# See validate_bootstrap_servers() in tests/helpers/util_kafka.py for implementation.
 KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
 
 # =============================================================================
@@ -108,7 +122,14 @@ KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
 # Imported from tests.helpers.util_kafka for centralized implementation.
 # See tests/helpers/util_kafka.py for the canonical implementations.
 from tests.helpers.util_kafka import (
+    KAFKA_ERROR_BROKER_RESOURCE_EXHAUSTED,
+    KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED,
+    KAFKA_ERROR_GROUP_AUTHORIZATION_FAILED,
+    KAFKA_ERROR_INVALID_CONFIG,
     KAFKA_ERROR_INVALID_PARTITIONS,
+    KAFKA_ERROR_INVALID_REPLICA_ASSIGNMENT,
+    KAFKA_ERROR_INVALID_REPLICATION_FACTOR,
+    KAFKA_ERROR_NOT_CONTROLLER,
     KAFKA_ERROR_REMEDIATION_HINTS,
     KAFKA_ERROR_TOPIC_ALREADY_EXISTS,
     KafkaConfigValidationResult,
@@ -132,6 +153,13 @@ __all__ = [
     "KAFKA_ERROR_REMEDIATION_HINTS",
     "KAFKA_ERROR_TOPIC_ALREADY_EXISTS",
     "KAFKA_ERROR_INVALID_PARTITIONS",
+    "KAFKA_ERROR_INVALID_REPLICATION_FACTOR",
+    "KAFKA_ERROR_INVALID_REPLICA_ASSIGNMENT",
+    "KAFKA_ERROR_INVALID_CONFIG",
+    "KAFKA_ERROR_NOT_CONTROLLER",
+    "KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED",
+    "KAFKA_ERROR_GROUP_AUTHORIZATION_FAILED",
+    "KAFKA_ERROR_BROKER_RESOURCE_EXHAUSTED",
 ]
 
 # =============================================================================

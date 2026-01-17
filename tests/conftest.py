@@ -76,6 +76,11 @@ from omnibase_infra.utils import sanitize_error_message
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    # TYPE_CHECKING imports: These imports are only used for type annotations.
+    # They are NOT imported at runtime, which:
+    # 1. Avoids circular import issues (container modules may import test utilities)
+    # 2. Reduces import overhead during test collection
+    # 3. Prevents runtime errors if these modules have heavy dependencies
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
     from omnibase_infra.runtime.registry_policy import RegistryPolicy
