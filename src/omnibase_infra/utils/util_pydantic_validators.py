@@ -32,10 +32,10 @@ Related Tickets:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
-from uuid import uuid4
+from urllib.parse import ParseResult, urlparse
 
 from omnibase_infra.utils.util_datetime import is_timezone_aware
 
@@ -135,6 +135,70 @@ def validate_timezone_aware_datetime_optional(
     return validate_timezone_aware_datetime(dt)
 
 
+def _sanitize_url_for_logging(url: str, parsed: ParseResult | None = None) -> str:
+    """Redact password from URL for safe logging.
+
+    This prevents credential exposure in error messages and logs.
+    Handles both well-formed URLs (http://user:pass@host) and malformed
+    URLs (user:pass@host) that may contain credentials.
+
+    Args:
+        url: The URL to sanitize.
+        parsed: Optional pre-parsed URL result to avoid re-parsing.
+
+    Returns:
+        URL with password redacted (if present), or original URL if no password.
+
+    Example:
+        >>> _sanitize_url_for_logging("http://user:secret@localhost:8080/path")
+        'http://user:****@localhost:8080/path'
+        >>> _sanitize_url_for_logging("http://localhost:8080/path")
+        'http://localhost:8080/path'
+        >>> _sanitize_url_for_logging("user:secret@localhost:5432")
+        'user:****@localhost:5432'
+    """
+    if parsed is None:
+        parsed = urlparse(url)
+
+    # If urlparse detected a password, use structured reconstruction
+    if parsed.password:
+        # Reconstruct URL with redacted password
+        # netloc format: [user[:password]@]host[:port]
+        user_part = parsed.username or ""
+        user_part += ":****@"
+
+        # Extract host:port from netloc (everything after @)
+        host_port = (
+            parsed.netloc.split("@")[-1] if "@" in parsed.netloc else parsed.netloc
+        )
+
+        # Reconstruct the sanitized URL
+        sanitized = f"{parsed.scheme}://{user_part}{host_port}"
+        if parsed.path:
+            sanitized += parsed.path
+        if parsed.query:
+            sanitized += f"?{parsed.query}"
+        if parsed.fragment:
+            sanitized += f"#{parsed.fragment}"
+
+        return sanitized
+
+    # Fallback: handle malformed URLs where urlparse doesn't detect credentials
+    # Pattern matches: anything:something@host (credential-like patterns)
+    # This catches cases like "user:password@host" without a scheme
+    if "@" in url:
+        # Look for pattern: word:word@ at the START of the string (likely credentials)
+        # Exclude URLs with schemes (scheme://...) by requiring no "/" before the ":"
+        # Pattern: starts with non-slash chars, then colon, then non-@/slash chars, then @
+        credential_pattern = re.compile(r"^([^/:]+):([^@/]+)@")
+        match = credential_pattern.match(url)
+        if match:
+            # Redact the password part (group 2)
+            return url[: match.start(2)] + "****" + url[match.end(2) :]
+
+    return url
+
+
 def validate_endpoint_urls_dict(endpoints: dict[str, str]) -> dict[str, str]:
     """Validate that all endpoint values are valid URLs.
 
@@ -173,7 +237,9 @@ def validate_endpoint_urls_dict(endpoints: dict[str, str]) -> dict[str, str]:
     for name, url in endpoints.items():
         parsed = urlparse(url)
         if not parsed.scheme or not parsed.netloc:
-            raise ValueError(f"Invalid URL for endpoint '{name}': {url}")
+            # Sanitize URL to prevent credential exposure in error messages
+            safe_url = _sanitize_url_for_logging(url, parsed)
+            raise ValueError(f"Invalid URL for endpoint '{name}': {safe_url}")
     return endpoints
 
 
@@ -231,11 +297,10 @@ def validate_pool_sizes_constraint(
             ProtocolConfigurationError,
         )
 
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="validate_config",
             target_name=target_name,
-            correlation_id=uuid4(),
         )
         raise ProtocolConfigurationError(
             f"pool_max_size ({pool_max_size}) must be >= pool_min_size ({pool_min_size})",

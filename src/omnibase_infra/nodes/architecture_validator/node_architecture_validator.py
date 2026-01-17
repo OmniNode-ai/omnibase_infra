@@ -121,7 +121,12 @@ class NodeArchitectureValidatorCompute(
         >>> validator = NodeArchitectureValidatorCompute(container, rules=rules)
         >>> result = validator.compute(request)
         >>> if not result:
-        ...     raise RuntimeError(f"Validation failed: {result.violation_count} violations")
+        ...     from omnibase_infra.errors import ProtocolConfigurationError
+        ...     raise ProtocolConfigurationError(
+        ...         f"Validation failed: {result.violation_count} violations",
+        ...         code="ARCHITECTURE_VALIDATION_FAILED",
+        ...         violations=[v.to_dict() for v in result.violations],
+        ...     )
 
         >>> # CI/CD pipeline validation
         >>> result = validator.compute(ModelArchitectureValidationRequest(
