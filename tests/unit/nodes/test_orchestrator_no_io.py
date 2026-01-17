@@ -549,9 +549,10 @@ class TestContractIOOperationsAreEffectNodes:
                         else ""
                     )
                     misclassified_nodes.append(
-                        f"{node_id}: Contract-test mismatch for node classification.\n"
-                        f"  CONTRACT: node_type='{node['node_type']}' (indicates external I/O)\n"
-                        f"  TEST: Node is in 'non_io_exceptions' allowlist (expects pure computation)\n"
+                        f"{node_id}: Node in 'non_io_exceptions' has conflicting EFFECT_GENERIC type.\n"
+                        f"  FAILURE CONDITION: Test allowlist says pure computation, but contract says external I/O.\n"
+                        f"  CONTRACT: node_type='{node['node_type']}' (indicates external I/O operations)\n"
+                        f"  TEST: Node is in 'non_io_exceptions' set (expects no external I/O)\n"
                         f"  {keyword_note}\n"
                         f"  RESOLUTION - Verify what '{node_id}' actually does:\n"
                         f"    A) If node performs pure computation (no network/database/filesystem):\n"

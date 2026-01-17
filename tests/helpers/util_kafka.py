@@ -51,11 +51,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import socket
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING
 from uuid import uuid4
+
+# Import Kafka error types for specific exception handling.
+# KafkaError is the base class for all aiokafka exceptions.
+# We import these at module level (not TYPE_CHECKING) because they are
+# used at runtime in exception handlers.
+from aiokafka.errors import KafkaConnectionError, KafkaError, KafkaTimeoutError
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -85,6 +92,9 @@ logger = logging.getLogger(__name__)
 # These constants are defined BEFORE KAFKA_ERROR_REMEDIATION_HINTS so they can
 # be used as dictionary keys.
 # =============================================================================
+
+KAFKA_ERROR_UNKNOWN_TOPIC_OR_PARTITION = 3
+"""Unknown topic or partition (error_code=3). Topic may not exist or is being deleted."""
 
 KAFKA_ERROR_TOPIC_ALREADY_EXISTS = 36
 """Topic with this name already exists (error_code=36)."""
@@ -126,6 +136,12 @@ KAFKA_ERROR_BROKER_RESOURCE_EXHAUSTED = 89
 # =============================================================================
 
 KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
+    # Topic/partition errors
+    KAFKA_ERROR_UNKNOWN_TOPIC_OR_PARTITION: (
+        "Unknown topic or partition. "
+        "Hint: The topic may not exist or is being deleted. "
+        "Wait for topic creation to complete, or verify the topic name is correct."
+    ),
     # Topic management errors
     KAFKA_ERROR_TOPIC_ALREADY_EXISTS: (
         "Topic already exists. This is usually harmless in test environments. "
@@ -183,18 +199,43 @@ KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
 # These can be overridden via environment variables in test fixtures.
 # =============================================================================
 
-KAFKA_DEFAULT_PORT = 29092
+_KAFKA_DEFAULT_PORT_FALLBACK = 29092
+"""Fallback port when KAFKA_DEFAULT_PORT env var is not set or invalid."""
+
+
+def _get_kafka_default_port() -> int:
+    """Get the default Kafka port from environment or fallback.
+
+    Reads from KAFKA_DEFAULT_PORT environment variable. Falls back to 29092
+    (the standard external Redpanda port) if not set or invalid.
+
+    Returns:
+        The default port as an integer.
+    """
+    env_value = os.getenv("KAFKA_DEFAULT_PORT", "")
+    if env_value.isdigit():
+        port = int(env_value)
+        if 1 <= port <= 65535:
+            return port
+    return _KAFKA_DEFAULT_PORT_FALLBACK
+
+
+KAFKA_DEFAULT_PORT = _get_kafka_default_port()
 """Default Kafka/Redpanda port for external connections (outside Docker network).
 
 The default port 29092 is the external advertised port for Redpanda/Kafka
 when running in Docker. Internal Docker connections typically use port 9092.
+
+This value is determined by:
+1. KAFKA_DEFAULT_PORT environment variable (if set and valid)
+2. Fallback to 29092 (standard Redpanda external port)
 
 This value is used when:
 - Bootstrap servers string has no explicit port
 - Bare IPv6 addresses are provided without port specification
 - Error messages suggest default configuration
 
-Override in tests via environment variable or explicit port in bootstrap_servers.
+Override via KAFKA_DEFAULT_PORT environment variable or explicit port in bootstrap_servers.
 """
 
 # =============================================================================
@@ -1047,9 +1088,11 @@ async def wait_for_topic_metadata(
             # Re-raise TypeErrors - they indicate programming errors
             # (e.g., unexpected response format), not transient Kafka issues
             raise
-        except Exception as e:
-            # Log other exceptions for diagnostics - helps identify if specific
-            # Kafka exceptions should be added to the handler
+        except (KafkaError, OSError) as e:
+            # KafkaError: Base class for all aiokafka exceptions (connection,
+            # timeout, broker errors, etc.) - transient issues that may resolve
+            # OSError: Socket-level connection issues (ECONNREFUSED, etc.)
+            # Both are expected during topic propagation and should be retried
             exc_type_name = type(e).__name__
             logger.debug(
                 "Topic %s metadata check failed (%s): %s", topic_name, exc_type_name, e
@@ -1137,7 +1180,10 @@ class KafkaTopicManager:
         self._admin = AIOKafkaAdminClient(bootstrap_servers=self.bootstrap_servers)
         try:
             await self._admin.start()
-        except Exception as conn_err:
+        except (KafkaConnectionError, KafkaTimeoutError, OSError) as conn_err:
+            # KafkaConnectionError: Kafka-level connection refused or unavailable
+            # KafkaTimeoutError: Timeout waiting for broker response
+            # OSError: Socket-level issues (ECONNREFUSED, ENETUNREACH, etc.)
             self._admin = None  # Reset to allow retry
             host: str
             port: str
@@ -1207,29 +1253,52 @@ class KafkaTopicManager:
             )
 
             # Check for errors in the response
-            # aiokafka 0.11.0+ uses topic_errors: List of (topic, error_code, error_message) tuples
-            if not hasattr(response, "topic_errors"):
+            # aiokafka version compatibility:
+            # - 0.11.0+: topic_errors (list of (topic, error_code, error_message) tuples)
+            # - Older versions: topic_error_codes (may also be present)
+            # Check for both attributes to support multiple aiokafka versions
+            topic_errors_attr: list[object] | None = None
+            if hasattr(response, "topic_errors"):
+                topic_errors_attr = response.topic_errors
+            elif hasattr(response, "topic_error_codes"):
+                # Fallback for older aiokafka versions
+                topic_errors_attr = response.topic_error_codes
+                logger.debug(
+                    "Using legacy 'topic_error_codes' attribute (older aiokafka version)"
+                )
+            else:
                 raise TypeError(
-                    f"Unexpected create_topics response: missing 'topic_errors' attribute. "
-                    f"Expected aiokafka 0.11.0+ format. Response type: {type(response).__name__}"
+                    f"Unexpected create_topics response: missing 'topic_errors' or "
+                    f"'topic_error_codes' attribute. Response type: {type(response).__name__}. "
+                    f"Available attributes: {[a for a in dir(response) if not a.startswith('_')]}"
                 )
 
-            if response.topic_errors:
+            if topic_errors_attr:
                 logger.debug(
                     "create_topics response for '%s': topic_errors=%s",
                     topic_name,
-                    response.topic_errors,
+                    topic_errors_attr,
                 )
-                for topic_error in response.topic_errors:
+                for topic_error in topic_errors_attr:
                     # Handle both protocol v0 (2-tuple) and v1+ (3-tuple) formats:
                     # - Protocol v0: (topic_name, error_code)
                     # - Protocol v1+: (topic_name, error_code, error_message)
                     # Use length guard to safely extract elements
-                    topic_error_tuple: tuple[object, ...] = (
-                        tuple(topic_error)
-                        if not isinstance(topic_error, tuple)
-                        else topic_error
-                    )
+                    topic_error_tuple: tuple[object, ...]
+                    if isinstance(topic_error, tuple):
+                        topic_error_tuple = topic_error
+                    elif isinstance(topic_error, list):
+                        # List type - convert to tuple
+                        topic_error_tuple = tuple(topic_error)
+                    else:
+                        # Unexpected type - log and skip
+                        logger.warning(
+                            "Unexpected topic_error type (expected tuple): "
+                            "type=%s, value=%r",
+                            type(topic_error).__name__,
+                            topic_error,
+                        )
+                        continue
                     if len(topic_error_tuple) < AIOKAFKA_TOPIC_ERRORS_MIN_TUPLE_LEN:
                         logger.warning(
                             "Unexpected topic_error format (len=%d, min=%d): %r",
@@ -1316,9 +1385,11 @@ class KafkaTopicManager:
             if self.created_topics:
                 try:
                     await self._admin.delete_topics(self.created_topics)
-                except Exception as e:
-                    # Log exception type for diagnostics - helps identify if specific
-                    # Kafka exceptions should be handled differently
+                except (KafkaError, OSError) as e:
+                    # KafkaError: Base class for all aiokafka exceptions (topic
+                    # not found, broker unavailable, auth errors, etc.)
+                    # OSError: Socket-level issues during cleanup
+                    # Both are logged but not re-raised since cleanup should be resilient
                     exc_type_name = type(e).__name__
                     logger.warning(
                         "Cleanup failed for Kafka topics %s (%s): %s",
@@ -1331,8 +1402,9 @@ class KafkaTopicManager:
 
             try:
                 await self._admin.close()
-            except Exception as e:
-                # Log exception type for diagnostics
+            except (KafkaError, OSError) as e:
+                # KafkaError: Kafka-level issues during close (connection reset, etc.)
+                # OSError: Socket-level issues during cleanup
                 exc_type_name = type(e).__name__
                 logger.warning(
                     "Failed to close Kafka admin client (%s): %s",
@@ -1422,6 +1494,7 @@ __all__ = [
     "create_topic_factory_function",
     # Error code constants (Kafka protocol error codes)
     "KAFKA_ERROR_REMEDIATION_HINTS",
+    "KAFKA_ERROR_UNKNOWN_TOPIC_OR_PARTITION",
     "KAFKA_ERROR_TOPIC_ALREADY_EXISTS",
     "KAFKA_ERROR_INVALID_PARTITIONS",
     "KAFKA_ERROR_INVALID_REPLICATION_FACTOR",

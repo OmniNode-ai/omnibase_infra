@@ -151,7 +151,7 @@ if TYPE_CHECKING:
 # Cross-Module Import: Infrastructure Configuration
 # =============================================================================
 # From tests/infrastructure_config.py:
-#   - REMOTE_INFRA_HOST: Default infrastructure server IP (192.168.86.200)
+#   - REMOTE_INFRA_HOST: Default infrastructure server hostname (localhost by default)
 #     Can be overridden via REMOTE_INFRA_HOST environment variable.
 #
 # This configuration provides centralized infrastructure endpoint management

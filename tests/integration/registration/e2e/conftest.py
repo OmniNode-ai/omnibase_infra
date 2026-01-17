@@ -7,9 +7,9 @@ orchestrator against real infrastructure (Kafka, Consul, PostgreSQL).
 
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:
-    - PostgreSQL: 192.168.86.200:5436 (database: omninode_bridge)
-    - Consul: 192.168.86.200:28500
-    - Kafka/Redpanda: 192.168.86.200:29092
+    - PostgreSQL: POSTGRES_HOST:5436 (database: omninode_bridge)
+    - Consul: CONSUL_HOST:28500
+    - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 
     Environment variables required:
     - POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)

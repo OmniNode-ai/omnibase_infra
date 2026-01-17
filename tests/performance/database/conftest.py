@@ -58,11 +58,12 @@ Related:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -174,6 +175,40 @@ pytestmark = [
         ),
     ),
 ]
+
+
+# =============================================================================
+# Event Loop Fixture (pytest-asyncio 0.25+ compatibility)
+# =============================================================================
+#
+# This fixture overrides the default function-scoped event_loop fixture with
+# a module-scoped one. Required because:
+#
+#   1. Module-scoped async fixtures (postgres_pool, schema_initialized, etc.)
+#      need to run on the same event loop throughout the module
+#   2. pytest-asyncio 0.25+ changed the default event_loop scope to "function"
+#   3. Without this override, module-scoped fixtures get ScopeMismatch errors
+#
+# Error without this fix:
+#   ScopeMismatch: You tried to access the function scoped fixture event_loop
+#   with a module scoped request object.
+#
+# Reference: https://pytest-asyncio.readthedocs.io/en/latest/concepts.html
+
+
+@pytest.fixture(scope="module")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create module-scoped event loop for async fixtures.
+
+    This fixture ensures all module-scoped async fixtures share the same
+    event loop, preventing ScopeMismatch errors with pytest-asyncio 0.25+.
+
+    Yields:
+        asyncio.AbstractEventLoop: Event loop for the test module.
+    """
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 # =============================================================================
@@ -902,6 +937,7 @@ __all__ = [
     "POSTGRES_AVAILABLE",
     "QueryAnalyzer",
     "QueryAnalyzerError",
+    "event_loop",
     "postgres_pool",
     "query_analyzer",
     "schema_initialized",

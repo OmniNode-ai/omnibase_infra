@@ -171,8 +171,10 @@ __all__ = [
 #   This is intentional for test stability - environment configuration should
 #   be set before test collection, not modified during test execution.
 #
-#   For dynamic reconfiguration needs (rare), reimport the module to refresh
-#   the cached validation result.
+#   DEFENSIVE VALIDATION: Fixtures that use KAFKA_BOOTSTRAP_SERVERS perform
+#   a secondary check at execution time (os.getenv + empty/whitespace check)
+#   to handle edge cases where the env var is modified after module import.
+#   This provides belt-and-suspenders safety without fully re-validating.
 #
 # EMPTY VALUE HANDLING:
 #   The validation handles these edge cases:
@@ -242,9 +244,19 @@ async def ensure_test_topic() -> AsyncGenerator[
         "Fixture logic error: should have skipped if validation failed"
     )
 
+    # DEFENSIVE: Re-validate at point of use to catch runtime env changes.
+    # The module-level _kafka_config_validation is cached at import time,
+    # so this check catches if someone modified KAFKA_BOOTSTRAP_SERVERS after import.
+    current_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+    if not current_bootstrap_servers or not current_bootstrap_servers.strip():
+        pytest.skip(
+            "KAFKA_BOOTSTRAP_SERVERS is empty or whitespace-only at fixture execution. "
+            "Env var may have been modified after module import."
+        )
+
     # Use the shared KafkaTopicManager for topic lifecycle management
     # Use create_topic_factory_function to avoid duplicating topic creation logic
-    async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
+    async with KafkaTopicManager(current_bootstrap_servers) as manager:
         # No UUID suffix for integration tests (caller controls naming)
         yield create_topic_factory_function(manager, add_uuid_suffix=False)
         # Cleanup is handled automatically by KafkaTopicManager context exit
@@ -348,8 +360,18 @@ async def topic_factory() -> AsyncGenerator[
         "Fixture logic error: should have skipped if validation failed"
     )
 
+    # DEFENSIVE: Re-validate at point of use to catch runtime env changes.
+    # The module-level _kafka_config_validation is cached at import time,
+    # so this check catches if someone modified KAFKA_BOOTSTRAP_SERVERS after import.
+    current_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+    if not current_bootstrap_servers or not current_bootstrap_servers.strip():
+        pytest.skip(
+            "KAFKA_BOOTSTRAP_SERVERS is empty or whitespace-only at fixture execution. "
+            "Env var may have been modified after module import."
+        )
+
     # Use the shared KafkaTopicManager for topic lifecycle management
-    async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
+    async with KafkaTopicManager(current_bootstrap_servers) as manager:
 
         async def _create_topic(
             topic_name: str,

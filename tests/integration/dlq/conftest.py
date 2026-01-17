@@ -19,7 +19,7 @@ Environment Variables
 =====================
 
     POSTGRES_HOST: PostgreSQL server hostname (required - skip if not set)
-        Example: localhost or 192.168.86.200
+        Example: localhost or your-server-ip
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
     POSTGRES_DATABASE: Database name (default: omninode_bridge)
     POSTGRES_USER: Database username (default: postgres)
@@ -56,7 +56,7 @@ from omnibase_infra.dlq import (
 #   - PostgresConfig: Configuration dataclass for PostgreSQL connections
 #
 # From tests/infrastructure_config.py:
-#   - REMOTE_INFRA_HOST: Default infrastructure server IP (192.168.86.200)
+#   - REMOTE_INFRA_HOST: Default infrastructure server hostname (localhost by default)
 #     Used as fallback when POSTGRES_HOST is not set.
 #
 # This ensures consistent infrastructure endpoint configuration across all
