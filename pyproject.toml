@@ -132,6 +132,7 @@ pytest-httpserver = "^1.1.0"  # Local mock HTTP server for integration tests
 types-aiofiles = "^23.2.0.20240403"
 types-requests = "^2.32.0.20250914"
 hypothesis = "^6.148.7"
+pytest-split = "^0.10.0"
 
 [tool.ruff]
 target-version = "py312"
