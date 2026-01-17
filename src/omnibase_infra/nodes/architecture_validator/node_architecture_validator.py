@@ -267,7 +267,7 @@ class NodeArchitectureValidatorCompute(
             >>> # Check specific rules only
             >>> result = validator.compute(ModelArchitectureValidationRequest(
             ...     nodes=all_nodes,
-            ...     rule_ids=("NO_HANDLER_PUBLISHING", "NO_ANY_TYPES"),
+            ...     rule_ids=("NO_HANDLER_PUBLISHING", "PURE_REDUCERS"),
             ...     fail_fast=True,
             ... ))
 

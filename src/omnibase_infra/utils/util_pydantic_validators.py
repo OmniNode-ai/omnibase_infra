@@ -314,7 +314,7 @@ def validate_pool_sizes_constraint(
         >>> validate_pool_sizes_constraint(5, 10)  # doctest: +ELLIPSIS
         Traceback (most recent call last):
         ...
-        omnibase_infra.errors...ProtocolConfigurationError: pool_max_size (5) must be >= pool_min_size (10)
+        omnibase_infra.errors...ProtocolConfigurationError: ...pool_max_size (5) must be >= pool_min_size (10)
 
     Usage in Pydantic model:
         @field_validator("pool_max_size", mode="after")

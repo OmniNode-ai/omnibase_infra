@@ -507,11 +507,16 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         # Validate string against enum values
         valid_types = {e.value for e in EnumPolicyType}
         if policy_type not in valid_types:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="normalize_policy_type",
+            )
             raise PolicyRegistryError(
                 f"Invalid policy_type: {policy_type!r}. "
                 f"Must be one of: {sorted(valid_types)}",
                 policy_id=None,
                 policy_type=policy_type,
+                context=context,
             )
 
         return policy_type
@@ -807,11 +812,16 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
                         key=lambda k: (k.policy_id, k.policy_type, k.version),
                     )
                 ]
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="get_policy",
+                )
                 raise PolicyRegistryError(
                     f"No policy registered matching: {', '.join(filters)}. "
                     f"Registered policies: {registered}",
                     policy_id=policy_id,
                     policy_type=str(policy_type) if policy_type else None,
+                    context=context,
                 )
 
             # Find matching entries from candidates (optimized to reduce allocations)
@@ -859,11 +869,16 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
                             key=lambda k: (k.policy_id, k.policy_type, k.version),
                         )
                     ]
+                    context = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="get_policy",
+                    )
                     raise PolicyRegistryError(
                         f"No policy registered matching: {', '.join(filters)}. "
                         f"Registered policies: {registered}",
                         policy_id=policy_id,
                         policy_type=str(policy_type) if policy_type else None,
+                        context=context,
                     )
 
                 # If version not specified and multiple matches, return latest

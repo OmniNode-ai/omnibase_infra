@@ -62,9 +62,17 @@ SENSITIVE_PATTERNS: tuple[str, ...] = (
     "ssh-key",
     # OAuth/OIDC credentials
     "client_secret",
+    "clientsecret",
     "client-secret",
+    "access_token",
+    "accesstoken",
+    "access-token",
     "refresh_token",
+    "refreshtoken",
     "refresh-token",
+    "id_token",
+    "idtoken",
+    "id-token",
     # Session identifiers (hijacking prevention)
     "session_id",
     "sessionid",
@@ -88,9 +96,13 @@ SENSITIVE_PATTERNS: tuple[str, ...] = (
     "aws_access",
     # Vault-specific
     "vault_token",
+    "vaulttoken",
     "vault-token",
     "x-vault-token",
     # Consul-specific
+    "consul_token",
+    "consultoken",
+    "consul-token",
     "consul_http_token",
     "consul-http-token",
     "x-consul-token",

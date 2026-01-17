@@ -586,12 +586,22 @@ class HandlerConsul(
         retry_state = ctx.retry_state
         op_context = ctx.operation_context
 
+        # Track last exception for proper error chaining when retries exhaust
+        last_exception: Exception | None = None
+
         while retry_state.is_retriable():
-            result_tuple, retry_state = await self._try_execute_operation(
+            (
+                result_tuple,
+                retry_state,
+                caught_exception,
+            ) = await self._try_execute_operation(
                 func, retry_state, op_context, operation, correlation_id
             )
             if result_tuple is not None:
                 return result_tuple[0]  # Unpack the result tuple
+
+            # Track the last exception for error chaining
+            last_exception = caught_exception
 
             await self._log_retry_attempt(operation, retry_state, correlation_id)
             await asyncio.sleep(retry_state.delay_seconds)
@@ -604,14 +614,15 @@ class HandlerConsul(
             correlation_id=correlation_id,
         )
         if retry_state.last_error is not None:
+            # Chain to original exception to preserve root cause for debugging
             raise InfraConsulError(
                 f"Retry exhausted: {retry_state.last_error}",
                 context=context,
-            )
+            ) from last_exception
         raise InfraConsulError(
             "Retry loop completed without result",
             context=context,
-        )
+        ) from last_exception
 
     def _init_retry_context(self, operation: str, correlation_id: UUID) -> RetryContext:
         """Initialize retry state and operation context.
@@ -658,7 +669,9 @@ class HandlerConsul(
         op_context: ModelOperationContext,
         operation: str,
         correlation_id: UUID,
-    ) -> tuple[tuple[T], ModelRetryState] | tuple[None, ModelRetryState]:
+    ) -> (
+        tuple[tuple[T], ModelRetryState, None] | tuple[None, ModelRetryState, Exception]
+    ):
         """Try to execute an operation once with error handling.
 
         Thread-Safety:
@@ -674,8 +687,10 @@ class HandlerConsul(
             correlation_id: Correlation ID.
 
         Returns:
-            Tuple of ((result,), retry_state) if successful.
-            Tuple of (None, updated_retry_state) if should retry.
+            Tuple of ((result,), retry_state, None) if successful.
+            Tuple of (None, updated_retry_state, exception) if should retry.
+            The exception is returned to enable proper error chaining when
+            retries are eventually exhausted.
 
         Raises:
             InfraTimeoutError, InfraConnectionError, InfraAuthenticationError:
@@ -699,7 +714,7 @@ class HandlerConsul(
             )
 
             await self._reset_circuit_if_enabled()
-            return (result,), retry_state
+            return (result,), retry_state, None
 
         except Exception as e:
             classification = self._classify_error(e, operation)
@@ -723,7 +738,7 @@ class HandlerConsul(
             if error_to_raise is not None:
                 raise error_to_raise from e
 
-            return None, new_state
+            return None, new_state, e
 
     def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities for introspection.
