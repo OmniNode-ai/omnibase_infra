@@ -18,9 +18,9 @@ Tests cover:
 from uuid import uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.errors import ModelOnexError
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -89,7 +89,12 @@ class TestInfraVaultError:
             secret_path="secret/data/database/credentials",  # noqa: S106
         )
         # Path is sanitized to mask sensitive segments
-        assert error.model.context["secret_path"] == "secret/***/***"
+        sanitized_path = error.model.context["secret_path"]
+        assert sanitized_path == "secret/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "data" not in sanitized_path
+        assert "database" not in sanitized_path
+        assert "credentials" not in sanitized_path
 
     def test_secret_path_included_in_extra_context(self) -> None:
         """Test that sanitized secret_path is added to extra_context."""
@@ -98,7 +103,11 @@ class TestInfraVaultError:
             secret_path="secret/data/api-key",  # noqa: S106
         )
         # Path is sanitized to mask sensitive segments
-        assert error.model.context["secret_path"] == "secret/***/***"
+        sanitized_path = error.model.context["secret_path"]
+        assert sanitized_path == "secret/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "data" not in sanitized_path
+        assert "api-key" not in sanitized_path
 
     def test_with_extra_context_kwargs(self) -> None:
         """Test InfraVaultError with additional extra_context kwargs."""
@@ -187,7 +196,12 @@ class TestInfraVaultError:
             retry_count=2,
         )
         # Path is sanitized to mask sensitive segments
-        assert error.model.context["secret_path"] == "secret/***/***"
+        sanitized_path = error.model.context["secret_path"]
+        assert sanitized_path == "secret/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "data" not in sanitized_path
+        assert "db" not in sanitized_path
+        assert "password" not in sanitized_path
         assert error.model.context["vault_namespace"] == "production"
         assert error.model.context["retry_count"] == 2
 
@@ -258,7 +272,11 @@ class TestInfraConsulError:
             consul_key="config/database/connection",
         )
         # Key is sanitized to mask sensitive segments
-        assert error.model.context["consul_key"] == "config/***/***"
+        sanitized_key = error.model.context["consul_key"]
+        assert sanitized_key == "config/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "database" not in sanitized_key
+        assert "connection" not in sanitized_key
 
     def test_with_service_name_parameter(self) -> None:
         """Test InfraConsulError with service_name parameter."""
@@ -281,7 +299,11 @@ class TestInfraConsulError:
             consul_key="config/api/endpoint",
         )
         # Key is sanitized to mask sensitive segments
-        assert error.model.context["consul_key"] == "config/***/***"
+        sanitized_key = error.model.context["consul_key"]
+        assert sanitized_key == "config/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "api" not in sanitized_key
+        assert "endpoint" not in sanitized_key
 
     def test_service_name_included_in_extra_context(self) -> None:
         """Test that service_name is added to extra_context."""
@@ -305,7 +327,11 @@ class TestInfraConsulError:
             service_name="my-service",
         )
         # Key is sanitized to mask sensitive segments
-        assert error.model.context["consul_key"] == "service/***/***"
+        sanitized_key = error.model.context["consul_key"]
+        assert sanitized_key == "service/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "health" not in sanitized_key
+        assert "my-service" not in sanitized_key
         assert error.model.context["service_name"] == "my-service"
 
     def test_with_extra_context_kwargs(self) -> None:
@@ -421,7 +447,11 @@ class TestInfraConsulError:
         assert error.model.context["operation"] == "kv_put"
         assert error.model.context["target_name"] == "consul-cluster"
         # Key is sanitized to mask sensitive segments
-        assert error.model.context["consul_key"] == "config/***/***"
+        sanitized_key = error.model.context["consul_key"]
+        assert sanitized_key == "config/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "app" not in sanitized_key
+        assert "settings" not in sanitized_key
         assert error.model.context["service_name"] == "config-writer"
         assert error.model.context["host"] == "consul.example.com"
         assert error.model.context["port"] == 8500
@@ -564,7 +594,12 @@ class TestServiceErrorsRealWorldScenarios:
             vault_address="https://vault.example.com:8200",
         )
         # Path is sanitized to mask sensitive segments
-        assert error.model.context["secret_path"] == "secret/***/***"
+        sanitized_path = error.model.context["secret_path"]
+        assert sanitized_path == "secret/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "data" not in sanitized_path
+        assert "database" not in sanitized_path
+        assert "credentials" not in sanitized_path
         assert error.model.context["retry_count"] == 3
         assert error.model.context["vault_address"] == "https://vault.example.com:8200"
 
@@ -619,7 +654,12 @@ class TestServiceErrorsRealWorldScenarios:
             consistency_mode="consistent",
         )
         # Key is sanitized to mask sensitive segments
-        assert error.model.context["consul_key"] == "config/***/***"
+        sanitized_key = error.model.context["consul_key"]
+        assert sanitized_key == "config/***/***"
+        # Negative assertions: prove sensitive data is actually removed
+        assert "app" not in sanitized_key
+        assert "database" not in sanitized_key
+        assert "connection_pool_size" not in sanitized_key
         assert error.model.context["datacenter"] == "us-west-2"
         assert error.model.context["consistency_mode"] == "consistent"
 

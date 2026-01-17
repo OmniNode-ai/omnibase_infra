@@ -99,7 +99,10 @@ class MixinVaultSecrets:
                 target_name="vault_handler",
                 namespace=self._config.namespace if self._config else None,
             )
-            raise InfraVaultError("Vault client not initialized", context=ctx)
+            raise InfraVaultError(
+                "Vault client not initialized for operation 'vault.read_secret'",
+                context=ctx,
+            )
 
         # Capture namespace for use in closure
         namespace = self._config.namespace if self._config else None
@@ -113,7 +116,10 @@ class MixinVaultSecrets:
                     target_name="vault_handler",
                     namespace=namespace,
                 )
-                raise InfraVaultError("Vault client not initialized", context=ctx)
+                raise InfraVaultError(
+                    "Vault client not initialized for operation 'vault.read_secret'",
+                    context=ctx,
+                )
             result: dict[str, object] = self._client.secrets.kv.v2.read_secret_version(
                 path=path,
                 mount_point=mount_point,
@@ -205,7 +211,10 @@ class MixinVaultSecrets:
                 target_name="vault_handler",
                 namespace=self._config.namespace if self._config else None,
             )
-            raise InfraVaultError("Vault client not initialized", context=ctx)
+            raise InfraVaultError(
+                "Vault client not initialized for operation 'vault.write_secret'",
+                context=ctx,
+            )
 
         # Capture namespace for use in closure
         namespace = self._config.namespace if self._config else None
@@ -219,7 +228,10 @@ class MixinVaultSecrets:
                     target_name="vault_handler",
                     namespace=namespace,
                 )
-                raise InfraVaultError("Vault client not initialized", context=ctx)
+                raise InfraVaultError(
+                    "Vault client not initialized for operation 'vault.write_secret'",
+                    context=ctx,
+                )
             result: dict[str, object] = (
                 self._client.secrets.kv.v2.create_or_update_secret(
                     path=path,
@@ -297,7 +309,10 @@ class MixinVaultSecrets:
                 target_name="vault_handler",
                 namespace=self._config.namespace if self._config else None,
             )
-            raise InfraVaultError("Vault client not initialized", context=ctx)
+            raise InfraVaultError(
+                "Vault client not initialized for operation 'vault.delete_secret'",
+                context=ctx,
+            )
 
         # Capture namespace for use in closure
         namespace = self._config.namespace if self._config else None
@@ -311,7 +326,10 @@ class MixinVaultSecrets:
                     target_name="vault_handler",
                     namespace=namespace,
                 )
-                raise InfraVaultError("Vault client not initialized", context=ctx)
+                raise InfraVaultError(
+                    "Vault client not initialized for operation 'vault.delete_secret'",
+                    context=ctx,
+                )
             # Delete latest version
             self._client.secrets.kv.v2.delete_latest_version_of_secret(
                 path=path,
@@ -379,7 +397,10 @@ class MixinVaultSecrets:
                 target_name="vault_handler",
                 namespace=self._config.namespace if self._config else None,
             )
-            raise InfraVaultError("Vault client not initialized", context=ctx)
+            raise InfraVaultError(
+                "Vault client not initialized for operation 'vault.list_secrets'",
+                context=ctx,
+            )
 
         # Capture namespace for use in closure
         namespace = self._config.namespace if self._config else None
@@ -393,7 +414,10 @@ class MixinVaultSecrets:
                     target_name="vault_handler",
                     namespace=namespace,
                 )
-                raise InfraVaultError("Vault client not initialized", context=ctx)
+                raise InfraVaultError(
+                    "Vault client not initialized for operation 'vault.list_secrets'",
+                    context=ctx,
+                )
             result: dict[str, object] = self._client.secrets.kv.v2.list_secrets(
                 path=path,
                 mount_point=mount_point,

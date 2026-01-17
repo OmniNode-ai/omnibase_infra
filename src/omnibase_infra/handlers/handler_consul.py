@@ -475,7 +475,8 @@ class HandlerConsul(
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HandlerConsul not initialized. Call initialize() first.",
+                "Consul client not initialized for operation 'execute'. "
+                "Call initialize() first.",
                 context=ctx,
             )
 
