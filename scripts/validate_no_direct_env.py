@@ -22,28 +22,51 @@ import re
 import sys
 from pathlib import Path
 
-# Patterns to detect - fully qualified os.* usage
+# Patterns to detect direct environment variable access.
+#
+# Pattern Categories:
+# 1. Fully qualified os.* usage (os.getenv, os.environ)
+# 2. Module alias patterns (import os as _os; _os.environ)
+# 3. Bare environ/getenv (from os import environ; environ[...])
+#
+# The patterns use negative lookahead (?!os\b) to exclude exact 'os' matches,
+# allowing detection of aliases like _os, my_os, o, os_module while still
+# catching os.* via the explicit patterns above.
 FORBIDDEN_PATTERNS = [
-    re.compile(r"os\.getenv\s*\("),
-    re.compile(r"os\.environ\s*\["),
-    re.compile(r"os\.environ\.get\s*\("),
-    re.compile(r"os\.environ\.setdefault\s*\("),
-    re.compile(r"os\.environ\.pop\s*\("),  # Mutation: removes env var
-    re.compile(r"os\.environ\.clear\s*\("),  # Mutation: removes all env vars
-    re.compile(r"os\.environ\.update\s*\("),  # Mutation: bulk updates env vars
-    # Alias-agnostic patterns: catch `from os import environ` or `from os import getenv`
-    # These use word boundary (\b) + negative lookbehind to:
-    # 1. Match only standalone `environ` (not `process_environ` or `myenviron`)
-    # 2. Avoid double-matching when `os.environ` is used (handled by os.* patterns above)
-    re.compile(r"(?<!os\.)\benviron\s*\["),  # environ["VAR"] without os. prefix
-    re.compile(
-        r"(?<!os\.)\benviron\.get\s*\("
-    ),  # environ.get("VAR") without os. prefix
-    re.compile(r"(?<!os\.)\benviron\.setdefault\s*\("),
-    re.compile(r"(?<!os\.)\benviron\.pop\s*\("),
-    re.compile(r"(?<!os\.)\benviron\.clear\s*\("),
-    re.compile(r"(?<!os\.)\benviron\.update\s*\("),
-    re.compile(r"(?<!os\.)\bgetenv\s*\("),  # getenv("VAR") - bare function call
+    # === Fully qualified os.* usage ===
+    re.compile(r"\bos\.getenv\s*\("),
+    re.compile(r"\bos\.environ\s*\["),
+    re.compile(r"\bos\.environ\.get\s*\("),
+    re.compile(r"\bos\.environ\.setdefault\s*\("),
+    re.compile(r"\bos\.environ\.pop\s*\("),  # Mutation: removes env var
+    re.compile(r"\bos\.environ\.clear\s*\("),  # Mutation: removes all env vars
+    re.compile(r"\bos\.environ\.update\s*\("),  # Mutation: bulk updates env vars
+    #
+    # === Module alias patterns ===
+    # Catches: import os as _os; _os.environ["VAR"]
+    # Catches: import os as o; o.getenv("VAR")
+    # Uses (?!os\b) negative lookahead to exclude exact 'os' (caught above)
+    # Pattern: \b(?!os\b)\w+\.environ... matches any identifier except 'os'
+    re.compile(r"\b(?!os\b)[a-zA-Z_]\w*\.environ\s*\["),
+    re.compile(r"\b(?!os\b)[a-zA-Z_]\w*\.environ\.get\s*\("),
+    re.compile(r"\b(?!os\b)[a-zA-Z_]\w*\.environ\.setdefault\s*\("),
+    re.compile(r"\b(?!os\b)[a-zA-Z_]\w*\.environ\.pop\s*\("),
+    re.compile(r"\b(?!os\b)[a-zA-Z_]\w*\.environ\.clear\s*\("),
+    re.compile(r"\b(?!os\b)[a-zA-Z_]\w*\.environ\.update\s*\("),
+    re.compile(r"\b(?!os\b)[a-zA-Z_]\w*\.getenv\s*\("),
+    #
+    # === Bare environ/getenv (from os import environ/getenv) ===
+    # Catches: from os import environ; environ["VAR"]
+    # Catches: from os import getenv; getenv("VAR")
+    # Uses (?<!\w\.) negative lookbehind to exclude <identifier>.environ
+    # (those are caught by module alias patterns above)
+    re.compile(r"(?<!\w\.)\benviron\s*\["),
+    re.compile(r"(?<!\w\.)\benviron\.get\s*\("),
+    re.compile(r"(?<!\w\.)\benviron\.setdefault\s*\("),
+    re.compile(r"(?<!\w\.)\benviron\.pop\s*\("),
+    re.compile(r"(?<!\w\.)\benviron\.clear\s*\("),
+    re.compile(r"(?<!\w\.)\benviron\.update\s*\("),
+    re.compile(r"(?<!\w\.)\bgetenv\s*\("),
 ]
 
 # Production paths to scan (relative to repo root)

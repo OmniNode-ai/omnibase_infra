@@ -400,6 +400,111 @@ except SecretResolutionError as e:
 
 ---
 
+## Security Considerations
+
+The SecretResolver implements multiple security controls to protect secrets:
+
+### Path Traversal Prevention
+
+File-based secrets are protected against path traversal attacks:
+
+```python
+# BLOCKED: Path traversal attempt
+config = ModelSecretResolverConfig(
+    mappings=[
+        ModelSecretMapping(
+            logical_name="attempted.traversal",
+            source=ModelSecretSourceSpec(
+                source_type="file",
+                source_path="../../../etc/passwd",  # BLOCKED
+            ),
+        ),
+    ],
+    secrets_dir=Path("/run/secrets"),
+)
+
+resolver = SecretResolver(config=config)
+# Returns None - path traversal detected and blocked
+result = resolver.get_secret("attempted.traversal", required=False)
+```
+
+**How it works**:
+- Relative paths MUST resolve within `secrets_dir`
+- Absolute paths are trusted (explicitly configured by administrator)
+- Symlink loops are handled gracefully (return None, not crash)
+
+### Bootstrap Secret Isolation
+
+Bootstrap secrets (needed to initialize Vault) are isolated from normal resolution:
+
+```python
+config = ModelSecretResolverConfig(
+    bootstrap_secrets=["vault.token", "vault.addr", "vault.ca_cert"],
+    # ... other settings
+)
+```
+
+**Bootstrap secrets**:
+- Always resolve from environment variables only
+- Never routed to Vault (prevents circular dependency)
+- Use convention-based naming: `vault.token` -> `VAULT_TOKEN`
+
+### Vault Integration Security
+
+Vault integration is currently a stub that raises `NotImplementedError`:
+
+```python
+# When vault_handler is configured but secret is from Vault:
+resolver.get_secret("vault.sourced.secret")
+# Raises NotImplementedError with helpful message:
+# "Vault secret resolution not yet implemented for logical name: vault.sourced.secret.
+#  Configure this secret via 'env' or 'file' source until Vault integration is complete."
+```
+
+**When Vault handler is NOT configured**:
+- Returns `None` (graceful degradation)
+- Logs warning with logical name only (no path)
+
+### Log Sanitization
+
+The SecretResolver never logs:
+- Actual secret values (at any log level, including DEBUG)
+- File paths to secret files
+- Vault paths (which could reveal secret structure)
+
+**What IS logged (for debugging)**:
+- Logical names (e.g., `database.postgres.password`)
+- Error types (e.g., `PermissionError`, `FileNotFoundError`)
+- Correlation IDs
+
+### Error Message Security
+
+Error messages are sanitized to prevent information leakage:
+
+```python
+# SecretResolutionError includes:
+# - Logical name (for debugging)
+# - Correlation ID (for tracing)
+# - Error type
+#
+# SecretResolutionError does NOT include:
+# - Actual file paths
+# - Vault paths
+# - Secret values
+# - Internal directory structure
+```
+
+### Best Practices
+
+| Do | Do Not |
+|----|--------|
+| Use explicit mappings for sensitive secrets | Rely on convention fallback for critical secrets |
+| Configure bootstrap secrets in `bootstrap_secrets` | Store Vault credentials in Vault |
+| Use absolute paths only for trusted admin configs | Use relative paths with user-controlled input |
+| Check return values for `required=False` calls | Assume secrets always exist |
+
+---
+
 ## Introspection (Safe)
 
 Introspection methods are designed to be safe for logging and debugging. They **never expose actual secret values**.
@@ -534,8 +639,11 @@ For bootstrap secrets or legacy code migration, add to `.secretresolver_allowlis
 # SecretResolver Migration Allowlist
 # OMN-764: Centralized secret resolution
 #
-# Format: filepath:line_number # ticket VARIABLE_NAME (optional context)
+# Format: filepath:line_number # ticket reason
 # Remove entries as files are migrated to use SecretResolver
+#
+# Bootstrap exceptions (permanent - not in this list):
+# - src/omnibase_infra/runtime/secret_resolver.py (resolver needs bootstrap access)
 #
 # ==============================================================================
 # Runtime - Service Kernel
@@ -553,8 +661,37 @@ src/legacy/adapter.py:42 # OMN-999 LEGACY_API_KEY migration pending
 **Allowlist Conventions**:
 - Group entries by logical section using `# ===` delimiters
 - Use relative paths from repository root
-- Include ticket reference (e.g., `OMN-764`) and variable name
+- Include ticket reference (e.g., `OMN-764`) and variable name as the reason
 - Remove entries as files are migrated to use SecretResolver
+- Bootstrap exceptions (e.g., `secret_resolver.py` itself) are hardcoded in the validator, not in the allowlist
+
+### Option 3: Inline Exclusion Marker
+
+For individual lines that cannot be migrated, use an inline comment marker:
+
+```python
+# This env var is documented in external API, cannot change
+api_endpoint = os.getenv("EXTERNAL_API_URL")  # ONEX_EXCLUDE: secret_resolver
+```
+
+**Important**: The marker must appear in a comment context (after `#`). Markers inside string literals are ignored.
+
+### CI Validator Edge Cases
+
+The `validate_no_direct_env.py` validator has specific behaviors to be aware of:
+
+| Behavior | Description |
+|----------|-------------|
+| **Alias detection** | Catches `from os import getenv` and `from os import environ` aliases |
+| **Inline markers** | `# ONEX_EXCLUDE: secret_resolver` must be in actual comment, not string literal |
+| **Bootstrap exceptions** | `secret_resolver.py` is permanently exempt (hardcoded, not allowlisted) |
+| **Path matching** | Allowlist uses exact `filepath:line_number` format |
+| **Exclusion patterns** | Test files (`test_*.py`, `*_test.py`, `conftest.py`) are automatically excluded |
+
+**Exit Codes**:
+- `0`: No violations found
+- `1`: Violations found (blocks CI)
+- `2`: Configuration error (malformed allowlist entry)
 
 ---
 
@@ -646,6 +783,55 @@ stats = resolver.get_cache_stats()
 if stats.hit_rate < 0.8:
     logger.warning("Low cache hit rate", hit_rate=stats.hit_rate)
 ```
+
+---
+
+## ONEX Compliance
+
+The SecretResolver follows ONEX infrastructure patterns:
+
+### Error Handling
+
+Uses the standard `omnibase_infra.errors` hierarchy:
+
+```python
+from omnibase_infra.errors import SecretResolutionError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+# Create error context with automatic correlation ID
+context = ModelInfraErrorContext.with_correlation(
+    transport_type=EnumInfraTransportType.RUNTIME,
+    operation="get_secret",
+    target_name="secret_resolver",
+)
+
+raise SecretResolutionError(
+    f"Secret not found: {logical_name}",
+    context=context,
+    logical_name=logical_name,
+)
+```
+
+### Type Safety
+
+- Uses `Literal["env", "vault", "file"]` for `source_type` parameter
+- `SecretSourceType` type alias exported for consistent usage across codebase
+- `SecretStr` from Pydantic prevents accidental secret logging
+
+### Thread Safety
+
+- Sync operations protected by `threading.Lock`
+- Async operations use `asyncio.Lock` for serialization
+- No global state - all state encapsulated in resolver instance
+
+### Not a Node
+
+SecretResolver is a **runtime utility**, not an ONEX node. It does not require:
+- `contract.yaml` (not a node)
+- `ModelONEXContainer` injection (standalone utility)
+- Handler routing (direct method calls)
+
+This is intentional - the resolver is a low-level primitive used by nodes and handlers, not a workflow component.
 
 ---
 

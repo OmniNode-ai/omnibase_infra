@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
@@ -94,17 +94,22 @@ class ModelCachedSecret(BaseModel):
 
         Note:
             Non-UTC timezones are converted to UTC to ensure consistent
-            comparison behavior.
+            comparison behavior. Uses utcoffset() comparison for robust
+            UTC detection across different timezone implementations.
         """
         if not isinstance(v, datetime):
             return v  # Let Pydantic handle type validation
         if v.tzinfo is None:
             # Treat naive datetime as UTC
             return v.replace(tzinfo=UTC)
-        if v.tzinfo != UTC and v.tzinfo != UTC:
-            # Convert non-UTC timezone to UTC
-            return v.astimezone(UTC)
-        return v
+        # Check if already UTC by comparing offset (handles different UTC representations)
+        if v.utcoffset() == timedelta(0):
+            # Already UTC (or equivalent), normalize to datetime.UTC
+            if v.tzinfo is not UTC:
+                return v.replace(tzinfo=UTC)
+            return v
+        # Non-UTC timezone, convert to UTC
+        return v.astimezone(UTC)
 
     def is_expired(self) -> bool:
         """Check if this cached entry has expired.

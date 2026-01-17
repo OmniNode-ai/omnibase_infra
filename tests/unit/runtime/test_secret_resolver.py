@@ -1144,6 +1144,354 @@ class TestSecretResolverFileSecrets:
             assert result is None
 
 
+class TestSecretResolverSecurity:
+    """Security-focused tests for SecretResolver.
+
+    These tests verify:
+    - Path traversal prevention
+    - Bootstrap secret isolation
+    - Vault stub behavior (NotImplementedError)
+    - No sensitive path logging
+    - Error message sanitization
+    """
+
+    def test_path_traversal_blocked_relative_path(self) -> None:
+        """Path traversal using relative path components should be blocked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "secrets"
+            secrets_dir.mkdir()
+
+            # Create a file outside secrets_dir that we shouldn't be able to access
+            outside_file = Path(tmpdir) / "outside_secret"
+            outside_file.write_text("outside_value")
+
+            config = ModelSecretResolverConfig(
+                mappings=[
+                    ModelSecretMapping(
+                        logical_name="traversal.attempt",
+                        source=ModelSecretSourceSpec(
+                            source_type="file",
+                            source_path="../outside_secret",  # Path traversal attempt
+                        ),
+                    ),
+                ],
+                secrets_dir=secrets_dir,
+                enable_convention_fallback=False,
+            )
+            resolver = SecretResolver(config=config)
+
+            # Should return None because path traversal is blocked
+            result = resolver.get_secret("traversal.attempt", required=False)
+            assert result is None
+
+    def test_path_traversal_blocked_double_dots(self) -> None:
+        """Multiple path traversal components should be blocked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "deep" / "secrets"
+            secrets_dir.mkdir(parents=True)
+
+            # Create a file that traversal would reach
+            outside_file = Path(tmpdir) / "etc_passwd_like"
+            outside_file.write_text("sensitive_data")
+
+            config = ModelSecretResolverConfig(
+                mappings=[
+                    ModelSecretMapping(
+                        logical_name="traversal.deep",
+                        source=ModelSecretSourceSpec(
+                            source_type="file",
+                            source_path="../../etc_passwd_like",  # Deep traversal
+                        ),
+                    ),
+                ],
+                secrets_dir=secrets_dir,
+                enable_convention_fallback=False,
+            )
+            resolver = SecretResolver(config=config)
+
+            # Should return None because path traversal is blocked
+            result = resolver.get_secret("traversal.deep", required=False)
+            assert result is None
+
+    def test_absolute_path_allowed(self) -> None:
+        """Absolute paths should be allowed (no secrets_dir constraint)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Absolute paths bypass the secrets_dir constraint
+            # This is intentional - explicit absolute paths are trusted
+            secret_file = Path(tmpdir) / "absolute_secret"
+            secret_file.write_text("absolute_value")
+
+            config = ModelSecretResolverConfig(
+                mappings=[
+                    ModelSecretMapping(
+                        logical_name="absolute.secret",
+                        source=ModelSecretSourceSpec(
+                            source_type="file",
+                            source_path=str(secret_file),  # Absolute path
+                        ),
+                    ),
+                ],
+                secrets_dir=Path("/run/secrets"),  # Different from tmpdir
+                enable_convention_fallback=False,
+            )
+            resolver = SecretResolver(config=config)
+
+            result = resolver.get_secret("absolute.secret")
+            assert result is not None
+            assert result.get_secret_value() == "absolute_value"
+
+    def test_bootstrap_secrets_isolated_from_vault(self) -> None:
+        """Bootstrap secrets should always resolve from env, never Vault.
+
+        This prevents circular dependency when initializing Vault.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                # Even if there's a Vault mapping for a bootstrap secret,
+                # it should be ignored
+                ModelSecretMapping(
+                    logical_name="vault.token",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/data/bootstrap#token",
+                    ),
+                ),
+            ],
+            bootstrap_secrets=["vault.token", "vault.addr"],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Set the env var that bootstrap resolution will use
+        with patch.dict(os.environ, {"VAULT_TOKEN": "bootstrap_token_value"}):
+            result = resolver.get_secret("vault.token")
+
+        assert result is not None
+        # Should get value from env, not Vault
+        assert result.get_secret_value() == "bootstrap_token_value"
+
+    def test_bootstrap_secrets_use_convention_naming(self) -> None:
+        """Bootstrap secrets use convention-based env var naming."""
+        config = ModelSecretResolverConfig(
+            mappings=[],
+            bootstrap_secrets=["vault.ca_cert"],
+            convention_env_prefix="ONEX_",  # Prefix should be applied
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        with patch.dict(os.environ, {"ONEX_VAULT_CA_CERT": "ca_cert_data"}):
+            result = resolver.get_secret("vault.ca_cert")
+
+        assert result is not None
+        assert result.get_secret_value() == "ca_cert_data"
+
+    def test_vault_raises_not_implemented_when_handler_present(self) -> None:
+        """Vault secrets should raise NotImplementedError when handler exists."""
+        # Create a mock vault handler (not None)
+        mock_vault_handler = object()
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="vault.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/data/test#password",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        # Should raise NotImplementedError with helpful message
+        with pytest.raises(NotImplementedError) as exc_info:
+            resolver.get_secret("vault.secret")
+
+        error_msg = str(exc_info.value)
+        assert "vault.secret" in error_msg  # Should mention logical name
+        assert "not yet implemented" in error_msg.lower()
+        assert "env" in error_msg or "file" in error_msg  # Suggests alternatives
+
+    @pytest.mark.asyncio
+    async def test_vault_async_raises_not_implemented(self) -> None:
+        """Async Vault secrets should also raise NotImplementedError."""
+        mock_vault_handler = object()
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="async.vault.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/data/async#key",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        with pytest.raises(NotImplementedError) as exc_info:
+            await resolver.get_secret_async("async.vault.secret")
+
+        error_msg = str(exc_info.value)
+        assert "async.vault.secret" in error_msg
+
+    def test_vault_returns_none_when_no_handler(self) -> None:
+        """Vault secrets return None when no handler configured (graceful degradation)."""
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="vault.no.handler",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/data/test#field",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        # No vault_handler provided
+        resolver = SecretResolver(config=config, vault_handler=None)
+
+        result = resolver.get_secret("vault.no.handler", required=False)
+        assert result is None
+
+    def test_error_message_does_not_leak_file_path(self) -> None:
+        """SecretResolutionError should not expose file paths."""
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="missing.file.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="file",
+                        source_path="/sensitive/path/to/secret",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        with pytest.raises(SecretResolutionError) as exc_info:
+            resolver.get_secret("missing.file.secret")
+
+        error_msg = str(exc_info.value)
+        # Should contain logical name (for debugging)
+        assert "missing.file.secret" in error_msg
+        # Should NOT contain the actual file path
+        assert "/sensitive/path" not in error_msg
+        assert (
+            "secret" not in error_msg.lower() or "secret not found" in error_msg.lower()
+        )
+
+    def test_symlink_loop_handled_gracefully(self) -> None:
+        """Symlink loops should be handled without crashing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir)
+            # Create a symlink that points to itself (loop)
+            symlink_path = secrets_dir / "loop"
+            try:
+                symlink_path.symlink_to(symlink_path)
+            except OSError:
+                # Some systems don't allow self-referential symlinks
+                pytest.skip("Cannot create self-referential symlink on this system")
+
+            config = ModelSecretResolverConfig(
+                mappings=[
+                    ModelSecretMapping(
+                        logical_name="symlink.loop",
+                        source=ModelSecretSourceSpec(
+                            source_type="file",
+                            source_path="loop",
+                        ),
+                    ),
+                ],
+                secrets_dir=secrets_dir,
+                enable_convention_fallback=False,
+            )
+            resolver = SecretResolver(config=config)
+
+            # Should return None, not crash
+            result = resolver.get_secret("symlink.loop", required=False)
+            assert result is None
+
+
+class TestSecretResolverBootstrapSecrets:
+    """Tests specifically for bootstrap secret behavior."""
+
+    def test_bootstrap_secret_ignores_explicit_vault_mapping(self) -> None:
+        """Bootstrap secrets should ignore any explicit Vault mapping."""
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="vault.addr",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/bootstrap#addr",
+                    ),
+                ),
+            ],
+            bootstrap_secrets=["vault.addr"],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        with patch.dict(os.environ, {"VAULT_ADDR": "https://vault.local:8200"}):
+            result = resolver.get_secret("vault.addr")
+
+        assert result is not None
+        assert result.get_secret_value() == "https://vault.local:8200"
+
+    def test_non_bootstrap_secret_uses_normal_resolution(self) -> None:
+        """Non-bootstrap secrets should use normal resolution chain."""
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="database.password",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="DB_PASSWORD",
+                    ),
+                ),
+            ],
+            bootstrap_secrets=["vault.token"],  # database.password is NOT bootstrap
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        with patch.dict(
+            os.environ,
+            {
+                "DB_PASSWORD": "explicit_mapping",
+                "DATABASE_PASSWORD": "convention_value",
+            },
+        ):
+            result = resolver.get_secret("database.password")
+
+        assert result is not None
+        # Should use explicit mapping, not convention
+        assert result.get_secret_value() == "explicit_mapping"
+
+    def test_bootstrap_secret_missing_returns_none(self) -> None:
+        """Bootstrap secret not in env should return None when not required."""
+        config = ModelSecretResolverConfig(
+            mappings=[],
+            bootstrap_secrets=["vault.token"],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Ensure env var is not set
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("VAULT_TOKEN", None)
+            result = resolver.get_secret("vault.token", required=False)
+
+        assert result is None
+
+
 __all__: list[str] = [
     "TestSecretResolverBasic",
     "TestSecretResolverRequiredFlag",
@@ -1155,4 +1503,6 @@ __all__: list[str] = [
     "TestSecretResolverTTLBehavior",
     "TestSecretResolverEdgeCases",
     "TestSecretResolverFileSecrets",
+    "TestSecretResolverSecurity",
+    "TestSecretResolverBootstrapSecrets",
 ]

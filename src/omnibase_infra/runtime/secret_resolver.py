@@ -80,10 +80,33 @@ class SecretResolver:
         4. Raise or return None based on required flag
 
     Thread Safety:
-        - All cache operations use threading.Lock for thread-safe access
-        - Async operations additionally use asyncio.Lock to serialize resolution
-        - The threading lock protects cache reads/writes (fast, in-memory)
-        - The async lock prevents duplicate fetches for the same secret
+        This class supports concurrent access from both sync and async contexts
+        using a two-level locking strategy:
+
+        1. ``threading.Lock`` (``_lock``): Protects all cache reads/writes and
+           stats updates. This lock is held briefly for in-memory operations.
+
+        2. Per-key ``asyncio.Lock`` (``_async_key_locks``): Prevents duplicate
+           async fetches for the SAME secret. When multiple async callers request
+           the same secret simultaneously, only one performs the fetch while
+           others wait and reuse the cached result. Different secrets can be
+           fetched in parallel.
+
+        Sync/Async Coordination:
+            - Sync ``get_secret``: Holds ``_lock`` for entire operation (cache
+              check through cache write). This ensures atomicity but may briefly
+              block async callers during cache access.
+            - Async ``get_secret_async``: Uses per-key async locks to serialize
+              fetches for the same key, with ``_lock`` held only briefly for
+              cache access. This allows parallel fetches for different secrets.
+
+        Edge Case - Sync/Async Race:
+            Due to the different locking granularity between sync (holds lock
+            during I/O) and async (releases lock during I/O), there's a small
+            window where both sync and async code might resolve the same secret
+            simultaneously. This is benign (both write same value) but represents
+            duplicate work. This trade-off prioritizes async performance over
+            preventing rare duplicate fetches.
 
     Example:
         >>> config = ModelSecretResolverConfig(
@@ -122,8 +145,9 @@ class SecretResolver:
         self._refreshes = 0
         self._hit_counts: defaultdict[str, int] = defaultdict(int)  # per logical_name
         self._lock = threading.Lock()
-        # Eager initialization is safe in Python 3.10+ (no running loop required)
-        self._async_lock = asyncio.Lock()
+        # Per-key async locks to allow parallel fetches for different secrets
+        # while preventing duplicate fetches for the same secret
+        self._async_key_locks: dict[str, asyncio.Lock] = {}
 
         # Build lookup table from mappings
         self._mappings: dict[str, ModelSecretSourceSpec] = {
@@ -218,8 +242,8 @@ class SecretResolver:
 
         Thread Safety:
             Uses threading.Lock for cache access to prevent race conditions
-            with sync callers. The async lock serializes resolution to prevent
-            duplicate fetches.
+            with sync callers. Per-key async locks serialize resolution for the
+            same secret while allowing parallel fetches for different secrets.
 
         Args:
             logical_name: Dotted path (e.g., "database.postgres.password")
@@ -237,9 +261,12 @@ class SecretResolver:
             if cached is not None:
                 return cached
 
-        # Use async lock to serialize resolution (prevents duplicate fetches)
-        # _async_lock is eagerly initialized in __init__, so no lazy init needed
-        async with self._async_lock:
+        # Get or create per-key async lock for this logical_name
+        # This allows parallel fetches for different secrets while preventing
+        # duplicate fetches for the same secret
+        key_lock = self._get_async_key_lock(logical_name)
+
+        async with key_lock:
             # Double-check cache after acquiring async lock - another coroutine may
             # have resolved this secret while we were waiting on the lock
             with self._lock:
@@ -269,12 +296,42 @@ class SecretResolver:
 
             return result
 
+    def _get_async_key_lock(self, logical_name: str) -> asyncio.Lock:
+        """Get or create an async lock for a specific logical_name.
+
+        This enables parallel resolution of different secrets while preventing
+        duplicate concurrent fetches for the same secret.
+
+        Thread Safety:
+            Uses threading.Lock to safely access the key locks dictionary,
+            ensuring thread-safe creation of new locks.
+
+        Args:
+            logical_name: The secret key to get a lock for
+
+        Returns:
+            asyncio.Lock for the given logical_name
+        """
+        with self._lock:
+            if logical_name not in self._async_key_locks:
+                self._async_key_locks[logical_name] = asyncio.Lock()
+            return self._async_key_locks[logical_name]
+
     async def get_secrets_async(
         self,
         logical_names: list[str],
         required: bool = True,
     ) -> dict[str, SecretStr | None]:
-        """Resolve multiple secrets asynchronously.
+        """Resolve multiple secrets asynchronously in parallel.
+
+        Uses asyncio.gather() to fetch multiple secrets concurrently, improving
+        performance when resolving multiple secrets that may involve I/O (e.g.,
+        Vault or file-based secrets).
+
+        Thread Safety:
+            Each secret resolution uses per-key async locks, so fetches for
+            different secrets proceed in parallel while fetches for the same
+            secret are serialized.
 
         Args:
             logical_names: List of dotted paths
@@ -282,11 +339,24 @@ class SecretResolver:
 
         Returns:
             Dict mapping logical_name -> SecretStr | None
+
+        Raises:
+            SecretResolutionError: If required=True and any secret is not found.
+                The first missing secret will raise; other fetches may complete
+                or be cancelled depending on timing.
         """
-        results: dict[str, SecretStr | None] = {}
-        for name in logical_names:
-            results[name] = await self.get_secret_async(name, required=required)
-        return results
+        if not logical_names:
+            return {}
+
+        # Create tasks for parallel resolution
+        tasks = [
+            self.get_secret_async(name, required=required) for name in logical_names
+        ]
+
+        # Gather results - raises on first failure if required=True
+        values = await asyncio.gather(*tasks)
+
+        return dict(zip(logical_names, values, strict=True))
 
     # === Cache Management ===
 
@@ -392,8 +462,58 @@ class SecretResolver:
         self._hits += 1
         return cached.value
 
+    def _is_bootstrap_secret(self, logical_name: str) -> bool:
+        """Check if a logical name is a bootstrap secret.
+
+        Bootstrap secrets are resolved ONLY from environment variables, never from
+        Vault or files. This ensures they're available before Vault is initialized.
+
+        Security:
+            Bootstrap secrets (vault.token, vault.addr, vault.ca_cert) are needed
+            to initialize the Vault connection. They MUST come from env vars to
+            avoid a circular dependency.
+
+        Args:
+            logical_name: The logical name to check
+
+        Returns:
+            True if this is a bootstrap secret that bypasses normal resolution
+        """
+        return logical_name in self._config.bootstrap_secrets
+
+    def _resolve_bootstrap_secret(self, logical_name: str) -> SecretStr | None:
+        """Resolve a bootstrap secret directly from environment variables.
+
+        Security:
+            Bootstrap secrets are isolated from the normal resolution chain.
+            They are ALWAYS resolved from environment variables using the
+            convention-based naming (logical_name -> ENV_VAR).
+
+        Args:
+            logical_name: The bootstrap secret's logical name
+
+        Returns:
+            SecretStr if found, None if env var is not set
+        """
+        # Convert logical name to env var name
+        env_var = self._logical_name_to_env_var(logical_name)
+        value = os.environ.get(env_var)
+
+        if value is None:
+            return None
+
+        secret = SecretStr(value)
+        # Cache with env TTL
+        self._cache_secret(logical_name, secret, "env")
+        return secret
+
     def _resolve_secret(self, logical_name: str) -> SecretStr | None:
         """Resolve secret from source and cache it.
+
+        Security:
+            Bootstrap secrets (vault.token, vault.addr, etc.) are resolved directly
+            from environment variables, bypassing the normal source chain. This
+            prevents circular dependencies when initializing Vault.
 
         Args:
             logical_name: The logical name to resolve
@@ -401,6 +521,11 @@ class SecretResolver:
         Returns:
             SecretStr if found, None otherwise
         """
+        # SECURITY: Bootstrap secrets bypass normal resolution
+        # They must come from env vars to avoid circular dependency with Vault
+        if self._is_bootstrap_secret(logical_name):
+            return self._resolve_bootstrap_secret(logical_name)
+
         source = self._get_source_spec(logical_name)
         if source is None:
             return None
@@ -410,7 +535,7 @@ class SecretResolver:
         if source.source_type == "env":
             value = os.environ.get(source.source_path)
         elif source.source_type == "file":
-            value = self._read_file_secret(source.source_path)
+            value = self._read_file_secret(source.source_path, logical_name)
         elif source.source_type == "vault":
             if self._vault_handler is None:
                 logger.warning(
@@ -419,7 +544,7 @@ class SecretResolver:
                     extra={"logical_name": logical_name},
                 )
                 return None
-            value = self._read_vault_secret_sync(source.source_path)
+            value = self._read_vault_secret_sync(source.source_path, logical_name)
 
         if value is None:
             return None
@@ -435,12 +560,22 @@ class SecretResolver:
             Uses threading.Lock for cache writes to prevent race conditions
             with sync callers. I/O operations are performed outside the lock.
 
+        Security:
+            Bootstrap secrets (vault.token, vault.addr, etc.) are resolved directly
+            from environment variables, bypassing the normal source chain. This
+            prevents circular dependencies when initializing Vault.
+
         Args:
             logical_name: The logical name to resolve
 
         Returns:
             SecretStr if found, None otherwise
         """
+        # SECURITY: Bootstrap secrets bypass normal resolution
+        # They must come from env vars to avoid circular dependency with Vault
+        if self._is_bootstrap_secret(logical_name):
+            return self._resolve_bootstrap_secret(logical_name)
+
         source = self._get_source_spec(logical_name)
         if source is None:
             return None
@@ -451,7 +586,9 @@ class SecretResolver:
         if source.source_type == "env":
             value = os.environ.get(source.source_path)
         elif source.source_type == "file":
-            value = await asyncio.to_thread(self._read_file_secret, source.source_path)
+            value = await asyncio.to_thread(
+                self._read_file_secret, source.source_path, logical_name
+            )
         elif source.source_type == "vault":
             if self._vault_handler is None:
                 logger.warning(
@@ -460,7 +597,9 @@ class SecretResolver:
                     extra={"logical_name": logical_name},
                 )
                 return None
-            value = await self._read_vault_secret_async(source.source_path)
+            value = await self._read_vault_secret_async(
+                source.source_path, logical_name
+            )
 
         if value is None:
             return None
@@ -509,128 +648,208 @@ class SecretResolver:
             env_var = f"{self._config.convention_env_prefix}{env_var}"
         return env_var
 
-    def _read_file_secret(self, path: str) -> str | None:
+    def _read_file_secret(self, path: str, logical_name: str = "") -> str | None:
         """Read secret from file.
 
         Thread Safety:
             This method avoids TOCTOU race conditions by catching exceptions
             during the read operation rather than pre-checking file existence.
 
+        Security:
+            - Path traversal attacks are prevented by validating resolved paths
+              stay within the configured secrets_dir
+            - Error messages are sanitized to avoid leaking path information
+            - No secret values are ever logged
+
         Args:
             path: Path to the secret file (absolute or relative to secrets_dir)
+            logical_name: The logical name being resolved (for error context only)
 
         Returns:
             Secret value with whitespace stripped, or None if not found or unreadable
         """
         secret_path = Path(path)
 
+        # Track whether the original path was relative BEFORE combining with secrets_dir
+        # This is critical for path traversal detection
+        original_is_relative = not secret_path.is_absolute()
+
         # If relative path, resolve against secrets_dir
-        if not secret_path.is_absolute():
+        if original_is_relative:
             secret_path = self._config.secrets_dir / path
+
+        # Resolve to absolute path to detect path traversal
+        try:
+            resolved_path = secret_path.resolve()
+        except (OSError, RuntimeError):
+            # resolve() can fail on invalid paths or symlink loops
+            logger.warning(
+                "Invalid secret path for logical name: %s",
+                logical_name,
+                extra={"logical_name": logical_name},
+            )
+            return None
+
+        # SECURITY: Prevent path traversal attacks
+        # Verify the resolved path is within secrets_dir for relative paths
+        # Absolute paths are trusted (explicitly configured by administrator)
+        if original_is_relative:
+            secrets_dir_resolved = self._config.secrets_dir.resolve()
+            # Relative paths MUST resolve within secrets_dir
+            try:
+                resolved_path.relative_to(secrets_dir_resolved)
+            except ValueError:
+                # Path escapes secrets_dir - this is a path traversal attempt
+                logger.warning(
+                    "Path traversal detected for secret: %s",
+                    logical_name,
+                    extra={"logical_name": logical_name},
+                )
+                return None
 
         # Avoid TOCTOU race: catch exceptions during read instead of pre-checking
         try:
-            return secret_path.read_text().strip()
+            return resolved_path.read_text().strip()
         except FileNotFoundError:
             # File does not exist - this is expected for optional secrets
+            # SECURITY: Don't log the actual path to avoid information disclosure
             logger.debug(
-                "Secret file not found: %s",
-                secret_path,
-                extra={"path": str(secret_path)},
+                "Secret file not found for logical name: %s",
+                logical_name,
+                extra={"logical_name": logical_name},
             )
             return None
         except IsADirectoryError:
             # Path exists but is a directory, not a file
+            # SECURITY: Don't log the actual path
             logger.warning(
-                "Secret path is a directory, not a file: %s",
-                secret_path,
-                extra={"path": str(secret_path)},
+                "Secret path is a directory for logical name: %s",
+                logical_name,
+                extra={"logical_name": logical_name},
             )
             return None
         except PermissionError:
             # Permission denied - log at warning level since this may indicate
             # a configuration issue (file exists but is not readable)
+            # SECURITY: Don't log the actual path
             logger.warning(
-                "Permission denied reading secret file: %s",
-                secret_path,
-                extra={"path": str(secret_path)},
+                "Permission denied reading secret for logical name: %s",
+                logical_name,
+                extra={"logical_name": logical_name},
             )
             return None
         except OSError as e:
             # Catch other OS-level errors (e.g., too many open files, I/O errors)
+            # SECURITY: Don't log the path or detailed OS error which may leak info
             logger.warning(
-                "OS error reading secret file %s: %s",
-                secret_path,
-                e,
-                extra={"path": str(secret_path), "error": str(e)},
+                "OS error reading secret for logical name: %s (error type: %s)",
+                logical_name,
+                type(e).__name__,
+                extra={"logical_name": logical_name, "error_type": type(e).__name__},
             )
             return None
 
-    def _read_vault_secret_sync(self, path: str) -> str | None:
+    def _read_vault_secret_sync(self, path: str, logical_name: str = "") -> str | None:
         """Read secret from Vault synchronously.
 
         Path format: "secret/data/path#field" or "secret/data/path" (returns first field)
 
+        Security:
+            - This method never logs Vault paths (could reveal secret structure)
+            - Secret values are never logged at any level
+            - Error messages are sanitized to include only logical names
+
         Args:
             path: Vault path with optional field specifier
+            logical_name: The logical name being resolved (for error context only)
 
         Returns:
             Secret value or None if not found
+
+        Raises:
+            NotImplementedError: Vault integration is not yet implemented.
+                When implemented, this method will:
+                1. Use HandlerVault.execute() with a sync wrapper
+                2. Parse the path to extract mount/path/field
+                3. Return the secret value or None if not found
+                4. Raise SecretResolutionError on Vault communication failures
+
+        Note:
+            Vault integration requires OMN-XXX (follow-up ticket).
+            Currently, configure secrets via 'env' or 'file' source types.
         """
         if self._vault_handler is None:
             return None
 
-        # Parse path and field
+        # Parse path and field (validated but not logged for security)
         vault_path, field = self._parse_vault_path(path)
+        # Suppress unused variable warnings - these will be used when implemented
+        _ = vault_path, field
 
-        # TODO: Integrate with HandlerVault.execute() method
-        # This will require running the async handler in a sync context
-        # For now, return None - Vault integration will be added in follow-up
-        logger.debug(
-            "Vault secret resolution not yet implemented: %s",
-            vault_path,
-            extra={"vault_path": vault_path, "field": field},
+        # SECURITY: Do not log Vault paths as they reveal secret structure
+        raise NotImplementedError(
+            f"Vault secret resolution not yet implemented for logical name: "
+            f"{logical_name}. Configure this secret via 'env' or 'file' source "
+            f"until Vault integration is complete. "
+            f"See docs/patterns/secret_resolver.md for migration guidance."
         )
-        return None
 
-    async def _read_vault_secret_async(self, path: str) -> str | None:
+    async def _read_vault_secret_async(
+        self, path: str, logical_name: str = ""
+    ) -> str | None:
         """Read secret from Vault asynchronously.
 
         Path format: "secret/data/path#field" or "secret/data/path" (returns first field)
 
+        Security:
+            - This method never logs Vault paths (could reveal secret structure)
+            - Secret values are never logged at any level
+            - Error messages are sanitized to include only logical names
+
         Args:
             path: Vault path with optional field specifier
+            logical_name: The logical name being resolved (for error context only)
 
         Returns:
             Secret value or None if not found
+
+        Raises:
+            NotImplementedError: Vault integration is not yet implemented.
+                When implemented, this method will:
+                1. Use HandlerVault.execute() for async Vault communication
+                2. Parse the path to extract mount/path/field
+                3. Return the secret value or None if not found
+                4. Raise SecretResolutionError on Vault communication failures
+
+        Implementation Plan (for follow-up ticket):
+            1. Create envelope for vault.read_secret operation
+            2. Call self._vault_handler.execute(envelope)
+            3. Handle response:
+               - Success: Extract data[field] or first value
+               - NotFound: Return None
+               - Auth failure: Raise InfraAuthenticationError
+               - Timeout: Raise InfraTimeoutError
+               - Other: Raise SecretResolutionError
+
+        Note:
+            Vault integration requires OMN-XXX (follow-up ticket).
+            Currently, configure secrets via 'env' or 'file' source types.
         """
         if self._vault_handler is None:
             return None
 
-        # Parse path and field
+        # Parse path and field (validated but not logged for security)
         vault_path, field = self._parse_vault_path(path)
+        # Suppress unused variable warnings - these will be used when implemented
+        _ = vault_path, field
 
-        # TODO: Integrate with HandlerVault.execute() method
-        # Example envelope:
-        # {
-        #     "operation": "vault.read_secret",
-        #     "payload": {"path": vault_path},
-        #     "correlation_id": str(uuid4()),
-        # }
-        # result = await self._vault_handler.execute(envelope)
-        # if result.status == "success" and result.payload:
-        #     data = result.payload.get("data", {})
-        #     if field:
-        #         return data.get(field)
-        #     else:
-        #         # Return first value if no field specified
-        #         return next(iter(data.values()), None) if data else None
-        logger.debug(
-            "Vault secret resolution not yet implemented: %s",
-            vault_path,
-            extra={"vault_path": vault_path, "field": field},
+        # SECURITY: Do not log Vault paths as they reveal secret structure
+        raise NotImplementedError(
+            f"Vault secret resolution not yet implemented for logical name: "
+            f"{logical_name}. Configure this secret via 'env' or 'file' source "
+            f"until Vault integration is complete. "
+            f"See docs/patterns/secret_resolver.md for migration guidance."
         )
-        return None
 
     def _parse_vault_path(self, path: str) -> tuple[str, str | None]:
         """Parse Vault path into path and optional field.
