@@ -18,6 +18,7 @@ Test Coverage:
 - Async API support
 - Validation and error handling
 - Security (path traversal, sanitization)
+- Container-based dependency injection
 
 Related:
 - OMN-765: BindingConfigResolver implementation
@@ -34,7 +35,8 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -54,6 +56,45 @@ from omnibase_infra.runtime.models.model_config_ref import (
     ModelConfigRef,
 )
 
+if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
+
+
+def create_mock_container(
+    config: ModelBindingConfigResolverConfig,
+    secret_resolver: MagicMock | None = None,
+) -> MagicMock:
+    """Create a mock container with config registered in service registry.
+
+    This helper creates a mock ModelONEXContainer with the required
+    service_registry.resolve_service() behavior for BindingConfigResolver.
+
+    Args:
+        config: The resolver config to register.
+        secret_resolver: Optional mock SecretResolver to register.
+
+    Returns:
+        Mock container with service registry configured.
+    """
+    from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+    container = MagicMock()
+
+    # Map of types to instances for resolve_service
+    service_map: dict[type, object] = {
+        ModelBindingConfigResolverConfig: config,
+    }
+    if secret_resolver is not None:
+        service_map[SecretResolver] = secret_resolver
+
+    def resolve_service_side_effect(service_type: type) -> object:
+        if service_type in service_map:
+            return service_map[service_type]
+        raise KeyError(f"Service {service_type} not registered")
+
+    container.service_registry.resolve_service.side_effect = resolve_service_side_effect
+    return container
+
 
 class TestBindingConfigResolverBasic:
     """Basic resolution functionality tests."""
@@ -64,7 +105,8 @@ class TestBindingConfigResolverBasic:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             result = resolver.resolve(
                 handler_type="db",
@@ -82,7 +124,8 @@ class TestBindingConfigResolverBasic:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             result = resolver.resolve(handler_type="vault")
 
@@ -99,7 +142,8 @@ class TestBindingConfigResolverBasic:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             retry_policy = ModelRetryPolicy(
                 max_retries=5,
@@ -137,7 +181,8 @@ class TestBindingConfigResolverBasic:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Empty handler_type should fail validation
             with pytest.raises(ProtocolConfigurationError):
@@ -152,7 +197,8 @@ class TestBindingConfigResolverBasic:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             bindings = [
                 {"handler_type": "db", "config": {"timeout_ms": 5000}},
@@ -173,7 +219,8 @@ class TestBindingConfigResolverBasic:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             bindings = [
                 {"config": {"timeout_ms": 5000}},  # Missing handler_type
@@ -206,7 +253,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             result = resolver.resolve(
                 handler_type="db",
@@ -235,7 +283,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             result = resolver.resolve(
                 handler_type="vault",
@@ -253,7 +302,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -275,7 +325,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -298,7 +349,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Attempt path traversal
             with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -323,7 +375,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             result = resolver.resolve(
                 handler_type="db",
@@ -342,7 +395,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Use file:// with absolute path
             result = resolver.resolve(
@@ -362,7 +416,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -382,7 +437,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -402,7 +458,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -417,7 +474,8 @@ class TestBindingConfigResolverFileSource:
         config = ModelBindingConfigResolverConfig(
             config_dir=None,  # No config_dir
         )
-        resolver = BindingConfigResolver(config=config)
+        container = create_mock_container(config)
+        resolver = BindingConfigResolver(container)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             resolver.resolve(
@@ -437,7 +495,8 @@ class TestBindingConfigResolverFileSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -457,7 +516,8 @@ class TestBindingConfigResolverEnvSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             env_config = json.dumps({"timeout_ms": 12000, "priority": 15})
             with patch.dict(os.environ, {"DB_HANDLER_CONFIG": env_config}):
@@ -475,7 +535,8 @@ class TestBindingConfigResolverEnvSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             env_config = yaml.dump({"timeout_ms": 13000, "enabled": False})
             with patch.dict(os.environ, {"VAULT_HANDLER_CONFIG": env_config}):
@@ -493,7 +554,8 @@ class TestBindingConfigResolverEnvSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Ensure env var is not set
             with patch.dict(os.environ, {}, clear=False):
@@ -513,7 +575,8 @@ class TestBindingConfigResolverEnvSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"INVALID_CONFIG": "{ invalid json:"}):
                 with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -530,7 +593,8 @@ class TestBindingConfigResolverEnvSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"LIST_CONFIG": '["item1", "item2"]'}):
                 with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -552,7 +616,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=Path(tmpdir),
                 env_prefix="HANDLER",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"HANDLER_DB_TIMEOUT_MS": "25000"}):
                 result = resolver.resolve(
@@ -569,7 +634,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=Path(tmpdir),
                 env_prefix="HANDLER",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"HANDLER_VAULT_ENABLED": "false"}):
                 result = resolver.resolve(
@@ -586,7 +652,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=Path(tmpdir),
                 env_prefix="HANDLER",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"HANDLER_CONSUL_PRIORITY": "75"}):
                 result = resolver.resolve(
@@ -603,7 +670,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=Path(tmpdir),
                 env_prefix="HANDLER",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"HANDLER_DB_RATE_LIMIT_PER_SECOND": "500.5"}):
                 result = resolver.resolve(
@@ -624,7 +692,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=config_dir,
                 env_prefix="HANDLER",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"HANDLER_DB_TIMEOUT_MS": "99000"}):
                 result = resolver.resolve(
@@ -644,7 +713,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=Path(tmpdir),
                 env_prefix="ONEX_CUSTOM",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"ONEX_CUSTOM_DB_TIMEOUT_MS": "45000"}):
                 result = resolver.resolve(handler_type="db")
@@ -658,7 +728,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=Path(tmpdir),
                 env_prefix="HANDLER",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"HANDLER_DB_NAME": "override-name"}):
                 result = resolver.resolve(
@@ -675,7 +746,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=Path(tmpdir),
                 env_prefix="HANDLER",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(
                 os.environ,
@@ -709,7 +781,8 @@ class TestBindingConfigResolverEnvOverrides:
                 config_dir=Path(tmpdir),
                 env_prefix="HANDLER",
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with patch.dict(os.environ, {"HANDLER_DB_TIMEOUT_MS": "not_a_number"}):
                 result = resolver.resolve(
@@ -738,7 +811,8 @@ class TestBindingConfigResolverVaultSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Patch the _get_secret_resolver method to return our mock
             with patch.object(
@@ -766,7 +840,8 @@ class TestBindingConfigResolverVaultSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Patch the _get_secret_resolver method to return our mock
             with patch.object(
@@ -783,13 +858,14 @@ class TestBindingConfigResolverVaultSource:
             assert "config" in call_args[0][0]
 
     def test_vault_resolver_not_configured(self) -> None:
-        """Error when vault:// used but no SecretResolver."""
+        """Error when vault:// used but no SecretResolver registered in container."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
-                secret_resolver=None,  # No resolver
             )
-            resolver = BindingConfigResolver(config=config)
+            # Create container without SecretResolver registered
+            container = create_mock_container(config, secret_resolver=None)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -808,7 +884,8 @@ class TestBindingConfigResolverVaultSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Patch the _get_secret_resolver method to return our mock
             with patch.object(
@@ -831,7 +908,8 @@ class TestBindingConfigResolverVaultSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Patch the _get_secret_resolver method to return our mock
             with patch.object(
@@ -856,7 +934,8 @@ class TestBindingConfigResolverVaultSource:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Patch the _get_secret_resolver method to return our mock
             with patch.object(
@@ -890,7 +969,8 @@ class TestBindingConfigResolverCaching:
                 enable_caching=True,
                 cache_ttl_seconds=300.0,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # First call - cache miss
             result1 = resolver.resolve(
@@ -921,7 +1001,8 @@ class TestBindingConfigResolverCaching:
                 config_dir=Path(tmpdir),
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             resolver.resolve(handler_type="db")
 
@@ -941,7 +1022,8 @@ class TestBindingConfigResolverCaching:
                 enable_caching=True,
                 cache_ttl_seconds=0.1,  # 100ms TTL
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # First call
             result1 = resolver.resolve(
@@ -978,7 +1060,8 @@ class TestBindingConfigResolverCaching:
                 config_dir=config_dir,
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # First call
             resolver.resolve(
@@ -1010,7 +1093,8 @@ class TestBindingConfigResolverCaching:
                 config_dir=Path(tmpdir),
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Cache multiple entries
             resolver.resolve(handler_type="db")
@@ -1037,7 +1121,8 @@ class TestBindingConfigResolverCaching:
                 config_dir=config_dir,
                 enable_caching=False,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # First call
             result1 = resolver.resolve(
@@ -1068,7 +1153,8 @@ class TestBindingConfigResolverCaching:
                 config_dir=config_dir,
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Cache miss
             resolver.resolve(
@@ -1105,7 +1191,8 @@ class TestBindingConfigResolverAsync:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             result = await resolver.resolve_async(
                 handler_type="db",
@@ -1122,7 +1209,8 @@ class TestBindingConfigResolverAsync:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             bindings = [
                 {"handler_type": "db", "config": {"timeout_ms": 5000}},
@@ -1149,7 +1237,8 @@ class TestBindingConfigResolverAsync:
                 config_dir=config_dir,
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # First call - cache miss
             result1 = await resolver.resolve_async(
@@ -1191,7 +1280,8 @@ class TestBindingConfigResolverAsync:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             # Patch the _get_secret_resolver method to return our mock
             with patch.object(
@@ -1211,7 +1301,8 @@ class TestBindingConfigResolverAsync:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             results = await resolver.resolve_many_async([])
 
@@ -1228,7 +1319,8 @@ class TestBindingConfigResolverThreadSafety:
                 config_dir=Path(tmpdir),
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             results: list[ModelBindingConfig] = []
             errors: list[Exception] = []
@@ -1263,7 +1355,8 @@ class TestBindingConfigResolverThreadSafety:
                 config_dir=Path(tmpdir),
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             handler_types = ["db", "vault", "consul", "kafka", "redis"]
             results: dict[str, ModelBindingConfig] = {}
@@ -1303,7 +1396,8 @@ class TestBindingConfigResolverThreadSafety:
                 config_dir=Path(tmpdir),
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             errors: list[Exception] = []
             stop_event = threading.Event()
@@ -1349,7 +1443,8 @@ class TestBindingConfigResolverValidation:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError):
                 resolver.resolve(handler_type="")
@@ -1360,7 +1455,8 @@ class TestBindingConfigResolverValidation:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError):
                 resolver.resolve(
@@ -1374,7 +1470,8 @@ class TestBindingConfigResolverValidation:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError):
                 resolver.resolve(
@@ -1388,7 +1485,8 @@ class TestBindingConfigResolverValidation:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError):
                 resolver.resolve(
@@ -1402,7 +1500,8 @@ class TestBindingConfigResolverValidation:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError):
                 resolver.resolve(
@@ -1420,7 +1519,8 @@ class TestBindingConfigResolverValidation:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError):
                 resolver.resolve(
@@ -1440,7 +1540,8 @@ class TestBindingConfigResolverValidation:
                 config_dir=Path(tmpdir),
                 strict_validation=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError):
                 resolver.resolve(
@@ -1458,7 +1559,8 @@ class TestBindingConfigResolverValidation:
                 config_dir=Path(tmpdir),
                 strict_validation=False,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             result = resolver.resolve(
                 handler_type="db",
@@ -1476,7 +1578,8 @@ class TestBindingConfigResolverValidation:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError):
                 resolver.resolve(
@@ -1491,7 +1594,8 @@ class TestBindingConfigResolverValidation:
                 config_dir=Path(tmpdir),
                 allowed_schemes=frozenset({"file"}),  # Only file allowed
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -1512,7 +1616,8 @@ class TestBindingConfigResolverSecurity:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -1533,7 +1638,8 @@ class TestBindingConfigResolverSecurity:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
@@ -1554,7 +1660,8 @@ class TestBindingConfigResolverSecurity:
                 config_dir=config_dir,
                 enable_caching=True,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             resolver.resolve(
                 handler_type="db",
@@ -1870,7 +1977,8 @@ class TestBindingConfigResolverInlinePrecedence:
             config = ModelBindingConfigResolverConfig(
                 config_dir=config_dir,
             )
-            resolver = BindingConfigResolver(config=config)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
 
             result = resolver.resolve(
                 handler_type="db",

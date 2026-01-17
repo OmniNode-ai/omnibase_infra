@@ -899,6 +899,195 @@ This is intentional - the resolver is a low-level primitive used by orchestrator
 
 ---
 
+## Migration Guide
+
+This section helps teams migrate from common configuration patterns to `BindingConfigResolver`.
+
+### Migrating from Direct Environment Variables
+
+**Before (manual os.getenv)**:
+```python
+import os
+
+class MyHandler:
+    def __init__(self):
+        self.timeout_ms = int(os.getenv("HANDLER_DB_TIMEOUT_MS", "5000"))
+        self.retry_attempts = int(os.getenv("HANDLER_DB_RETRY_ATTEMPTS", "3"))
+        self.connection_string = os.getenv("DB_CONNECTION_STRING", "")
+```
+
+**After (BindingConfigResolver)**:
+```python
+from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
+from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
+
+class MyHandler:
+    def __init__(self, container: ModelONEXContainer):
+        resolver = BindingConfigResolver(
+            config=ModelBindingConfigResolverConfig(env_prefix="HANDLER")
+        )
+        config = resolver.resolve(handler_type="db", inline_config={})
+        self.timeout_ms = config.timeout_ms
+        self.retry_attempts = config.retry_policy.max_retries if config.retry_policy else 3
+        # Connection strings should come from Vault, not env directly
+```
+
+### Migrating from Config Files
+
+**Before (manual file loading)**:
+```python
+import yaml
+from pathlib import Path
+
+def load_config(handler_type: str) -> dict:
+    config_path = Path(f"configs/{handler_type}.yaml")
+    with open(config_path) as f:
+        return yaml.safe_load(f)
+
+class MyHandler:
+    def __init__(self, handler_type: str):
+        config = load_config(handler_type)
+        self.timeout_ms = config.get("timeout_ms", 5000)
+        self.pool_size = config.get("pool_size", 10)
+```
+
+**After (BindingConfigResolver)**:
+```python
+from pathlib import Path
+from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
+from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
+
+class MyHandler:
+    def __init__(self, handler_type: str):
+        resolver = BindingConfigResolver(
+            config=ModelBindingConfigResolverConfig(
+                config_dir=Path("configs"),
+            )
+        )
+        # Config file reference resolved automatically
+        config = resolver.resolve(
+            handler_type=handler_type,
+            config_ref=f"file:{handler_type}.yaml",
+        )
+        self.timeout_ms = config.timeout_ms
+        # pool_size would be in config.config dict if not a standard field
+```
+
+### Migrating from Vault Direct Access
+
+**Before (direct vault client)**:
+```python
+import hvac
+
+class MyHandler:
+    def __init__(self):
+        client = hvac.Client(url="https://vault.example.com")
+        client.token = os.getenv("VAULT_TOKEN")
+        secret = client.secrets.kv.v2.read_secret_version(path="handlers/db")
+        self.db_password = secret["data"]["data"]["password"]
+        self.db_host = secret["data"]["data"]["host"]
+```
+
+**After (BindingConfigResolver)**:
+```python
+from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
+from omnibase_infra.runtime.secret_resolver import SecretResolver
+from omnibase_infra.runtime.models import (
+    ModelBindingConfigResolverConfig,
+    ModelSecretResolverConfig,
+)
+
+class MyHandler:
+    def __init__(self):
+        # Create secret resolver for vault: references
+        secret_resolver = SecretResolver(
+            config=ModelSecretResolverConfig(
+                enable_convention_fallback=True,
+            )
+        )
+
+        resolver = BindingConfigResolver(
+            config=ModelBindingConfigResolverConfig(
+                secret_resolver=secret_resolver,
+            )
+        )
+
+        # Vault reference resolved automatically via config_ref
+        config = resolver.resolve(
+            handler_type="db",
+            config_ref="vault:secret/data/handlers/db#config",
+        )
+        # Or use vault: references in inline config values
+        # config = resolver.resolve(
+        #     handler_type="db",
+        #     inline_config={"password": "vault:secret/data/handlers/db#password"},
+        # )
+```
+
+### Key Benefits of Migration
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| **Source Priority** | Manual implementation required | Built-in: Env > Vault > File > Inline |
+| **Caching** | None or custom implementation | TTL-based with statistics |
+| **Thread Safety** | Manual locking required | Built-in sync/async safety |
+| **Error Handling** | Inconsistent across handlers | Structured with correlation IDs |
+| **Path Security** | Manual validation | Built-in traversal protection |
+| **File Size Limits** | Often missing | 1MB limit prevents memory exhaustion |
+| **Testing** | Mock individual sources | Mock resolver or container |
+| **Environment Overrides** | Manual per-field implementation | Automatic with naming convention |
+
+### Migration Checklist
+
+Use this checklist when migrating handlers to `BindingConfigResolver`:
+
+**Identification Phase**:
+- [ ] Identify all handlers using direct `os.getenv()` calls
+- [ ] Identify all handlers loading config files manually (yaml.safe_load, json.load)
+- [ ] Identify all direct Vault client usage (hvac, vault-cli)
+- [ ] Document current environment variable naming conventions
+- [ ] List all config file locations and formats
+
+**Preparation Phase**:
+- [ ] Create `ModelBindingConfigResolverConfig` with appropriate settings
+- [ ] Register `BindingConfigResolver` in container (if using DI)
+- [ ] Create `SecretResolver` if Vault integration is needed
+- [ ] Define config file directory structure (`config_dir`)
+- [ ] Establish environment variable prefix convention (`env_prefix`)
+
+**Migration Phase**:
+- [ ] Update handler constructors to accept `ModelONEXContainer` or resolver
+- [ ] Replace direct `os.getenv()` with resolver calls
+- [ ] Replace manual file loading with `config_ref="file:..."` patterns
+- [ ] Replace direct Vault access with `config_ref="vault:..."` or SecretResolver
+- [ ] Convert custom retry logic to use `ModelRetryPolicy`
+
+**Testing Phase**:
+- [ ] Update unit tests to mock resolver instead of environment
+- [ ] Verify environment override behavior (`HANDLER_{TYPE}_{FIELD}`)
+- [ ] Test cache invalidation with `refresh()` and `refresh_all()`
+- [ ] Verify error messages include correlation IDs
+- [ ] Test file not found and permission error scenarios
+
+**Cleanup Phase**:
+- [ ] Remove deprecated config loading code
+- [ ] Remove direct `hvac` client imports (if fully migrated)
+- [ ] Update documentation to reference new patterns
+- [ ] Remove old config file parsing utilities
+
+### Common Migration Pitfalls
+
+| Pitfall | Solution |
+|---------|----------|
+| Forgetting to set `config_dir` for relative paths | Always configure `config_dir` when using `file:` references |
+| Using `vault:` scheme without `SecretResolver` | Ensure `secret_resolver` is provided in config |
+| Expecting immediate cache updates | Call `refresh()` after external config changes |
+| Mixing old and new patterns | Fully migrate each handler before moving to the next |
+| Ignoring environment override naming | Follow `{PREFIX}_{HANDLER_TYPE}_{FIELD}` convention exactly |
+
+---
+
 ## Related Documentation
 
 - [`docs/patterns/secret_resolver.md`](./secret_resolver.md) - Secret management for vault: references

@@ -48,12 +48,15 @@ class ModelBindingConfigResolverConfig(BaseModel):
         cache_ttl_seconds: Time-to-live for cached configurations (0-86400).
         env_prefix: Prefix for environment variable overrides.
             Pattern: {env_prefix}_{HANDLER_TYPE}_{FIELD}
-        secret_resolver: Optional SecretResolver instance for vault:// resolution.
-            This is injected at runtime and excluded from serialization.
         strict_validation: If True, fail on unknown fields in resolved config.
             If False, ignore unknown fields.
         allowed_schemes: Set of allowed config_ref URI schemes for security.
             Only these schemes can be used in config_ref values.
+
+    Note:
+        SecretResolver is resolved from the container via dependency injection
+        in BindingConfigResolver.__init__, following ONEX mandatory container
+        injection pattern per CLAUDE.md.
 
     Example:
         >>> config = ModelBindingConfigResolverConfig(
@@ -100,15 +103,10 @@ class ModelBindingConfigResolverConfig(BaseModel):
         "Must be a valid Python identifier.",
     )
 
-    # SecretResolver instance for vault:// resolution
-    # NOTE: object is used instead of Any for generic type per ONEX policy
-    # This field is excluded from serialization as it's a runtime dependency
-    secret_resolver: object | None = Field(
-        default=None,
-        exclude=True,
-        description="Optional SecretResolver instance for vault:// resolution. "
-        "Injected at runtime, not serialized.",
-    )
+    # NOTE: SecretResolver is now resolved from container via dependency injection.
+    # See BindingConfigResolver.__init__ which resolves SecretResolver from
+    # container.service_registry.resolve_service(SecretResolver).
+    # This follows ONEX mandatory container injection pattern per CLAUDE.md.
 
     # Validation strictness
     strict_validation: bool = Field(

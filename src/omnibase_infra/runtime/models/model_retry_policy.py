@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class ModelRetryPolicy(BaseModel):
@@ -77,7 +77,7 @@ class ModelRetryPolicy(BaseModel):
 
     @field_validator("max_delay_ms")
     @classmethod
-    def validate_max_delay_greater_than_base(cls, v: int, info: object) -> int:
+    def validate_max_delay_greater_than_base(cls, v: int, info: ValidationInfo) -> int:
         """Ensure max_delay_ms is at least as large as base_delay_ms.
 
         Args:
@@ -91,8 +91,7 @@ class ModelRetryPolicy(BaseModel):
             ValueError: If max_delay_ms is less than base_delay_ms.
         """
         # Access data from validation info
-        # info is ValidationInfo but we use object to avoid Any
-        data = getattr(info, "data", {})
+        data = info.data if info.data else {}
         base_delay = data.get("base_delay_ms", 100)
         if v < base_delay:
             raise ValueError(

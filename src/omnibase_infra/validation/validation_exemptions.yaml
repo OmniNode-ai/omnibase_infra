@@ -1723,6 +1723,25 @@ pattern_exemptions:
     documentation:
       - docs/patterns/secret_resolver.md (Naming Conventions section)
     ticket: OMN-764
+  # ==========================================================================
+  # BindingConfigResolver Exemptions (OMN-765)
+  # ==========================================================================
+  # BindingConfigResolver is a centralized configuration resolution service with
+  # cohesive functionality: sync/async resolution, multi-source support, caching,
+  # and environment overrides. Similar to SecretResolver, the methods form a
+  # complete API for configuration management:
+  # - Primary API (4): resolve, resolve_async, resolve_many, resolve_many_async
+  # - Cache management (4): invalidate, invalidate_all, get_cache_stats, cleanup
+  # - Internal helpers (13): source loading, env overrides, vault refs, validation
+  - file_pattern: 'binding_config_resolver\.py'
+    class_pattern: "Class 'BindingConfigResolver'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      BindingConfigResolver provides centralized configuration resolution with sync/async APIs, TTL-based caching, and multi-source support (file, env, vault). Similar to SecretResolver, the 21 methods are cohesive: 4 primary resolution API methods, 4 cache management, and 13 internal helpers for source loading, environment overrides, vault reference resolution, and validation. Splitting would fragment a unified configuration management interface.
+
+    documentation:
+      - docs/patterns/binding_config_resolver.md
+    ticket: OMN-765
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

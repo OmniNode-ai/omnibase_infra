@@ -16,10 +16,22 @@ Design Philosophy:
     - Caching is optional and TTL-controlled for performance vs freshness tradeoff
 
 Example:
-    Basic usage::
+    Basic usage with container-based dependency injection::
 
+        from omnibase_core.container import ModelONEXContainer
+        from omnibase_infra.runtime.util_container_wiring import wire_infrastructure_services
+
+        # Bootstrap container and register config
+        container = ModelONEXContainer()
         config = ModelBindingConfigResolverConfig(env_prefix="HANDLER")
-        resolver = BindingConfigResolver(config=config)
+        await container.service_registry.register_instance(
+            interface=ModelBindingConfigResolverConfig,
+            instance=config,
+            scope="global",
+        )
+
+        # Create resolver with container injection
+        resolver = BindingConfigResolver(container)
 
         # Resolve from inline config
         binding = resolver.resolve(
@@ -70,9 +82,10 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 from uuid import UUID, uuid4
 
 import yaml
@@ -94,17 +107,19 @@ from omnibase_infra.runtime.models.model_config_ref import (
 from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
 
 if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
+
     from omnibase_infra.runtime.secret_resolver import SecretResolver
 
 logger = logging.getLogger(__name__)
 
 # Maximum file size for config files (1MB)
 # Prevents memory exhaustion from accidentally pointing at large files
-MAX_CONFIG_FILE_SIZE = 1024 * 1024
+MAX_CONFIG_FILE_SIZE: Final[int] = 1024 * 1024
 
 # Fields that can be overridden via environment variables
 # Maps from environment variable field name (uppercase) to model field name
-_ENV_OVERRIDE_FIELDS: dict[str, str] = {
+_ENV_OVERRIDE_FIELDS: Final[dict[str, str]] = {
     "ENABLED": "enabled",
     "PRIORITY": "priority",
     "TIMEOUT_MS": "timeout_ms",
@@ -117,9 +132,16 @@ _ENV_OVERRIDE_FIELDS: dict[str, str] = {
 }
 
 # Retry policy fields (nested under retry_policy)
-_RETRY_POLICY_FIELDS: frozenset[str] = frozenset(
+_RETRY_POLICY_FIELDS: Final[frozenset[str]] = frozenset(
     {"MAX_RETRIES", "BACKOFF_STRATEGY", "BASE_DELAY_MS", "MAX_DELAY_MS"}
 )
+
+# Async key lock cleanup configuration
+# Prevents unbounded growth of _async_key_locks dict in long-running processes
+_ASYNC_KEY_LOCK_CLEANUP_THRESHOLD: Final[int] = (
+    1000  # Trigger cleanup when > 1000 locks
+)
+_ASYNC_KEY_LOCK_MAX_AGE_SECONDS: Final[float] = 3600.0  # Clean locks older than 1 hour
 
 
 class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResolver pattern
@@ -141,8 +163,15 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         async contexts. See module docstring for details on the locking strategy.
 
     Example:
+        >>> # Container setup (async context required)
+        >>> container = ModelONEXContainer()
         >>> config = ModelBindingConfigResolverConfig(env_prefix="HANDLER")
-        >>> resolver = BindingConfigResolver(config=config)
+        >>> await container.service_registry.register_instance(
+        ...     interface=ModelBindingConfigResolverConfig,
+        ...     instance=config,
+        ...     scope="global",
+        ... )
+        >>> resolver = BindingConfigResolver(container)
         >>> binding = resolver.resolve(
         ...     handler_type="db",
         ...     inline_config={"pool_size": 10}
@@ -151,14 +180,50 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
     def __init__(
         self,
-        config: ModelBindingConfigResolverConfig,
+        container: ModelONEXContainer,
     ) -> None:
-        """Initialize BindingConfigResolver.
+        """Initialize BindingConfigResolver with container-based dependency injection.
+
+        Follows ONEX mandatory container injection pattern per CLAUDE.md.
+        Config is resolved from container's service registry, and SecretResolver
+        is resolved as an optional dependency.
 
         Args:
-            config: Resolver configuration with cache settings and allowed schemes.
+            container: ONEX container for dependency resolution.
+
+        Raises:
+            RuntimeError: If ModelBindingConfigResolverConfig is not registered
+                in the container's service registry.
         """
-        self._config = config
+        self._container = container
+
+        # Resolve config from container's service registry
+        try:
+            self._config: ModelBindingConfigResolverConfig = (
+                container.service_registry.resolve_service(
+                    ModelBindingConfigResolverConfig
+                )
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to resolve ModelBindingConfigResolverConfig from container. "
+                f"Ensure config is registered via container.service_registry.register_instance(). "
+                f"Original error: {e}"
+            ) from e
+
+        # Resolve SecretResolver from container (optional dependency)
+        # This replaces the config.secret_resolver pattern
+        self._secret_resolver: SecretResolver | None = None
+        try:
+            from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+            self._secret_resolver = container.service_registry.resolve_service(
+                SecretResolver
+            )
+        except Exception:
+            # SecretResolver is optional - if not registered, vault:// schemes won't work
+            pass
+
         self._cache: dict[str, ModelConfigCacheEntry] = {}
         # Track mutable stats internally since ModelBindingConfigCacheStats is frozen
         self._hits = 0
@@ -168,10 +233,19 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self._file_loads = 0
         self._env_loads = 0
         self._vault_loads = 0
-        self._lock = threading.RLock()  # Use RLock for reentrant locking
+        self._async_key_lock_cleanups = 0  # Track cleanup events for observability
+
+        # RLock is required for reentrant locking in the sync path:
+        # resolve() holds the lock while calling _resolve_config() -> _load_from_file(),
+        # which also acquires the lock to update _file_loads counter.
+        # Regular Lock would cause deadlock in this scenario.
+        self._lock = threading.RLock()
+
         # Per-key async locks to allow parallel fetches for different handler types
-        # while preventing duplicate fetches for the same handler type
+        # while preventing duplicate fetches for the same handler type.
+        # Timestamps track when each lock was created for periodic cleanup.
         self._async_key_locks: dict[str, asyncio.Lock] = {}
+        self._async_key_lock_timestamps: dict[str, float] = {}
 
     # === Primary API (Sync) ===
 
@@ -450,7 +524,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """Get cache statistics.
 
         Returns:
-            ModelBindingConfigCacheStats with hit/miss/load counts.
+            ModelBindingConfigCacheStats with hit/miss/load counts and lock stats.
         """
         with self._lock:
             return ModelBindingConfigCacheStats(
@@ -462,6 +536,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 file_loads=self._file_loads,
                 env_loads=self._env_loads,
                 vault_loads=self._vault_loads,
+                async_key_lock_count=len(self._async_key_locks),
+                async_key_lock_cleanups=self._async_key_lock_cleanups,
             )
 
     # === Internal Methods ===
@@ -469,9 +545,14 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
     def _get_async_key_lock(self, handler_type: str) -> asyncio.Lock:
         """Get or create an async lock for a specific handler_type.
 
+        Includes periodic cleanup of stale locks to prevent unbounded memory
+        growth in long-running processes. Cleanup is triggered when the number
+        of locks exceeds _ASYNC_KEY_LOCK_CLEANUP_THRESHOLD.
+
         Thread Safety:
             Uses threading.Lock to safely access the key locks dictionary,
-            ensuring thread-safe creation of new locks.
+            ensuring thread-safe creation of new locks. Cleanup only removes
+            locks that are not currently held.
 
         Args:
             handler_type: The handler type to get a lock for.
@@ -480,9 +561,55 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             asyncio.Lock for the given handler_type.
         """
         with self._lock:
+            # Periodic cleanup when threshold exceeded
+            if len(self._async_key_locks) > _ASYNC_KEY_LOCK_CLEANUP_THRESHOLD:
+                self._cleanup_stale_async_key_locks()
+
             if handler_type not in self._async_key_locks:
                 self._async_key_locks[handler_type] = asyncio.Lock()
+                self._async_key_lock_timestamps[handler_type] = time.monotonic()
             return self._async_key_locks[handler_type]
+
+    def _cleanup_stale_async_key_locks(self) -> None:
+        """Remove async key locks that have not been used recently.
+
+        Only removes locks that are:
+        1. Older than _ASYNC_KEY_LOCK_MAX_AGE_SECONDS
+        2. Not currently held (not locked)
+
+        Thread Safety:
+            Must be called while holding self._lock. Safe to call from
+            any thread as it only modifies internal state.
+
+        Note:
+            This method is called periodically from _get_async_key_lock()
+            when the lock count exceeds the threshold. It does not require
+            external scheduling.
+        """
+        current_time = time.monotonic()
+        stale_keys: list[str] = []
+
+        for key, timestamp in self._async_key_lock_timestamps.items():
+            age = current_time - timestamp
+            if age > _ASYNC_KEY_LOCK_MAX_AGE_SECONDS:
+                lock = self._async_key_locks.get(key)
+                # Only remove locks that are not currently held
+                if lock is not None and not lock.locked():
+                    stale_keys.append(key)
+
+        for key in stale_keys:
+            del self._async_key_locks[key]
+            del self._async_key_lock_timestamps[key]
+
+        if stale_keys:
+            self._async_key_lock_cleanups += 1
+            logger.debug(
+                "Cleaned up stale async key locks",
+                extra={
+                    "cleaned_count": len(stale_keys),
+                    "remaining_count": len(self._async_key_locks),
+                },
+            )
 
     def _get_from_cache(self, handler_type: str) -> ModelBindingConfig | None:
         """Get config from cache if present and not expired.
@@ -1263,20 +1390,15 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         return data
 
     def _get_secret_resolver(self) -> SecretResolver | None:
-        """Get the configured SecretResolver instance.
+        """Get the container-resolved SecretResolver instance.
+
+        The SecretResolver is resolved from the container during __init__.
+        This method provides access to the cached instance.
 
         Returns:
-            SecretResolver if configured, None otherwise.
+            SecretResolver if registered in container, None otherwise.
         """
-        resolver = self._config.secret_resolver
-        if resolver is None:
-            return None
-        # Type assertion - the config model validates this
-        from omnibase_infra.runtime.secret_resolver import SecretResolver
-
-        if isinstance(resolver, SecretResolver):
-            return resolver
-        return None
+        return self._secret_resolver
 
     def _apply_env_overrides(
         self,
@@ -1426,7 +1548,17 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                         result[key] = secret.get_secret_value()
                     else:
                         result[key] = value  # Keep original if not found
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Failed to resolve vault reference",
+                        extra={
+                            "correlation_id": str(correlation_id),
+                            "vault_path": logical_name,
+                            "config_key": key,
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                        },
+                    )
                     result[key] = value  # Keep original on error
             elif isinstance(value, dict):
                 # Recursively resolve nested dicts
@@ -1475,7 +1607,17 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                         result[key] = secret.get_secret_value()
                     else:
                         result[key] = value  # Keep original if not found
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Failed to resolve vault reference",
+                        extra={
+                            "correlation_id": str(correlation_id),
+                            "vault_path": logical_name,
+                            "config_key": key,
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                        },
+                    )
                     result[key] = value  # Keep original on error
             elif isinstance(value, dict):
                 # Recursively resolve nested dicts
@@ -1543,4 +1685,4 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             ) from e
 
 
-__all__: list[str] = ["BindingConfigResolver"]
+__all__: Final[list[str]] = ["BindingConfigResolver"]

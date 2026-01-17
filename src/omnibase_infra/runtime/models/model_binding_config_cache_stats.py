@@ -26,6 +26,8 @@ class ModelBindingConfigCacheStats(BaseModel):
         file_loads: Total number of configurations loaded from files.
         env_loads: Total number of configurations loaded from environment variables.
         vault_loads: Total number of configurations loaded from Vault.
+        async_key_lock_count: Current number of async key locks held.
+        async_key_lock_cleanups: Total number of stale lock cleanup operations.
 
     Example:
         >>> stats = ModelBindingConfigCacheStats(hits=100, misses=10)
@@ -79,6 +81,16 @@ class ModelBindingConfigCacheStats(BaseModel):
         default=0,
         ge=0,
         description="Total number of configurations loaded from Vault.",
+    )
+    async_key_lock_count: int = Field(
+        default=0,
+        ge=0,
+        description="Current number of async key locks held for handler type serialization.",
+    )
+    async_key_lock_cleanups: int = Field(
+        default=0,
+        ge=0,
+        description="Total number of stale async key lock cleanup operations performed.",
     )
 
     @property
