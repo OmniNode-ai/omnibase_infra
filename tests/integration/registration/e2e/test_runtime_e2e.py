@@ -57,9 +57,9 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,

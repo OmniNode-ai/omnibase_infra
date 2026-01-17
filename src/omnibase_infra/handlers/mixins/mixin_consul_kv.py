@@ -19,7 +19,6 @@ from uuid import UUID
 T = TypeVar("T")
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConsulError,

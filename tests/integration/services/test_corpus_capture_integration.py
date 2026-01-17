@@ -13,6 +13,7 @@ Tests the full pipeline integration: ManifestGenerator callback -> CorpusCapture
 import inspect
 
 import pytest
+
 from omnibase_core.enums.enum_execution_status import EnumExecutionStatus
 from omnibase_core.enums.enum_handler_execution_phase import EnumHandlerExecutionPhase
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
@@ -23,7 +24,6 @@ from omnibase_core.models.manifest.model_execution_manifest import (
 from omnibase_core.models.manifest.model_node_identity import ModelNodeIdentity
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.pipeline.manifest_generator import ManifestGenerator
-
 from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
 from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy

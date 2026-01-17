@@ -42,11 +42,11 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
+from pydantic import Field, field_validator
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.intents import ModelRegistrationRecordBase
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from pydantic import Field, field_validator
-
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )

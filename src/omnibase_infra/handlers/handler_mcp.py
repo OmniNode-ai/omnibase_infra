@@ -26,9 +26,9 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_core.models.dispatch import ModelHandlerOutput
 from pydantic import ValidationError
 
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,

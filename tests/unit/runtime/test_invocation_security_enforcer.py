@@ -21,8 +21,8 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from omnibase_core.enums import EnumDataClassification
 
+from omnibase_core.enums import EnumDataClassification
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.models.security.model_handler_security_policy import (

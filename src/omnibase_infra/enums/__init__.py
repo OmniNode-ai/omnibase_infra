@@ -45,7 +45,6 @@ Exports:
 """
 
 from omnibase_core.enums import EnumTopicType
-
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.enums.enum_backend_type import EnumBackendType
 from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome

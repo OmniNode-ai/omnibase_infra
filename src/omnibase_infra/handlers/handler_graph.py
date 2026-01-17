@@ -45,6 +45,7 @@ from neo4j.exceptions import (
     ServiceUnavailable,
     TransactionError,
 )
+
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.graph import (
     ModelGraphBatchResult,
@@ -60,8 +61,6 @@ from omnibase_core.models.graph import (
     ModelGraphTraversalResult,
 )
 from omnibase_core.types import JsonType
-from omnibase_spi.protocols.storage import ProtocolGraphDatabaseHandler
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -71,6 +70,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils.util_env_parsing import parse_env_float
+from omnibase_spi.protocols.storage import ProtocolGraphDatabaseHandler
 
 logger = logging.getLogger(__name__)
 

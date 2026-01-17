@@ -28,8 +28,8 @@ Related Tickets:
 from __future__ import annotations
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,

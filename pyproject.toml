@@ -253,6 +253,14 @@ ignore = [
     "TC006",     # Add quotes to type expression in cast (style preference)
 ]
 
+[tool.ruff.lint.isort]
+# Ensure consistent import sorting between local and CI
+known-first-party = ["omnibase_infra", "omnibase_core", "omnibase_spi", "tests"]
+# Force combine as imports for consistency
+force-single-line = false
+# Split imports from same package
+split-on-trailing-comma = true
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
@@ -278,6 +286,7 @@ markers = [
     "e2e: End-to-end tests requiring full infrastructure (Kafka + Consul + PostgreSQL)",
     "runtime: Tests requiring the ONEX runtime container to be running",
     "serial: Tests that must run serially (not in parallel with pytest-xdist) due to resource intensity",
+    "heavy: Heavy integration tests requiring real infrastructure (Kafka, PostgreSQL, HTTP servers). Skipped by default, run with RUN_HEAVY_TESTS=1",
 ]
 addopts = [
     "--strict-markers",

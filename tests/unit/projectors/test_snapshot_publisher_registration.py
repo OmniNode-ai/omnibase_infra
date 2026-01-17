@@ -42,8 +42,8 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import (
     InfraConnectionError,

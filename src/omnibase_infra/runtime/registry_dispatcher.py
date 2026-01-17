@@ -46,7 +46,6 @@ from uuid import uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode, EnumNodeKind
 from omnibase_core.models.errors import ModelOnexError
-
 from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.models.validation.model_execution_shape_validation import (
     ModelExecutionShapeValidation,

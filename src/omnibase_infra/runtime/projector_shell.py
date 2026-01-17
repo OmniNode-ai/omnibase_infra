@@ -31,13 +31,13 @@ import logging
 from uuid import UUID
 
 import asyncpg
+from pydantic import BaseModel
+
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.projectors import (
     ModelProjectionResult,
     ModelProjectorContract,
 )
-from pydantic import BaseModel
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,

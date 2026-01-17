@@ -33,6 +33,9 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qdrant_models
+
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.common.model_schema_value import ModelSchemaValue
 from omnibase_core.models.vector import (
@@ -52,10 +55,6 @@ from omnibase_core.models.vector import (
     ModelVectorStoreResult,
 )
 from omnibase_core.types import JsonType
-from omnibase_spi.protocols.storage import ProtocolVectorStoreHandler
-from qdrant_client import QdrantClient
-from qdrant_client.http import models as qdrant_models
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -65,6 +64,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_spi.protocols.storage import ProtocolVectorStoreHandler
 
 logger = logging.getLogger(__name__)
 

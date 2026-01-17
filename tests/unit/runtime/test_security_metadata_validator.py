@@ -26,8 +26,8 @@ See Also:
 from __future__ import annotations
 
 import pytest
-from omnibase_core.enums import EnumDataClassification
 
+from omnibase_core.enums import EnumDataClassification
 from omnibase_infra.enums import EnumHandlerTypeCategory, EnumSecurityRuleId
 from omnibase_infra.models.security import ModelHandlerSecurityPolicy
 from omnibase_infra.runtime import SecurityMetadataValidator

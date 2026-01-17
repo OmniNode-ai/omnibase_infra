@@ -299,7 +299,6 @@ class TestKernelShutdownIntegration:
         ModelDomainPluginConfig for cleanup in error scenarios.
         """
         from omnibase_core.container import ModelONEXContainer
-
         from omnibase_infra.event_bus import EventBusInmemory
 
         # Verify minimal config can be created (matches kernel.py:1167-1174)

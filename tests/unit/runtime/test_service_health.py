@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import web
-from omnibase_core.container import ModelONEXContainer
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.services.service_health import (
     DEFAULT_HTTP_HOST,

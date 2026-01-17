@@ -33,7 +33,6 @@ from uuid import UUID, uuid4
 
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
 from omnibase_infra.validation.validator_chain_propagation import (
     ChainPropagationValidator,
 )

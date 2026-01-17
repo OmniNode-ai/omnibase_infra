@@ -23,12 +23,12 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from pydantic import BaseModel, ConfigDict, Field
-
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
     ModelInfraErrorContext,

@@ -706,7 +706,6 @@ class TestDispatchContextCorrelation:
     async def test_dispatch_result_error_preserves_correlation_id(self) -> None:
         """Verify correlation ID is preserved when dispatch result has error."""
         from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-
         from omnibase_infra.models.dispatch import (
             EnumDispatchStatus,
             ModelDispatchResult,

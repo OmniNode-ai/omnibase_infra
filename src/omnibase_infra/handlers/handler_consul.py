@@ -32,8 +32,8 @@ from typing import NamedTuple, TypeVar
 from uuid import UUID, uuid4
 
 import consul
-from omnibase_core.models.dispatch import ModelHandlerOutput
 
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,

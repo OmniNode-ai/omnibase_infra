@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, Field
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models.routing.model_routing_entry import (
     ModelRoutingEntry,
 )

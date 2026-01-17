@@ -33,9 +33,9 @@ from typing import get_type_hints
 from uuid import uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
 from omnibase_infra.nodes.effects.protocol_postgres_adapter import (

@@ -34,9 +34,9 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import (

@@ -57,7 +57,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from omnibase_core.nodes import NodeCompute
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.errors.model_infra_error_context import (

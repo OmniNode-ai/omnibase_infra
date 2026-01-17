@@ -131,7 +131,6 @@ import re
 from urllib.parse import urlparse
 
 from omnibase_core.enums import EnumDataClassification
-
 from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumSecurityRuleId,

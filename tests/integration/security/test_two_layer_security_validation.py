@@ -21,8 +21,8 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from omnibase_core.enums import EnumDataClassification
 
+from omnibase_core.enums import EnumDataClassification
 from omnibase_infra.enums import EnumEnvironment, EnumSecurityRuleId
 from omnibase_infra.models.security import (
     CLASSIFICATION_SECURITY_LEVELS,

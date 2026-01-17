@@ -17,8 +17,8 @@ from typing import TypeVar
 from uuid import UUID, uuid4
 
 import hvac
-from omnibase_core.models.dispatch import ModelHandlerOutput
 
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraVaultError,

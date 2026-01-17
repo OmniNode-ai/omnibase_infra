@@ -74,7 +74,6 @@ from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-
     from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)

@@ -21,7 +21,6 @@ from typing import cast
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
-
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
     ModelPluginContext,

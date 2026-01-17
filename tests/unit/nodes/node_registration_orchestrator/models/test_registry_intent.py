@@ -35,10 +35,10 @@ from typing import Literal
 from uuid import uuid4
 
 import pytest
-from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ModelConsulIntentPayload,

@@ -29,9 +29,9 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ValidationError
 
+from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
