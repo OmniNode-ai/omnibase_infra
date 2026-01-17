@@ -5,7 +5,7 @@
 This node orchestrates the registration workflow by coordinating between
 the reducer (for intent generation) and effect node (for execution).
 
-Node Type: ORCHESTRATOR
+Node Type: ORCHESTRATOR_GENERIC
 Purpose: Coordinate node lifecycle registration workflows by consuming
          introspection events, requesting intents from reducer, and
          dispatching execution to the effect node.

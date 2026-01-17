@@ -38,7 +38,7 @@ Environment Variables
 =====================
 
     MEMGRAPH_BOLT_URL: Memgraph/Neo4j Bolt URL (required - skip if not set)
-        Example: bolt://localhost:7687 or bolt://192.168.86.200:7687
+        Example: bolt://localhost:7687 or bolt://your-server-ip:7687
     MEMGRAPH_USERNAME: Optional username for authentication
     MEMGRAPH_PASSWORD: Optional password for authentication
     MEMGRAPH_DATABASE: Database name (default: memgraph)

@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Architecture Validator Node Package.
 
-This package provides architecture validation COMPUTE nodes for validating
+This package provides architecture validation COMPUTE_GENERIC nodes for validating
 ONEX architecture patterns and compliance rules.
 
 Available Validators:

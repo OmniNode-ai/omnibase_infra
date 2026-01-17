@@ -29,7 +29,7 @@ node_version:
   minor: 0
   patch: 0
 # Node type
-node_type: "EFFECT"
+node_type: "EFFECT_GENERIC"
 # Description
 description: >
   Capability-oriented effect node for registration storage operations. Handles store, query, update, and delete operations for node registrations with pluggable backend handlers (e.g., PostgreSQL).

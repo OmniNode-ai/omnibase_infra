@@ -5,7 +5,7 @@
 This module provides utilities for measuring and asserting performance thresholds
 in the ONEX 2-way registration pattern E2E tests (OMN-892).
 
-Performance Thresholds (calibrated for remote infrastructure at 192.168.86.200):
+Performance Thresholds (calibrated for remote infrastructure):
     - Introspection broadcast latency: <200ms (includes network round-trip)
     - Registry processing latency: <300ms (network + database operations)
     - Dual registration time: <1000ms (multiple network calls)
@@ -61,10 +61,10 @@ class PerformanceThresholds:
     Threshold Calibration Context
     =============================
 
-    **Target Infrastructure**: Remote services at 192.168.86.200
-        - Redpanda (Kafka): Port 29092
-        - PostgreSQL: Port 5436
-        - Consul: Port 28500
+    **Target Infrastructure**: Remote services (configured via environment variables)
+        - Redpanda (Kafka): KAFKA_BOOTSTRAP_SERVERS (default port 29092)
+        - PostgreSQL: POSTGRES_HOST (default port 5436)
+        - Consul: CONSUL_HOST (default port 28500)
 
     **Network Characteristics** (measured December 2024):
         - Network RTT to remote host: 10-25ms typical, 50ms worst-case
@@ -176,8 +176,8 @@ class PerformanceThresholds:
     # Performance Thresholds (calibrated for remote infrastructure)
     # =========================================================================
     #
-    # These values are calibrated for testing against remote services at
-    # 192.168.86.200. Network RTT (~20-50ms) is included in each threshold.
+    # These values are calibrated for testing against remote services.
+    # Network RTT (~20-50ms) is included in each threshold.
     #
     # For local testing (all services on localhost), consider using:
     #   - 50ms, 100ms, 300ms, 50ms for the operation thresholds

@@ -1132,11 +1132,17 @@ class TestSecretResolverFileSecrets:
             )
             resolver = SecretResolver(config=config)
 
-            # Mock Path.read_text to raise PermissionError
-            # This simulates file permission issues without relying on chmod
-            with patch.object(
-                Path, "read_text", side_effect=PermissionError("Permission denied")
-            ):
+            # Mock Path.open to raise PermissionError only for the target file
+            # We need a surgical mock that doesn't break pytest's file handling
+            original_open = Path.open
+            target_path = str(secret_file)
+
+            def mock_open(self: Path, *args: object, **kwargs: object) -> object:
+                if str(self) == target_path:
+                    raise PermissionError("Permission denied")
+                return original_open(self, *args, **kwargs)
+
+            with patch.object(Path, "open", mock_open):
                 result = resolver.get_secret("protected.secret", required=False)
 
             # Should return None when file cannot be read due to permissions

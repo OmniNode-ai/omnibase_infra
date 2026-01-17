@@ -24,8 +24,8 @@ node_version:
   major: 0
   minor: 1
   patch: 0
-# Node type - VALIDATOR for architecture validation
-node_type: "VALIDATOR"
+# Node type
+node_type: "COMPUTE_GENERIC"
 # Description
 description: >
   Compute node for architecture validation. Validates ONEX architecture compliance by checking nodes and handlers against forbidden patterns defined in architecture rules. This node performs pure transformations with no side effects, making it suitable for both startup validation and runtime checks.

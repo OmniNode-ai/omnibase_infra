@@ -3,21 +3,78 @@
 """Pytest fixtures for Kafka event bus integration tests.
 
 This module provides fixtures for managing Kafka topics in integration tests.
-The remote Redpanda broker at 192.168.86.200:29092 has topic auto-creation
-disabled, so topics must be created explicitly before use.
+The Redpanda broker (configured via KAFKA_BOOTSTRAP_SERVERS env var) has topic
+auto-creation disabled, so topics must be created explicitly before use.
+
+==============================================================================
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+==============================================================================
+
+This module provides **function-scoped** async fixtures for Kafka topic
+management. With pytest-asyncio 0.25+, the default event loop scope is
+"function", which works correctly with these fixtures.
+
+When to Configure loop_scope in Test Modules
+--------------------------------------------
+If your test module uses **session-scoped or module-scoped** Kafka fixtures
+(e.g., a shared Kafka producer across tests), you must configure loop_scope:
+
+.. code-block:: python
+
+    # For session-scoped Kafka fixtures
+    pytestmark = [
+        pytest.mark.kafka,
+        pytest.mark.asyncio(loop_scope="session"),
+    ]
+
+    # For module-scoped Kafka fixtures
+    pytestmark = [
+        pytest.mark.kafka,
+        pytest.mark.asyncio(loop_scope="module"),
+    ]
+
+Fixtures in This Module
+-----------------------
+All fixtures in this module are **function-scoped** (or use async generators
+that clean up per-test), so they work with the default function-scoped event
+loop:
+
+    - ensure_test_topic: Creates topics per-test (async generator with cleanup)
+    - topic_factory: Factory for creating topics per-test
+    - created_unique_topic: Pre-created unique topic per-test
+
+Why loop_scope Matters for Kafka
+--------------------------------
+Kafka async clients (AIOKafkaProducer, AIOKafkaConsumer) are bound to the
+event loop at creation time. If you share a Kafka client across tests without
+matching loop_scope, you'll encounter:
+
+    - RuntimeError: "attached to a different event loop"
+    - RuntimeError: "Event loop is closed"
+
+Reference Documentation
+-----------------------
+- https://pytest-asyncio.readthedocs.io/en/latest/concepts.html#event-loop-scope
+- https://pytest-asyncio.readthedocs.io/en/latest/how-to-guides/change_default_loop_scope.html
 
 Fixtures:
     ensure_test_topic: Creates topics via admin API before tests, cleans up after
     topic_factory: Factory fixture for creating multiple topics with custom settings
+
+Implementation Note:
+    This module uses shared helpers from tests.helpers.util_kafka to avoid code
+    duplication. The KafkaTopicManager class provides the core topic lifecycle
+    management functionality used by multiple fixtures.
+
+Related Tickets:
+    - OMN-1361: pytest-asyncio 0.25+ upgrade and loop_scope configuration
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from collections.abc import AsyncGenerator, Callable, Coroutine
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -32,24 +89,105 @@ pytestmark = [
     pytest.mark.kafka,
 ]
 
-if TYPE_CHECKING:
-    from aiokafka.admin import AIOKafkaAdminClient
-
 # =============================================================================
 # Configuration
 # =============================================================================
 
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:29092")
-
+# KAFKA_BOOTSTRAP_SERVERS must be set via environment variable.
+# No hardcoded default to ensure portability across CI/CD environments.
+# Tests will skip via fixture if not set. Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092
+#
+# VALIDATION: The value is validated at module load time via validate_bootstrap_servers().
+# This validation checks for:
+# - None or empty string values
+# - Whitespace-only values
+# - Malformed port numbers (non-numeric, out of range 1-65535)
+# - Comma-separated server lists (each entry is validated)
+# - IPv6 addresses (both bracketed [::1]:port and bare :: formats)
+#
+# Fixtures that depend on this value MUST check _kafka_config_validation before use.
+# See validate_bootstrap_servers() in tests/helpers/util_kafka.py for implementation.
+KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
 
 # =============================================================================
-# Consumer Readiness Helper (shared implementation)
+# Kafka Helpers (shared implementations)
 # =============================================================================
-# Re-exported from tests.helpers.kafka_utils for convenience.
-# See tests/helpers/kafka_utils.py for the canonical implementation.
-from tests.helpers.kafka_utils import wait_for_consumer_ready
+# Imported from tests.helpers.util_kafka for centralized implementation.
+# See tests/helpers/util_kafka.py for the canonical implementations.
+from tests.helpers.util_kafka import (
+    KAFKA_ERROR_BROKER_RESOURCE_EXHAUSTED,
+    KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED,
+    KAFKA_ERROR_GROUP_AUTHORIZATION_FAILED,
+    KAFKA_ERROR_INVALID_CONFIG,
+    KAFKA_ERROR_INVALID_PARTITIONS,
+    KAFKA_ERROR_INVALID_REPLICA_ASSIGNMENT,
+    KAFKA_ERROR_INVALID_REPLICATION_FACTOR,
+    KAFKA_ERROR_NOT_CONTROLLER,
+    KAFKA_ERROR_REMEDIATION_HINTS,
+    KAFKA_ERROR_TOPIC_ALREADY_EXISTS,
+    KafkaConfigValidationResult,
+    KafkaTopicManager,
+    create_topic_factory_function,
+    get_kafka_error_hint,
+    parse_bootstrap_servers,
+    validate_bootstrap_servers,
+    wait_for_consumer_ready,
+    wait_for_topic_metadata,
+)
 
-__all__ = ["wait_for_consumer_ready"]
+# Re-export for convenience - allows importing from this module instead of util_kafka
+__all__ = [
+    "wait_for_consumer_ready",
+    "wait_for_topic_metadata",
+    "KafkaTopicManager",
+    "parse_bootstrap_servers",
+    "validate_bootstrap_servers",
+    "KafkaConfigValidationResult",
+    "get_kafka_error_hint",
+    "KAFKA_ERROR_REMEDIATION_HINTS",
+    "KAFKA_ERROR_TOPIC_ALREADY_EXISTS",
+    "KAFKA_ERROR_INVALID_PARTITIONS",
+    "KAFKA_ERROR_INVALID_REPLICATION_FACTOR",
+    "KAFKA_ERROR_INVALID_REPLICA_ASSIGNMENT",
+    "KAFKA_ERROR_INVALID_CONFIG",
+    "KAFKA_ERROR_NOT_CONTROLLER",
+    "KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED",
+    "KAFKA_ERROR_GROUP_AUTHORIZATION_FAILED",
+    "KAFKA_ERROR_BROKER_RESOURCE_EXHAUSTED",
+]
+
+# =============================================================================
+# Configuration Validation
+# =============================================================================
+# Validate KAFKA_BOOTSTRAP_SERVERS at module load time to provide clear
+# skip reasons when configuration is missing or malformed.
+#
+# CACHING BEHAVIOR:
+#   This validation result is cached at module import time. If the
+#   KAFKA_BOOTSTRAP_SERVERS environment variable is modified at runtime
+#   (e.g., via os.environ["KAFKA_BOOTSTRAP_SERVERS"] = "new:9092"), the
+#   cached validation result will NOT be updated.
+#
+#   This is intentional for test stability - environment configuration should
+#   be set before test collection, not modified during test execution.
+#
+#   DEFENSIVE VALIDATION: Fixtures that use KAFKA_BOOTSTRAP_SERVERS perform
+#   a secondary check at execution time (os.getenv + empty/whitespace check)
+#   to handle edge cases where the env var is modified after module import.
+#   This provides belt-and-suspenders safety without fully re-validating.
+#
+# EMPTY VALUE HANDLING:
+#   The validation handles these edge cases:
+#   - None: Returns invalid with skip reason
+#   - Empty string "": Returns invalid with skip reason
+#   - Whitespace-only "  ": Returns invalid with skip reason
+#   - Comma-only ",,,": Returns invalid with skip reason (no valid entries)
+#   - Malformed port "host:abc": Returns invalid with skip reason
+#   - Port out of range "host:99999": Returns invalid with skip reason
+
+_kafka_config_validation: KafkaConfigValidationResult = validate_bootstrap_servers(
+    KAFKA_BOOTSTRAP_SERVERS
+)
 
 
 # =============================================================================
@@ -70,6 +208,14 @@ async def ensure_test_topic() -> AsyncGenerator[
     After creating a topic, this fixture waits for the broker metadata to
     propagate to ensure the topic is ready for use.
 
+    Implementation:
+        Uses KafkaTopicManager from tests.helpers.util_kafka for centralized
+        topic lifecycle management and error handling.
+
+    Skips:
+        When KAFKA_BOOTSTRAP_SERVERS is empty, whitespace-only, or malformed.
+        The skip reason provides actionable guidance for configuration.
+
     Yields:
         Async function that creates a topic with the given name and partition count.
         Returns the topic name for convenience.
@@ -79,105 +225,41 @@ async def ensure_test_topic() -> AsyncGenerator[
             topic = await ensure_test_topic(f"test.integration.{uuid4().hex[:12]}")
             # Topic now exists and can be used for produce/consume
     """
+    # Skip if Kafka is not properly configured (empty, whitespace-only, or malformed)
+    # The validation at module load time catches:
+    # - Empty string or None
+    # - Whitespace-only values
+    # - Non-numeric port (e.g., "localhost:abc")
+    # - Port out of range (must be 1-65535)
+    if not _kafka_config_validation:
+        ensure_skip_reason: str = (
+            _kafka_config_validation.skip_reason
+            or "KAFKA_BOOTSTRAP_SERVERS not configured"
+        )
+        pytest.skip(ensure_skip_reason)
 
-    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-    from aiokafka.errors import TopicAlreadyExistsError
+    # SAFETY: At this point, KAFKA_BOOTSTRAP_SERVERS is guaranteed to be valid
+    # because validate_bootstrap_servers() returned is_valid=True
+    assert _kafka_config_validation.is_valid, (
+        "Fixture logic error: should have skipped if validation failed"
+    )
 
-    admin: AIOKafkaAdminClient | None = None
-    created_topics: list[str] = []
+    # DEFENSIVE: Re-validate at point of use to catch runtime env changes.
+    # The module-level _kafka_config_validation is cached at import time,
+    # so this check catches if someone modified KAFKA_BOOTSTRAP_SERVERS after import.
+    current_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+    if not current_bootstrap_servers or not current_bootstrap_servers.strip():
+        pytest.skip(
+            "KAFKA_BOOTSTRAP_SERVERS is empty or whitespace-only at fixture execution. "
+            "Env var may have been modified after module import."
+        )
 
-    async def _wait_for_topic_metadata(
-        admin_client: AIOKafkaAdminClient,
-        topic_name: str,
-        timeout: float = 10.0,
-    ) -> bool:
-        """Wait for topic metadata to be available in the broker.
-
-        After topic creation, there's a delay before the broker metadata
-        is updated. This function polls until the topic appears.
-
-        Args:
-            admin_client: The admin client to use for metadata checks.
-            topic_name: The topic to wait for.
-            timeout: Maximum time to wait in seconds.
-
-        Returns:
-            True if topic was found, False if timed out.
-        """
-        start_time = asyncio.get_running_loop().time()
-        while (asyncio.get_running_loop().time() - start_time) < timeout:
-            try:
-                # Describe topics to check if metadata is available
-                # This forces a metadata refresh
-                description = await admin_client.describe_topics([topic_name])
-                if description:
-                    return True
-            except Exception:
-                pass  # Topic not yet available
-            await asyncio.sleep(0.5)  # Poll every 500ms
-        return False
-
-    async def _create_topic(topic_name: str, partitions: int = 1) -> str:
-        """Create a topic with the given name and partition count.
-
-        Args:
-            topic_name: Name of the topic to create.
-            partitions: Number of partitions (default: 1).
-
-        Returns:
-            The topic name (for chaining convenience).
-        """
-        nonlocal admin, created_topics
-
-        # Lazy initialization of admin client
-        if admin is None:
-            admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-            await admin.start()
-
-        try:
-            await admin.create_topics(
-                [
-                    NewTopic(
-                        name=topic_name,
-                        num_partitions=partitions,
-                        replication_factor=1,
-                    )
-                ]
-            )
-            created_topics.append(topic_name)
-
-            # Wait for topic metadata to propagate
-            await _wait_for_topic_metadata(admin, topic_name)
-        except TopicAlreadyExistsError:
-            # Topic already exists - this is acceptable in test environments
-            # Still wait for metadata in case topic was just created by another process
-            if admin is not None:
-                await _wait_for_topic_metadata(admin, topic_name, timeout=5.0)
-
-        return topic_name
-
-    yield _create_topic
-
-    # Cleanup: delete created topics
-    if admin is not None:
-        if created_topics:
-            try:
-                await admin.delete_topics(created_topics)
-            except Exception as e:
-                logger.warning(
-                    "Cleanup failed for Kafka topics %s: %s",
-                    created_topics,
-                    e,
-                    exc_info=True,
-                )
-        try:
-            await admin.close()
-        except Exception as e:
-            logger.warning(
-                "Failed to close Kafka admin client: %s",
-                e,
-                exc_info=True,
-            )
+    # Use the shared KafkaTopicManager for topic lifecycle management
+    # Use create_topic_factory_function to avoid duplicating topic creation logic
+    async with KafkaTopicManager(current_bootstrap_servers) as manager:
+        # No UUID suffix for integration tests (caller controls naming)
+        yield create_topic_factory_function(manager, add_uuid_suffix=False)
+        # Cleanup is handled automatically by KafkaTopicManager context exit
 
 
 @pytest.fixture
@@ -198,8 +280,8 @@ async def created_unique_topic(
     """
     import uuid
 
-    topic_name = f"test.integration.{uuid.uuid4().hex[:12]}"
-    await ensure_test_topic(topic_name)
+    topic_name: str = f"test.integration.{uuid.uuid4().hex[:12]}"
+    await ensure_test_topic(topic_name, 1)
     return topic_name
 
 
@@ -216,8 +298,8 @@ async def created_unique_dlq_topic(
     """
     import uuid
 
-    topic_name = f"test-dlq.dlq.intents.{uuid.uuid4().hex[:8]}"
-    await ensure_test_topic(topic_name)
+    topic_name: str = f"test-dlq.dlq.intents.{uuid.uuid4().hex[:8]}"
+    await ensure_test_topic(topic_name, 1)
     return topic_name
 
 
@@ -230,8 +312,8 @@ async def created_broadcast_topic(
     Returns:
         The created broadcast topic name.
     """
-    topic_name = "integration-test.broadcast"
-    await ensure_test_topic(topic_name)
+    topic_name: str = "integration-test.broadcast"
+    await ensure_test_topic(topic_name, 1)
     return topic_name
 
 
@@ -244,6 +326,14 @@ async def topic_factory() -> AsyncGenerator[
     Similar to ensure_test_topic but allows specifying replication factor.
     Useful for testing with different topic configurations.
 
+    Implementation:
+        Uses KafkaTopicManager from tests.helpers.util_kafka for centralized
+        topic lifecycle management and error handling.
+
+    Skips:
+        When KAFKA_BOOTSTRAP_SERVERS is empty, whitespace-only, or malformed.
+        The skip reason provides actionable guidance for configuration.
+
     Yields:
         Async function that creates a topic with custom settings.
 
@@ -251,68 +341,58 @@ async def topic_factory() -> AsyncGenerator[
         async def test_replicated_topic(topic_factory):
             topic = await topic_factory("my.topic", partitions=3, replication=1)
     """
-    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-    from aiokafka.errors import TopicAlreadyExistsError
+    # Skip if Kafka is not properly configured (empty, whitespace-only, or malformed)
+    # The validation at module load time catches:
+    # - Empty string or None
+    # - Whitespace-only values
+    # - Non-numeric port (e.g., "localhost:abc")
+    # - Port out of range (must be 1-65535)
+    if not _kafka_config_validation:
+        factory_skip_reason: str = (
+            _kafka_config_validation.skip_reason
+            or "KAFKA_BOOTSTRAP_SERVERS not configured"
+        )
+        pytest.skip(factory_skip_reason)
 
-    admin: AIOKafkaAdminClient | None = None
-    created_topics: list[str] = []
+    # SAFETY: At this point, KAFKA_BOOTSTRAP_SERVERS is guaranteed to be valid
+    # because validate_bootstrap_servers() returned is_valid=True
+    assert _kafka_config_validation.is_valid, (
+        "Fixture logic error: should have skipped if validation failed"
+    )
 
-    async def _create_topic(
-        topic_name: str,
-        partitions: int = 1,
-        replication_factor: int = 1,
-    ) -> str:
-        """Create a topic with custom configuration.
+    # DEFENSIVE: Re-validate at point of use to catch runtime env changes.
+    # The module-level _kafka_config_validation is cached at import time,
+    # so this check catches if someone modified KAFKA_BOOTSTRAP_SERVERS after import.
+    current_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+    if not current_bootstrap_servers or not current_bootstrap_servers.strip():
+        pytest.skip(
+            "KAFKA_BOOTSTRAP_SERVERS is empty or whitespace-only at fixture execution. "
+            "Env var may have been modified after module import."
+        )
 
-        Args:
-            topic_name: Name of the topic to create.
-            partitions: Number of partitions.
-            replication_factor: Replication factor (usually 1 for testing).
+    # Use the shared KafkaTopicManager for topic lifecycle management
+    async with KafkaTopicManager(current_bootstrap_servers) as manager:
 
-        Returns:
-            The topic name.
-        """
-        nonlocal admin, created_topics
+        async def _create_topic(
+            topic_name: str,
+            partitions: int = 1,
+            replication_factor: int = 1,
+        ) -> str:
+            """Create a topic with custom configuration.
 
-        if admin is None:
-            admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-            await admin.start()
+            Args:
+                topic_name: Name of the topic to create.
+                partitions: Number of partitions.
+                replication_factor: Replication factor (usually 1 for testing).
 
-        try:
-            await admin.create_topics(
-                [
-                    NewTopic(
-                        name=topic_name,
-                        num_partitions=partitions,
-                        replication_factor=replication_factor,
-                    )
-                ]
+            Returns:
+                The topic name.
+            """
+            return await manager.create_topic(
+                topic_name,
+                partitions=partitions,
+                replication_factor=replication_factor,
             )
-            created_topics.append(topic_name)
-        except TopicAlreadyExistsError:
-            pass  # Topic already exists - acceptable in test environments
 
-        return topic_name
-
-    yield _create_topic
-
-    # Cleanup
-    if admin is not None:
-        if created_topics:
-            try:
-                await admin.delete_topics(created_topics)
-            except Exception as e:
-                logger.warning(
-                    "Cleanup failed for Kafka topics %s: %s",
-                    created_topics,
-                    e,
-                    exc_info=True,
-                )
-        try:
-            await admin.close()
-        except Exception as e:
-            logger.warning(
-                "Failed to close Kafka admin client: %s",
-                e,
-                exc_info=True,
-            )
+        yield _create_topic
+        # Cleanup is handled automatically by KafkaTopicManager context exit

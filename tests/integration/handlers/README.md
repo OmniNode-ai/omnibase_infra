@@ -57,8 +57,9 @@ cp .env.example .env
 ### Remote Infrastructure Host (Optional)
 
 ```bash
-# Override the default infrastructure server IP (see tests/infrastructure_config.py)
-REMOTE_INFRA_HOST=192.168.86.200  # or localhost for local development
+# Override the default infrastructure server hostname (see tests/infrastructure_config.py)
+# Default is localhost; set to your infrastructure server IP for remote testing
+REMOTE_INFRA_HOST=localhost  # or your-server-ip for remote infrastructure
 ```
 
 ### PostgreSQL (HandlerDb)

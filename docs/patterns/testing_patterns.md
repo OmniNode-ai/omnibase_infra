@@ -192,7 +192,7 @@ assert node_type == "effect", "Wrong node type"
 assert node_type == "effect", (
     f"Node '{node_id}' performs I/O but marked as '{node_type}' instead of 'effect'.\n"
     f"Description: {description}\n\n"
-    f"HOW TO FIX: Update contract.yaml to set node_type: effect for this node.\n"
+    f"HOW TO FIX: Update contract.yaml to set node_type: EFFECT_GENERIC for this node.\n"
     f"All nodes that perform external I/O operations must be effect nodes."
 )
 ```

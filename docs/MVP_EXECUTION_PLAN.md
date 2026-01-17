@@ -423,7 +423,7 @@ class NodePostgresAdapterEffect(NodeEffect):
 contract_version: "1.0.0"
 node_version: "1.0.0"
 name: "node_postgres_adapter_effect"
-node_type: "EFFECT"
+node_type: "EFFECT_GENERIC"
 description: "PostgreSQL database adapter for ONEX infrastructure"
 
 input_model:

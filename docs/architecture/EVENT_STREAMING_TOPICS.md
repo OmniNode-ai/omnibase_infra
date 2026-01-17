@@ -643,7 +643,7 @@ ONEX node contracts declare their event channel dependencies in `contract.yaml`.
 meta:
   name: registry-effect
   version: 1.0.0
-  node_type: EFFECT
+  node_type: EFFECT_GENERIC
 
 # event_channels is at top level, NOT under meta
 event_channels:
@@ -680,7 +680,7 @@ event_channels:
 meta:
   name: registration-orchestrator
   version: 1.0.0
-  node_type: ORCHESTRATOR
+  node_type: ORCHESTRATOR_GENERIC
 
 # event_channels is at top level, NOT under meta
 event_channels:
@@ -792,7 +792,7 @@ First, define the event channels in `contract.yaml`. The `event_type` field serv
 meta:
   name: registry-effect-node
   version: 1.0.0
-  node_type: EFFECT
+  node_type: EFFECT_GENERIC
 
 # event_channels is at top level, NOT under meta
 event_channels:

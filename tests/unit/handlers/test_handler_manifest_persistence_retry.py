@@ -1249,9 +1249,6 @@ class TestRetryTiming:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Timing-based test may be flaky in CI - backoff timing is approximate"
-    )
     async def test_backoff_timing_approximate(
         self, temp_storage_path: Path, mock_container: MagicMock
     ) -> None:
@@ -1260,9 +1257,8 @@ class TestRetryTiming:
         Contract: initial_delay=0.1s, base=2
         First retry should wait ~0.1s, second should wait ~0.2s.
 
-        Note: This test is marked xfail because timing tests are inherently
-        flaky in CI environments. The retry logic is also tested by other
-        non-timing-based tests.
+        Note: Timing tests can be flaky in CI environments. The retry logic
+        is also validated by non-timing-based tests for redundancy.
         """
         handler = await create_initialized_handler(temp_storage_path, mock_container)
 

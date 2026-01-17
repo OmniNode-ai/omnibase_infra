@@ -20,8 +20,8 @@ Environment Variables:
     POSTGRES_USER: Database user (default: postgres)
     POSTGRES_PASSWORD: Database password (REQUIRED - no default, tests skip if unset)
 
-    For OmniNode infrastructure, set:
-        POSTGRES_HOST=192.168.86.200
+    For remote OmniNode infrastructure, set:
+        POSTGRES_HOST=your-infra-server-ip
         POSTGRES_PORT=5436
         POSTGRES_DATABASE=omninode_bridge
 

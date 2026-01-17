@@ -81,7 +81,7 @@ Security Considerations:
     - **FSM state information**: Current state value if FSM attributes exist
       (e.g., ``connected``, ``authenticated``, ``processing``).
     - **Endpoint URLs**: Health, API, and metrics endpoint paths.
-    - **Node metadata**: Node ID (UUID), type (EFFECT/COMPUTE/etc.), and version.
+    - **Node metadata**: Node ID (UUID), type via ``EnumNodeKind`` (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR), and version.
 
     **What is NOT Exposed**:
 
