@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
 
+from omnibase_infra.errors import InfraUnavailableError
 from tests.integration.correlation.conftest import (
     MockHandlerA,
     MockHandlerB,
@@ -31,9 +33,12 @@ from tests.integration.correlation.conftest import (
     assert_correlation_in_logs,
 )
 
-# Type alias for async message handlers - defined at module level for runtime use
-# in SimpleAsyncEventBus._subscribers typing
-AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
+if TYPE_CHECKING:
+    # Type alias for async message handlers - used only in type annotations
+    AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
+else:
+    # Runtime type alias for SimpleAsyncEventBus._subscribers typing
+    AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
 
 
 pytestmark = [
@@ -145,12 +150,18 @@ class TestCorrelationPreservation:
         await handler_a.execute(correlation_id)
 
         # Assert - Handler B received the message
-        assert len(handler_b.received_messages) == 1
+        assert len(handler_b.received_messages) == 1, (
+            f"Expected Handler B to receive exactly 1 message, "
+            f"but received {len(handler_b.received_messages)}"
+        )
 
         # Assert - Correlation ID was preserved
         # Messages serialize correlation_id as string for wire transport (JSON/Kafka)
         received_correlation_id = handler_b.received_messages[0].get("correlation_id")
-        assert received_correlation_id == str(correlation_id)
+        assert received_correlation_id == str(correlation_id), (
+            f"Correlation ID not preserved in message. "
+            f"Expected '{correlation_id}', got '{received_correlation_id}'"
+        )
 
         # Assert - Correlation ID appears in logs at handler boundaries
         assert_correlation_in_logs(log_capture, correlation_id, "handler_a_entry")
@@ -170,8 +181,6 @@ class TestCorrelationPreservation:
         should include the correlation ID in its context for proper error
         tracing and debugging.
         """
-        from omnibase_infra.errors import InfraUnavailableError
-
         # Arrange
         handler_a = MockHandlerA(event_bus)
         handler_b = MockHandlerB(should_fail=True)
@@ -184,7 +193,10 @@ class TestCorrelationPreservation:
 
         # Assert - Error contains the correlation ID in context
         error = exc_info.value
-        assert error.model.correlation_id == correlation_id
+        assert error.model.correlation_id == correlation_id, (
+            f"Expected correlation_id {correlation_id} in error context, "
+            f"but got {error.model.correlation_id}"
+        )
 
         # Assert - Handler entry was logged before failure
         assert_correlation_in_logs(log_capture, correlation_id, "handler_a_entry")
@@ -267,15 +279,27 @@ class TestCorrelationPreservation:
         await handler_a.execute(correlation_id)
 
         # Assert - All handlers received messages
-        assert len(handler_b.received_messages) == 1
-        assert len(handler_c.received_messages) == 1
+        assert len(handler_b.received_messages) == 1, (
+            f"Expected Handler B to receive exactly 1 message, "
+            f"but received {len(handler_b.received_messages)}"
+        )
+        assert len(handler_c.received_messages) == 1, (
+            f"Expected Handler C to receive exactly 1 message, "
+            f"but received {len(handler_c.received_messages)}"
+        )
 
         # Assert - Correlation ID preserved through all handlers
         # Messages serialize correlation_id as string for wire transport (JSON/Kafka)
         b_correlation = handler_b.received_messages[0].get("correlation_id")
         c_correlation = handler_c.received_messages[0].get("correlation_id")
-        assert b_correlation == str(correlation_id)
-        assert c_correlation == str(correlation_id)
+        assert b_correlation == str(correlation_id), (
+            f"Correlation ID not preserved in Handler B. "
+            f"Expected '{correlation_id}', got '{b_correlation}'"
+        )
+        assert c_correlation == str(correlation_id), (
+            f"Correlation ID not preserved in Handler C. "
+            f"Expected '{correlation_id}', got '{c_correlation}'"
+        )
 
         # Assert - All 6 boundaries are logged with correlation ID
         boundaries = [

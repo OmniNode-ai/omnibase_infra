@@ -36,7 +36,7 @@ import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -512,13 +512,11 @@ class TestCorrelationKafka:
 
         Creates the topic via Kafka admin API and cleans up after test.
         """
-        import uuid
-
         from aiokafka.admin import AIOKafkaAdminClient, NewTopic
         from aiokafka.errors import TopicAlreadyExistsError
 
-        bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:29092")
-        topic_name = f"test.correlation.{uuid.uuid4().hex[:12]}"
+        bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+        topic_name = f"test.correlation.{uuid4().hex[:12]}"
 
         admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
         await admin.start()
@@ -551,9 +549,7 @@ class TestCorrelationKafka:
     @pytest.fixture
     def unique_group(self) -> str:
         """Generate unique consumer group for test isolation."""
-        import uuid
-
-        return f"correlation-test-group-{uuid.uuid4().hex[:8]}"
+        return f"correlation-test-group-{uuid4().hex[:8]}"
 
     @pytest.mark.asyncio
     async def test_correlation_end_to_end_with_real_kafka(

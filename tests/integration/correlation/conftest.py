@@ -117,6 +117,11 @@ async def log_capture() -> AsyncGenerator[list[logging.LogRecord], None]:
         List of captured LogRecord objects that can be inspected for
         correlation_id attributes and message content.
 
+    Note:
+        The fixture uses a 10ms delay before cleanup to ensure reliable log
+        capture in CI environments. Handler cleanup is performed with explicit
+        flush and safe removal to prevent handler leaks between tests.
+
     Example:
         async def test_correlation_logging(log_capture):
             # ... perform operations that log with correlation_id ...
@@ -127,14 +132,20 @@ async def log_capture() -> AsyncGenerator[list[logging.LogRecord], None]:
     captured_records: list[logging.LogRecord] = []
 
     class CapturingHandler(logging.Handler):
+        """Custom handler that captures log records for test inspection."""
+
         def emit(self, record: logging.LogRecord) -> None:
+            """Capture log record to the shared list."""
             captured_records.append(record)
 
     handler = CapturingHandler()
+    handler.setLevel(logging.DEBUG)
     logger = logging.getLogger("omnibase_infra")
     original_level = logger.level
+    original_handlers = list(logger.handlers)  # Snapshot for cleanup verification
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
+
     try:
         yield captured_records
     finally:
@@ -144,11 +155,33 @@ async def log_capture() -> AsyncGenerator[list[logging.LogRecord], None]:
         # - Multiple event loop iterations for pending log operations
         # - Containerized environments with timing variations
         await asyncio.sleep(0.01)
-        try:
+
+        # Explicit flush before removal to ensure all records are captured
+        handler.flush()
+
+        # Safe handler removal - check if handler is still attached
+        if handler in logger.handlers:
             logger.removeHandler(handler)
-        except ValueError:  # Handler already removed
-            pass
+
+        # Close the handler to release any resources
+        handler.close()
+
+        # Restore original log level
         logger.setLevel(original_level)
+
+        # Verify no handler leak: current handlers should match original
+        # (minus our handler) - log warning if unexpected handlers remain
+        current_handlers = set(logger.handlers)
+        expected_handlers = set(original_handlers)
+        if current_handlers != expected_handlers:
+            # This is a test infrastructure issue, not a test failure
+            import warnings
+
+            warnings.warn(
+                f"Handler leak detected: expected {len(expected_handlers)} handlers, "
+                f"found {len(current_handlers)}",
+                stacklevel=2,
+            )
 
 
 @pytest.fixture
