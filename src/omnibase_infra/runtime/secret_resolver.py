@@ -79,6 +79,18 @@ Vault Integration:
         - "secret/myapp/db#password" -> Reads "password" field from secret at myapp/db
         - "secret/myapp/db" -> Reads first field value from secret
 
+    Type Handling:
+        All Vault values are converted to strings. This is intentional because
+        SecretResolver returns SecretStr values (which only wrap strings) for
+        security. Non-string Vault values are converted via Python's str():
+
+        - Integers: 123 -> "123"
+        - Booleans: True -> "True"
+        - Lists/Dicts: Python repr (NOT JSON)
+
+        Best Practice: Store secrets as strings in Vault. For structured data,
+        store as JSON strings and parse after resolution.
+
     Graceful Degradation:
         - If vault_handler is None: Returns None with a warning log
         - Vault errors are wrapped in SecretResolutionError with correlation ID
@@ -688,7 +700,8 @@ class SecretResolver:
             collector: Metrics collector implementing ProtocolSecretResolverMetrics,
                 or None to disable external metrics collection.
         """
-        self._metrics_collector = collector
+        with self._lock:
+            self._metrics_collector = collector
 
     def _record_resolution_success(
         self,
@@ -779,8 +792,9 @@ class SecretResolver:
             try:
                 if hasattr(self._metrics_collector, "record_resolution_failure"):
                     self._metrics_collector.record_resolution_failure(source_type)
-                if hasattr(self._metrics_collector, "record_cache_miss"):
-                    self._metrics_collector.record_cache_miss()
+                # NOTE: Do NOT call record_cache_miss() here - resolution failures
+                # are distinct from cache misses. Cache misses are already tracked
+                # in get_secret() and get_secret_async() via self._misses += 1
             except Exception as e:
                 # Never let metrics failures affect resolution
                 logger.debug(
@@ -792,17 +806,33 @@ class SecretResolver:
                     },
                 )
 
-        # Structured logging
-        logger.debug(
-            "Secret resolution failed: %s",
-            logical_name,
-            extra={
-                "logical_name": logical_name,
-                "source_type": source_type,
-                "reason": reason,
-                "correlation_id": str(correlation_id),
-            },
-        )
+        # Structured logging - level depends on failure type
+        # Configuration issues (no_mapping, handler_not_configured) are warnings
+        # since they indicate misconfiguration that should be addressed.
+        # Expected failures (not_found for optional secrets) are debug level.
+        if reason in ("no_mapping", "handler_not_configured"):
+            logger.warning(
+                "Secret resolution failed (configuration issue): %s",
+                logical_name,
+                extra={
+                    "logical_name": logical_name,
+                    "source_type": source_type,
+                    "reason": reason,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+        else:
+            # not_found and other expected failures - debug level
+            logger.debug(
+                "Secret resolution failed: %s",
+                logical_name,
+                extra={
+                    "logical_name": logical_name,
+                    "source_type": source_type,
+                    "reason": reason,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
     # === Introspection (non-sensitive) ===
 
@@ -1184,11 +1214,11 @@ class SecretResolver:
         if original_is_relative:
             secrets_dir_resolved = self._config.secrets_dir.resolve()
             # Relative paths MUST resolve within secrets_dir
-            try:
-                resolved_path.relative_to(secrets_dir_resolved)
-            except ValueError:
+            # Use is_relative_to() to check without raising (Python 3.9+)
+            if not resolved_path.is_relative_to(secrets_dir_resolved):
                 # Path escapes secrets_dir - this is a path traversal attempt
-                logger.warning(
+                # SECURITY: Log at ERROR level - potential attack indicator
+                logger.error(
                     "Path traversal detected for secret: %s",
                     logical_name,
                     extra={"logical_name": logical_name},
@@ -1321,6 +1351,18 @@ class SecretResolver:
             "secret/myapp/db#password" -> mount="secret", path="myapp/db", field="password"
             "secret/myapp/db" -> mount="secret", path="myapp/db", field=None (first value)
 
+        Type Handling:
+            All Vault values are converted to strings via ``str()``. This is intentional
+            because SecretResolver returns ``SecretStr`` values, which only wrap strings.
+            Non-string Vault values (integers, booleans, dicts) are converted as follows:
+
+            - Integers: ``123`` -> ``"123"``
+            - Booleans: ``True`` -> ``"True"``
+            - Lists/Dicts: Python repr (NOT JSON) - avoid storing complex types
+
+            Best Practice: Store secrets as strings in Vault. If you need structured
+            data, store it as a JSON string and parse after resolution.
+
         Security:
             - This method never logs Vault paths (could reveal secret structure)
             - Secret values are never logged at any level
@@ -1332,7 +1374,7 @@ class SecretResolver:
             correlation_id: Optional correlation ID for tracing
 
         Returns:
-            Secret value or None if not found
+            Secret value as string, or None if not found
 
         Raises:
             SecretResolutionError: On Vault communication failures
@@ -1423,7 +1465,20 @@ class SecretResolver:
             if value is None:
                 return None
 
-            # Ensure we return a string
+            # SECURITY: String conversion is INTENTIONAL for SecretStr compatibility.
+            #
+            # SecretStr (from Pydantic) only wraps string values to prevent accidental
+            # logging of secrets. Since SecretResolver returns SecretStr, all Vault
+            # values must be converted to strings.
+            #
+            # Type conversion behavior:
+            #   - Strings: returned as-is
+            #   - Integers: "123" (str representation)
+            #   - Booleans: "True" or "False" (Python str representation)
+            #   - Lists/Dicts: Python repr (NOT JSON) - avoid storing complex types
+            #
+            # Best Practice: Store secrets as strings in Vault. If you need structured
+            # data, store it as a JSON string and parse after resolution.
             return str(value)
 
         except InfraAuthenticationError:

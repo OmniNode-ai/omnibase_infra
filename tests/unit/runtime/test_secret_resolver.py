@@ -28,17 +28,17 @@ import os
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from pydantic import SecretStr
 
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraUnavailableError,
+    ModelInfraErrorContext,
     SecretResolutionError,
 )
 from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
@@ -1293,10 +1293,6 @@ class TestSecretResolverSecurity:
 
     def test_vault_resolves_secret_with_mocked_handler(self) -> None:
         """Vault secrets should resolve when handler returns valid response."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from omnibase_core.models.dispatch import ModelHandlerOutput
-
         # Create a mock vault handler
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
@@ -1336,8 +1332,6 @@ class TestSecretResolverSecurity:
     @pytest.mark.asyncio
     async def test_vault_async_resolves_secret(self) -> None:
         """Async Vault secrets should resolve with mocked handler."""
-        from unittest.mock import AsyncMock, MagicMock
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             return_value=MagicMock(
@@ -1538,8 +1532,6 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_path_parsing_with_field(self) -> None:
         """Should parse vault path with mount/path#field format."""
-        from unittest.mock import AsyncMock, MagicMock
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             return_value=MagicMock(
@@ -1583,8 +1575,6 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_path_parsing_without_field(self) -> None:
         """Should return first field value when no field specified."""
-        from unittest.mock import AsyncMock, MagicMock
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             return_value=MagicMock(
@@ -1621,8 +1611,6 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_field_not_found_returns_none(self) -> None:
         """Should return None when specified field doesn't exist."""
-        from unittest.mock import AsyncMock, MagicMock
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             return_value=MagicMock(
@@ -1658,8 +1646,6 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_empty_data_returns_none(self) -> None:
         """Should return None when Vault returns empty data."""
-        from unittest.mock import AsyncMock, MagicMock
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             return_value=MagicMock(
@@ -1695,8 +1681,6 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_non_success_status_returns_none(self) -> None:
         """Should return None when Vault returns non-success status."""
-        from unittest.mock import AsyncMock, MagicMock
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             return_value=MagicMock(
@@ -1729,14 +1713,6 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_auth_error_propagates(self) -> None:
         """Should propagate InfraAuthenticationError from handler."""
-        from unittest.mock import AsyncMock, MagicMock
-        from uuid import uuid4
-
-        from omnibase_infra.enums import EnumInfraTransportType
-        from omnibase_infra.errors import (
-            ModelInfraErrorContext,
-        )
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             side_effect=InfraAuthenticationError(
@@ -1769,11 +1745,6 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_unavailable_error_propagates(self) -> None:
         """Should propagate InfraUnavailableError (circuit breaker open)."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from omnibase_infra.enums import EnumInfraTransportType
-        from omnibase_infra.errors import ModelInfraErrorContext
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             side_effect=InfraUnavailableError(
@@ -1806,8 +1777,6 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_generic_error_wrapped_in_secret_resolution_error(self) -> None:
         """Should wrap generic errors in SecretResolutionError."""
-        from unittest.mock import AsyncMock, MagicMock
-
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
             side_effect=RuntimeError("Unexpected error")
@@ -1859,9 +1828,6 @@ class TestSecretResolverCorrelationId:
     @pytest.mark.asyncio
     async def test_correlation_id_passed_to_vault_handler(self) -> None:
         """Should pass correlation_id to Vault handler in envelope."""
-        from unittest.mock import AsyncMock, MagicMock
-        from uuid import UUID
-
         test_correlation_id = uuid4()
         mock_vault_handler = MagicMock()
         mock_vault_handler.execute = AsyncMock(
@@ -1948,8 +1914,6 @@ class TestSecretResolverMetrics:
 
     def test_external_metrics_collector_called(self) -> None:
         """Should call external metrics collector methods."""
-        from unittest.mock import MagicMock
-
         mock_collector = MagicMock()
         mock_collector.record_resolution_success = MagicMock()
         mock_collector.record_resolution_latency = MagicMock()
@@ -1977,8 +1941,6 @@ class TestSecretResolverMetrics:
 
     def test_metrics_collector_errors_ignored(self) -> None:
         """Should not let metrics collector errors affect resolution."""
-        from unittest.mock import MagicMock
-
         mock_collector = MagicMock()
         mock_collector.record_resolution_success = MagicMock(
             side_effect=RuntimeError("Metrics failed")
@@ -2007,8 +1969,6 @@ class TestSecretResolverMetrics:
 
     def test_set_metrics_collector(self) -> None:
         """Should allow setting metrics collector after construction."""
-        from unittest.mock import MagicMock
-
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(

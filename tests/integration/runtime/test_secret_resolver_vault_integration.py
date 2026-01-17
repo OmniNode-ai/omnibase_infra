@@ -27,32 +27,34 @@ Skip Conditions:
 from __future__ import annotations
 
 import logging
-import os
 import uuid
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 import pytest
 
-from omnibase_infra.errors import SecretResolutionError
+from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+    SecretResolutionError,
+)
 from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
 from omnibase_infra.runtime.models.model_secret_source_spec import ModelSecretSourceSpec
 from omnibase_infra.runtime.secret_resolver import SecretResolver
+from tests.integration.handlers.conftest import (
+    VAULT_AVAILABLE,
+    VAULT_REACHABLE,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerVault
 
 logger = logging.getLogger(__name__)
-
-# Import Vault availability from conftest
-from tests.integration.handlers.conftest import (
-    VAULT_ADDR,
-    VAULT_AVAILABLE,
-    VAULT_REACHABLE,
-    VAULT_TOKEN,
-)
 
 # Test secret path prefix for isolation
 TEST_SECRET_PATH_PREFIX = "integration-tests/secret-resolver"
@@ -77,10 +79,27 @@ def unique_secret_path() -> str:
 
 
 @pytest.fixture
-async def cleanup_secret(vault_handler: HandlerVault, unique_secret_path: str):
+async def cleanup_secret(
+    vault_handler: HandlerVault, unique_secret_path: str
+) -> AsyncGenerator[str, None]:
     """Cleanup fixture that deletes test secret after test completion.
 
     Yields the secret path for the test to use, then cleans up.
+
+    Expected behavior:
+        - Succeeds silently when secret is deleted successfully
+        - Handles SecretResolutionError gracefully (secret never created or already deleted)
+        - Logs infrastructure errors at warning level but does not fail test teardown
+        - Never re-raises exceptions to ensure test teardown completes
+
+    Note:
+        This fixture catches specific exception types for better diagnostics:
+        - SecretResolutionError: Expected for already-deleted or never-created secrets
+        - InfraConnectionError: Vault connection issues during cleanup
+        - InfraTimeoutError: Vault operation timed out during cleanup
+        - InfraAuthenticationError: Token expired or invalid during cleanup
+        - InfraUnavailableError: Vault unavailable during cleanup
+        - Exception: Catch-all for unexpected errors
     """
     yield unique_secret_path
 
@@ -92,12 +111,60 @@ async def cleanup_secret(vault_handler: HandlerVault, unique_secret_path: str):
             "correlation_id": str(uuid.uuid4()),
         }
         await vault_handler.execute(envelope)
+        logger.debug("Cleanup: deleted test secret at %s", unique_secret_path)
+    except SecretResolutionError:
+        # Expected: secret was never created or already deleted
+        logger.debug(
+            "Cleanup: secret already deleted or never existed at path %s",
+            unique_secret_path,
+        )
+    except InfraConnectionError as e:
+        # Vault connection issue - log at warning but don't fail teardown
+        logger.warning(
+            "Cleanup: Vault connection error while deleting test secret %s: %s",
+            unique_secret_path,
+            e,
+            exc_info=True,
+        )
+    except InfraTimeoutError as e:
+        # Vault operation timed out - log at warning but don't fail teardown
+        logger.warning(
+            "Cleanup: Vault timeout while deleting test secret %s: %s",
+            unique_secret_path,
+            e,
+            exc_info=True,
+        )
+    except InfraAuthenticationError as e:
+        # Token may have expired during test - log at warning but don't fail teardown
+        logger.warning(
+            "Cleanup: Vault authentication error while deleting test secret %s: %s",
+            unique_secret_path,
+            e,
+            exc_info=True,
+        )
+    except InfraUnavailableError as e:
+        # Vault unavailable (circuit breaker open or server down)
+        logger.warning(
+            "Cleanup: Vault unavailable while deleting test secret %s: %s",
+            unique_secret_path,
+            e,
+            exc_info=True,
+        )
     except Exception as e:
-        logger.debug("Cleanup: secret may not exist - %s", e)
+        # Catch-all for any other unexpected errors
+        logger.warning(
+            "Cleanup: unexpected error deleting test secret %s: %s (%s)",
+            unique_secret_path,
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
 
 
 @pytest.fixture
-async def write_test_secret(vault_handler: HandlerVault, cleanup_secret: str):
+async def write_test_secret(
+    vault_handler: HandlerVault, cleanup_secret: str
+) -> tuple[str, dict[str, str]]:
     """Write a test secret to Vault and return the path and data.
 
     Returns:
