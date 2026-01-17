@@ -19,21 +19,28 @@ The `BindingConfigResolver` provides a unified interface for resolving handler c
 
 ```python
 from pathlib import Path
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
 from omnibase_infra.runtime.models import (
     ModelBindingConfigResolverConfig,
     ModelBindingConfig,
 )
 
-# Configure resolver
+# Bootstrap container and register config
+container = ModelONEXContainer()
 config = ModelBindingConfigResolverConfig(
     config_dir=Path("/etc/onex/handlers"),
     cache_ttl_seconds=300.0,
     env_prefix="HANDLER",
 )
+await container.service_registry.register_instance(
+    interface=ModelBindingConfigResolverConfig,
+    instance=config,
+    scope="global",
+)
 
-# Initialize resolver
-resolver = BindingConfigResolver(config=config)
+# Create resolver with container injection
+resolver = BindingConfigResolver(container)
 
 # Resolve from inline config
 binding = resolver.resolve(
@@ -263,12 +270,21 @@ binding = resolver.resolve(
 
 ```python
 from pathlib import Path
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
 from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
 
-# Create resolver with defaults
+# Bootstrap container and register config
+container = ModelONEXContainer()
 config = ModelBindingConfigResolverConfig()
-resolver = BindingConfigResolver(config=config)
+await container.service_registry.register_instance(
+    interface=ModelBindingConfigResolverConfig,
+    instance=config,
+    scope="global",
+)
+
+# Create resolver with container injection
+resolver = BindingConfigResolver(container)
 
 # Resolve from inline config only
 binding = resolver.resolve(
@@ -310,10 +326,19 @@ retry_policy:
 Load and resolve:
 
 ```python
+from omnibase_core.container import ModelONEXContainer
+
+# Container setup with config_dir
+container = ModelONEXContainer()
 config = ModelBindingConfigResolverConfig(
     config_dir=Path("/etc/onex/handlers"),
 )
-resolver = BindingConfigResolver(config=config)
+await container.service_registry.register_instance(
+    interface=ModelBindingConfigResolverConfig,
+    instance=config,
+    scope="global",
+)
+resolver = BindingConfigResolver(container)
 
 binding = resolver.resolve(
     handler_type="db",
@@ -365,11 +390,9 @@ binding = resolver.resolve(
 For I/O-bound configurations (file or Vault):
 
 ```python
-async def resolve_handlers():
-    config = ModelBindingConfigResolverConfig(
-        config_dir=Path("/etc/onex/handlers"),
-    )
-    resolver = BindingConfigResolver(config=config)
+async def resolve_handlers(container: ModelONEXContainer):
+    # Resolve BindingConfigResolver from container
+    resolver = container.service_registry.resolve_service(BindingConfigResolver)
 
     # Resolve single config asynchronously
     binding = await resolver.resolve_async(
@@ -862,10 +885,10 @@ raise ProtocolConfigurationError(
 
 ### Not a Node
 
-BindingConfigResolver is a **runtime utility**, not an ONEX node. It does not require:
-- `contract.yaml` (not a node)
-- `ModelONEXContainer` injection (standalone utility)
-- Handler routing (direct method calls)
+BindingConfigResolver is a **runtime utility**, not an ONEX node. It:
+- Uses container-based dependency injection (ONEX pattern)
+- Does not require `contract.yaml` (not a node)
+- Does not use handler routing (direct method calls)
 
 This is intentional - the resolver is a low-level primitive used by orchestrators, not a workflow component.
 
@@ -920,13 +943,11 @@ class MyHandler:
 ```python
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
-from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
 
 class MyHandler:
     def __init__(self, container: ModelONEXContainer):
-        resolver = BindingConfigResolver(
-            config=ModelBindingConfigResolverConfig(env_prefix="HANDLER")
-        )
+        # Resolve BindingConfigResolver from container
+        resolver = container.service_registry.resolve_service(BindingConfigResolver)
         config = resolver.resolve(handler_type="db", inline_config={})
         self.timeout_ms = config.timeout_ms
         self.retry_attempts = config.retry_policy.max_retries if config.retry_policy else 3
@@ -954,17 +975,13 @@ class MyHandler:
 
 **After (BindingConfigResolver)**:
 ```python
-from pathlib import Path
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
-from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
 
 class MyHandler:
-    def __init__(self, handler_type: str):
-        resolver = BindingConfigResolver(
-            config=ModelBindingConfigResolverConfig(
-                config_dir=Path("configs"),
-            )
-        )
+    def __init__(self, container: ModelONEXContainer, handler_type: str):
+        # Resolve BindingConfigResolver from container
+        resolver = container.service_registry.resolve_service(BindingConfigResolver)
         # Config file reference resolved automatically
         config = resolver.resolve(
             handler_type=handler_type,
@@ -991,27 +1008,14 @@ class MyHandler:
 
 **After (BindingConfigResolver)**:
 ```python
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
-from omnibase_infra.runtime.secret_resolver import SecretResolver
-from omnibase_infra.runtime.models import (
-    ModelBindingConfigResolverConfig,
-    ModelSecretResolverConfig,
-)
 
 class MyHandler:
-    def __init__(self):
-        # Create secret resolver for vault: references
-        secret_resolver = SecretResolver(
-            config=ModelSecretResolverConfig(
-                enable_convention_fallback=True,
-            )
-        )
-
-        resolver = BindingConfigResolver(
-            config=ModelBindingConfigResolverConfig(
-                secret_resolver=secret_resolver,
-            )
-        )
+    def __init__(self, container: ModelONEXContainer):
+        # Resolve BindingConfigResolver from container
+        # (SecretResolver should also be registered in container for vault: support)
+        resolver = container.service_registry.resolve_service(BindingConfigResolver)
 
         # Vault reference resolved automatically via config_ref
         config = resolver.resolve(

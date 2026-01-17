@@ -298,6 +298,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             if self._config.enable_caching:
                 source = self._describe_source(config_ref, inline_config)
                 self._cache_config(handler_type, result, source)
+            else:
+                # Count miss when caching is disabled since _cache_config won't be called
+                self._misses += 1
 
             return result
 
@@ -427,6 +430,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if handler_type not in self._cache:
                         source = self._describe_source(config_ref, inline_config)
                         self._cache_config(handler_type, result, source)
+            else:
+                # Count miss when caching is disabled since _cache_config won't be called
+                with self._lock:
+                    self._misses += 1
 
             return result
 
@@ -618,6 +625,13 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Returns:
             ModelBindingConfig if cached and valid, None otherwise.
+
+        Note:
+            This method does NOT increment the miss counter. Misses are counted
+            at the point where resolution from sources occurs (either in
+            _cache_config when caching is enabled, or in resolve/resolve_async
+            when caching is disabled). This ensures accurate miss counting in
+            the async path which uses a double-check locking pattern.
         """
         if not self._config.enable_caching:
             return None
