@@ -22,7 +22,17 @@ Configuration Validation:
     This handles:
     - Empty/whitespace-only values
     - Malformed port numbers (non-numeric, out of range)
+    - IPv6 addresses (bracketed [::1]:9092 and bare ::1 formats)
     - Clear skip reasons for test output
+
+IPv6 Address Support:
+    Both bracketed and bare IPv6 addresses are supported:
+    - Bracketed with port: "[::1]:9092" or "[2001:db8::1]:9092"
+    - Bare without port: "::1" or "2001:db8::1" (uses default port 29092)
+
+    Bare IPv6 addresses with apparent port suffixes (e.g., "::1:9092") are treated
+    as the full IPv6 address with default port, since the format is ambiguous.
+    For unambiguous IPv6 with custom port, always use the bracketed format.
 
 Topic Management Pattern:
     Use KafkaTopicManager for consistent topic creation and cleanup in tests:
@@ -41,6 +51,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -128,11 +139,11 @@ def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
     Returns:
         A formatted error message with remediation hints if available.
     """
-    base_msg = f"Kafka error_code={error_code}"
+    base_msg: str = f"Kafka error_code={error_code}"
     if error_message:
         base_msg += f", message='{error_message}'"
 
-    hint = KAFKA_ERROR_REMEDIATION_HINTS.get(error_code)
+    hint: str | None = KAFKA_ERROR_REMEDIATION_HINTS.get(error_code)
     if hint:
         return f"{base_msg}. {hint}"
 
@@ -143,6 +154,75 @@ def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
         "Verify broker is running: 'docker ps | grep redpanda' or "
         "'curl -s http://<host>:9644/v1/status/ready' for Redpanda health."
     )
+
+
+# =============================================================================
+# IPv6 Detection and Parsing
+# =============================================================================
+# Bare IPv6 addresses (without brackets) are ambiguous when combined with ports.
+# For example, "::1:9092" could be interpreted as either:
+#   - IPv6 address "::1" with port "9092"
+#   - IPv6 address "::1:9092" without a port
+#
+# Per RFC 3986, IPv6 addresses in URIs should be enclosed in brackets.
+# This module treats bare IPv6 addresses as the full host with default port.
+# =============================================================================
+
+# Pattern for detecting bare IPv6 addresses (without brackets)
+# Matches strings that:
+# - Contain only hex digits, colons, and optionally dots (for IPv4-mapped addresses)
+# - Have at least 2 colons (minimum for valid IPv6)
+# - Do not start with '[' (which would be bracketed)
+_BARE_IPV6_PATTERN = re.compile(r"^[0-9a-fA-F:.]+$")
+
+
+def _is_likely_bare_ipv6(address: str) -> bool:
+    """Detect if address appears to be a bare IPv6 address without brackets.
+
+    This is a heuristic check based on:
+    - Contains more than one colon (IPv6 has multiple colons)
+    - Does not start with '[' (bracketed IPv6 uses [::1]:port format)
+    - Contains only valid IPv6 characters (hex digits, colons, dots for v4 suffix)
+
+    Note:
+        Bare IPv6 addresses with ports are ambiguous. For example, "::1:9092"
+        could be interpreted as IPv6 "::1" with port 9092, or as the full
+        IPv6 address "::1:9092". This function treats such addresses as bare
+        IPv6 (the entire string is the host, use default port).
+
+        For unambiguous IPv6 with port, use bracketed format: [::1]:9092
+
+    Args:
+        address: The address string to check.
+
+    Returns:
+        True if the address appears to be a bare IPv6 address.
+
+    Examples:
+        >>> _is_likely_bare_ipv6("::1")
+        True
+        >>> _is_likely_bare_ipv6("2001:db8::1")
+        True
+        >>> _is_likely_bare_ipv6("::ffff:192.168.1.1")  # IPv4-mapped
+        True
+        >>> _is_likely_bare_ipv6("[::1]:9092")  # Bracketed - not bare
+        False
+        >>> _is_likely_bare_ipv6("localhost:9092")  # Only one colon
+        False
+        >>> _is_likely_bare_ipv6("192.168.1.1:9092")  # IPv4 with port
+        False
+    """
+    if not address or address.startswith("["):
+        return False
+
+    # Count colons - IPv6 has at least 2 colons
+    colon_count: int = address.count(":")
+    if colon_count < 2:
+        return False
+
+    # Check if it contains only valid IPv6 characters
+    # Allows: hex digits (0-9, a-f, A-F), colons, and dots (for IPv4-mapped)
+    return bool(_BARE_IPV6_PATTERN.fullmatch(address))
 
 
 class KafkaConfigValidationResult:
@@ -185,9 +265,18 @@ def validate_bootstrap_servers(
 
     Performs comprehensive validation of the bootstrap servers string:
     - Checks for empty/whitespace-only values
-    - Validates host:port format
+    - Validates host:port format (including IPv4 and bracketed IPv6)
     - Validates port is numeric and in valid range (1-65535)
+    - Handles bare IPv6 addresses (treats as host with default port)
     - Returns structured result with skip reason for tests
+
+    IPv6 Address Support:
+        - Bracketed IPv6 with port: "[::1]:9092" - fully validated
+        - Bare IPv6 without port: "::1", "2001:db8::1" - valid, uses default port
+        - Bare IPv6 with ambiguous port: "::1:9092" - treated as bare IPv6, uses
+          default port (the "9092" is considered part of the address)
+
+        For unambiguous IPv6 with custom port, use bracketed format: [::1]:9092
 
     Args:
         bootstrap_servers: The KAFKA_BOOTSTRAP_SERVERS value from environment.
@@ -195,7 +284,7 @@ def validate_bootstrap_servers(
     Returns:
         KafkaConfigValidationResult with validation status and details.
 
-    Example:
+    Examples:
         >>> result = validate_bootstrap_servers("")
         >>> if not result:
         ...     pytest.skip(result.skip_reason)
@@ -204,6 +293,16 @@ def validate_bootstrap_servers(
         >>> assert result.is_valid
         >>> assert result.host == "localhost"
         >>> assert result.port == "9092"
+
+        >>> result = validate_bootstrap_servers("[::1]:9092")
+        >>> assert result.is_valid
+        >>> assert result.host == "[::1]"
+        >>> assert result.port == "9092"
+
+        >>> result = validate_bootstrap_servers("::1")
+        >>> assert result.is_valid
+        >>> assert result.host == "::1"
+        >>> assert result.port == "29092"  # Default port for bare IPv6
     """
     # Handle None (defensive)
     if bootstrap_servers is None:
@@ -233,17 +332,22 @@ def validate_bootstrap_servers(
             ),
         )
 
-    stripped = bootstrap_servers.strip()
+    stripped: str = bootstrap_servers.strip()
 
     # Parse host and port
+    host: str
+    port: str
     host, port = parse_bootstrap_servers(stripped)
 
     # Validate port is numeric (when explicitly provided)
-    if ":" in stripped:
+    # Skip port validation for bare IPv6 addresses (they contain multiple colons
+    # which are part of the address, not host:port separators)
+    if ":" in stripped and not _is_likely_bare_ipv6(stripped):
         # Extract port part for validation
+        port_str: str
         if stripped.startswith("["):
             # IPv6 format: [::1]:9092
-            bracket_close = stripped.rfind("]")
+            bracket_close: int = stripped.rfind("]")
             if bracket_close != -1 and bracket_close < len(stripped) - 1:
                 port_str = stripped[bracket_close + 2 :]
             else:
@@ -269,7 +373,7 @@ def validate_bootstrap_servers(
             )
 
         if port_str:
-            port_num = int(port_str)
+            port_num: int = int(port_str)
             if port_num < 1 or port_num > 65535:
                 return KafkaConfigValidationResult(
                     is_valid=False,
@@ -303,8 +407,20 @@ def parse_bootstrap_servers(bootstrap_servers: str) -> tuple[str, str]:
     - Empty/whitespace-only: Returns ("<not set>", "29092")
     - "hostname:port": Returns ("hostname", "port")
     - "hostname" (no port): Returns ("hostname", "29092")
-    - "[::1]:9092" (IPv6): Returns ("[::1]", "9092")
-    - IPv6 without brackets: Returns (address, "29092") - malformed but tolerated
+    - "[::1]:9092" (bracketed IPv6 with port): Returns ("[::1]", "9092")
+    - "::1" (bare IPv6 without port): Returns ("::1", "29092")
+    - "2001:db8::1" (bare IPv6 without port): Returns ("2001:db8::1", "29092")
+    - "::ffff:192.168.1.1" (IPv4-mapped IPv6): Returns ("::ffff:192.168.1.1", "29092")
+
+    IPv6 Address Handling:
+        Bare IPv6 addresses (without brackets) are treated as the full host with
+        the default port. This is because bare IPv6 with port is ambiguous - for
+        example, "::1:9092" could mean either:
+        - IPv6 address "::1" with port 9092, OR
+        - IPv6 address "::1:9092" without a port
+
+        For unambiguous IPv6 with port specification, use the bracketed format:
+        "[::1]:9092" or "[2001:db8::1]:9092"
 
     Note:
         This function is primarily for error message generation. For validation
@@ -315,28 +431,43 @@ def parse_bootstrap_servers(bootstrap_servers: str) -> tuple[str, str]:
 
     Returns:
         Tuple of (host, port) for use in error messages.
+
+    Examples:
+        >>> parse_bootstrap_servers("localhost:9092")
+        ('localhost', '9092')
+        >>> parse_bootstrap_servers("[::1]:9092")
+        ('[::1]', '9092')
+        >>> parse_bootstrap_servers("::1")
+        ('::1', '29092')
+        >>> parse_bootstrap_servers("2001:db8::1")
+        ('2001:db8::1', '29092')
     """
     # Handle empty/whitespace-only input
     if not bootstrap_servers or not bootstrap_servers.strip():
         return ("<not set>", "29092")
 
-    stripped = bootstrap_servers.strip()
+    stripped: str = bootstrap_servers.strip()
 
     # Handle IPv6 with brackets: [::1]:9092
     if stripped.startswith("["):
-        bracket_close = stripped.rfind("]")
+        bracket_close: int = stripped.rfind("]")
         if bracket_close != -1 and bracket_close < len(stripped) - 1:
             # Has closing bracket and something after it
             if stripped[bracket_close + 1] == ":":
-                host = stripped[: bracket_close + 1]
-                port = stripped[bracket_close + 2 :] or "29092"
+                host: str = stripped[: bracket_close + 1]
+                port: str = stripped[bracket_close + 2 :] or "29092"
                 return (host, port)
-        # Malformed IPv6 - return as-is with default port
+        # Malformed bracketed IPv6 - return as-is with default port
+        return (stripped, "29092")
+
+    # Handle bare IPv6 addresses (without brackets)
+    # These contain multiple colons which are part of the address, not separators
+    if _is_likely_bare_ipv6(stripped):
         return (stripped, "29092")
 
     # Standard host:port format - use rsplit to handle single colon
     if ":" in stripped:
-        parts = stripped.rsplit(":", 1)
+        parts: list[str] = stripped.rsplit(":", 1)
         host = parts[0] or "<not set>"
         port = parts[1] if len(parts) > 1 and parts[1] else "29092"
         return (host, port)
@@ -427,17 +558,17 @@ async def wait_for_consumer_ready(
         # Consumer MAY be ready here (with strict=False), but test should not
         # rely on this. Use assertions on actual test outcomes instead.
     """
-    start_time = asyncio.get_running_loop().time()
-    current_backoff = initial_backoff
+    start_time: float = asyncio.get_running_loop().time()
+    current_backoff: float = initial_backoff
 
     # Get initial consumer count for comparison
-    initial_health = await event_bus.health_check()
-    initial_consumer_count = initial_health.get("consumer_count", 0)
+    initial_health: dict[str, object] = await event_bus.health_check()
+    initial_consumer_count: int = initial_health.get("consumer_count", 0)  # type: ignore[assignment]
 
     # Poll until consumer count increases or timeout
     while (asyncio.get_running_loop().time() - start_time) < max_wait:
-        health = await event_bus.health_check()
-        consumer_count = health.get("consumer_count", 0)
+        health: dict[str, object] = await event_bus.health_check()
+        consumer_count: int = health.get("consumer_count", 0)  # type: ignore[assignment]
 
         # If consumer count has increased, the subscription is active
         if consumer_count > initial_consumer_count:
@@ -447,7 +578,7 @@ async def wait_for_consumer_ready(
             return True
 
         # Check if we've timed out after health check (prevents unnecessary sleep)
-        elapsed = asyncio.get_running_loop().time() - start_time
+        elapsed: float = asyncio.get_running_loop().time() - start_time
         if elapsed >= max_wait:
             break
 
@@ -504,7 +635,7 @@ async def wait_for_topic_metadata(
         >>> await wait_for_topic_metadata(admin, "my-topic", expected_partitions=3)
         True
     """
-    start_time = asyncio.get_running_loop().time()
+    start_time: float = asyncio.get_running_loop().time()
 
     while (asyncio.get_running_loop().time() - start_time) < timeout:
         try:
@@ -678,6 +809,8 @@ class KafkaTopicManager:
             await self._admin.start()
         except Exception as conn_err:
             self._admin = None  # Reset to allow retry
+            host: str
+            port: str
             host, port = parse_bootstrap_servers(self.bootstrap_servers)
             raise RuntimeError(
                 f"Failed to connect to Kafka broker at {self.bootstrap_servers}. "
@@ -731,7 +864,20 @@ class KafkaTopicManager:
             # Handle both aiokafka response formats for version compatibility:
             # - topic_errors: List of (topic, error_code, error_message) tuples (newer versions)
             # - topic_error_codes: Dict mapping topic to error_code (older versions)
-            if hasattr(response, "topic_errors") and response.topic_errors:
+            has_topic_errors: bool = hasattr(response, "topic_errors")
+            has_topic_error_codes: bool = hasattr(response, "topic_error_codes")
+            logger.debug(
+                "create_topics response for '%s': has_topic_errors=%s, has_topic_error_codes=%s",
+                topic_name,
+                has_topic_errors,
+                has_topic_error_codes,
+            )
+
+            if has_topic_errors and response.topic_errors:
+                logger.debug(
+                    "Using topic_errors format (newer aiokafka): %s",
+                    response.topic_errors,
+                )
                 for topic_error in response.topic_errors:
                     _, error_code, error_message = topic_error
                     if error_code != 0:
@@ -741,8 +887,12 @@ class KafkaTopicManager:
                             f"Failed to create topic '{topic_name}': "
                             f"{get_kafka_error_hint(error_code, error_message)}"
                         )
-            elif hasattr(response, "topic_error_codes") and response.topic_error_codes:
+            elif has_topic_error_codes and response.topic_error_codes:
                 # Older aiokafka format: dict mapping topic name to error code
+                logger.debug(
+                    "Using topic_error_codes format (older aiokafka): %s",
+                    response.topic_error_codes,
+                )
                 for topic, error_code in response.topic_error_codes.items():
                     if error_code != 0:
                         if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
@@ -751,6 +901,13 @@ class KafkaTopicManager:
                             f"Failed to create topic '{topic}': "
                             f"{get_kafka_error_hint(error_code)}"
                         )
+            else:
+                # Neither format has errors - topic created successfully
+                # or response format is unknown (may indicate new aiokafka version)
+                logger.debug(
+                    "Topic '%s' created successfully (no errors in response)",
+                    topic_name,
+                )
 
             self.created_topics.append(topic_name)
 

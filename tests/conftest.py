@@ -1,4 +1,63 @@
-"""Pytest configuration and shared fixtures for omnibase_infra tests."""
+"""Pytest configuration and shared fixtures for omnibase_infra tests.
+
+==============================================================================
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+==============================================================================
+
+This module provides session-scoped and function-scoped async fixtures. With
+pytest-asyncio 0.25+, the default event loop scope changed from "session" to
+"function", which can cause "attached to a different loop" errors when sharing
+async resources across tests.
+
+Global Configuration (pyproject.toml)
+-------------------------------------
+This project uses ``asyncio_mode = "auto"`` in ``[tool.pytest.ini_options]``.
+This auto-detects async tests but does NOT set a global loop scope.
+
+When to Configure loop_scope
+----------------------------
+**Test modules that use session-scoped async fixtures** must explicitly set
+the loop_scope via pytestmark:
+
+.. code-block:: python
+
+    # For session-scoped fixtures (shared across entire test session)
+    pytestmark = [pytest.mark.asyncio(loop_scope="session")]
+
+    # For module-scoped fixtures (shared within a single test module)
+    pytestmark = [pytest.mark.asyncio(loop_scope="module")]
+
+    # For function-scoped fixtures only (default - no config needed)
+    # Each test gets its own event loop
+
+Why This Matters
+----------------
+- **Session/Module-scoped async fixtures**: Require matching loop_scope to
+  share async resources (database connections, Kafka producers, etc.)
+- **Function-scoped async fixtures**: Work with default settings (each test
+  gets isolated event loop)
+- **RuntimeError symptoms**: "attached to a different loop" or "Event loop is
+  closed" typically indicate loop_scope mismatch
+
+Fixture Scope Reference
+-----------------------
+This module provides the following async fixtures:
+
+Session-scoped (require loop_scope="session" in test modules):
+    - (none currently - add here if session-scoped fixtures are added)
+
+Function-scoped (work with default settings):
+    - event_bus: In-memory event bus for testing
+    - container_with_registries: Real ONEX container with wired services
+
+Reference Documentation
+-----------------------
+- https://pytest-asyncio.readthedocs.io/en/latest/concepts.html#event-loop-scope
+- https://pytest-asyncio.readthedocs.io/en/latest/how-to-guides/change_default_loop_scope.html
+
+Related Tickets:
+    - OMN-1361: pytest-asyncio 0.25+ upgrade and loop_scope configuration
+"""
 
 from __future__ import annotations
 

@@ -771,7 +771,7 @@ class TestStructuredErrorConversion:
         violation = ModelContractViolation(
             file_path="nodes/test/contract.yaml",
             field_path="node_type",
-            message="Invalid node_type 'INVALID'. Must be one of: EFFECT, COMPUTE",
+            message="Invalid node_type 'INVALID'. Must be one of: EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, ORCHESTRATOR_GENERIC",
             severity=EnumContractViolationSeverity.ERROR,
         )
 
@@ -884,7 +884,7 @@ node_type: INVALID_TYPE
             field_path="node_type",
             message="Invalid node_type",
             severity=EnumContractViolationSeverity.ERROR,
-            suggestion="Use EFFECT, COMPUTE, REDUCER, or ORCHESTRATOR",
+            suggestion="Use EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, or ORCHESTRATOR_GENERIC",
         )
 
         error = convert_violation_to_handler_error(violation)

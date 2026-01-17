@@ -93,7 +93,7 @@ def _strip_sql_comments(sql: str) -> str:
         'SELECT   1;'
     """
     # Replace block comments first (they can span multiple lines)
-    result = _SQL_BLOCK_COMMENT_PATTERN.sub(" ", sql)
+    result: str = _SQL_BLOCK_COMMENT_PATTERN.sub(" ", sql)
     # Then replace line comments
     result = _SQL_LINE_COMMENT_PATTERN.sub(" ", result)
     return result
@@ -144,7 +144,7 @@ def should_skip_migration(sql: str) -> bool:
         3. A false positive (skipping a safe migration) is harmless in tests
     """
     # Strip comments before matching to avoid false positives
-    sql_without_comments = _strip_sql_comments(sql)
+    sql_without_comments: str = _strip_sql_comments(sql)
     return bool(CONCURRENT_DDL_PATTERN.search(sql_without_comments))
 
 
@@ -209,13 +209,13 @@ class PostgresConfig:
         Returns:
             PostgresConfig instance with values from environment.
         """
-        host = os.getenv(host_var)
+        host: str | None = os.getenv(host_var)
         if host is None and fallback_host is not None:
             host = fallback_host
         elif host is None:
             host = os.getenv("REMOTE_INFRA_HOST", REMOTE_INFRA_HOST)
 
-        password = os.getenv(password_var)
+        password: str | None = os.getenv(password_var)
         # Normalize empty password to None
         if password and not password.strip():
             password = None
@@ -261,7 +261,7 @@ class PostgresConfig:
             'postgresql://user%40domain:p%40ss%3Aword%23123@localhost:5432/test'
         """
         if not self.is_configured:
-            missing = []
+            missing: list[str] = []
             if self.host is None:
                 missing.append("host")
             if self.password is None:
@@ -271,8 +271,10 @@ class PostgresConfig:
             )
 
         # URL-encode credentials to handle special characters (@, :, #, %, etc.)
-        encoded_user = quote(self.user, safe="")
-        encoded_password = quote(self.password, safe="")
+        # Assert to help mypy understand is_configured ensures password is not None
+        assert self.password is not None  # Verified by is_configured check above
+        encoded_user: str = quote(self.user, safe="")
+        encoded_password: str = quote(self.password, safe="")
 
         return (
             f"postgresql://{encoded_user}:{encoded_password}"
@@ -313,8 +315,8 @@ def build_postgres_dsn(
         'postgresql://user%40domain:p%40ss%3Aword%23123@localhost:5432/test'
     """
     # URL-encode credentials to handle special characters (@, :, #, %, etc.)
-    encoded_user = quote(user, safe="")
-    encoded_password = quote(password, safe="")
+    encoded_user: str = quote(user, safe="")
+    encoded_password: str = quote(password, safe="")
 
     return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
 
@@ -347,12 +349,12 @@ def check_postgres_reachable(
         return False
 
     # Host should never be None here due to is_configured check
-    host = config.host or ""
+    host: str = config.host or ""
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
-            result = sock.connect_ex((host, config.port))
+            result: int = sock.connect_ex((host, config.port))
             return result == 0
     except (OSError, TimeoutError, socket.gaierror):
         return False
@@ -378,7 +380,7 @@ def check_postgres_reachable_simple(
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
-            result = sock.connect_ex((host, port))
+            result: int = sock.connect_ex((host, port))
             return result == 0
     except (OSError, TimeoutError, socket.gaierror):
         return False

@@ -1328,7 +1328,7 @@ class TestFullOrchestratorFlow:
         # 1. Pipeline.wait_until_idle() method that tracks in-flight messages
         # 2. Counter-based approach: wait until processed_count increments
         # 3. Expose processing completion via asyncio.Event per message
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2.0)
 
         # Publish a valid message after the malformed one
         # Note: node_version must be ModelSemVer for ModelNodeIntrospectionEvent

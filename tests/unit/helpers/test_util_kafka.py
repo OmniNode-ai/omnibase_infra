@@ -69,6 +69,48 @@ class TestParseBootstrapServers:
         assert host == "localhost"
         assert port == "29092"  # Default port for empty port section
 
+    # =========================================================================
+    # Bare IPv6 Address Tests
+    # =========================================================================
+
+    def test_bare_ipv6_localhost(self) -> None:
+        """Test parsing bare IPv6 localhost without brackets."""
+        host, port = parse_bootstrap_servers("::1")
+        assert host == "::1"
+        assert port == "29092"  # Default port for bare IPv6
+
+    def test_bare_ipv6_full_address(self) -> None:
+        """Test parsing bare IPv6 full address without brackets."""
+        host, port = parse_bootstrap_servers("2001:db8::1")
+        assert host == "2001:db8::1"
+        assert port == "29092"  # Default port for bare IPv6
+
+    def test_bare_ipv6_with_all_segments(self) -> None:
+        """Test parsing bare IPv6 with all segments specified."""
+        host, port = parse_bootstrap_servers("2001:0db8:85a3:0000:0000:8a2e:0370:7334")
+        assert host == "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+        assert port == "29092"  # Default port for bare IPv6
+
+    def test_bare_ipv6_mapped_ipv4(self) -> None:
+        """Test parsing IPv4-mapped IPv6 address."""
+        host, port = parse_bootstrap_servers("::ffff:192.168.1.1")
+        assert host == "::ffff:192.168.1.1"
+        assert port == "29092"  # Default port for bare IPv6
+
+    def test_bare_ipv6_ambiguous_with_port_like_suffix(self) -> None:
+        """Test bare IPv6 with port-like suffix is treated as full address.
+
+        The string "::1:9092" is ambiguous - it could mean:
+        - IPv6 "::1" with port 9092, OR
+        - IPv6 "::1:9092" without a port
+
+        We treat it as bare IPv6 (full address) with default port.
+        For unambiguous IPv6 with port, use bracketed format: [::1]:9092
+        """
+        host, port = parse_bootstrap_servers("::1:9092")
+        assert host == "::1:9092"  # Entire string is the host
+        assert port == "29092"  # Default port since it's bare IPv6
+
 
 class TestValidateBootstrapServers:
     """Tests for validate_bootstrap_servers function."""
@@ -173,6 +215,45 @@ class TestValidateBootstrapServers:
         assert result.is_valid is True
         assert result.host == "[2001:db8::1]"
         assert result.port == "29092"  # Default
+
+    # =========================================================================
+    # Bare IPv6 Address Validation Tests
+    # =========================================================================
+
+    def test_bare_ipv6_localhost_valid(self) -> None:
+        """Test validation passes for bare IPv6 localhost."""
+        result = validate_bootstrap_servers("::1")
+        assert result.is_valid is True
+        assert result.host == "::1"
+        assert result.port == "29092"  # Default port for bare IPv6
+        assert result.error_message is None
+
+    def test_bare_ipv6_full_address_valid(self) -> None:
+        """Test validation passes for bare IPv6 full address."""
+        result = validate_bootstrap_servers("2001:db8::1")
+        assert result.is_valid is True
+        assert result.host == "2001:db8::1"
+        assert result.port == "29092"  # Default port for bare IPv6
+
+    def test_bare_ipv6_mapped_ipv4_valid(self) -> None:
+        """Test validation passes for IPv4-mapped IPv6 address."""
+        result = validate_bootstrap_servers("::ffff:192.168.1.1")
+        assert result.is_valid is True
+        assert result.host == "::ffff:192.168.1.1"
+        assert result.port == "29092"  # Default port for bare IPv6
+
+    def test_bare_ipv6_ambiguous_port_like_suffix_valid(self) -> None:
+        """Test validation passes for bare IPv6 with port-like suffix.
+
+        The string "::1:9092" is ambiguous and is treated as a bare IPv6 address
+        (the entire string is the host, not "::1" with port "9092").
+        For unambiguous IPv6 with port, use bracketed format: [::1]:9092
+        """
+        result = validate_bootstrap_servers("::1:9092")
+        assert result.is_valid is True
+        assert result.host == "::1:9092"  # Entire string is the host
+        assert result.port == "29092"  # Default port since it's bare IPv6
+        assert result.error_message is None
 
     def test_skip_reason_contains_example(self) -> None:
         """Test skip reason contains helpful example."""

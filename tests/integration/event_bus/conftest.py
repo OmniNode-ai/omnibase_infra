@@ -6,6 +6,57 @@ This module provides fixtures for managing Kafka topics in integration tests.
 The Redpanda broker (configured via KAFKA_BOOTSTRAP_SERVERS env var) has topic
 auto-creation disabled, so topics must be created explicitly before use.
 
+==============================================================================
+IMPORTANT: Event Loop Scope Configuration (pytest-asyncio 0.25+)
+==============================================================================
+
+This module provides **function-scoped** async fixtures for Kafka topic
+management. With pytest-asyncio 0.25+, the default event loop scope is
+"function", which works correctly with these fixtures.
+
+When to Configure loop_scope in Test Modules
+--------------------------------------------
+If your test module uses **session-scoped or module-scoped** Kafka fixtures
+(e.g., a shared Kafka producer across tests), you must configure loop_scope:
+
+.. code-block:: python
+
+    # For session-scoped Kafka fixtures
+    pytestmark = [
+        pytest.mark.kafka,
+        pytest.mark.asyncio(loop_scope="session"),
+    ]
+
+    # For module-scoped Kafka fixtures
+    pytestmark = [
+        pytest.mark.kafka,
+        pytest.mark.asyncio(loop_scope="module"),
+    ]
+
+Fixtures in This Module
+-----------------------
+All fixtures in this module are **function-scoped** (or use async generators
+that clean up per-test), so they work with the default function-scoped event
+loop:
+
+    - ensure_test_topic: Creates topics per-test (async generator with cleanup)
+    - topic_factory: Factory for creating topics per-test
+    - created_unique_topic: Pre-created unique topic per-test
+
+Why loop_scope Matters for Kafka
+--------------------------------
+Kafka async clients (AIOKafkaProducer, AIOKafkaConsumer) are bound to the
+event loop at creation time. If you share a Kafka client across tests without
+matching loop_scope, you'll encounter:
+
+    - RuntimeError: "attached to a different event loop"
+    - RuntimeError: "Event loop is closed"
+
+Reference Documentation
+-----------------------
+- https://pytest-asyncio.readthedocs.io/en/latest/concepts.html#event-loop-scope
+- https://pytest-asyncio.readthedocs.io/en/latest/how-to-guides/change_default_loop_scope.html
+
 Fixtures:
     ensure_test_topic: Creates topics via admin API before tests, cleans up after
     topic_factory: Factory fixture for creating multiple topics with custom settings
@@ -14,6 +65,9 @@ Implementation Note:
     This module uses shared helpers from tests.helpers.util_kafka to avoid code
     duplication. The KafkaTopicManager class provides the core topic lifecycle
     management functionality used by multiple fixtures.
+
+Related Tickets:
+    - OMN-1361: pytest-asyncio 0.25+ upgrade and loop_scope configuration
 """
 
 from __future__ import annotations
@@ -124,9 +178,20 @@ async def ensure_test_topic() -> AsyncGenerator[
             topic = await ensure_test_topic(f"test.integration.{uuid4().hex[:12]}")
             # Topic now exists and can be used for produce/consume
     """
-    # Skip if Kafka is not properly configured
+    # Skip if Kafka is not properly configured (empty, whitespace-only, or malformed)
+    # The validation at module load time catches:
+    # - Empty string or None
+    # - Whitespace-only values
+    # - Non-numeric port (e.g., "localhost:abc")
+    # - Port out of range (must be 1-65535)
     if not _kafka_config_validation:
         pytest.skip(_kafka_config_validation.skip_reason)
+
+    # SAFETY: At this point, KAFKA_BOOTSTRAP_SERVERS is guaranteed to be valid
+    # because validate_bootstrap_servers() returned is_valid=True
+    assert _kafka_config_validation.is_valid, (
+        "Fixture logic error: should have skipped if validation failed"
+    )
 
     # Use the shared KafkaTopicManager for topic lifecycle management
     async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
@@ -226,9 +291,20 @@ async def topic_factory() -> AsyncGenerator[
         async def test_replicated_topic(topic_factory):
             topic = await topic_factory("my.topic", partitions=3, replication=1)
     """
-    # Skip if Kafka is not properly configured
+    # Skip if Kafka is not properly configured (empty, whitespace-only, or malformed)
+    # The validation at module load time catches:
+    # - Empty string or None
+    # - Whitespace-only values
+    # - Non-numeric port (e.g., "localhost:abc")
+    # - Port out of range (must be 1-65535)
     if not _kafka_config_validation:
         pytest.skip(_kafka_config_validation.skip_reason)
+
+    # SAFETY: At this point, KAFKA_BOOTSTRAP_SERVERS is guaranteed to be valid
+    # because validate_bootstrap_servers() returned is_valid=True
+    assert _kafka_config_validation.is_valid, (
+        "Fixture logic error: should have skipped if validation failed"
+    )
 
     # Use the shared KafkaTopicManager for topic lifecycle management
     async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:

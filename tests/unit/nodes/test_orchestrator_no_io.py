@@ -543,10 +543,11 @@ class TestContractIOOperationsAreEffectNodes:
                 # Use .lower() for case-insensitive comparison (contracts use UPPERCASE)
                 if node_type.lower() == "effect_generic":
                     misclassified_nodes.append(
-                        f"{node_id}: marked as '{node['node_type']}' but is listed in non_io_exceptions. "
-                        f"Nodes in non_io_exceptions perform PURE computation and should use "
-                        f"'COMPUTE_GENERIC' or 'REDUCER_GENERIC', not 'EFFECT_GENERIC' "
-                        f"(comparison is case-insensitive)."
+                        f"{node_id}: marked as '{node['node_type']}' but this node is in the "
+                        f"known pure-computation allowlist (despite containing I/O keywords like "
+                        f"'execute', 'read', etc.). Nodes performing pure computation should use "
+                        f"'COMPUTE_GENERIC' or 'REDUCER_GENERIC', not 'EFFECT_GENERIC'. "
+                        f"If this node truly performs external I/O, remove it from non_io_exceptions."
                     )
                 continue
 
