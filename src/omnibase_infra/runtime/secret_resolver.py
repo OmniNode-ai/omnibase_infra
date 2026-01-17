@@ -135,6 +135,7 @@ from uuid import UUID, uuid4
 
 from pydantic import SecretStr
 
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -276,7 +277,7 @@ class SecretResolver:
         This class supports concurrent access from both sync and async contexts
         using a two-level locking strategy:
 
-        1. ``threading.Lock`` (``_lock``): Protects all cache reads/writes and
+        1. ``threading.RLock`` (``_lock``): Protects all cache reads/writes and
            stats updates. This lock is held briefly for in-memory operations.
 
         2. Per-key ``asyncio.Lock`` (``_async_key_locks``): Prevents duplicate
@@ -358,7 +359,10 @@ class SecretResolver:
         self._expired_evictions = 0
         self._refreshes = 0
         self._hit_counts: defaultdict[str, int] = defaultdict(int)  # per logical_name
-        self._lock = threading.Lock()
+        # RLock (reentrant lock) allows the same thread to acquire the lock
+        # multiple times, which is needed because get_secret() holds the lock
+        # while calling _record_resolution_success() which also needs the lock.
+        self._lock = threading.RLock()
         # Per-key async locks to allow parallel fetches for different secrets
         # while preventing duplicate fetches for the same secret
         self._async_key_locks: dict[str, asyncio.Lock] = {}
@@ -491,7 +495,7 @@ class SecretResolver:
         this wraps the sync call in a thread executor.
 
         Thread Safety:
-            Uses threading.Lock for cache access to prevent race conditions
+            Uses threading.RLock for cache access to prevent race conditions
             with sync callers. Per-key async locks serialize resolution for the
             same secret while allowing parallel fetches for different secrets.
 
@@ -567,8 +571,30 @@ class SecretResolver:
         duplicate concurrent fetches for the same secret.
 
         Thread Safety:
-            Uses threading.Lock to safely access the key locks dictionary,
+            Uses threading.RLock to safely access the key locks dictionary,
             ensuring thread-safe creation of new locks.
+
+        Known Limitation - Unbounded Dictionary Growth:
+            The ``_async_key_locks`` dictionary grows monotonically as new
+            logical names are resolved asynchronously. Entries are never removed
+            because:
+
+            1. **Correctness over complexity**: Implementing lock cleanup requires
+               reference counting or periodic sweeps, adding significant complexity
+               for minimal benefit in typical use cases.
+
+            2. **Bounded in practice**: The number of unique secrets is bounded by
+               the resolver's configuration (explicit mappings + convention-based
+               names). In production, this is typically <100 secrets.
+
+            3. **Minimal memory overhead**: Each ``asyncio.Lock`` is ~100 bytes.
+               Even 1000 unique secrets would use only ~100KB.
+
+            4. **DoS mitigation**: If an attacker can control logical names passed
+               to ``get_secret_async()``, they could cause unbounded growth. Mitigate
+               by validating logical names against configured mappings before calling
+               resolution methods, or by using ``get_secret()`` (sync) which doesn't
+               create per-key locks.
 
         Args:
             logical_name: The secret key to get a lock for
@@ -712,6 +738,12 @@ class SecretResolver:
     ) -> None:
         """Record a successful secret resolution.
 
+        Thread Safety:
+            Captures ``_metrics_collector`` reference while holding ``_lock`` to
+            prevent race conditions with concurrent ``set_metrics_collector()``
+            calls. The captured reference is then used outside the lock to avoid
+            holding the lock during potentially slow I/O operations.
+
         Args:
             logical_name: The secret's logical name
             source_type: Source type (env, file, vault, cache)
@@ -722,28 +754,27 @@ class SecretResolver:
         if start_time is not None:
             latency_ms = (time.monotonic() - start_time) * 1000
 
-        # Internal tracking
+        # Internal tracking + capture collector reference atomically
         with self._lock:
             self._resolution_success_counts[source_type] += 1
             if start_time is not None:
                 # deque with maxlen=1000 automatically rotates (O(1) vs O(n) for list.pop(0))
                 self._resolution_latencies.append((source_type, latency_ms))
+            # THREAD SAFETY: Capture collector reference while holding lock to prevent
+            # race with set_metrics_collector(). Use captured ref outside lock.
+            collector = self._metrics_collector
 
-        # External metrics collector
-        if self._metrics_collector is not None:
+        # External metrics collector - use captured reference (may be None)
+        if collector is not None:
             try:
-                if hasattr(self._metrics_collector, "record_resolution_success"):
-                    self._metrics_collector.record_resolution_success(source_type)
+                if hasattr(collector, "record_resolution_success"):
+                    collector.record_resolution_success(source_type)
                 if start_time is not None and hasattr(
-                    self._metrics_collector, "record_resolution_latency"
+                    collector, "record_resolution_latency"
                 ):
-                    self._metrics_collector.record_resolution_latency(
-                        source_type, latency_ms
-                    )
-                if source_type == "cache" and hasattr(
-                    self._metrics_collector, "record_cache_hit"
-                ):
-                    self._metrics_collector.record_cache_hit()
+                    collector.record_resolution_latency(source_type, latency_ms)
+                if source_type == "cache" and hasattr(collector, "record_cache_hit"):
+                    collector.record_cache_hit()
             except Exception as e:
                 # Never let metrics failures affect resolution
                 logger.debug(
@@ -777,21 +808,30 @@ class SecretResolver:
     ) -> None:
         """Record a failed secret resolution.
 
+        Thread Safety:
+            Captures ``_metrics_collector`` reference while holding ``_lock`` to
+            prevent race conditions with concurrent ``set_metrics_collector()``
+            calls. The captured reference is then used outside the lock to avoid
+            holding the lock during potentially slow I/O operations.
+
         Args:
             logical_name: The secret's logical name
             source_type: Source type (env, file, vault, unknown)
             correlation_id: Correlation ID for tracing
             reason: Failure reason (not_found, handler_not_configured, etc.)
         """
-        # Internal tracking
+        # Internal tracking + capture collector reference atomically
         with self._lock:
             self._resolution_failure_counts[source_type] += 1
+            # THREAD SAFETY: Capture collector reference while holding lock to prevent
+            # race with set_metrics_collector(). Use captured ref outside lock.
+            collector = self._metrics_collector
 
-        # External metrics collector
-        if self._metrics_collector is not None:
+        # External metrics collector - use captured reference (may be None)
+        if collector is not None:
             try:
-                if hasattr(self._metrics_collector, "record_resolution_failure"):
-                    self._metrics_collector.record_resolution_failure(source_type)
+                if hasattr(collector, "record_resolution_failure"):
+                    collector.record_resolution_failure(source_type)
                 # NOTE: Do NOT call record_cache_miss() here - resolution failures
                 # are distinct from cache misses. Cache misses are already tracked
                 # in get_secret() and get_secret_async() via self._misses += 1
@@ -1036,7 +1076,7 @@ class SecretResolver:
         """Resolve secret from source asynchronously.
 
         Thread Safety:
-            Uses threading.Lock for cache writes to prevent race conditions
+            Uses threading.RLock for cache writes to prevent race conditions
             with sync callers. I/O operations are performed outside the lock.
             Bootstrap secrets also use _lock for their cache writes to ensure
             thread-safe access from both sync and async contexts.
@@ -1391,7 +1431,7 @@ class SecretResolver:
         mount_point, vault_path, field = self._parse_vault_path_components(path)
 
         # Create envelope for vault.read_secret operation
-        envelope: dict[str, object] = {
+        envelope: JsonType = {
             "operation": "vault.read_secret",
             "payload": {
                 "path": vault_path,
