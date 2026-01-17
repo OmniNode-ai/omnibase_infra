@@ -540,17 +540,22 @@ class TestContractIOOperationsAreEffectNodes:
 
             if node_id in non_io_exceptions:
                 # These should NOT be effect nodes despite keyword matches
-                if node_type == "effect_generic":
+                # Use .lower() for case-insensitive comparison (contracts use UPPERCASE)
+                if node_type.lower() == "effect_generic":
                     misclassified_nodes.append(
-                        f"{node_id}: expected 'compute_generic' or 'reducer_generic' (pure computation), "
-                        f"but found '{node_type}' - nodes in non_io_exceptions perform pure computation"
+                        f"{node_id}: marked as '{node['node_type']}' but is listed in non_io_exceptions. "
+                        f"Nodes in non_io_exceptions perform PURE computation and should use "
+                        f"'COMPUTE_GENERIC' or 'REDUCER_GENERIC', not 'EFFECT_GENERIC' "
+                        f"(comparison is case-insensitive)."
                     )
                 continue
 
             # I/O operations should be effect nodes
-            if suggests_io and node_type != "effect_generic":
+            # Use .lower() for case-insensitive comparison (contracts use UPPERCASE)
+            if suggests_io and node_type.lower() != "effect_generic":
                 misclassified_nodes.append(
-                    f"{node_id}: performs I/O but marked as '{node_type}' instead of 'effect_generic'"
+                    f"{node_id}: performs I/O but marked as '{node['node_type']}' instead of "
+                    f"'EFFECT_GENERIC' (comparison is case-insensitive)"
                 )
 
         assert not misclassified_nodes, (

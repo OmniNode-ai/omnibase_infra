@@ -336,11 +336,11 @@ class TestWorkflowGraphIntegration:
         # Find the registration nodes
         for node in nodes:
             if "consul" in node["node_id"].lower():
-                assert node["node_type"] == "effect_generic", (
+                assert node["node_type"].lower() == "effect_generic", (
                     "Consul registration should be effect_generic type"
                 )
             if "postgres" in node["node_id"].lower():
-                assert node["node_type"] == "effect_generic", (
+                assert node["node_type"].lower() == "effect_generic", (
                     "Postgres registration should be effect_generic type"
                 )
 
@@ -352,7 +352,7 @@ class TestWorkflowGraphIntegration:
 
         for node in nodes:
             if node["node_id"] == "compute_intents":
-                assert node["node_type"] == "reducer_generic", (
+                assert node["node_type"].lower() == "reducer_generic", (
                     "compute_intents should be reducer_generic type"
                 )
                 break
@@ -476,8 +476,8 @@ class TestWorkflowGraphIntegration:
             assert node_id in node_map, f"Missing node: {node_id}"
             node = node_map[node_id]
 
-            # Validate node_type
-            assert node["node_type"] == expected["node_type"], (
+            # Validate node_type (case-insensitive comparison)
+            assert node["node_type"].lower() == expected["node_type"], (
                 f"Node '{node_id}' has type '{node['node_type']}', "
                 f"expected '{expected['node_type']}'"
             )
