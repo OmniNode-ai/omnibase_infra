@@ -3,7 +3,7 @@
 """Centralized secret resolution for ONEX infrastructure.
 
 SecretResolver provides a unified interface for accessing secrets from multiple sources:
-- Vault (if configured)
+- Vault (if configured) - **STUB: Not yet implemented, raises NotImplementedError**
 - Environment variables
 - File-based secrets (K8s /run/secrets)
 
@@ -33,6 +33,45 @@ Security Considerations:
     - Cache stores SecretStr values, never raw strings
     - Introspection methods never expose secret values
     - Error messages are sanitized to exclude secret values
+    - File paths are never logged (prevents information disclosure)
+    - Path traversal attacks are blocked for file-based secrets
+    - Bootstrap secrets bypass normal resolution to prevent circular dependencies
+
+Memory Handling:
+    Raw secret values (plain strings) are briefly held in local variables during
+    resolution before being wrapped in SecretStr. Python's garbage collector will
+    reclaim this memory, but there is no explicit secure memory wiping. This is
+    acceptable for most use cases, but for high-security environments:
+
+    - Consider using dedicated secret management libraries with secure memory handling
+    - Use short-lived processes for secret-intensive operations
+    - Ensure swap is encrypted at the OS level
+
+    The brief exposure window is minimized by immediately wrapping values in SecretStr
+    after retrieval and never storing raw strings in instance attributes.
+
+Vault Integration Status:
+    The Vault integration is currently a **stub implementation**. When a secret is
+    configured with source_type="vault":
+
+    - If vault_handler is None: Returns None with a warning log (graceful degradation)
+    - If vault_handler is provided: Raises NotImplementedError with guidance
+
+    To use Vault secrets today, configure them via 'env' or 'file' source types
+    until full Vault integration is implemented. See docs/patterns/secret_resolver.md
+    for migration guidance.
+
+    TODO: Implement full Vault integration (follow-up ticket required)
+    Implementation will require:
+    1. Create envelope for vault.read_secret operation with correlation_id
+    2. Call HandlerVault.execute() for KV v2 secret retrieval
+    3. Parse path to extract mount/path/field from "secret/data/path#field" format
+    4. Handle error responses:
+       - 404 (NotFound): Return None
+       - 403 (Forbidden): Raise InfraAuthenticationError
+       - Timeout: Raise InfraTimeoutError with ModelTimeoutErrorContext
+       - Other: Raise SecretResolutionError with sanitized message
+    5. Extract data[field] from response or first value if no field specified
 """
 
 from __future__ import annotations
@@ -104,9 +143,17 @@ class SecretResolver:
             Due to the different locking granularity between sync (holds lock
             during I/O) and async (releases lock during I/O), there's a small
             window where both sync and async code might resolve the same secret
-            simultaneously. This is benign (both write same value) but represents
-            duplicate work. This trade-off prioritizes async performance over
-            preventing rare duplicate fetches.
+            simultaneously. This is handled by a check-before-write pattern:
+            before caching, we verify the key isn't already present. If a sync
+            caller won the race, we skip the redundant cache write.
+
+        Bootstrap Secret Isolation:
+            Bootstrap secrets (vault.token, vault.addr, vault.ca_cert) are
+            resolved exclusively from environment variables, never from Vault
+            or files. This prevents circular dependencies during Vault init.
+            The resolution path is isolated from regular secrets, and cache
+            writes are always protected by ``_lock`` in both sync and async
+            contexts.
 
     Example:
         >>> config = ModelSecretResolverConfig(
@@ -223,6 +270,16 @@ class SecretResolver:
 
         Returns:
             Dict mapping logical_name -> SecretStr | None
+
+        Note:
+            This sync method resolves secrets sequentially. For better latency
+            when resolving multiple secrets that involve I/O (Vault, file-based),
+            prefer using ``get_secrets_async()`` which resolves in parallel via
+            ``asyncio.gather()``.
+
+            TODO: Consider parallelizing sync resolution using ThreadPoolExecutor
+            for Vault/file secrets. This would require careful lock management to
+            avoid deadlocks with the per-key locking strategy. See OMN-XXX.
         """
         return {
             name: self.get_secret(name, required=required) for name in logical_names
@@ -481,8 +538,13 @@ class SecretResolver:
         """
         return logical_name in self._config.bootstrap_secrets
 
-    def _resolve_bootstrap_secret(self, logical_name: str) -> SecretStr | None:
-        """Resolve a bootstrap secret directly from environment variables.
+    def _resolve_bootstrap_secret_value(self, logical_name: str) -> SecretStr | None:
+        """Resolve a bootstrap secret value from environment variables.
+
+        Thread Safety:
+            This method only reads from environment variables (atomic on most platforms)
+            and does NOT write to cache. The caller is responsible for cache writes
+            with proper locking.
 
         Security:
             Bootstrap secrets are isolated from the normal resolution chain.
@@ -502,13 +564,14 @@ class SecretResolver:
         if value is None:
             return None
 
-        secret = SecretStr(value)
-        # Cache with env TTL
-        self._cache_secret(logical_name, secret, "env")
-        return secret
+        return SecretStr(value)
 
     def _resolve_secret(self, logical_name: str) -> SecretStr | None:
         """Resolve secret from source and cache it.
+
+        Thread Safety:
+            This method MUST be called while holding _lock. It writes to cache
+            directly without additional locking.
 
         Security:
             Bootstrap secrets (vault.token, vault.addr, etc.) are resolved directly
@@ -524,7 +587,11 @@ class SecretResolver:
         # SECURITY: Bootstrap secrets bypass normal resolution
         # They must come from env vars to avoid circular dependency with Vault
         if self._is_bootstrap_secret(logical_name):
-            return self._resolve_bootstrap_secret(logical_name)
+            secret = self._resolve_bootstrap_secret_value(logical_name)
+            if secret is not None:
+                # Cache write is safe here - caller holds _lock
+                self._cache_secret(logical_name, secret, "env")
+            return secret
 
         source = self._get_source_spec(logical_name)
         if source is None:
@@ -559,6 +626,8 @@ class SecretResolver:
         Thread Safety:
             Uses threading.Lock for cache writes to prevent race conditions
             with sync callers. I/O operations are performed outside the lock.
+            Bootstrap secrets also use _lock for their cache writes to ensure
+            thread-safe access from both sync and async contexts.
 
         Security:
             Bootstrap secrets (vault.token, vault.addr, etc.) are resolved directly
@@ -574,7 +643,16 @@ class SecretResolver:
         # SECURITY: Bootstrap secrets bypass normal resolution
         # They must come from env vars to avoid circular dependency with Vault
         if self._is_bootstrap_secret(logical_name):
-            return self._resolve_bootstrap_secret(logical_name)
+            # Resolve value (no cache write in _resolve_bootstrap_secret_value)
+            secret = self._resolve_bootstrap_secret_value(logical_name)
+            if secret is not None:
+                # THREAD SAFETY: Use lock for cache write to prevent race with sync callers
+                # Check-before-write pattern avoids unnecessary overwrites if sync caller
+                # already cached this secret between our cache check and now
+                with self._lock:
+                    if logical_name not in self._cache:
+                        self._cache_secret(logical_name, secret, "env")
+            return secret
 
         source = self._get_source_spec(logical_name)
         if source is None:
@@ -605,9 +683,12 @@ class SecretResolver:
             return None
 
         secret = SecretStr(value)
-        # Use threading lock for cache write (fast operation, prevents race with sync)
+        # THREAD SAFETY: Use lock for cache write to prevent race with sync callers
+        # Check-before-write pattern avoids unnecessary overwrites if sync caller
+        # already cached this secret between our cache check and now
         with self._lock:
-            self._cache_secret(logical_name, secret, source.source_type)
+            if logical_name not in self._cache:
+                self._cache_secret(logical_name, secret, source.source_type)
         return secret
 
     def _get_source_spec(self, logical_name: str) -> ModelSecretSourceSpec | None:

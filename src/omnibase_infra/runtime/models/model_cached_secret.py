@@ -80,22 +80,26 @@ class ModelCachedSecret(BaseModel):
 
     @field_validator("cached_at", "expires_at", mode="before")
     @classmethod
-    def ensure_utc_aware(cls, v: datetime) -> datetime:
+    def ensure_utc_aware(cls, v: object) -> object:
         """Ensure datetime fields are timezone-aware (UTC).
 
         This validator prevents naive/aware datetime comparison errors in
         is_expired() by ensuring all datetime fields are UTC-aware.
 
         Args:
-            v: The datetime value to validate.
+            v: The input value. In "before" mode, this can be any type.
+               Non-datetime values are passed through for Pydantic to validate.
 
         Returns:
-            UTC-aware datetime. Naive datetimes are treated as UTC.
+            UTC-aware datetime if input is datetime, otherwise unchanged input.
+            Naive datetimes are treated as UTC. Non-UTC timezones are converted.
 
         Note:
-            Non-UTC timezones are converted to UTC to ensure consistent
-            comparison behavior. Uses utcoffset() comparison for robust
-            UTC detection across different timezone implementations.
+            - Non-datetime inputs are returned unchanged for Pydantic's type validation
+            - Naive datetimes are treated as UTC (v.replace(tzinfo=UTC))
+            - Non-UTC timezones are converted to UTC (v.astimezone(UTC))
+            - Uses utcoffset() comparison for robust UTC detection across different
+              timezone implementations (timezone.utc, datetime.UTC, pytz.UTC, etc.)
         """
         if not isinstance(v, datetime):
             return v  # Let Pydantic handle type validation

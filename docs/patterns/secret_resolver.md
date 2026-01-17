@@ -388,14 +388,17 @@ if secret is None:
 
 ### Error Context
 
-`SecretResolutionError` includes structured context:
+`SecretResolutionError` includes structured context via the standard `ModelOnexError` interface:
 
 ```python
 except SecretResolutionError as e:
-    print(e.context.transport_type)   # EnumInfraTransportType.RUNTIME
-    print(e.context.operation)        # "get_secret"
-    print(e.context.correlation_id)   # UUID for tracing
-    print(e.logical_name)             # The requested logical name
+    # Access context fields via error.model.context dict
+    print(e.model.context.get("transport_type"))  # EnumInfraTransportType.RUNTIME
+    print(e.model.context.get("operation"))       # "get_secret"
+    print(e.model.context.get("logical_name"))    # The requested logical name
+
+    # Correlation ID is at the model level
+    print(e.model.correlation_id)                 # UUID for tracing
 ```
 
 ---
@@ -451,7 +454,7 @@ config = ModelSecretResolverConfig(
 
 ### Vault Integration Security
 
-Vault integration is currently a stub that raises `NotImplementedError`:
+Vault integration is currently a **stub implementation** that raises `NotImplementedError`:
 
 ```python
 # When vault_handler is configured but secret is from Vault:
@@ -464,6 +467,33 @@ resolver.get_secret("vault.sourced.secret")
 **When Vault handler is NOT configured**:
 - Returns `None` (graceful degradation)
 - Logs warning with logical name only (no path)
+
+**Vault Integration Implementation Plan** (for follow-up ticket):
+1. Create envelope for `vault.read_secret` operation with correlation_id
+2. Call `HandlerVault.execute()` for KV v2 secret retrieval
+3. Parse path to extract mount/path/field from `"secret/data/path#field"` format
+4. Handle error responses:
+   - 404 (NotFound): Return `None`
+   - 403 (Forbidden): Raise `InfraAuthenticationError`
+   - Timeout: Raise `InfraTimeoutError` with `ModelTimeoutErrorContext`
+   - Other: Raise `SecretResolutionError` with sanitized message
+5. Extract `data[field]` from response or first value if no field specified
+
+### Memory Handling
+
+Raw secret values (plain strings) are briefly held in local variables during resolution
+before being wrapped in `SecretStr`. Python's garbage collector will reclaim this memory,
+but there is no explicit secure memory wiping. This is acceptable for most use cases.
+
+**For high-security environments**:
+- Consider using dedicated secret management libraries with secure memory handling
+- Use short-lived processes for secret-intensive operations
+- Ensure swap is encrypted at the OS level
+
+The brief exposure window is minimized by:
+- Immediately wrapping values in `SecretStr` after retrieval
+- Never storing raw strings in instance attributes
+- Cache stores only `SecretStr` values, not raw strings
 
 ### Log Sanitization
 
@@ -646,6 +676,11 @@ For bootstrap secrets or legacy code migration, add to `.secretresolver_allowlis
 # - src/omnibase_infra/runtime/secret_resolver.py (resolver needs bootstrap access)
 #
 # ==============================================================================
+# Event Bus
+# ==============================================================================
+src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py:507 # OMN-764 KAFKA config from env
+
+# ==============================================================================
 # Runtime - Service Kernel
 # ==============================================================================
 src/omnibase_infra/runtime/service_kernel.py:157 # OMN-764 ONEX_CONTRACTS_DIR
@@ -653,9 +688,9 @@ src/omnibase_infra/runtime/service_kernel.py:630 # OMN-764 POSTGRES_HOST
 src/omnibase_infra/runtime/service_kernel.py:635 # OMN-764 POSTGRES_USER
 
 # ==============================================================================
-# Legacy - Pending Migration
+# Nodes - Registration Orchestrator Plugin
 # ==============================================================================
-src/legacy/adapter.py:42 # OMN-999 LEGACY_API_KEY migration pending
+src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py:214 # OMN-764 POSTGRES_HOST
 ```
 
 **Allowlist Conventions**:

@@ -7,17 +7,24 @@ variable access in production code paths. Use the allowlist for migration.
 Exit codes:
     0: No violations found
     1: Violations found (blocks CI)
-    2: Configuration error (malformed allowlist)
+    2: Configuration error (malformed allowlist, file read error)
 
 Usage:
     python scripts/validate_no_direct_env.py
     python scripts/validate_no_direct_env.py --verbose
     python scripts/validate_no_direct_env.py --fix-allowlist  # Generate allowlist entries
+
+Detection Approach:
+    This validator uses a hybrid regex + AST approach for comprehensive detection:
+    1. Regex patterns catch common os.environ/os.getenv usage
+    2. AST analysis detects aliased imports (e.g., `from os import environ as env`)
+    3. Both approaches run on each file for maximum coverage
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import sys
 from pathlib import Path
@@ -69,6 +76,157 @@ FORBIDDEN_PATTERNS = [
     re.compile(r"(?<!\w\.)\bgetenv\s*\("),
 ]
 
+
+class EnvAccessASTVisitor(ast.NodeVisitor):
+    """AST visitor to detect aliased environment variable access.
+
+    This visitor catches cases that regex patterns cannot reliably detect:
+    - `from os import environ as env; env["VAR"]`
+    - `from os import getenv as get; get("VAR")`
+    - `import os as o; o.environ["VAR"]`
+
+    The visitor tracks import aliases and reports their usage locations.
+    """
+
+    def __init__(self) -> None:
+        self.violations: list[tuple[int, str, str]] = []  # (line, code, description)
+        # Track aliases: alias_name -> what it aliases ("environ", "getenv", or "os")
+        self._environ_aliases: set[str] = set()
+        self._getenv_aliases: set[str] = set()
+        self._os_aliases: set[str] = set()
+
+    def visit_Import(self, node: ast.Import) -> None:
+        """Track `import os as <alias>` patterns."""
+        for alias in node.names:
+            if alias.name == "os":
+                # If aliased (import os as o), track the alias
+                # If not aliased, regex patterns handle it
+                if alias.asname and alias.asname != "os":
+                    self._os_aliases.add(alias.asname)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """Track `from os import environ/getenv as <alias>` patterns."""
+        if node.module != "os":
+            self.generic_visit(node)
+            return
+
+        for alias in node.names:
+            if alias.name == "environ":
+                # If aliased (from os import environ as e), track it
+                # If not aliased, regex patterns handle it
+                if alias.asname and alias.asname != "environ":
+                    self._environ_aliases.add(alias.asname)
+            elif alias.name == "getenv":
+                # If aliased (from os import getenv as g), track it
+                if alias.asname and alias.asname != "getenv":
+                    self._getenv_aliases.add(alias.asname)
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        """Detect aliased_environ["VAR"] access."""
+        if isinstance(node.value, ast.Name):
+            if node.value.id in self._environ_aliases:
+                self.violations.append(
+                    (
+                        node.lineno,
+                        f"{node.value.id}[...]",
+                        f"aliased environ access ('{node.value.id}' aliases 'os.environ')",
+                    )
+                )
+        elif isinstance(node.value, ast.Attribute):
+            # aliased_os.environ["VAR"]
+            if (
+                isinstance(node.value.value, ast.Name)
+                and node.value.value.id in self._os_aliases
+                and node.value.attr == "environ"
+            ):
+                self.violations.append(
+                    (
+                        node.lineno,
+                        f"{node.value.value.id}.environ[...]",
+                        f"aliased os.environ access ('{node.value.value.id}' aliases 'os')",
+                    )
+                )
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """Detect aliased getenv() and environ.get/setdefault/pop/clear/update() calls."""
+        # Check for aliased getenv() call
+        if isinstance(node.func, ast.Name):
+            if node.func.id in self._getenv_aliases:
+                self.violations.append(
+                    (
+                        node.lineno,
+                        f"{node.func.id}(...)",
+                        f"aliased getenv call ('{node.func.id}' aliases 'os.getenv')",
+                    )
+                )
+        elif isinstance(node.func, ast.Attribute):
+            # Check for aliased_environ.get/setdefault/pop/clear/update()
+            env_methods = {"get", "setdefault", "pop", "clear", "update"}
+            if node.func.attr in env_methods:
+                if isinstance(node.func.value, ast.Name):
+                    if node.func.value.id in self._environ_aliases:
+                        self.violations.append(
+                            (
+                                node.lineno,
+                                f"{node.func.value.id}.{node.func.attr}(...)",
+                                f"aliased environ.{node.func.attr} call",
+                            )
+                        )
+                elif isinstance(node.func.value, ast.Attribute):
+                    # aliased_os.environ.get()
+                    if (
+                        isinstance(node.func.value.value, ast.Name)
+                        and node.func.value.value.id in self._os_aliases
+                        and node.func.value.attr == "environ"
+                    ):
+                        self.violations.append(
+                            (
+                                node.lineno,
+                                f"{node.func.value.value.id}.environ.{node.func.attr}(...)",
+                                f"aliased os.environ.{node.func.attr} call",
+                            )
+                        )
+
+            # Check for aliased_os.getenv() call
+            if node.func.attr == "getenv":
+                if (
+                    isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in self._os_aliases
+                ):
+                    self.violations.append(
+                        (
+                            node.lineno,
+                            f"{node.func.value.id}.getenv(...)",
+                            f"aliased os.getenv call ('{node.func.value.id}' aliases 'os')",
+                        )
+                    )
+        self.generic_visit(node)
+
+
+def detect_aliased_env_access(source: str) -> list[tuple[int, str, str]]:
+    """Detect environment variable access via aliased imports using AST analysis.
+
+    Args:
+        source: Python source code to analyze.
+
+    Returns:
+        List of (line_number, code_snippet, description) tuples for violations.
+        Returns empty list if AST parsing fails (syntax errors are not violations).
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        # Syntax errors are not our concern - let other tools handle them
+        return []
+
+    visitor = EnvAccessASTVisitor()
+    visitor.visit(tree)
+    return visitor.violations
+
+
 # Production paths to scan (relative to repo root)
 SCAN_PATHS = [
     "src/omnibase_infra/handlers/",
@@ -102,17 +260,30 @@ EXCLUDE_PATTERNS = {
 }
 
 # Bootstrap exception - these files may use os.getenv for Vault bootstrap only
-# Uses exact relative paths to prevent overly broad exemptions
-BOOTSTRAP_EXCEPTION_PATHS = [
-    "src/omnibase_infra/runtime/secret_resolver.py",  # The resolver itself needs bootstrap access
-]
+# Uses exact relative paths (with forward slashes) to prevent overly broad exemptions.
+# The matching is performed with path normalization to handle platform differences.
+BOOTSTRAP_EXCEPTION_PATHS: frozenset[str] = frozenset(
+    [
+        "src/omnibase_infra/runtime/secret_resolver.py",  # The resolver itself needs bootstrap access
+    ]
+)
 
 ALLOWLIST_FILE = ".secretresolver_allowlist"
 
 # Inline exclusion marker pattern - must be in a comment context
-# Pattern: # followed by optional whitespace, then ONEX_EXCLUDE: secret_resolver
-# This is stricter than substring matching to avoid false positives from string literals
-INLINE_EXCLUSION_PATTERN = re.compile(r"#\s*ONEX_EXCLUDE:\s*secret_resolver\b")
+# Pattern requirements (to avoid accidental matches):
+#   1. Must start with # (comment indicator)
+#   2. Followed by optional whitespace
+#   3. Exactly "ONEX_EXCLUDE:" (case-sensitive)
+#   4. Followed by optional whitespace
+#   5. Exactly "secret_resolver" (not partial matches like "secret_resolver_v2")
+#   6. Must be followed by whitespace, end of line, or another comment marker
+#
+# Valid: # ONEX_EXCLUDE: secret_resolver
+# Valid: #ONEX_EXCLUDE:secret_resolver  # comment
+# Invalid: # ONEX_EXCLUDE: secret_resolver_v2  (no partial match)
+# Invalid: "# ONEX_EXCLUDE: secret_resolver"  (inside string - handled by _has_inline_exclusion_marker)
+INLINE_EXCLUSION_PATTERN = re.compile(r"#\s*ONEX_EXCLUDE:\s*secret_resolver(?:\s|$|#)")
 
 
 def _has_inline_exclusion_marker(line: str) -> bool:
@@ -315,6 +486,9 @@ def is_bootstrap_exception(filepath: Path, repo_root: Path) -> bool:
     For example, only src/omnibase_infra/runtime/secret_resolver.py is exempt,
     not any file named secret_resolver.py in other locations.
 
+    Path normalization ensures cross-platform compatibility (Windows backslashes
+    are converted to forward slashes for matching).
+
     Args:
         filepath: Absolute path to the file being checked.
         repo_root: Repository root path for computing relative path.
@@ -322,14 +496,22 @@ def is_bootstrap_exception(filepath: Path, repo_root: Path) -> bool:
     Returns:
         True if the file is in the bootstrap exception list.
     """
-    relative = str(filepath.relative_to(repo_root))
-    return relative in BOOTSTRAP_EXCEPTION_PATHS
+    # Use PurePosixPath parts to normalize path separators for cross-platform matching
+    # This ensures Windows paths like "src\\omnibase_infra\\..." match the forward-slash
+    # patterns in BOOTSTRAP_EXCEPTION_PATHS
+    relative_path = filepath.relative_to(repo_root)
+    normalized = "/".join(relative_path.parts)
+    return normalized in BOOTSTRAP_EXCEPTION_PATHS
 
 
 def scan_file(
     filepath: Path, repo_root: Path, verbose: bool = False
 ) -> list[Violation]:
-    """Scan a single file for violations.
+    """Scan a single file for violations using both regex and AST analysis.
+
+    This function uses a hybrid approach:
+    1. Regex patterns catch common os.environ/os.getenv usage
+    2. AST analysis catches aliased imports that evade regex detection
 
     Args:
         filepath: The file path to scan.
@@ -350,7 +532,12 @@ def scan_file(
             print(f"WARNING: Could not read {relative_path}: {e}")
         return violations
 
-    for line_number, line in enumerate(content.splitlines(), start=1):
+    lines = content.splitlines()
+    # Track which lines have violations to avoid duplicates from both regex and AST
+    lines_with_violations: set[int] = set()
+
+    # Phase 1: Regex-based detection
+    for line_number, line in enumerate(lines, start=1):
         # Skip comments
         stripped = line.strip()
         if stripped.startswith("#"):
@@ -372,7 +559,36 @@ def scan_file(
                         pattern=pattern.pattern,
                     )
                 )
+                lines_with_violations.add(line_number)
                 break  # Only report first pattern match per line
+
+    # Phase 2: AST-based detection for aliased imports
+    # This catches patterns like: from os import environ as env; env["VAR"]
+    ast_violations = detect_aliased_env_access(content)
+    for line_number, code_snippet, description in ast_violations:
+        # Skip if regex already caught this line
+        if line_number in lines_with_violations:
+            continue
+
+        # Skip if line has inline exclusion marker
+        if line_number <= len(lines) and _has_inline_exclusion_marker(
+            lines[line_number - 1]
+        ):
+            continue
+
+        # Get actual line content for the violation
+        line_content = (
+            lines[line_number - 1] if line_number <= len(lines) else code_snippet
+        )
+        violations.append(
+            Violation(
+                filepath=relative_path,
+                line_number=line_number,
+                line_content=line_content,
+                pattern=f"AST:{description}",
+            )
+        )
+        lines_with_violations.add(line_number)
 
     return violations
 
