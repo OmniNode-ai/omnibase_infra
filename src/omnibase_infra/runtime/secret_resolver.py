@@ -105,6 +105,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Maximum file size for secret files (1MB)
+# Prevents memory exhaustion from accidentally pointing at large files
+MAX_SECRET_FILE_SIZE = 1024 * 1024
+
 
 class SecretResolver:
     """Centralized secret resolution. Dumb and deterministic.
@@ -146,6 +150,16 @@ class SecretResolver:
             simultaneously. This is handled by a check-before-write pattern:
             before caching, we verify the key isn't already present. If a sync
             caller won the race, we skip the redundant cache write.
+
+            Why this race is acceptable:
+            1. Both sync and async resolvers fetch the same value from the same
+               source (env var, file, or Vault path), so the resolved values are
+               always identical.
+            2. The skip-if-present check prevents wasted cache writes, but even
+               without it, last-write-wins produces correct results since all
+               writers have the same value.
+            3. There is no correctness issue - only a minor inefficiency of
+               potentially resolving the same secret twice in rare cases.
 
         Bootstrap Secret Isolation:
             Bootstrap secrets (vault.token, vault.addr, vault.ca_cert) are
@@ -279,7 +293,7 @@ class SecretResolver:
 
             TODO: Consider parallelizing sync resolution using ThreadPoolExecutor
             for Vault/file secrets. This would require careful lock management to
-            avoid deadlocks with the per-key locking strategy. See OMN-XXX.
+            avoid deadlocks with the per-key locking strategy. See OMN-1374.
         """
         return {
             name: self.get_secret(name, required=required) for name in logical_names
@@ -790,6 +804,16 @@ class SecretResolver:
 
         # Avoid TOCTOU race: catch exceptions during read instead of pre-checking
         try:
+            # Check file size to prevent memory exhaustion from large files
+            file_size = resolved_path.stat().st_size
+            if file_size > MAX_SECRET_FILE_SIZE:
+                logger.warning(
+                    "Secret file exceeds size limit (%d bytes): %s",
+                    file_size,
+                    logical_name,
+                    extra={"logical_name": logical_name, "file_size": file_size},
+                )
+                return None
             return resolved_path.read_text().strip()
         except FileNotFoundError:
             # File does not exist - this is expected for optional secrets
@@ -856,7 +880,7 @@ class SecretResolver:
                 4. Raise SecretResolutionError on Vault communication failures
 
         Note:
-            Vault integration requires OMN-XXX (follow-up ticket).
+            Vault integration requires OMN-1374 (follow-up ticket).
             Currently, configure secrets via 'env' or 'file' source types.
         """
         if self._vault_handler is None:
@@ -913,7 +937,7 @@ class SecretResolver:
                - Other: Raise SecretResolutionError
 
         Note:
-            Vault integration requires OMN-XXX (follow-up ticket).
+            Vault integration requires OMN-1374 (follow-up ticket).
             Currently, configure secrets via 'env' or 'file' source types.
         """
         if self._vault_handler is None:
