@@ -42,9 +42,9 @@ from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID, uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.enums import EnumRegistrationState
 
 if TYPE_CHECKING:

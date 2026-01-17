@@ -26,9 +26,9 @@ See Also:
 
 from __future__ import annotations
 
-from omnibase_core.enums import EnumDataClassification
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.enums import EnumDataClassification
 from omnibase_infra.enums import EnumEnvironment
 
 

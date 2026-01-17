@@ -12,7 +12,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors.error_infra import (
     ProtocolConfigurationError,

@@ -24,7 +24,6 @@ import logging
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
-
 from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.errors import MessageTypeRegistryError
 from omnibase_infra.models.errors import ModelMessageTypeRegistryErrorContext

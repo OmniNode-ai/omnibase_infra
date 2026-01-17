@@ -25,10 +25,10 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumContractType, EnumRegistrationState
 from omnibase_infra.models.projection.model_sequence_info import ModelSequenceInfo
 from omnibase_infra.models.registration.model_node_capabilities import (

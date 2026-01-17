@@ -374,7 +374,6 @@ class TestModelSecurityValidationResultIntegration:
     def test_result_from_validator(self) -> None:
         """Result from validator should have correct structure."""
         from omnibase_core.enums import EnumDataClassification
-
         from omnibase_infra.models.security import ModelHandlerSecurityPolicy
         from omnibase_infra.runtime import SecurityMetadataValidator
 
@@ -403,7 +402,6 @@ class TestModelSecurityValidationResultIntegration:
     def test_failed_result_from_validator(self) -> None:
         """Failed result from validator should have errors."""
         from omnibase_core.enums import EnumDataClassification
-
         from omnibase_infra.models.security import ModelHandlerSecurityPolicy
         from omnibase_infra.runtime import SecurityMetadataValidator
 

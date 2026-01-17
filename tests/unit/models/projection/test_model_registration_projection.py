@@ -24,10 +24,10 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,

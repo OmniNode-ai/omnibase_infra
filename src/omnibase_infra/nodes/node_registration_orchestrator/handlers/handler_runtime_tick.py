@@ -40,11 +40,11 @@ import time
 from datetime import datetime
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel
+
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from pydantic import BaseModel
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.registration.events.model_node_liveness_expired import (

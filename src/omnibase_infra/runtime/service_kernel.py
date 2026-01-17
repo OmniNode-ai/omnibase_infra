@@ -62,9 +62,9 @@ from uuid import UUID
 
 import asyncpg
 import yaml
-from omnibase_core.container import ModelONEXContainer
 from pydantic import ValidationError
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     ModelInfraErrorContext,

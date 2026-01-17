@@ -56,7 +56,6 @@ from tests.integration.handlers.conftest import CONSUL_AVAILABLE
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
-
     from omnibase_infra.handlers import HandlerConsul
 
 # =============================================================================

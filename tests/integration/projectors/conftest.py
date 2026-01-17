@@ -39,9 +39,9 @@ from typing import TYPE_CHECKING
 import asyncpg
 import pytest
 import yaml
-from omnibase_core.models.projectors import ModelProjectorContract
 from testcontainers.postgres import PostgresContainer
 
+from omnibase_core.models.projectors import ModelProjectorContract
 from omnibase_infra.projectors.contracts import REGISTRATION_PROJECTOR_CONTRACT
 
 if TYPE_CHECKING:

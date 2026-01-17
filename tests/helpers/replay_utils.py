@@ -38,7 +38,6 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,

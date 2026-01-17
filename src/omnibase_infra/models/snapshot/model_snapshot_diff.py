@@ -18,9 +18,9 @@ from __future__ import annotations
 from typing import Self
 from uuid import UUID
 
-from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
 from omnibase_infra.models.snapshot.model_field_change import ModelFieldChange
 
 
