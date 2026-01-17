@@ -74,11 +74,11 @@ class MixinVaultSecrets:
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.read_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             # Payload validation error (bad request) - not an infrastructure failure
@@ -92,11 +92,11 @@ class MixinVaultSecrets:
             mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.read_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise InfraVaultError("Vault client not initialized", context=ctx)
@@ -167,11 +167,11 @@ class MixinVaultSecrets:
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
@@ -181,11 +181,11 @@ class MixinVaultSecrets:
 
         data = payload.get("data")
         if not isinstance(data, dict):
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
@@ -198,11 +198,11 @@ class MixinVaultSecrets:
             mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise InfraVaultError("Vault client not initialized", context=ctx)
@@ -212,11 +212,11 @@ class MixinVaultSecrets:
 
         def write_func() -> dict[str, object]:
             if self._client is None:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.VAULT,
                     operation="vault.write_secret",
                     target_name="vault_handler",
-                    correlation_id=correlation_id,
                     namespace=namespace,
                 )
                 raise InfraVaultError("Vault client not initialized", context=ctx)
@@ -273,11 +273,11 @@ class MixinVaultSecrets:
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.delete_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
@@ -290,11 +290,11 @@ class MixinVaultSecrets:
             mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.delete_secret",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise InfraVaultError("Vault client not initialized", context=ctx)
@@ -304,11 +304,11 @@ class MixinVaultSecrets:
 
         def delete_func() -> None:
             if self._client is None:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.VAULT,
                     operation="vault.delete_secret",
                     target_name="vault_handler",
-                    correlation_id=correlation_id,
                     namespace=namespace,
                 )
                 raise InfraVaultError("Vault client not initialized", context=ctx)
@@ -355,11 +355,11 @@ class MixinVaultSecrets:
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.list_secrets",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
@@ -372,11 +372,11 @@ class MixinVaultSecrets:
             mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.list_secrets",
                 target_name="vault_handler",
-                correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
             raise InfraVaultError("Vault client not initialized", context=ctx)
@@ -386,11 +386,11 @@ class MixinVaultSecrets:
 
         def list_func() -> dict[str, object]:
             if self._client is None:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.VAULT,
                     operation="vault.list_secrets",
                     target_name="vault_handler",
-                    correlation_id=correlation_id,
                     namespace=namespace,
                 )
                 raise InfraVaultError("Vault client not initialized", context=ctx)

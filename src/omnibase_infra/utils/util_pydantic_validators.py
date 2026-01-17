@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, overload
 from urllib.parse import ParseResult, urlparse
 
 from omnibase_infra.utils.util_datetime import is_timezone_aware
@@ -43,26 +43,47 @@ if TYPE_CHECKING:
     from omnibase_infra.enums import EnumPolicyType
 
 
+@overload
 def validate_timezone_aware_datetime(
     dt: datetime,
-) -> datetime:
+    *,
+    allow_none: Literal[False] = ...,
+) -> datetime: ...
+
+
+@overload
+def validate_timezone_aware_datetime(
+    dt: datetime | None,
+    *,
+    allow_none: Literal[True],
+) -> datetime | None: ...
+
+
+def validate_timezone_aware_datetime(
+    dt: datetime | None,
+    *,
+    allow_none: bool = False,
+) -> datetime | None:
     """Validate that a datetime is timezone-aware.
 
     This is the SINGLE SOURCE OF TRUTH for timezone-aware datetime validation
     in Pydantic field validators. Use this instead of duplicating the validation
     logic in each model.
 
-    For optional datetime fields, use ``validate_timezone_aware_datetime_optional``
-    instead.
+    For optional datetime fields, use ``allow_none=True`` parameter.
 
     Args:
-        dt: The datetime value to validate.
+        dt: The datetime value to validate (or None if allow_none=True).
+        allow_none: If True, None is a valid value. If False (default), None
+            raises ValueError.
 
     Returns:
-        The validated datetime (unchanged if valid).
+        The validated datetime (unchanged if valid), or None if allow_none=True
+        and dt is None.
 
     Raises:
-        ValueError: If datetime is naive (no timezone info).
+        ValueError: If datetime is naive (no timezone info), or if dt is None
+            and allow_none=False.
 
     Example:
         >>> from datetime import datetime, UTC
@@ -79,13 +100,32 @@ def validate_timezone_aware_datetime(
         Traceback (most recent call last):
         ...
         ValueError: timestamp must be timezone-aware...
+        >>>
+        >>> # Optional datetime with allow_none=True
+        >>> validate_timezone_aware_datetime(None, allow_none=True) is None
+        True
 
     Usage in Pydantic model:
         @field_validator("timestamp")
         @classmethod
         def validate_timestamp_timezone_aware(cls, v: datetime) -> datetime:
             return validate_timezone_aware_datetime(v)
+
+        @field_validator("created_at", "updated_at")
+        @classmethod
+        def validate_optional_timestamps(
+            cls, v: datetime | None
+        ) -> datetime | None:
+            return validate_timezone_aware_datetime(v, allow_none=True)
     """
+    if dt is None:
+        if not allow_none:
+            raise ValueError(
+                "timestamp is required and cannot be None. "
+                "Use allow_none=True if None is a valid value."
+            )
+        return None
+
     if not is_timezone_aware(dt):
         raise ValueError(
             "timestamp must be timezone-aware. Use datetime.now(UTC) or "
@@ -100,7 +140,7 @@ def validate_timezone_aware_datetime_optional(
     """Validate that an optional datetime is timezone-aware when provided.
 
     Convenience wrapper around validate_timezone_aware_datetime for optional
-    datetime fields.
+    datetime fields. Equivalent to ``validate_timezone_aware_datetime(dt, allow_none=True)``.
 
     Args:
         dt: The datetime value to validate (or None).
@@ -130,9 +170,7 @@ def validate_timezone_aware_datetime_optional(
         def validate_timestamps(cls, v: datetime | None) -> datetime | None:
             return validate_timezone_aware_datetime_optional(v)
     """
-    if dt is None:
-        return None
-    return validate_timezone_aware_datetime(dt)
+    return validate_timezone_aware_datetime(dt, allow_none=True)
 
 
 def _sanitize_url_for_logging(url: str, parsed: ParseResult | None = None) -> str:

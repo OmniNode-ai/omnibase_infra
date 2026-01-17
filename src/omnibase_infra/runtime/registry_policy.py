@@ -695,6 +695,10 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         except ValidationError as e:
             # Convert all validation errors to ProtocolConfigurationError for consistency
             # This ensures uniform error handling across all validation failures
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="register_policy",
+            )
             for error in e.errors():
                 field_loc = error.get("loc", ())
                 field_name = field_loc[0] if field_loc else "unknown"
@@ -704,24 +708,29 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
                     raise ProtocolConfigurationError(
                         f"Invalid version format: {error_msg}",
                         version=version,
+                        context=context,
                     ) from e
                 if field_name == "policy_id":
                     raise ProtocolConfigurationError(
                         f"Invalid policy_id: {error_msg}",
                         policy_id=policy_id,
+                        context=context,
                     ) from e
                 if field_name == "policy_type":
                     raise ProtocolConfigurationError(
                         f"Invalid policy_type: {error_msg}",
                         policy_type=str(policy_type),
+                        context=context,
                     ) from e
                 if field_name == "policy_class":
                     raise ProtocolConfigurationError(
                         f"Invalid policy_class: {error_msg}",
+                        context=context,
                     ) from e
             # Fallback for any unhandled validation errors
             raise ProtocolConfigurationError(
                 f"Validation error in policy registration: {e}",
+                context=context,
             ) from e
 
         self.register(registration)
@@ -984,6 +993,12 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
 
         Returns:
             Cached semver parsing function that returns ModelSemVer instances.
+            The returned function accepts a version string and returns a ModelSemVer.
+
+        Raises:
+            ProtocolConfigurationError: Raised by the returned parsing function if
+                the version format is invalid (e.g., non-numeric components,
+                negative numbers, or more than 3 version parts).
 
         Performance:
             - First call: Creates LRU-cached function (one-time cost)

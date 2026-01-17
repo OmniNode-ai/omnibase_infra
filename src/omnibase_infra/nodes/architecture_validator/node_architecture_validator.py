@@ -30,7 +30,7 @@ Example:
     ... )
     >>>
     >>> # Create validator with rules
-    >>> container = ModelONEXContainer.minimal()
+    >>> container = ModelONEXContainer()
     >>> validator = NodeArchitectureValidatorCompute(
     ...     container=container,
     ...     rules=(no_handler_publishing_rule, no_workflow_in_reducer_rule),
@@ -163,7 +163,7 @@ class NodeArchitectureValidatorCompute(
             >>> from omnibase_core.models.container import ModelONEXContainer
             >>> from my_rules import NoHandlerPublishingRule, NoWorkflowInReducerRule
             >>>
-            >>> container = ModelONEXContainer.minimal()
+            >>> container = ModelONEXContainer()
             >>> validator = NodeArchitectureValidatorCompute(
             ...     container=container,
             ...     rules=(NoHandlerPublishingRule(), NoWorkflowInReducerRule()),
@@ -213,7 +213,7 @@ class NodeArchitectureValidatorCompute(
         """
         for rule in rules:
             if rule.rule_id not in SUPPORTED_RULE_IDS:
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="validate_rules_against_contract",
                 )
