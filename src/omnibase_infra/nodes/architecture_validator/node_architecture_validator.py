@@ -134,7 +134,7 @@ class NodeArchitectureValidatorCompute(
         ...         f"Validation failed: {result.violation_count} violations",
         ...         context=context,
         ...         code="ARCHITECTURE_VALIDATION_FAILED",
-        ...         violations=[v.to_dict() for v in result.violations],
+        ...         violations=[v.to_structured_dict() for v in result.violations],
         ...     )
 
         >>> # CI/CD pipeline validation

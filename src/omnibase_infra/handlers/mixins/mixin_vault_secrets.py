@@ -106,11 +106,11 @@ class MixinVaultSecrets:
 
         def read_func() -> dict[str, object]:
             if self._client is None:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.VAULT,
                     operation="vault.read_secret",
                     target_name="vault_handler",
-                    correlation_id=correlation_id,
                     namespace=namespace,
                 )
                 raise InfraVaultError("Vault client not initialized", context=ctx)

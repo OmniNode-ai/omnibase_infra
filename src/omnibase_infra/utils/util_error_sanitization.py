@@ -59,6 +59,9 @@ SENSITIVE_PATTERNS: tuple[str, ...] = (
     # SSH credentials
     "ssh_key",
     "sshkey",
+    # OAuth/OIDC credentials
+    "client_secret",
+    "refresh_token",
     # Session identifiers (hijacking prevention)
     "session_id",
     "sessionid",

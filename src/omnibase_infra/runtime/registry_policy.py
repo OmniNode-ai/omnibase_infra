@@ -551,9 +551,14 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         try:
             return normalize_version(version)
         except ValueError as e:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="normalize_version",
+            )
             raise ProtocolConfigurationError(
                 str(e),
                 version=version,
+                context=context,
             ) from e
 
     def register(
@@ -1024,14 +1029,24 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
                 try:
                     return ModelSemVer.parse(normalized_version)
                 except ModelOnexError as e:
+                    context = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="parse_semver",
+                    )
                     raise ProtocolConfigurationError(
                         str(e),
                         version=normalized_version,
+                        context=context,
                     ) from e
                 except ValueError as e:
+                    context = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="parse_semver",
+                    )
                     raise ProtocolConfigurationError(
                         str(e),
                         version=normalized_version,
+                        context=context,
                     ) from e
 
             def _parse_semver_impl(version: str) -> ModelSemVer:
