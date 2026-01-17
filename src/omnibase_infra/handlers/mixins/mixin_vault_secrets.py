@@ -81,6 +81,7 @@ class MixinVaultSecrets:
                 correlation_id=correlation_id,
                 namespace=self._config.namespace if self._config else None,
             )
+            # Payload validation error (bad request) - not an infrastructure failure
             raise RuntimeHostError(
                 "Missing or invalid 'path' in payload",
                 context=ctx,
