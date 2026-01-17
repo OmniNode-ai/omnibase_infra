@@ -774,7 +774,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         merged_config["handler_type"] = handler_type
 
         # Apply environment variable overrides (highest priority)
-        merged_config = self._apply_env_overrides(merged_config, handler_type)
+        merged_config = self._apply_env_overrides(
+            merged_config, handler_type, correlation_id
+        )
 
         # Resolve any vault: references in the config
         merged_config = self._resolve_vault_refs(merged_config, correlation_id)
@@ -819,7 +821,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         merged_config["handler_type"] = handler_type
 
         # Apply environment variable overrides (highest priority)
-        merged_config = self._apply_env_overrides(merged_config, handler_type)
+        merged_config = self._apply_env_overrides(
+            merged_config, handler_type, correlation_id
+        )
 
         # Resolve any vault: references in the config (async)
         merged_config = await self._resolve_vault_refs_async(
@@ -1476,10 +1480,31 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             vault_path, fragment = vault_path.rsplit("#", 1)
         return vault_path, fragment
 
+    def _has_vault_references(self, config: dict[str, object]) -> bool:
+        """Check if config contains any vault: references (including nested dicts).
+
+        Recursively scans the configuration dictionary to detect any string
+        values that start with "vault:".
+
+        Args:
+            config: Configuration dictionary to check.
+
+        Returns:
+            True if any vault: references are found, False otherwise.
+        """
+        for value in config.values():
+            if isinstance(value, str) and value.startswith("vault:"):
+                return True
+            if isinstance(value, dict):
+                if self._has_vault_references(value):
+                    return True
+        return False
+
     def _apply_env_overrides(
         self,
         config: dict[str, object],
         handler_type: str,
+        correlation_id: UUID,
     ) -> dict[str, object]:
         """Apply environment variable overrides.
 
@@ -1491,6 +1516,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Args:
             config: Base configuration dictionary.
             handler_type: Handler type for env var name construction.
+            correlation_id: Correlation ID for error tracking.
 
         Returns:
             Configuration with environment overrides applied.
@@ -1508,7 +1534,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
             if env_value is not None:
                 # Convert value based on expected type
-                converted = self._convert_env_value(env_value, model_field, env_name)
+                converted = self._convert_env_value(
+                    env_value, model_field, env_name, correlation_id
+                )
                 if converted is not None:
                     if env_field in _RETRY_POLICY_FIELDS:
                         retry_overrides[model_field] = converted
@@ -1537,6 +1565,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         value: str,
         field: str,
         env_name: str,
+        correlation_id: UUID,
     ) -> object | None:
         """Convert environment variable string to appropriate type.
 
@@ -1544,6 +1573,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             value: String value from environment.
             field: Field name to determine type.
             env_name: Full environment variable name for error messages.
+            correlation_id: Correlation ID for error tracking.
 
         Returns:
             Converted value, or None if conversion fails.
@@ -1571,6 +1601,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     env_name=env_name,
                     field=field,
                     expected_type="integer",
+                    correlation_id=correlation_id,
                 )
                 return None
 
@@ -1583,6 +1614,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     env_name=env_name,
                     field=field,
                     expected_type="float",
+                    correlation_id=correlation_id,
                 )
                 return None
 
@@ -1597,6 +1629,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         env_name: str,
         field: str,
         expected_type: str,
+        correlation_id: UUID,
     ) -> None:
         """Handle type conversion error based on strict_env_coercion setting.
 
@@ -1607,12 +1640,14 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             env_name: Full environment variable name.
             field: Field name that was being set.
             expected_type: Expected type name (e.g., "integer", "float").
+            correlation_id: Correlation ID for error tracking.
 
         Raises:
             ProtocolConfigurationError: If strict_env_coercion is enabled.
         """
         if self._config.strict_env_coercion:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="convert_env_value",
                 target_name="binding_config_resolver",
@@ -1630,6 +1665,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             env_name,
             field,
             extra={
+                "correlation_id": str(correlation_id),
                 "env_var": env_name,
                 "field": field,
                 "expected_type": expected_type,
@@ -1673,6 +1709,19 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
+            # Check if there are vault references that need resolution
+            # If fail_on_vault_error is True and vault refs exist, this is a security issue
+            if self._config.fail_on_vault_error and self._has_vault_references(config):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="resolve_vault_refs",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Config contains vault: references but no SecretResolver is configured",
+                    context=context,
+                )
             return config
 
         result: dict[str, object] = {}
@@ -1756,6 +1805,19 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
+            # Check if there are vault references that need resolution
+            # If fail_on_vault_error is True and vault refs exist, this is a security issue
+            if self._config.fail_on_vault_error and self._has_vault_references(config):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="resolve_vault_refs_async",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Config contains vault: references but no SecretResolver is configured",
+                    context=context,
+                )
             return config
 
         result: dict[str, object] = {}

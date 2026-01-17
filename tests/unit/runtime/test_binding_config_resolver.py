@@ -19,6 +19,7 @@ Test Coverage:
 - Validation and error handling
 - Security (path traversal, sanitization)
 - Container-based dependency injection
+- Recursion depth limits for nested config resolution
 
 Related:
 - OMN-765: BindingConfigResolver implementation
@@ -37,6 +38,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -1993,6 +1995,329 @@ class TestBindingConfigResolverInlinePrecedence:
             assert result.enabled is True
 
 
+class TestBindingConfigResolverRecursionDepth:
+    """Tests for recursion depth limits in nested config resolution."""
+
+    def test_resolve_vault_refs_depth_limit(self) -> None:
+        """Deeply nested configs hit recursion limit.
+
+        Tests that _resolve_vault_refs raises ProtocolConfigurationError
+        when nesting exceeds _MAX_NESTED_CONFIG_DEPTH (20).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create mock SecretResolver
+            mock_resolver = MagicMock()
+            mock_secret = MagicMock()
+            mock_secret.get_secret_value.return_value = "secret_value"
+            mock_resolver.get_secret.return_value = mock_secret
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Patch the _get_secret_resolver method to return our mock
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                # Create deeply nested config (21 levels deep to exceed limit of 20)
+                nested: dict[str, object] = {"value": "vault:secret/test"}
+                for _ in range(21):
+                    nested = {"nested": nested}
+
+                with pytest.raises(ProtocolConfigurationError) as exc_info:
+                    resolver._resolve_vault_refs(nested, uuid4(), depth=0)
+
+                assert "nesting exceeds maximum depth" in str(exc_info.value).lower()
+
+    def test_resolve_vault_refs_at_depth_limit_succeeds(self) -> None:
+        """Config at exactly the depth limit succeeds.
+
+        Tests that configs with nesting at exactly _MAX_NESTED_CONFIG_DEPTH (20)
+        are processed successfully.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create mock SecretResolver
+            mock_resolver = MagicMock()
+            mock_secret = MagicMock()
+            mock_secret.get_secret_value.return_value = "resolved_secret"
+            mock_resolver.get_secret.return_value = mock_secret
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Patch the _get_secret_resolver method to return our mock
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                # Create config at exactly 20 levels deep (should succeed)
+                nested: dict[str, object] = {"value": "vault:secret/test"}
+                for _ in range(20):
+                    nested = {"nested": nested}
+
+                # Should not raise - at the limit, not exceeding it
+                result = resolver._resolve_vault_refs(nested, uuid4(), depth=0)
+
+                # Verify the nested structure was processed
+                assert result is not None
+                assert "nested" in result
+
+    @pytest.mark.asyncio
+    async def test_resolve_vault_refs_async_depth_limit(self) -> None:
+        """Async vault ref resolution also respects depth limit.
+
+        Tests that _resolve_vault_refs_async raises ProtocolConfigurationError
+        when nesting exceeds _MAX_NESTED_CONFIG_DEPTH (20).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create mock SecretResolver with async support
+            mock_resolver = MagicMock()
+            mock_secret = MagicMock()
+            mock_secret.get_secret_value.return_value = "secret_value"
+
+            async def mock_get_secret_async(name: str, required: bool = True) -> object:
+                return mock_secret
+
+            mock_resolver.get_secret_async = mock_get_secret_async
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Patch the _get_secret_resolver method to return our mock
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                # Create deeply nested config (21 levels deep to exceed limit of 20)
+                nested: dict[str, object] = {"value": "vault:secret/test"}
+                for _ in range(21):
+                    nested = {"nested": nested}
+
+                with pytest.raises(ProtocolConfigurationError) as exc_info:
+                    await resolver._resolve_vault_refs_async(nested, uuid4(), depth=0)
+
+                assert "nesting exceeds maximum depth" in str(exc_info.value).lower()
+
+
+class TestAsyncKeyLockCleanup:
+    """Tests for _cleanup_stale_async_key_locks method.
+
+    These tests verify that async key locks are properly cleaned up to prevent
+    unbounded memory growth in long-running processes. The cleanup mechanism
+    removes locks that are:
+    1. Older than _ASYNC_KEY_LOCK_MAX_AGE_SECONDS (3600s)
+    2. Not currently held (unlocked)
+
+    Related:
+    - OMN-765: BindingConfigResolver implementation
+    - PR #168 review feedback
+    """
+
+    def test_cleanup_removes_stale_unlocked_locks(self) -> None:
+        """Test that stale unlocked locks are removed during cleanup."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create a lock and make it stale
+            resolver._get_async_key_lock("test_handler")
+
+            # Simulate lock being old by manipulating timestamp
+            # _ASYNC_KEY_LOCK_MAX_AGE_SECONDS is 3600
+            with resolver._lock:
+                resolver._async_key_lock_timestamps["test_handler"] = (
+                    time.monotonic() - 4000  # Older than 3600 seconds
+                )
+                resolver._cleanup_stale_async_key_locks()
+
+            # Verify lock was removed
+            assert "test_handler" not in resolver._async_key_locks
+            assert "test_handler" not in resolver._async_key_lock_timestamps
+            assert resolver._async_key_lock_cleanups == 1
+
+    def test_cleanup_preserves_recent_locks(self) -> None:
+        """Test that recent locks are preserved during cleanup."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create a recent lock
+            resolver._get_async_key_lock("recent_handler")
+
+            with resolver._lock:
+                resolver._cleanup_stale_async_key_locks()
+
+            # Verify lock is preserved (timestamp is recent)
+            assert "recent_handler" in resolver._async_key_locks
+            assert "recent_handler" in resolver._async_key_lock_timestamps
+            # No cleanup should have occurred since the lock is recent
+            assert resolver._async_key_lock_cleanups == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_preserves_held_locks(self) -> None:
+        """Test that held locks are not removed even if stale."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create and acquire a lock
+            lock = resolver._get_async_key_lock("held_handler")
+
+            async with lock:
+                # Make the timestamp stale while lock is held
+                with resolver._lock:
+                    resolver._async_key_lock_timestamps["held_handler"] = (
+                        time.monotonic() - 4000  # Older than 3600 seconds
+                    )
+                    resolver._cleanup_stale_async_key_locks()
+
+                # Verify held lock is preserved despite being stale
+                assert "held_handler" in resolver._async_key_locks
+                assert "held_handler" in resolver._async_key_lock_timestamps
+                # No cleanup counter increment since no locks were actually cleaned
+                assert resolver._async_key_lock_cleanups == 0
+
+    def test_cleanup_counter_increments_only_when_locks_cleaned(self) -> None:
+        """Test that _async_key_lock_cleanups stat increments only when locks are removed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            initial_cleanups = resolver._async_key_lock_cleanups
+            assert initial_cleanups == 0
+
+            # Create multiple stale locks
+            for i in range(5):
+                resolver._get_async_key_lock(f"handler_{i}")
+
+            # Make all locks stale
+            with resolver._lock:
+                current_time = time.monotonic()
+                for i in range(5):
+                    resolver._async_key_lock_timestamps[f"handler_{i}"] = (
+                        current_time - 4000  # Older than 3600 seconds
+                    )
+                resolver._cleanup_stale_async_key_locks()
+
+            # Verify all locks were removed
+            assert len(resolver._async_key_locks) == 0
+            # Counter should increment once per cleanup call (not per lock)
+            assert resolver._async_key_lock_cleanups == 1
+
+            # Calling cleanup again with no stale locks should not increment
+            with resolver._lock:
+                resolver._cleanup_stale_async_key_locks()
+            assert resolver._async_key_lock_cleanups == 1
+
+    def test_cleanup_mixed_stale_and_recent_locks(self) -> None:
+        """Test cleanup with a mix of stale and recent locks."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create multiple locks
+            for i in range(3):
+                resolver._get_async_key_lock(f"stale_handler_{i}")
+            for i in range(2):
+                resolver._get_async_key_lock(f"recent_handler_{i}")
+
+            # Make only some locks stale
+            with resolver._lock:
+                current_time = time.monotonic()
+                for i in range(3):
+                    resolver._async_key_lock_timestamps[f"stale_handler_{i}"] = (
+                        current_time - 4000  # Older than 3600 seconds
+                    )
+                # recent_handler_* timestamps remain current
+
+                resolver._cleanup_stale_async_key_locks()
+
+            # Verify only stale locks were removed
+            for i in range(3):
+                assert f"stale_handler_{i}" not in resolver._async_key_locks
+            for i in range(2):
+                assert f"recent_handler_{i}" in resolver._async_key_locks
+
+            assert len(resolver._async_key_locks) == 2
+            assert resolver._async_key_lock_cleanups == 1
+
+    def test_threshold_triggered_cleanup(self) -> None:
+        """Test that cleanup is triggered when lock count exceeds threshold."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # _ASYNC_KEY_LOCK_CLEANUP_THRESHOLD is 1000
+            # Manually create locks to exceed threshold (simulating many handlers)
+            with resolver._lock:
+                stale_time = time.monotonic() - 4000  # Older than 3600 seconds
+                for i in range(1001):
+                    lock = asyncio.Lock()
+                    resolver._async_key_locks[f"handler_{i}"] = lock
+                    resolver._async_key_lock_timestamps[f"handler_{i}"] = stale_time
+
+            # Verify we have more than threshold
+            assert len(resolver._async_key_locks) > 1000
+
+            # Create one more lock via _get_async_key_lock to trigger cleanup
+            resolver._get_async_key_lock("trigger_handler")
+
+            # After cleanup, stale locks should be removed
+            # Only the "trigger_handler" (which is recent) should remain
+            assert len(resolver._async_key_locks) == 1
+            assert "trigger_handler" in resolver._async_key_locks
+            assert resolver._async_key_lock_cleanups == 1
+
+    def test_cache_stats_includes_lock_cleanup_count(self) -> None:
+        """Test that get_cache_stats() returns async_key_lock_cleanups."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Initial stats
+            stats = resolver.get_cache_stats()
+            assert stats.async_key_lock_cleanups == 0
+
+            # Create and make a lock stale, then clean up
+            resolver._get_async_key_lock("test_handler")
+            with resolver._lock:
+                resolver._async_key_lock_timestamps["test_handler"] = (
+                    time.monotonic() - 4000
+                )
+                resolver._cleanup_stale_async_key_locks()
+
+            # Verify stats updated
+            stats = resolver.get_cache_stats()
+            assert stats.async_key_lock_cleanups == 1
+
+
 __all__: list[str] = [
     "TestBindingConfigResolverBasic",
     "TestBindingConfigResolverFileSource",
@@ -2008,4 +2333,6 @@ __all__: list[str] = [
     "TestModelBindingConfig",
     "TestModelRetryPolicy",
     "TestBindingConfigResolverInlinePrecedence",
+    "TestBindingConfigResolverRecursionDepth",
+    "TestAsyncKeyLockCleanup",
 ]
