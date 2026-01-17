@@ -65,7 +65,7 @@ class ModelCircuitBreakerConfig(BaseModel):
         from omnibase_infra.mixins import MixinAsyncCircuitBreaker
         from omnibase_infra.enums import EnumInfraTransportType
 
-        class KafkaEventBus(MixinAsyncCircuitBreaker):
+        class EventBusKafka(MixinAsyncCircuitBreaker):
             def __init__(self, environment: str):
                 config = ModelCircuitBreakerConfig(
                     threshold=5,

@@ -138,7 +138,7 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
         This implementation is NOT persistent and NOT distributed.
         Data is lost on process restart. For production deployments:
         - Use a persistent backend (Redis, PostgreSQL)
-        - Consider the existing PostgresIdempotencyStore for full persistence
+        - Consider the existing StoreIdempotencyPostgres for full persistence
         - Multi-instance deployments MUST use a shared backend
 
     Example:

@@ -14,10 +14,10 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.idempotency import (
-    InMemoryIdempotencyStore,
     ModelIdempotencyGuardConfig,
+    StoreIdempotencyInmemory,
 )
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from tests.conftest import seed_mock_handlers
 
 
@@ -131,7 +131,7 @@ class TestIdempotencyGuardEnabled:
         assert process._idempotency_config is not None
         assert process._idempotency_config.enabled
         assert process._idempotency_store is not None
-        assert isinstance(process._idempotency_store, InMemoryIdempotencyStore)
+        assert isinstance(process._idempotency_store, StoreIdempotencyInmemory)
 
         await process.stop()
 

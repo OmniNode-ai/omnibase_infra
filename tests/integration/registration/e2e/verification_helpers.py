@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
@@ -403,7 +403,7 @@ async def wait_for_postgres_registration(
 
 
 async def wait_for_kafka_event(
-    event_bus: KafkaEventBus,
+    event_bus: EventBusKafka,
     topic: str,
     correlation_id: UUID,
     timeout_seconds: float = 10.0,
@@ -414,7 +414,7 @@ async def wait_for_kafka_event(
     the specified correlation_id.
 
     Args:
-        event_bus: Initialized KafkaEventBus instance.
+        event_bus: Initialized EventBusKafka instance.
         topic: Topic to listen on.
         correlation_id: Correlation ID to match.
         timeout_seconds: Maximum time to wait.
@@ -474,7 +474,7 @@ async def wait_for_kafka_event(
 
 
 async def collect_registration_events(
-    event_bus: KafkaEventBus,
+    event_bus: EventBusKafka,
     node_id: UUID,
     event_types: list[type[BaseModel]],
     timeout_seconds: float = 10.0,
@@ -485,7 +485,7 @@ async def collect_registration_events(
     the specified types for the given node.
 
     Args:
-        event_bus: Initialized KafkaEventBus instance.
+        event_bus: Initialized EventBusKafka instance.
         node_id: Node UUID to filter events for.
         event_types: List of event model types to collect.
         timeout_seconds: Maximum time to collect events.

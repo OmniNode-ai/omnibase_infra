@@ -47,11 +47,12 @@ from pydantic import ValidationError
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
 )
 from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -912,7 +913,11 @@ class TestServiceTimeoutEmitterExactlyOnce:
         )
 
         mock_event_bus.publish_envelope.side_effect = InfraTimeoutError(
-            "Publish timeout"
+            "Publish timeout",
+            context=ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="publish_envelope",
+            ),
         )
 
         with pytest.raises(InfraTimeoutError):

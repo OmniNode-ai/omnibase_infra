@@ -116,6 +116,13 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         Args:
             container: ONEX container providing dependency injection for
                 services, configuration, and runtime context.
+
+        Note:
+            The container is stored for interface compliance with the standard ONEX
+            handler pattern (def __init__(self, container: ModelONEXContainer)) and
+            to enable future DI-based service resolution (e.g., dispatcher routing,
+            metrics integration). Currently, the handler operates independently but
+            the container parameter ensures API consistency across all handlers.
         """
         self._container = container
         self._config: ModelMcpHandlerConfig | None = None

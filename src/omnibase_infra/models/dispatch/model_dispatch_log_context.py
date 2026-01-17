@@ -18,7 +18,7 @@ This model uses sentinel values internally instead of ``None``:
 - Enum fields: kept as ``None`` (unavoidable for type safety)
 
 **Input Conversion**:
-For backwards compatibility, constructors accept ``None`` and convert to sentinels.
+Constructors accept ``None`` and convert to sentinel values for convenience.
 
 .. versionadded:: 0.6.0
     Created as part of Union Reduction Phase 2 (OMN-1002).
@@ -34,6 +34,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.types import PrimitiveValue
 from omnibase_infra.enums import EnumMessageCategory
 
 # Sentinel values for "not set" state
@@ -43,7 +44,7 @@ _SENTINEL_FLOAT: float = -1.0
 _SENTINEL_UUID: UUID = UUID(int=0)  # Nil UUID (00000000-0000-0000-0000-000000000000)
 
 # Type alias for log context dict values (reduces union count)
-type LogContextDict = dict[str, str | int | float]
+type LogContextDict = dict[str, PrimitiveValue]
 
 
 class ModelDispatchLogContext(BaseModel):
@@ -61,9 +62,9 @@ class ModelDispatchLogContext(BaseModel):
     - ``correlation_id=UUID(int=0)``: Not set (nil UUID)
     - ``trace_id=UUID(int=0)``: Not set (nil UUID)
 
-    **Backwards Compatibility**:
+    **None Handling**:
     Constructors accept ``None`` for any field and convert to the sentinel value.
-    This ensures existing code that passes ``None`` continues to work.
+    This provides a convenient API for optional fields.
 
     The model is designed for immutability (frozen=True) for thread-safety.
 
@@ -173,7 +174,7 @@ class ModelDispatchLogContext(BaseModel):
         """Convert None to -1.0 sentinel."""
         if v is None:
             return _SENTINEL_FLOAT
-        if isinstance(v, (int, float)):
+        if isinstance(v, int | float):
             return float(v)
         # Fallback for numeric strings - cast to float
         return float(str(v))

@@ -27,7 +27,7 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey
-from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -193,25 +193,25 @@ class MockPolicyV2:
 
 
 @pytest.fixture
-def policy_registry() -> PolicyRegistry:
-    """Provide a fresh PolicyRegistry instance for each test.
+def policy_registry() -> RegistryPolicy:
+    """Provide a fresh RegistryPolicy instance for each test.
 
-    Note: This fixture uses direct instantiation for unit testing the PolicyRegistry
+    Note: This fixture uses direct instantiation for unit testing the RegistryPolicy
     class itself. For integration tests that need container-based access, use
     container_with_policy_registry or container_with_registries fixtures from
     conftest.py.
     """
-    return PolicyRegistry()
+    return RegistryPolicy()
 
 
 @pytest.fixture
-def populated_policy_registry() -> PolicyRegistry:
-    """Provide a PolicyRegistry with pre-registered policies.
+def populated_policy_registry() -> RegistryPolicy:
+    """Provide a RegistryPolicy with pre-registered policies.
 
-    Note: This fixture uses direct instantiation for unit testing the PolicyRegistry
+    Note: This fixture uses direct instantiation for unit testing the RegistryPolicy
     class itself. For integration tests, use container-based fixtures.
     """
-    registry = PolicyRegistry()
+    registry = RegistryPolicy()
     registry.register_policy(
         policy_id="sync-orchestrator",
         policy_class=MockSyncPolicy,  # type: ignore[arg-type]
@@ -233,9 +233,9 @@ def populated_policy_registry() -> PolicyRegistry:
 
 
 class TestPolicyRegistryBasics:
-    """Basic tests for PolicyRegistry class."""
+    """Basic tests for RegistryPolicy class."""
 
-    def test_register_and_get_policy(self, policy_registry: PolicyRegistry) -> None:
+    def test_register_and_get_policy(self, policy_registry: RegistryPolicy) -> None:
         """Test basic registration and retrieval."""
         policy_registry.register_policy(
             policy_id="test-policy",
@@ -247,7 +247,7 @@ class TestPolicyRegistryBasics:
         assert policy_cls is MockSyncPolicy
 
     def test_get_unregistered_raises_error(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that getting an unregistered policy raises PolicyRegistryError."""
         with pytest.raises(PolicyRegistryError) as exc_info:
@@ -256,7 +256,7 @@ class TestPolicyRegistryBasics:
         assert "No policy registered" in str(exc_info.value)
 
     def test_register_orchestrator_policy(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test registering an orchestrator policy with EnumPolicyType.ORCHESTRATOR."""
         policy_registry.register_policy(
@@ -273,7 +273,7 @@ class TestPolicyRegistryBasics:
             "orchestrator-policy", policy_type=EnumPolicyType.ORCHESTRATOR
         )
 
-    def test_register_reducer_policy(self, policy_registry: PolicyRegistry) -> None:
+    def test_register_reducer_policy(self, policy_registry: RegistryPolicy) -> None:
         """Test registering a reducer policy with EnumPolicyType.REDUCER."""
         policy_registry.register_policy(
             policy_id="reducer-policy",
@@ -304,7 +304,7 @@ class TestPolicyRegistrySyncEnforcement:
     """
 
     def test_sync_policy_registration_succeeds(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that synchronous policy registers without issues."""
         # Should not raise - sync policy with default allow_async=False
@@ -319,7 +319,7 @@ class TestPolicyRegistrySyncEnforcement:
         assert policy_cls is MockSyncPolicy
 
     def test_async_policy_without_flag_raises(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that async policy without allow_async=True raises error.
 
@@ -347,7 +347,7 @@ class TestPolicyRegistrySyncEnforcement:
         )
 
     def test_async_policy_with_flag_succeeds(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that async policy with allow_async=True registers OK."""
         # Should not raise with explicit flag
@@ -363,7 +363,7 @@ class TestPolicyRegistrySyncEnforcement:
         assert policy_cls is MockAsyncPolicy
 
     def test_async_evaluate_method_detected(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that async evaluate() method is detected and enforced."""
         with pytest.raises(PolicyRegistryError) as exc_info:
@@ -379,7 +379,7 @@ class TestPolicyRegistrySyncEnforcement:
         assert "evaluate" in error_msg.lower()
 
     def test_async_decide_method_detected(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that async decide() method is detected and enforced."""
         with pytest.raises(PolicyRegistryError) as exc_info:
@@ -395,7 +395,7 @@ class TestPolicyRegistrySyncEnforcement:
         assert "decide" in error_msg.lower()
 
     def test_async_reduce_method_detected(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that async reduce() method is detected and enforced."""
         with pytest.raises(PolicyRegistryError) as exc_info:
@@ -410,7 +410,7 @@ class TestPolicyRegistrySyncEnforcement:
         # Should mention the async reduce method
         assert "reduce" in error_msg.lower()
 
-    def test_sync_decide_method_succeeds(self, policy_registry: PolicyRegistry) -> None:
+    def test_sync_decide_method_succeeds(self, policy_registry: RegistryPolicy) -> None:
         """Test that sync decide() method policy registers successfully."""
         policy_registry.register_policy(
             policy_id="sync-decide",
@@ -420,7 +420,7 @@ class TestPolicyRegistrySyncEnforcement:
         )  # type: ignore[arg-type]
         assert policy_registry.is_registered("sync-decide")
 
-    def test_sync_reduce_method_succeeds(self, policy_registry: PolicyRegistry) -> None:
+    def test_sync_reduce_method_succeeds(self, policy_registry: RegistryPolicy) -> None:
         """Test that sync reduce() method policy registers successfully."""
         policy_registry.register_policy(
             policy_id="sync-reduce",
@@ -439,7 +439,7 @@ class TestPolicyRegistrySyncEnforcement:
 class TestPolicyRegistryList:
     """Tests for list() method."""
 
-    def test_list_all_policies(self, populated_policy_registry: PolicyRegistry) -> None:
+    def test_list_all_policies(self, populated_policy_registry: RegistryPolicy) -> None:
         """Test that list_keys returns (id, type, version) tuples."""
         policies = populated_policy_registry.list_keys()
         assert len(policies) == 2
@@ -453,7 +453,7 @@ class TestPolicyRegistryList:
             assert isinstance(version, str)
 
     def test_list_by_policy_type(
-        self, populated_policy_registry: PolicyRegistry
+        self, populated_policy_registry: RegistryPolicy
     ) -> None:
         """Test filtering list_keys by policy type."""
         # List only orchestrator policies
@@ -470,7 +470,7 @@ class TestPolicyRegistryList:
         assert len(reducer_policies) == 1
         assert reducer_policies[0][1] == "reducer"
 
-    def test_list_empty_registry(self, policy_registry: PolicyRegistry) -> None:
+    def test_list_empty_registry(self, policy_registry: RegistryPolicy) -> None:
         """Test that empty registry returns empty list."""
         policies = policy_registry.list_keys()
         assert policies == []
@@ -484,7 +484,7 @@ class TestPolicyRegistryList:
 class TestPolicyRegistryVersioning:
     """Tests for version management."""
 
-    def test_register_multiple_versions(self, policy_registry: PolicyRegistry) -> None:
+    def test_register_multiple_versions(self, policy_registry: RegistryPolicy) -> None:
         """Test registering same policy with different versions."""
         policy_registry.register_policy(
             policy_id="versioned-policy",
@@ -500,7 +500,7 @@ class TestPolicyRegistryVersioning:
         )  # type: ignore[arg-type]
         assert len(policy_registry) == 2
 
-    def test_get_specific_version(self, policy_registry: PolicyRegistry) -> None:
+    def test_get_specific_version(self, policy_registry: RegistryPolicy) -> None:
         """Test retrieving a specific version."""
         policy_registry.register_policy(
             policy_id="versioned-policy",
@@ -523,7 +523,7 @@ class TestPolicyRegistryVersioning:
         assert v2_cls is MockPolicyV2
 
     def test_get_latest_when_no_version_specified(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that get() returns latest version when version=None."""
         policy_registry.register_policy(
@@ -544,7 +544,7 @@ class TestPolicyRegistryVersioning:
         assert latest_cls is MockPolicyV2
 
     def test_invalid_version_format_raises_error_on_registration(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that invalid version formats raise ProtocolConfigurationError at registration.
 
@@ -569,7 +569,7 @@ class TestPolicyRegistryVersioning:
         assert len(policy_registry) == 0
 
     def test_malformed_semver_components_raises_error(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that malformed semantic version components raise errors at registration.
 
@@ -598,7 +598,7 @@ class TestPolicyRegistryVersioning:
         assert len(policy_registry) == 0
 
     def test_empty_version_string_raises_error(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that empty version strings raise ProtocolConfigurationError at registration."""
         # Attempt to register with empty version
@@ -618,7 +618,7 @@ class TestPolicyRegistryVersioning:
         assert len(policy_registry) == 0
 
     def test_version_with_too_many_parts_raises_error(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that versions with more than 3 parts raise error."""
         # Attempt to register with too many version parts
@@ -638,7 +638,7 @@ class TestPolicyRegistryVersioning:
         assert "invalid" in error_msg_lower and "version" in error_msg_lower
 
     def test_get_latest_with_double_digit_versions(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test semver sorting handles double-digit versions correctly.
 
@@ -665,7 +665,7 @@ class TestPolicyRegistryVersioning:
         )
 
     def test_get_latest_with_prerelease_versions(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test semver sorting with prerelease versions.
 
@@ -698,7 +698,7 @@ class TestPolicyRegistryVersioning:
         # Verify we get one of the registered policies (either is valid when equal)
         assert latest_cls in (MockPolicyV1, MockPolicyV2)
 
-    def test_list_versions(self, policy_registry: PolicyRegistry) -> None:
+    def test_list_versions(self, policy_registry: RegistryPolicy) -> None:
         """Test list_versions() method."""
         policy_registry.register_policy(
             policy_id="versioned-policy",
@@ -719,7 +719,7 @@ class TestPolicyRegistryVersioning:
         assert len(versions) == 2
 
     def test_list_versions_empty_for_unknown_policy(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test list_versions() returns empty for unknown policy."""
         versions = policy_registry.list_versions("unknown-policy")
@@ -735,17 +735,17 @@ class TestPolicyRegistryIsRegistered:
     """Tests for is_registered() method."""
 
     def test_is_registered_returns_true(
-        self, populated_policy_registry: PolicyRegistry
+        self, populated_policy_registry: RegistryPolicy
     ) -> None:
         """Test is_registered returns True when policy exists."""
         assert populated_policy_registry.is_registered("sync-orchestrator")
 
-    def test_is_registered_returns_false(self, policy_registry: PolicyRegistry) -> None:
+    def test_is_registered_returns_false(self, policy_registry: RegistryPolicy) -> None:
         """Test is_registered returns False when policy doesn't exist."""
         assert not policy_registry.is_registered("nonexistent-policy")
 
     def test_is_registered_with_type_filter(
-        self, populated_policy_registry: PolicyRegistry
+        self, populated_policy_registry: RegistryPolicy
     ) -> None:
         """Test is_registered with policy_type filter."""
         # Policy exists with matching type
@@ -758,7 +758,7 @@ class TestPolicyRegistryIsRegistered:
         )
 
     def test_is_registered_with_version_filter(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test is_registered with version filter."""
         policy_registry.register_policy(
@@ -781,7 +781,7 @@ class TestPolicyRegistryIsRegistered:
 class TestPolicyRegistryUnregister:
     """Tests for unregister() method."""
 
-    def test_unregister_removes_policy(self, policy_registry: PolicyRegistry) -> None:
+    def test_unregister_removes_policy(self, policy_registry: RegistryPolicy) -> None:
         """Test basic unregister removes policy."""
         policy_registry.register_policy(
             policy_id="to-remove",
@@ -795,7 +795,7 @@ class TestPolicyRegistryUnregister:
         assert not policy_registry.is_registered("to-remove")
 
     def test_unregister_returns_count_when_found(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test unregister returns count of removed policies."""
         policy_registry.register_policy(
@@ -808,14 +808,14 @@ class TestPolicyRegistryUnregister:
         assert result == 1
 
     def test_unregister_returns_zero_when_not_found(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test unregister returns 0 when policy not found."""
         result = policy_registry.unregister("nonexistent")
         assert result == 0
 
     def test_unregister_multiple_versions(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test unregister removes all versions by default."""
         policy_registry.register_policy(
@@ -834,7 +834,7 @@ class TestPolicyRegistryUnregister:
         assert result == 2
         assert not policy_registry.is_registered("versioned")
 
-    def test_unregister_specific_version(self, policy_registry: PolicyRegistry) -> None:
+    def test_unregister_specific_version(self, policy_registry: RegistryPolicy) -> None:
         """Test unregister with specific version."""
         policy_registry.register_policy(
             policy_id="versioned",
@@ -864,7 +864,7 @@ class TestPolicyRegistryClear:
     """Tests for clear() method."""
 
     def test_clear_removes_all_policies(
-        self, populated_policy_registry: PolicyRegistry
+        self, populated_policy_registry: RegistryPolicy
     ) -> None:
         """Test that clear removes all policies."""
         assert len(populated_policy_registry) > 0
@@ -881,7 +881,7 @@ class TestPolicyRegistryClear:
 class TestPolicyRegistryLen:
     """Tests for __len__ method."""
 
-    def test_len_returns_count(self, policy_registry: PolicyRegistry) -> None:
+    def test_len_returns_count(self, policy_registry: RegistryPolicy) -> None:
         """Test __len__ returns correct count."""
         assert len(policy_registry) == 0
 
@@ -911,12 +911,12 @@ class TestPolicyRegistryContains:
     """Tests for __contains__ method."""
 
     def test_contains_returns_true(
-        self, populated_policy_registry: PolicyRegistry
+        self, populated_policy_registry: RegistryPolicy
     ) -> None:
         """Test __contains__ returns True for registered policy."""
         assert "sync-orchestrator" in populated_policy_registry
 
-    def test_contains_returns_false(self, policy_registry: PolicyRegistry) -> None:
+    def test_contains_returns_false(self, policy_registry: RegistryPolicy) -> None:
         """Test __contains__ returns False for unregistered policy."""
         assert "nonexistent" not in policy_registry
 
@@ -927,9 +927,9 @@ class TestPolicyRegistryContains:
 
 
 class TestPolicyRegistryThreadSafety:
-    """Tests for thread safety of PolicyRegistry."""
+    """Tests for thread safety of RegistryPolicy."""
 
-    def test_concurrent_registration(self, policy_registry: PolicyRegistry) -> None:
+    def test_concurrent_registration(self, policy_registry: RegistryPolicy) -> None:
         """Test that concurrent registrations are thread-safe."""
         policies = [
             ("policy1", MockSyncPolicy, EnumPolicyType.ORCHESTRATOR),
@@ -966,7 +966,7 @@ class TestPolicyRegistryThreadSafety:
         assert len(errors) == 0
         assert len(policy_registry) == len(policies)
 
-    def test_concurrent_get(self, populated_policy_registry: PolicyRegistry) -> None:
+    def test_concurrent_get(self, populated_policy_registry: RegistryPolicy) -> None:
         """Test that concurrent gets are thread-safe."""
         results: list[type] = []
         errors: list[Exception] = []
@@ -1080,7 +1080,7 @@ class TestPolicyRegistryError:
 class TestPolicyRegistryPolicyTypeNormalization:
     """Tests for policy type normalization."""
 
-    def test_register_with_enum_type(self, policy_registry: PolicyRegistry) -> None:
+    def test_register_with_enum_type(self, policy_registry: RegistryPolicy) -> None:
         """Test registering with EnumPolicyType enum value."""
         policy_registry.register_policy(
             policy_id="enum-type",
@@ -1090,7 +1090,7 @@ class TestPolicyRegistryPolicyTypeNormalization:
         )  # type: ignore[arg-type]
         assert policy_registry.is_registered("enum-type")
 
-    def test_register_with_string_type(self, policy_registry: PolicyRegistry) -> None:
+    def test_register_with_string_type(self, policy_registry: RegistryPolicy) -> None:
         """Test registering with string policy type."""
         policy_registry.register_policy(
             policy_id="string-type",
@@ -1101,11 +1101,11 @@ class TestPolicyRegistryPolicyTypeNormalization:
         assert policy_registry.is_registered("string-type")
 
     def test_invalid_policy_type_raises_error(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that invalid policy type string raises ProtocolConfigurationError.
 
-        The PolicyRegistry catches ValidationError and converts it to
+        The RegistryPolicy catches ValidationError and converts it to
         ProtocolConfigurationError for consistent error handling across
         all validation failures.
         """
@@ -1119,7 +1119,7 @@ class TestPolicyRegistryPolicyTypeNormalization:
         assert "invalid_type" in str(exc_info.value)
 
     def test_get_with_enum_and_string_equivalent(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that get() works with both enum and string type."""
         policy_registry.register_policy(
@@ -1143,13 +1143,13 @@ class TestPolicyRegistryPolicyTypeNormalization:
 class TestPolicyRegistryListPolicyTypes:
     """Tests for list_policy_types() method."""
 
-    def test_list_policy_types_empty(self, policy_registry: PolicyRegistry) -> None:
+    def test_list_policy_types_empty(self, policy_registry: RegistryPolicy) -> None:
         """Test list_policy_types returns empty for empty registry."""
         types = policy_registry.list_policy_types()
         assert types == []
 
     def test_list_policy_types_with_policies(
-        self, populated_policy_registry: PolicyRegistry
+        self, populated_policy_registry: RegistryPolicy
     ) -> None:
         """Test list_policy_types returns registered types."""
         types = populated_policy_registry.list_policy_types()
@@ -1157,7 +1157,7 @@ class TestPolicyRegistryListPolicyTypes:
         assert "reducer" in types
         assert len(types) == 2
 
-    def test_list_policy_types_unique(self, policy_registry: PolicyRegistry) -> None:
+    def test_list_policy_types_unique(self, policy_registry: RegistryPolicy) -> None:
         """Test list_policy_types returns unique types only."""
         policy_registry.register_policy(
             policy_id="policy1",
@@ -1184,7 +1184,7 @@ class TestPolicyRegistryOverwrite:
     """Tests for policy overwrite behavior."""
 
     def test_register_same_key_overwrites(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that registering same (id, type, version) overwrites."""
         policy_registry.register_policy(
@@ -1217,10 +1217,10 @@ class TestPolicyRegistryOverwrite:
 
 
 class TestPolicyRegistryEdgeCases:
-    """Edge case tests for PolicyRegistry."""
+    """Edge case tests for RegistryPolicy."""
 
     def test_get_not_found_with_policy_type_filter(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test error message includes policy_type when specified in get()."""
         policy_registry.register_policy(
@@ -1235,7 +1235,7 @@ class TestPolicyRegistryEdgeCases:
         assert "typed-policy" in error_msg
 
     def test_get_not_found_with_version_filter(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test error message includes version when specified in get()."""
         policy_registry.register_policy(
@@ -1250,7 +1250,7 @@ class TestPolicyRegistryEdgeCases:
         assert "versioned-policy" in error_msg
 
     def test_is_registered_with_invalid_policy_type(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test is_registered returns False for invalid policy type."""
         policy_registry.register_policy(
@@ -1266,7 +1266,7 @@ class TestPolicyRegistryEdgeCases:
         assert result is False
 
     def test_unregister_with_invalid_policy_type(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test unregister returns 0 for invalid policy type."""
         policy_registry.register_policy(
@@ -1282,7 +1282,7 @@ class TestPolicyRegistryEdgeCases:
         assert policy_registry.is_registered("test-policy")
 
     def test_unregister_with_policy_type_filter(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test unregister with policy_type filter only removes matching."""
         # Register same policy_id with different types
@@ -1320,9 +1320,9 @@ class TestPolicyRegistryEdgeCases:
 
 
 class TestPolicyRegistryIntegration:
-    """Integration tests for PolicyRegistry."""
+    """Integration tests for RegistryPolicy."""
 
-    def test_full_registration_workflow(self, policy_registry: PolicyRegistry) -> None:
+    def test_full_registration_workflow(self, policy_registry: RegistryPolicy) -> None:
         """Test complete workflow: register, get, list, unregister."""
         # Register
         policy_registry.register_policy(
@@ -1347,7 +1347,7 @@ class TestPolicyRegistryIntegration:
         assert not policy_registry.is_registered("workflow-test")
 
     def test_multiple_policies_different_types(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test registering policies of different types."""
         policy_registry.register_policy(
@@ -1376,7 +1376,7 @@ class TestPolicyRegistryIntegration:
         assert len(reducers) == 1
 
     def test_async_policy_workflow_with_flag(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test async policy workflow with allow_async=True."""
         # This should succeed with the flag
@@ -1410,12 +1410,12 @@ class TestPolicyRegistrySemverCaching:
     def test_parse_semver_returns_consistent_results(self) -> None:
         """Test that _parse_semver returns consistent results for same input."""
         # Reset cache to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Parse same version multiple times
-        result1 = PolicyRegistry._parse_semver("1.2.3")
-        result2 = PolicyRegistry._parse_semver("1.2.3")
-        result3 = PolicyRegistry._parse_semver("1.2.3")
+        result1 = RegistryPolicy._parse_semver("1.2.3")
+        result2 = RegistryPolicy._parse_semver("1.2.3")
+        result3 = RegistryPolicy._parse_semver("1.2.3")
 
         # All should return identical ModelSemVer instances
         assert result1 == result2 == result3
@@ -1424,32 +1424,32 @@ class TestPolicyRegistrySemverCaching:
     def test_parse_semver_cache_info_shows_hits(self) -> None:
         """Test that cache info shows hits for repeated parses."""
         # Reset cache to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Get the parser (initializes the cache)
-        PolicyRegistry._get_semver_parser()
-        initial_info = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._get_semver_parser()
+        initial_info = RegistryPolicy._get_semver_cache_info()
         assert initial_info is not None
         assert initial_info.hits == 0
         assert initial_info.misses == 0
 
         # First parse - should be a cache miss
-        PolicyRegistry._parse_semver("1.0.0")
-        info_after_first = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._parse_semver("1.0.0")
+        info_after_first = RegistryPolicy._get_semver_cache_info()
         assert info_after_first is not None
         assert info_after_first.misses == 1
         assert info_after_first.hits == 0
 
         # Second parse of same version - should be a cache hit
-        PolicyRegistry._parse_semver("1.0.0")
-        info_after_second = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._parse_semver("1.0.0")
+        info_after_second = RegistryPolicy._get_semver_cache_info()
         assert info_after_second is not None
         assert info_after_second.misses == 1
         assert info_after_second.hits == 1
 
         # Third parse - another hit
-        PolicyRegistry._parse_semver("1.0.0")
-        info_after_third = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._parse_semver("1.0.0")
+        info_after_third = RegistryPolicy._get_semver_cache_info()
         assert info_after_third is not None
         assert info_after_third.misses == 1
         assert info_after_third.hits == 2
@@ -1457,25 +1457,25 @@ class TestPolicyRegistrySemverCaching:
     def test_parse_semver_different_versions_cause_misses(self) -> None:
         """Test that different version strings cause cache misses."""
         # Reset cache to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Parse different versions
-        PolicyRegistry._parse_semver("1.0.0")
-        PolicyRegistry._parse_semver("2.0.0")
-        PolicyRegistry._parse_semver("3.0.0")
+        RegistryPolicy._parse_semver("1.0.0")
+        RegistryPolicy._parse_semver("2.0.0")
+        RegistryPolicy._parse_semver("3.0.0")
 
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         assert info is not None
         assert info.misses == 3
         assert info.hits == 0
         assert info.currsize == 3  # 3 entries cached
 
     def test_parse_semver_cache_improves_get_performance(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that caching improves performance for repeated get() calls."""
         # Reset cache to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Register multiple versions of same policy
         for i in range(10):
@@ -1488,13 +1488,13 @@ class TestPolicyRegistrySemverCaching:
 
         # First get() will parse all versions (cold cache)
         _ = policy_registry.get("perf-test")  # Gets latest version
-        first_info = PolicyRegistry._get_semver_cache_info()
+        first_info = RegistryPolicy._get_semver_cache_info()
         assert first_info is not None
         first_misses = first_info.misses
 
         # Second get() should hit cache (warm cache)
         _ = policy_registry.get("perf-test")
-        second_info = PolicyRegistry._get_semver_cache_info()
+        second_info = RegistryPolicy._get_semver_cache_info()
         assert second_info is not None
         second_misses = second_info.misses
 
@@ -1509,38 +1509,38 @@ class TestPolicyRegistrySemverCaching:
         The cache still creates separate entries for different input strings.
         """
         # Reset cache to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Parse prerelease versions
-        result1 = PolicyRegistry._parse_semver("1.0.0-alpha")
-        PolicyRegistry._parse_semver("1.0.0-beta")
-        PolicyRegistry._parse_semver("1.0.0")
+        result1 = RegistryPolicy._parse_semver("1.0.0-alpha")
+        RegistryPolicy._parse_semver("1.0.0-beta")
+        RegistryPolicy._parse_semver("1.0.0")
 
         # Note: omnibase_core's ModelSemVer ignores prerelease for comparison
         # All three versions have same major.minor.patch, so they compare equal
         # But cache still creates separate entries for different input strings
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         assert info is not None
         assert info.currsize == 3  # Three distinct input strings
 
         # Repeat parse should hit cache
-        result1_repeat = PolicyRegistry._parse_semver("1.0.0-alpha")
+        result1_repeat = RegistryPolicy._parse_semver("1.0.0-alpha")
         # Cache returns same parsed result
         assert result1_repeat == result1
-        info_after = PolicyRegistry._get_semver_cache_info()
+        info_after = RegistryPolicy._get_semver_cache_info()
         assert info_after is not None
         assert info_after.hits == 1
 
     def test_parse_semver_cache_size_limit(self) -> None:
         """Test that cache respects maxsize=128 limit (default)."""
         # Reset cache to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Parse 150 unique versions (exceeds default maxsize=128)
         for i in range(150):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
-        info = PolicyRegistry._get_semver_cache_info()
+        info = RegistryPolicy._get_semver_cache_info()
         assert info is not None
         # Cache size should not exceed maxsize
         assert info.currsize <= 128
@@ -1548,21 +1548,21 @@ class TestPolicyRegistrySemverCaching:
     def test_parse_semver_cache_lru_eviction(self) -> None:
         """Test that LRU eviction works correctly."""
         # Reset cache to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Fill cache to capacity with versions 0-127
         for i in range(128):
-            PolicyRegistry._parse_semver(f"{i}.0.0")
+            RegistryPolicy._parse_semver(f"{i}.0.0")
 
         # Access version "0.0.0" to make it most recently used
-        PolicyRegistry._parse_semver("0.0.0")
+        RegistryPolicy._parse_semver("0.0.0")
 
         # Add new version to trigger eviction (should evict "1.0.0", not "0.0.0")
-        PolicyRegistry._parse_semver("999.0.0")
+        RegistryPolicy._parse_semver("999.0.0")
 
         # "0.0.0" should still be in cache (was recently used)
-        PolicyRegistry._parse_semver("0.0.0")
-        info = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._parse_semver("0.0.0")
+        info = RegistryPolicy._get_semver_cache_info()
         assert info is not None
         # Last access to "0.0.0" should be a hit
         assert info.hits > 0
@@ -1570,22 +1570,22 @@ class TestPolicyRegistrySemverCaching:
     def test_reset_semver_cache_clears_state(self) -> None:
         """Test that _reset_semver_cache() clears cache state."""
         # Parse some versions
-        PolicyRegistry._parse_semver("1.0.0")
-        PolicyRegistry._parse_semver("2.0.0")
-        info_before = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._parse_semver("1.0.0")
+        RegistryPolicy._parse_semver("2.0.0")
+        info_before = RegistryPolicy._get_semver_cache_info()
         assert info_before is not None
         assert info_before.currsize > 0
 
         # Reset cache
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # After reset, the cache should be None (will be reinitialized on next use)
-        assert PolicyRegistry._semver_cache is None
-        assert PolicyRegistry._semver_cache_inner is None
+        assert RegistryPolicy._semver_cache is None
+        assert RegistryPolicy._semver_cache_inner is None
 
         # Next parse initializes a fresh cache
-        PolicyRegistry._parse_semver("3.0.0")
-        info_after = PolicyRegistry._get_semver_cache_info()
+        RegistryPolicy._parse_semver("3.0.0")
+        info_after = RegistryPolicy._get_semver_cache_info()
         assert info_after is not None
 
         # New cache should have only the one entry we just parsed
@@ -1603,104 +1603,104 @@ class TestPolicyRegistrySemverCacheConfiguration:
     def test_configure_semver_cache_before_use(self) -> None:
         """Test configuring cache size before first use."""
         # Reset cache to allow configuration
-        PolicyRegistry._reset_semver_cache()
-        original_size = PolicyRegistry.SEMVER_CACHE_SIZE
+        RegistryPolicy._reset_semver_cache()
+        original_size = RegistryPolicy.SEMVER_CACHE_SIZE
 
         try:
             # Configure a smaller cache size
-            PolicyRegistry.configure_semver_cache(maxsize=64)
-            assert PolicyRegistry.SEMVER_CACHE_SIZE == 64
+            RegistryPolicy.configure_semver_cache(maxsize=64)
+            assert RegistryPolicy.SEMVER_CACHE_SIZE == 64
 
             # Use the parser (initializes with new size)
-            PolicyRegistry._parse_semver("1.0.0")
+            RegistryPolicy._parse_semver("1.0.0")
 
             # Verify cache was created with the configured size
             # The maxsize is stored in cache_parameters() for newer Python
             # or we can verify by filling it
             for i in range(100):
-                PolicyRegistry._parse_semver(f"{i}.0.0")
-            info = PolicyRegistry._get_semver_cache_info()
+                RegistryPolicy._parse_semver(f"{i}.0.0")
+            info = RegistryPolicy._get_semver_cache_info()
             assert info is not None
             # With maxsize=64, currsize should be <= 64
             assert info.currsize <= 64
         finally:
             # Reset to original state
-            PolicyRegistry._reset_semver_cache()
-            PolicyRegistry.SEMVER_CACHE_SIZE = original_size
+            RegistryPolicy._reset_semver_cache()
+            RegistryPolicy.SEMVER_CACHE_SIZE = original_size
 
     def test_configure_semver_cache_after_use_raises_error(self) -> None:
         """Test that configuring cache after first use raises RuntimeError."""
         # Reset cache to start fresh
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Use the parser (initializes the cache)
-        PolicyRegistry._parse_semver("1.0.0")
+        RegistryPolicy._parse_semver("1.0.0")
 
         # Attempt to reconfigure should fail
         with pytest.raises(RuntimeError) as exc_info:
-            PolicyRegistry.configure_semver_cache(maxsize=256)
+            RegistryPolicy.configure_semver_cache(maxsize=256)
 
         assert "Cannot reconfigure semver cache after first use" in str(exc_info.value)
 
         # Reset for other tests
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
     def test_semver_cache_size_via_class_attribute(self) -> None:
         """Test setting cache size via class attribute before use."""
         # Reset cache to allow reconfiguration
-        PolicyRegistry._reset_semver_cache()
-        original_size = PolicyRegistry.SEMVER_CACHE_SIZE
+        RegistryPolicy._reset_semver_cache()
+        original_size = RegistryPolicy.SEMVER_CACHE_SIZE
 
         try:
             # Set via class attribute (alternative to configure_semver_cache)
-            PolicyRegistry.SEMVER_CACHE_SIZE = 32
+            RegistryPolicy.SEMVER_CACHE_SIZE = 32
 
             # Parse enough versions to exceed the small cache
             for i in range(50):
-                PolicyRegistry._parse_semver(f"{i}.0.0")
+                RegistryPolicy._parse_semver(f"{i}.0.0")
 
-            info = PolicyRegistry._get_semver_cache_info()
+            info = RegistryPolicy._get_semver_cache_info()
             assert info is not None
             # With maxsize=32, currsize should be <= 32
             assert info.currsize <= 32
         finally:
             # Reset to original state
-            PolicyRegistry._reset_semver_cache()
-            PolicyRegistry.SEMVER_CACHE_SIZE = original_size
+            RegistryPolicy._reset_semver_cache()
+            RegistryPolicy.SEMVER_CACHE_SIZE = original_size
 
     def test_default_cache_size_is_128(self) -> None:
         """Test that default cache size is 128."""
         # Reset to ensure we're checking the class default
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # The class-level default should be 128
         # Note: We need to be careful as tests may have modified this
         # Just verify the documented default
-        assert PolicyRegistry.SEMVER_CACHE_SIZE >= 64  # Reasonable minimum
-        assert PolicyRegistry.SEMVER_CACHE_SIZE <= 512  # Reasonable maximum
+        assert RegistryPolicy.SEMVER_CACHE_SIZE >= 64  # Reasonable minimum
+        assert RegistryPolicy.SEMVER_CACHE_SIZE <= 512  # Reasonable maximum
 
     def test_cache_reset_allows_reconfiguration(self) -> None:
         """Test that _reset_semver_cache allows reconfiguration."""
-        original_size = PolicyRegistry.SEMVER_CACHE_SIZE
+        original_size = RegistryPolicy.SEMVER_CACHE_SIZE
 
         try:
             # Reset and configure
-            PolicyRegistry._reset_semver_cache()
-            PolicyRegistry.configure_semver_cache(maxsize=100)
+            RegistryPolicy._reset_semver_cache()
+            RegistryPolicy.configure_semver_cache(maxsize=100)
 
             # Use the cache
-            PolicyRegistry._parse_semver("1.0.0")
+            RegistryPolicy._parse_semver("1.0.0")
 
             # Reset again
-            PolicyRegistry._reset_semver_cache()
+            RegistryPolicy._reset_semver_cache()
 
             # Should be able to reconfigure now
-            PolicyRegistry.configure_semver_cache(maxsize=200)
-            assert PolicyRegistry.SEMVER_CACHE_SIZE == 200
+            RegistryPolicy.configure_semver_cache(maxsize=200)
+            assert RegistryPolicy.SEMVER_CACHE_SIZE == 200
         finally:
             # Cleanup
-            PolicyRegistry._reset_semver_cache()
-            PolicyRegistry.SEMVER_CACHE_SIZE = original_size
+            RegistryPolicy._reset_semver_cache()
+            RegistryPolicy.SEMVER_CACHE_SIZE = original_size
 
 
 # =============================================================================
@@ -1717,7 +1717,7 @@ class TestPolicyRegistryInvalidVersions:
     """
 
     def test_invalid_version_format_empty_string(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that empty version string raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -1732,7 +1732,7 @@ class TestPolicyRegistryInvalidVersions:
         assert "empty" in error_msg or "whitespace" in error_msg
 
     def test_invalid_version_format_empty_prerelease_suffix(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that dash with no prerelease suffix raises ProtocolConfigurationError.
 
@@ -1756,7 +1756,7 @@ class TestPolicyRegistryInvalidVersions:
         assert len(policy_registry) == 0
 
     def test_valid_prerelease_versions_accepted(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that valid prerelease versions are still accepted."""
         # Valid prerelease formats should work
@@ -1792,7 +1792,7 @@ class TestPolicyRegistryInvalidVersions:
         assert policy_registry.is_registered("release-version", version="4.0.0")
 
     def test_empty_prerelease_suffix_various_formats(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test empty prerelease suffix is rejected for various version formats."""
         invalid_versions = [
@@ -1819,7 +1819,7 @@ class TestPolicyRegistryInvalidVersions:
             )
 
     def test_invalid_version_format_non_numeric(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that non-numeric version components raise ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -1834,7 +1834,7 @@ class TestPolicyRegistryInvalidVersions:
         assert "invalid" in error_msg or "format" in error_msg
 
     def test_invalid_version_format_negative_numbers(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that negative version numbers raise ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -1849,7 +1849,7 @@ class TestPolicyRegistryInvalidVersions:
         assert "invalid" in error_msg or "format" in error_msg
 
     def test_invalid_version_format_too_many_parts(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that version with too many parts raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -1863,7 +1863,7 @@ class TestPolicyRegistryInvalidVersions:
         # Case-insensitive check for robustness against minor error message changes
         assert "invalid" in error_msg and "version" in error_msg
 
-    def test_valid_version_major_only(self, policy_registry: PolicyRegistry) -> None:
+    def test_valid_version_major_only(self, policy_registry: RegistryPolicy) -> None:
         """Test that single component version (major only) is valid."""
         policy_registry.register_policy(
             policy_id="major-only",
@@ -1873,7 +1873,7 @@ class TestPolicyRegistryInvalidVersions:
         )
         assert policy_registry.is_registered("major-only", version="1")
 
-    def test_valid_version_major_minor(self, policy_registry: PolicyRegistry) -> None:
+    def test_valid_version_major_minor(self, policy_registry: RegistryPolicy) -> None:
         """Test that two component version (major.minor) is valid."""
         policy_registry.register_policy(
             policy_id="major-minor",
@@ -1883,7 +1883,7 @@ class TestPolicyRegistryInvalidVersions:
         )
         assert policy_registry.is_registered("major-minor", version="1.2")
 
-    def test_version_with_leading_spaces(self, policy_registry: PolicyRegistry) -> None:
+    def test_version_with_leading_spaces(self, policy_registry: RegistryPolicy) -> None:
         """Test that leading spaces are trimmed from version strings."""
         policy_registry.register_policy(
             policy_id="leading-space",
@@ -1898,7 +1898,7 @@ class TestPolicyRegistryInvalidVersions:
         assert policy_cls is MockSyncPolicy
 
     def test_version_with_trailing_spaces(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that trailing spaces are trimmed from version strings."""
         policy_registry.register_policy(
@@ -1912,7 +1912,7 @@ class TestPolicyRegistryInvalidVersions:
         assert policy_cls is MockSyncPolicy
 
     def test_version_with_surrounding_spaces(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that surrounding spaces are trimmed from version strings."""
         policy_registry.register_policy(
@@ -1925,7 +1925,7 @@ class TestPolicyRegistryInvalidVersions:
         policy_cls = policy_registry.get("surrounding-space", version="1.2.3")
         assert policy_cls is MockSyncPolicy
 
-    def test_version_with_newline(self, policy_registry: PolicyRegistry) -> None:
+    def test_version_with_newline(self, policy_registry: RegistryPolicy) -> None:
         """Test that newlines are trimmed from version strings."""
         policy_registry.register_policy(
             policy_id="newline-version",
@@ -1938,7 +1938,7 @@ class TestPolicyRegistryInvalidVersions:
         assert policy_cls is MockSyncPolicy
 
     def test_version_with_leading_newline(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that leading newlines are trimmed from version strings."""
         policy_registry.register_policy(
@@ -1951,7 +1951,7 @@ class TestPolicyRegistryInvalidVersions:
         policy_cls = policy_registry.get("leading-newline", version="1.2.3")
         assert policy_cls is MockSyncPolicy
 
-    def test_version_with_tabs(self, policy_registry: PolicyRegistry) -> None:
+    def test_version_with_tabs(self, policy_registry: RegistryPolicy) -> None:
         """Test that tabs are trimmed from version strings."""
         policy_registry.register_policy(
             policy_id="tab-version",
@@ -1964,7 +1964,7 @@ class TestPolicyRegistryInvalidVersions:
         assert policy_cls is MockSyncPolicy
 
     def test_version_with_mixed_whitespace(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that mixed whitespace is trimmed from version strings."""
         policy_registry.register_policy(
@@ -1978,7 +1978,7 @@ class TestPolicyRegistryInvalidVersions:
         assert policy_cls is MockSyncPolicy
 
     def test_prerelease_version_with_whitespace(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that whitespace is trimmed from prerelease version strings."""
         policy_registry.register_policy(
@@ -1992,7 +1992,7 @@ class TestPolicyRegistryInvalidVersions:
         assert policy_cls is MockSyncPolicy
 
     def test_whitespace_only_version_raises_error(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that whitespace-only version strings raise ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -2009,13 +2009,13 @@ class TestPolicyRegistryInvalidVersions:
     def test_parse_semver_whitespace_trimming(self) -> None:
         """Test _parse_semver directly with whitespace inputs."""
         # Reset cache to ensure clean state
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Test various whitespace scenarios
-        result1 = PolicyRegistry._parse_semver(" 1.2.3 ")
-        result2 = PolicyRegistry._parse_semver("1.2.3\n")
-        result3 = PolicyRegistry._parse_semver("\t1.2.3\t")
-        result4 = PolicyRegistry._parse_semver("1.2.3")
+        result1 = RegistryPolicy._parse_semver(" 1.2.3 ")
+        result2 = RegistryPolicy._parse_semver("1.2.3\n")
+        result3 = RegistryPolicy._parse_semver("\t1.2.3\t")
+        result4 = RegistryPolicy._parse_semver("1.2.3")
 
         # All should parse to the same ModelSemVer result
         assert result1 == result4
@@ -2024,7 +2024,7 @@ class TestPolicyRegistryInvalidVersions:
         assert result1 == ModelSemVer(major=1, minor=2, patch=3)
 
     def test_whitespace_versions_with_latest_selection(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that whitespace versions work correctly with latest version selection."""
         policy_registry.register_policy(
@@ -2045,7 +2045,7 @@ class TestPolicyRegistryInvalidVersions:
         assert latest_cls is MockPolicyV2
 
     def test_semver_comparison_edge_case_1_9_vs_1_10(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test the specific PR #36 case: 1.9.0 vs 1.10.0.
 
@@ -2073,7 +2073,7 @@ class TestPolicyRegistryInvalidVersions:
         )
 
     def test_semver_comparison_minor_version_edge_case(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test edge case: 0.9.0 vs 0.10.0."""
         policy_registry.register_policy(
@@ -2093,7 +2093,7 @@ class TestPolicyRegistryInvalidVersions:
         assert latest_cls is MockPolicyV2, "0.10.0 > 0.9.0"
 
     def test_semver_comparison_patch_version_edge_case(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test edge case: 1.0.9 vs 1.0.10."""
         policy_registry.register_policy(
@@ -2123,31 +2123,31 @@ class TestPolicyRegistryContainerIntegration:
 
     These tests demonstrate the container-based access pattern that should be
     used in production code. Unit tests above use direct instantiation to test
-    the PolicyRegistry class itself, but integration tests should use containers.
+    the RegistryPolicy class itself, but integration tests should use containers.
     """
 
     def test_container_provides_policy_registry_via_mock(
-        self, container_with_policy_registry: PolicyRegistry
+        self, container_with_policy_registry: RegistryPolicy
     ) -> None:
-        """Test that container fixture provides PolicyRegistry."""
-        assert isinstance(container_with_policy_registry, PolicyRegistry)
+        """Test that container fixture provides RegistryPolicy."""
+        assert isinstance(container_with_policy_registry, RegistryPolicy)
         assert len(container_with_policy_registry) == 0
 
     async def test_container_with_registries_provides_policy_registry(
         self, container_with_registries: ModelONEXContainer
     ) -> None:
-        """Test that real container fixture provides PolicyRegistry."""
+        """Test that real container fixture provides RegistryPolicy."""
         # Skip if ServiceRegistry not available (omnibase_core 0.6.x)
         if container_with_registries.service_registry is None:
             pytest.skip("ServiceRegistry not available in omnibase_core 0.6.x")
 
         # Resolve from container (async in omnibase_core 0.4+)
-        registry: PolicyRegistry = (
+        registry: RegistryPolicy = (
             await container_with_registries.service_registry.resolve_service(
-                PolicyRegistry
+                RegistryPolicy
             )
         )
-        assert isinstance(registry, PolicyRegistry)
+        assert isinstance(registry, RegistryPolicy)
 
     async def test_container_based_policy_registration_workflow(
         self, container_with_registries: ModelONEXContainer
@@ -2158,9 +2158,9 @@ class TestPolicyRegistryContainerIntegration:
             pytest.skip("ServiceRegistry not available in omnibase_core 0.6.x")
 
         # Step 1: Resolve registry from container
-        registry: PolicyRegistry = (
+        registry: RegistryPolicy = (
             await container_with_registries.service_registry.resolve_service(
-                PolicyRegistry
+                RegistryPolicy
             )
         )
 
@@ -2185,9 +2185,9 @@ class TestPolicyRegistryContainerIntegration:
         if container_with_registries.service_registry is None:
             pytest.skip("ServiceRegistry not available in omnibase_core 0.6.x")
 
-        registry: PolicyRegistry = (
+        registry: RegistryPolicy = (
             await container_with_registries.service_registry.resolve_service(
-                PolicyRegistry
+                RegistryPolicy
             )
         )
 
@@ -2212,7 +2212,7 @@ class TestPolicyRegistryContainerIntegration:
 class TestModelPolicyKeyHashUniqueness:
     """Test ModelPolicyKey hash uniqueness for edge cases.
 
-    ModelPolicyKey is used as a dictionary key in PolicyRegistry.
+    ModelPolicyKey is used as a dictionary key in RegistryPolicy.
     These tests verify that hash uniqueness doesn't collide for various
     edge cases, ensuring correct dictionary behavior.
     """
@@ -2356,7 +2356,7 @@ class TestModelPolicyKeyHashUniqueness:
 class TestPolicyRegistryVersionNormalizationIntegration:
     """Integration tests for version normalization edge cases.
 
-    These tests verify that the PolicyRegistry correctly normalizes version
+    These tests verify that the RegistryPolicy correctly normalizes version
     strings during registration and lookup, ensuring that partial versions
     and whitespace-trimmed versions work correctly with ModelPolicyKey.
 
@@ -2368,7 +2368,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # =========================================================================
 
     def test_partial_version_major_only_registers_and_retrieves(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that major-only version '1' normalizes to '1.0.0' for storage.
 
@@ -2402,7 +2402,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         assert policy_cls_normalized is MockSyncPolicy
 
     def test_partial_version_major_minor_registers_and_retrieves(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that major.minor version '1.2' normalizes to '1.2.0' for storage.
 
@@ -2437,7 +2437,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         assert policy_cls_normalized is MockSyncPolicy
 
     def test_partial_version_zero_normalizes_correctly(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test edge case: version '0' normalizes to '0.0.0'.
 
@@ -2464,7 +2464,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         assert policy_cls_normalized is MockSyncPolicy
 
     def test_partial_version_zero_major_minor_normalizes_correctly(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test edge case: version '0.1' normalizes to '0.1.0'.
 
@@ -2489,7 +2489,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # =========================================================================
 
     def test_whitespace_trimming_space_padded_version(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that ' 1.0.0 ' is trimmed and matches '1.0.0'.
 
@@ -2516,7 +2516,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         assert policy_cls_with_spaces is MockSyncPolicy
 
     def test_whitespace_trimming_tab_newline_version(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that tab and newline characters are trimmed from versions.
 
@@ -2541,7 +2541,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         assert policy_registry.is_registered("tab-newline", version=" 1.0.0 ")
 
     def test_whitespace_with_partial_version_combined(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test combined whitespace trimming and partial version normalization.
 
@@ -2571,7 +2571,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # =========================================================================
 
     def test_model_policy_key_equivalence_partial_versions(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that ModelPolicyKey treats normalized versions as equivalent.
 
@@ -2600,7 +2600,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         assert policy_cls_partial is policy_cls_full is MockPolicyV1
 
     def test_model_policy_key_equivalence_whitespace_versions(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that ModelPolicyKey treats whitespace-padded versions equivalently.
 
@@ -2623,7 +2623,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
             assert policy_cls is MockPolicyV1, f"Failed for version: {version!r}"
 
     def test_multiple_versions_with_normalization(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that multiple normalized versions don't collide unexpectedly.
 
@@ -2656,7 +2656,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         assert policy_cls is MockPolicyV2
 
     def test_latest_version_selection_with_partial_versions(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that get() returns latest version with mixed partial/full formats.
 
@@ -2693,7 +2693,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # =========================================================================
 
     def test_version_with_leading_zeros_in_numbers(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test versions with leading zeros in numeric components.
 
@@ -2717,7 +2717,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
             assert len(policy_registry) == 0
 
     def test_version_zero_zero_zero_explicit(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that '0.0.0' is a valid version (initial/prerelease indicator)."""
         policy_registry.register_policy(
@@ -2736,7 +2736,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
     # =========================================================================
 
     def test_v_prefix_stripped_during_normalization(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that 'v1.0.0' is normalized to '1.0.0'.
 
@@ -2761,7 +2761,7 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         assert policy_registry.is_registered("v-prefix", version="v1.0.0")
 
     def test_v_prefix_with_partial_version(
-        self, policy_registry: PolicyRegistry
+        self, policy_registry: RegistryPolicy
     ) -> None:
         """Test that 'v2' normalizes to '2.0.0'.
 
@@ -2787,34 +2787,34 @@ class TestPolicyRegistryVersionNormalizationIntegration:
 
     def test_parse_semver_partial_version_normalization(self) -> None:
         """Test _parse_semver directly handles partial version normalization."""
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Major only
-        result_1 = PolicyRegistry._parse_semver("1")
+        result_1 = RegistryPolicy._parse_semver("1")
         assert result_1 == ModelSemVer(major=1, minor=0, patch=0)
 
         # Major.minor
-        result_1_2 = PolicyRegistry._parse_semver("1.2")
+        result_1_2 = RegistryPolicy._parse_semver("1.2")
         assert result_1_2 == ModelSemVer(major=1, minor=2, patch=0)
 
         # Zero versions
-        result_0 = PolicyRegistry._parse_semver("0")
+        result_0 = RegistryPolicy._parse_semver("0")
         assert result_0 == ModelSemVer(major=0, minor=0, patch=0)
 
-        result_0_1 = PolicyRegistry._parse_semver("0.1")
+        result_0_1 = RegistryPolicy._parse_semver("0.1")
         assert result_0_1 == ModelSemVer(major=0, minor=1, patch=0)
 
     def test_parse_semver_whitespace_normalization(self) -> None:
         """Test _parse_semver trims whitespace before parsing."""
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # All should parse to same result
         expected = ModelSemVer(major=1, minor=0, patch=0)
 
-        assert PolicyRegistry._parse_semver(" 1.0.0 ") == expected
-        assert PolicyRegistry._parse_semver("1.0.0\n") == expected
-        assert PolicyRegistry._parse_semver("\t1.0.0") == expected
-        assert PolicyRegistry._parse_semver("  1  ") == expected  # Partial with spaces
+        assert RegistryPolicy._parse_semver(" 1.0.0 ") == expected
+        assert RegistryPolicy._parse_semver("1.0.0\n") == expected
+        assert RegistryPolicy._parse_semver("\t1.0.0") == expected
+        assert RegistryPolicy._parse_semver("  1  ") == expected  # Partial with spaces
 
     def test_parse_semver_combined_normalization(self) -> None:
         """Test _parse_semver with combined whitespace and partial versions.
@@ -2823,16 +2823,16 @@ class TestPolicyRegistryVersionNormalizationIntegration:
         _normalize_version and ModelPolicyKey. This test only verifies
         whitespace trimming + partial version expansion within _parse_semver.
         """
-        PolicyRegistry._reset_semver_cache()
+        RegistryPolicy._reset_semver_cache()
 
         # Whitespace + partial
-        result = PolicyRegistry._parse_semver("  2  ")
+        result = RegistryPolicy._parse_semver("  2  ")
         assert result == ModelSemVer(major=2, minor=0, patch=0)
 
         # Whitespace + major.minor partial
-        result_2 = PolicyRegistry._parse_semver(" 3.1 ")
+        result_2 = RegistryPolicy._parse_semver(" 3.1 ")
         assert result_2 == ModelSemVer(major=3, minor=1, patch=0)
 
         # Whitespace + full version
-        result_3 = PolicyRegistry._parse_semver("\t4.5.6\n")
+        result_3 = RegistryPolicy._parse_semver("\t4.5.6\n")
         assert result_3 == ModelSemVer(major=4, minor=5, patch=6)

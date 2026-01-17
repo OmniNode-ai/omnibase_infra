@@ -13,6 +13,7 @@ Usage:
     python scripts/validate.py patterns
     python scripts/validate.py unions
     python scripts/validate.py any_types
+    python scripts/validate.py localhandler
     python scripts/validate.py imports
     python scripts/validate.py all
 """
@@ -214,7 +215,7 @@ def run_contracts(verbose: bool = False) -> bool:
 
     # Phase 2: Infrastructure contract linting
     try:
-        from omnibase_infra.validation.contract_linter import (
+        from omnibase_infra.validation.linter_contract import (
             EnumContractViolationSeverity,
             lint_contracts_in_directory,
         )
@@ -324,7 +325,7 @@ def run_any_types(verbose: bool = False) -> bool:
         return True
 
     try:
-        from omnibase_infra.validation.any_type_validator import validate_any_types_ci
+        from omnibase_infra.validation.validator_any_type import validate_any_types_ci
 
         result = validate_any_types_ci(src_path)
 
@@ -346,6 +347,44 @@ def run_any_types(verbose: bool = False) -> bool:
 
     except ImportError as e:
         print(f"Skipping Any type validation: {e}")
+        return True
+
+
+def run_localhandler(verbose: bool = False) -> bool:
+    """Run LocalHandler usage validation.
+
+    Ensures LocalHandler is only used in tests, never in production src/ code.
+    LocalHandler is a testing utility that should not appear in production code paths.
+    """
+    src_path = Path("src/omnibase_infra")
+    if not src_path.exists():
+        if verbose:
+            print("LocalHandler: SKIP (no src/omnibase_infra directory)")
+        return True
+
+    try:
+        from omnibase_infra.validation.validator_localhandler import (
+            validate_localhandler_ci,
+        )
+
+        result = validate_localhandler_ci(src_path)
+
+        if verbose or not result.passed:
+            print(f"LocalHandler: {'PASS' if result.passed else 'FAIL'}")
+            print(
+                f"  Files checked: {result.files_checked}, "
+                f"violations: {len(result.violations)}"
+            )
+            # Show violations
+            for v in result.violations:
+                print(f"  - {v.file_path}:{v.line_number}: {v.import_line}")
+                if verbose:
+                    print(f"      {v.import_line}")
+
+        return result.passed
+
+    except ImportError as e:
+        print(f"Skipping LocalHandler validation: {e}")
         return True
 
 
@@ -485,6 +524,7 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
             [
                 ("Unions", run_unions),
                 ("Any Types", run_any_types),
+                ("LocalHandler", run_localhandler),
                 ("Imports", run_imports),
             ]
         )
@@ -524,6 +564,7 @@ def main() -> int:
             "patterns",
             "unions",
             "any_types",
+            "localhandler",
             "imports",
         ],
         help="Which validator to run (default: all)",
@@ -542,6 +583,7 @@ def main() -> int:
         "patterns": run_patterns,
         "unions": run_unions,
         "any_types": run_any_types,
+        "localhandler": run_localhandler,
         "imports": run_imports,
     }
 

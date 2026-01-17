@@ -38,7 +38,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 
 # =============================================================================
 # Test Helper: Simulated Effect Executor
@@ -68,7 +68,7 @@ class SimulatedEffectExecutor:
 
     def __init__(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         backend_client: MagicMock | None = None,
         instance_id: str | None = None,
     ) -> None:
@@ -187,9 +187,9 @@ class SimulatedEffectExecutor:
 
 
 @pytest.fixture
-def idempotency_store() -> InMemoryIdempotencyStore:
-    """Create InMemoryIdempotencyStore for testing restart scenarios."""
-    return InMemoryIdempotencyStore()
+def idempotency_store() -> StoreIdempotencyInmemory:
+    """Create StoreIdempotencyInmemory for testing restart scenarios."""
+    return StoreIdempotencyInmemory()
 
 
 @pytest.fixture
@@ -218,7 +218,7 @@ class TestRestartMidWorkflow:
     @pytest.mark.asyncio
     async def test_restart_mid_workflow_resumes_correctly(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         workflow_steps: list[tuple[UUID, str]],
         correlation_id: UUID,
     ) -> None:
@@ -276,7 +276,7 @@ class TestRestartMidWorkflow:
     @pytest.mark.asyncio
     async def test_restart_after_partial_step_execution(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         workflow_steps: list[tuple[UUID, str]],
         correlation_id: UUID,
     ) -> None:
@@ -358,7 +358,7 @@ class TestResumeFromCorrectPoint:
     @pytest.mark.asyncio
     async def test_resume_from_exact_failure_point(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         workflow_steps: list[tuple[UUID, str]],
         correlation_id: UUID,
     ) -> None:
@@ -405,7 +405,7 @@ class TestResumeFromCorrectPoint:
     @pytest.mark.asyncio
     async def test_multiple_restarts_all_resume_correctly(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         workflow_steps: list[tuple[UUID, str]],
         correlation_id: UUID,
     ) -> None:
@@ -462,7 +462,7 @@ class TestNoExtraIO:
     @pytest.mark.asyncio
     async def test_no_duplicate_backend_calls(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         workflow_steps: list[tuple[UUID, str]],
         correlation_id: UUID,
     ) -> None:
@@ -509,7 +509,7 @@ class TestNoExtraIO:
     @pytest.mark.asyncio
     async def test_concurrent_restart_no_duplicates(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         workflow_steps: list[tuple[UUID, str]],
         correlation_id: UUID,
     ) -> None:
@@ -561,7 +561,7 @@ class TestIdempotencyStorePersistence:
     @pytest.mark.asyncio
     async def test_records_survive_executor_restart(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         correlation_id: UUID,
     ) -> None:
         """Test that idempotency records created before restart are visible after."""
@@ -601,7 +601,7 @@ class TestIdempotencyStorePersistence:
     @pytest.mark.asyncio
     async def test_correlation_id_preserved_in_records(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Test that correlation IDs are preserved in idempotency records."""
         correlation_id = uuid4()

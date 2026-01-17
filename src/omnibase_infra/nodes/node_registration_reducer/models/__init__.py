@@ -19,8 +19,7 @@ from omnibase_infra.nodes.node_registration_reducer.models.model_validation_resu
     ValidationResult,
 )
 
-# Re-export shared models from the legacy location for compatibility
-# These will be migrated to this location in a future refactoring
+# Re-export shared models from the reducers module for convenience
 from omnibase_infra.nodes.reducers.models import (
     ModelPayloadConsulRegister,
     ModelPayloadPostgresUpsertRegistration,

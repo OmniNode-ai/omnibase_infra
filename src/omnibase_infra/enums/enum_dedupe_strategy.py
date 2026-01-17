@@ -7,7 +7,7 @@ Deduplication strategy enum for corpus capture.
 Defines how duplicate executions are detected and handled.
 
 .. versionadded:: 0.5.0
-    Added for ServiceCorpusCapture (OMN-1203)
+    Added for CorpusCapture (OMN-1203)
 """
 
 from enum import Enum
@@ -21,7 +21,7 @@ class EnumDedupeStrategy(str, Enum):
     using different strategies based on what constitutes a "duplicate".
 
     .. versionadded:: 0.5.0
-        Added for ServiceCorpusCapture (OMN-1203)
+        Added for CorpusCapture (OMN-1203)
     """
 
     NONE = "none"

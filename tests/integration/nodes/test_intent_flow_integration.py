@@ -192,7 +192,7 @@ class TestReducerExtensionTypeEmission:
             )
             assert isinstance(
                 intent.payload,
-                (ModelPayloadConsulRegister, ModelPayloadPostgresUpsertRegistration),
+                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
             ), (
                 f"payload should be typed payload class, got {type(intent.payload).__name__}"
             )
@@ -312,10 +312,7 @@ class TestExtensionTypeIntentRouting:
                 # Extract intent_type from typed payload (direct attribute access)
                 if isinstance(
                     intent.payload,
-                    (
-                        ModelPayloadConsulRegister,
-                        ModelPayloadPostgresUpsertRegistration,
-                    ),
+                    ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
                 ):
                     intent_type = intent.payload.intent_type
                     handler = routing_table.get(intent_type)
@@ -380,7 +377,7 @@ class TestExtensionTypeIntentRouting:
         for intent in output.intents:
             assert isinstance(
                 intent.payload,
-                (ModelPayloadConsulRegister, ModelPayloadPostgresUpsertRegistration),
+                ModelPayloadConsulRegister | ModelPayloadPostgresUpsertRegistration,
             )
             # Correlation ID is a direct attribute on typed payloads
             assert intent.payload.correlation_id == correlation_id

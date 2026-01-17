@@ -38,7 +38,8 @@ import pytest
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.errors import InfraTimeoutError, ModelTimeoutErrorContext
 from omnibase_infra.models.discovery import ModelDependencySpec
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.projection.model_registration_projection import (
@@ -905,10 +906,12 @@ class TestServiceCapabilityQueryErrorHandling:
         service: ServiceCapabilityQuery,
     ) -> None:
         """Should propagate InfraTimeoutError from projection reader."""
-        from omnibase_infra.errors import InfraTimeoutError
-
         mock_projection_reader.get_by_intent_type.side_effect = InfraTimeoutError(
-            "Query timed out"
+            "Query timed out",
+            context=ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_by_intent_type",
+            ),
         )
 
         with pytest.raises(InfraTimeoutError):

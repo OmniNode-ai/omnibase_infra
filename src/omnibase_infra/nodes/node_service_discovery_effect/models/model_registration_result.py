@@ -76,7 +76,7 @@ class ModelRegistrationResult(BaseModel):
         False
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     success: bool = Field(
         ...,

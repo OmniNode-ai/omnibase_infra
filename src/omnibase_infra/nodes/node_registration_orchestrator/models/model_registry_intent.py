@@ -226,7 +226,7 @@ class ModelRegistryIntent(BaseModel):
         - ProtocolRegistrationIntent: Protocol for duck-typed signatures
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     kind: str
     """Intent kind identifier used for type discrimination."""

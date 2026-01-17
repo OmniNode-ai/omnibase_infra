@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Integration tests for KafkaEventBus with RedPanda/Kafka.
+"""Integration tests for EventBusKafka with RedPanda/Kafka.
 
-These tests validate KafkaEventBus behavior against actual Kafka infrastructure
+These tests validate EventBusKafka behavior against actual Kafka infrastructure
 (RedPanda or Kafka). They require a running Kafka broker and will be skipped
 gracefully if Kafka is not available.
 
@@ -31,7 +31,7 @@ import pytest
 from .conftest import wait_for_consumer_ready
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models import ModelEventMessage
 
 # =============================================================================
@@ -81,12 +81,12 @@ def unique_group() -> str:
 @pytest.fixture
 async def kafka_event_bus(
     kafka_bootstrap_servers: str,
-) -> AsyncGenerator[KafkaEventBus, None]:
-    """Create and configure KafkaEventBus for integration testing.
+) -> AsyncGenerator[EventBusKafka, None]:
+    """Create and configure EventBusKafka for integration testing.
 
-    Yields a started KafkaEventBus instance and ensures cleanup after test.
+    Yields a started EventBusKafka instance and ensures cleanup after test.
     """
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     config = ModelKafkaEventBusConfig(
@@ -99,7 +99,7 @@ async def kafka_event_bus(
         circuit_breaker_threshold=5,
         circuit_breaker_reset_timeout=10.0,
     )
-    bus = KafkaEventBus(config=config)
+    bus = EventBusKafka(config=config)
 
     yield bus
 
@@ -112,9 +112,9 @@ async def kafka_event_bus(
 
 @pytest.fixture
 async def started_kafka_bus(
-    kafka_event_bus: KafkaEventBus,
-) -> KafkaEventBus:
-    """Provide a started KafkaEventBus instance."""
+    kafka_event_bus: EventBusKafka,
+) -> EventBusKafka:
+    """Provide a started EventBusKafka instance."""
     await kafka_event_bus.start()
     return kafka_event_bus
 
@@ -125,11 +125,11 @@ async def started_kafka_bus(
 
 
 class TestKafkaEventBusConnection:
-    """Tests for KafkaEventBus connection and lifecycle management."""
+    """Tests for EventBusKafka connection and lifecycle management."""
 
     @pytest.mark.asyncio
-    async def test_connect_to_kafka(self, kafka_event_bus: KafkaEventBus) -> None:
-        """Verify KafkaEventBus can connect to Kafka broker.
+    async def test_connect_to_kafka(self, kafka_event_bus: EventBusKafka) -> None:
+        """Verify EventBusKafka can connect to Kafka broker.
 
         This test validates that the event bus can establish a connection
         to the Kafka broker specified in KAFKA_BOOTSTRAP_SERVERS.
@@ -147,7 +147,7 @@ class TestKafkaEventBusConnection:
 
     @pytest.mark.asyncio
     async def test_health_check_reports_connected(
-        self, started_kafka_bus: KafkaEventBus
+        self, started_kafka_bus: EventBusKafka
     ) -> None:
         """Verify health check returns healthy when connected to Kafka.
 
@@ -165,7 +165,7 @@ class TestKafkaEventBusConnection:
 
     @pytest.mark.asyncio
     async def test_multiple_start_calls_idempotent(
-        self, kafka_event_bus: KafkaEventBus
+        self, kafka_event_bus: EventBusKafka
     ) -> None:
         """Verify multiple start() calls are safe and idempotent."""
         await kafka_event_bus.start()
@@ -175,7 +175,7 @@ class TestKafkaEventBusConnection:
         assert health["started"] is True
 
     @pytest.mark.asyncio
-    async def test_close_and_restart(self, kafka_event_bus: KafkaEventBus) -> None:
+    async def test_close_and_restart(self, kafka_event_bus: EventBusKafka) -> None:
         """Verify bus can be closed and restarted."""
         await kafka_event_bus.start()
         health = await kafka_event_bus.health_check()
@@ -197,12 +197,12 @@ class TestKafkaEventBusConnection:
 
 
 class TestKafkaEventBusE2E:
-    """End-to-end tests for KafkaEventBus publish/subscribe functionality."""
+    """End-to-end tests for EventBusKafka publish/subscribe functionality."""
 
     @pytest.mark.asyncio
     async def test_publish_subscribe_roundtrip(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -259,7 +259,7 @@ class TestKafkaEventBusE2E:
     @pytest.mark.asyncio
     async def test_multiple_subscribers_receive_messages(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
     ) -> None:
         """Verify multiple subscribers on same topic all receive messages.
@@ -320,7 +320,7 @@ class TestKafkaEventBusE2E:
     @pytest.mark.asyncio
     async def test_publish_envelope_roundtrip(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -377,7 +377,7 @@ class TestKafkaEventBusE2E:
     @pytest.mark.asyncio
     async def test_publish_multiple_messages_ordering(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -436,7 +436,7 @@ class TestKafkaEventBusE2E:
     @pytest.mark.asyncio
     async def test_unsubscribe_stops_message_delivery(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -494,11 +494,11 @@ class TestKafkaEventBusE2E:
 
 
 class TestKafkaEventBusResilience:
-    """Tests for KafkaEventBus resilience and error handling."""
+    """Tests for EventBusKafka resilience and error handling."""
 
     @pytest.mark.asyncio
     async def test_publish_without_start_fails(
-        self, kafka_event_bus: KafkaEventBus
+        self, kafka_event_bus: EventBusKafka
     ) -> None:
         """Verify publish fails gracefully when bus not started."""
         from omnibase_infra.errors import InfraUnavailableError
@@ -517,7 +517,7 @@ class TestKafkaEventBusResilience:
         The circuit breaker should open after consecutive failures and
         reject new requests until the reset timeout.
         """
-        from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
         from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
         # Create bus with invalid bootstrap servers to simulate failures
@@ -529,7 +529,7 @@ class TestKafkaEventBusResilience:
             circuit_breaker_threshold=2,
             circuit_breaker_reset_timeout=60.0,
         )
-        bus = KafkaEventBus(config=config)
+        bus = EventBusKafka(config=config)
 
         # First attempt should fail (connection error)
         from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError
@@ -556,7 +556,7 @@ class TestKafkaEventBusResilience:
     @pytest.mark.asyncio
     async def test_subscriber_error_does_not_crash_bus(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
     ) -> None:
         """Verify subscriber errors don't crash the event bus.
@@ -608,7 +608,7 @@ class TestKafkaEventBusResilience:
 
     @pytest.mark.asyncio
     async def test_health_check_after_close(
-        self, kafka_event_bus: KafkaEventBus
+        self, kafka_event_bus: EventBusKafka
     ) -> None:
         """Verify health check works correctly after bus is closed."""
         await kafka_event_bus.start()
@@ -627,12 +627,12 @@ class TestKafkaEventBusResilience:
 
 
 class TestKafkaEventBusHeaders:
-    """Tests for message header handling in KafkaEventBus."""
+    """Tests for message header handling in EventBusKafka."""
 
     @pytest.mark.asyncio
     async def test_headers_roundtrip(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -694,7 +694,7 @@ class TestKafkaEventBusHeaders:
     @pytest.mark.asyncio
     async def test_correlation_id_preserved(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -766,7 +766,7 @@ class TestKafkaEventBusBroadcast:
     @pytest.mark.asyncio
     async def test_broadcast_to_environment(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         unique_group: str,
         created_broadcast_topic: str,
     ) -> None:
@@ -816,7 +816,7 @@ class TestKafkaEventBusBroadcast:
     @pytest.mark.asyncio
     async def test_send_to_group(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         unique_group: str,
         ensure_test_topic: Callable[[str, int], Coroutine[None, None, str]],
     ) -> None:

@@ -74,7 +74,7 @@ from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+    from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)
 
@@ -431,7 +431,9 @@ class ServiceHealth:
             ProtocolConfigurationError: Failed to resolve RuntimeHostProcess from container: ...
             (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
         """
-        from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+        from omnibase_infra.runtime.service_runtime_host_process import (
+            RuntimeHostProcess,
+        )
 
         correlation_id = generate_correlation_id()
         try:

@@ -3,7 +3,7 @@
 """
 Central Message Type Registry Implementation.
 
-Provides the MessageTypeRegistry class that maps message types to handler
+Provides the RegistryMessageType class that maps message types to handler
 implementations and enforces topic category constraints and domain ownership.
 
 Design Principles:
@@ -14,7 +14,7 @@ Design Principles:
     - Extensibility for new domains
 
 Thread Safety:
-    MessageTypeRegistry follows the freeze-after-init pattern:
+    RegistryMessageType follows the freeze-after-init pattern:
     1. **Registration Phase** (single-threaded): Register message types
     2. **Freeze**: Call freeze() to validate and lock the registry
     3. **Query Phase** (multi-threaded safe): Thread-safe lookups
@@ -36,103 +36,25 @@ Related:
 from __future__ import annotations
 
 __all__ = [
-    "MessageTypeRegistry",
+    "RegistryMessageType",
     "MessageTypeRegistryError",
+    "extract_domain_from_topic",
 ]
 
 import logging
 import re
-import threading
-from collections import defaultdict
-from datetime import UTC, datetime
 
-from omnibase_core.enums import EnumCoreErrorCode
-from omnibase_core.models.errors import ModelOnexError
 from omnibase_infra.enums import EnumMessageCategory
-from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.models.registry.model_domain_constraint import (
-    ModelDomainConstraint,
-)
-from omnibase_infra.models.registry.model_message_type_entry import (
-    ModelMessageTypeEntry,
-)
+from omnibase_infra.errors import MessageTypeRegistryError
 from omnibase_infra.models.validation import ModelValidationOutcome
+from omnibase_infra.runtime.registry.mixin_message_type_query import (
+    MixinMessageTypeQuery,
+)
+from omnibase_infra.runtime.registry.mixin_message_type_registration import (
+    MixinMessageTypeRegistration,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Registry Error
-# =============================================================================
-
-
-class MessageTypeRegistryError(RuntimeHostError):
-    """Error raised when message type registry operations fail.
-
-    Used for:
-    - Missing message type mappings
-    - Category constraint violations
-    - Domain constraint violations
-    - Registration validation failures
-
-    Extends RuntimeHostError for consistency with infrastructure error patterns.
-
-    Example:
-        >>> from omnibase_infra.errors import ModelInfraErrorContext
-        >>> from uuid import uuid4
-        >>> try:
-        ...     handlers = registry.get_handlers("UnknownType", category, domain)
-        ... except MessageTypeRegistryError as e:
-        ...     print(f"Handler not found: {e}")
-        ...
-        >>> # With correlation context
-        >>> context = ModelInfraErrorContext.with_correlation(
-        ...     correlation_id=uuid4(),
-        ...     operation="get_handlers",
-        ... )
-        >>> raise MessageTypeRegistryError(
-        ...     "Message type not found",
-        ...     message_type="UnknownType",
-        ...     context=context,
-        ... )
-
-    .. versionadded:: 0.5.0
-    """
-
-    def __init__(
-        self,
-        message: str,
-        message_type: str | None = None,
-        domain: str | None = None,
-        category: EnumMessageCategory | None = None,
-        context: ModelInfraErrorContext | None = None,
-        **extra_context: object,
-    ) -> None:
-        """Initialize MessageTypeRegistryError.
-
-        Args:
-            message: Human-readable error message
-            message_type: The message type that caused the error (if applicable)
-            domain: The domain involved in the error (if applicable)
-            category: The category involved in the error (if applicable)
-            context: Bundled infrastructure context for correlation_id and structured fields
-            **extra_context: Additional context information
-        """
-        # Build extra context dict
-        extra: dict[str, object] = dict(extra_context)
-        if message_type is not None:
-            extra["message_type"] = message_type
-        if domain is not None:
-            extra["domain"] = domain
-        if category is not None:
-            extra["category"] = category.value
-
-        super().__init__(
-            message=message,
-            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
-            context=context,
-            **extra,
-        )
 
 
 # =============================================================================
@@ -266,7 +188,7 @@ def extract_domain_from_topic(topic: str | None) -> str | None:
 # =============================================================================
 
 
-class MessageTypeRegistry:
+class RegistryMessageType(MixinMessageTypeRegistration, MixinMessageTypeQuery):
     """
     Central Message Type Registry for ONEX runtime dispatch.
 
@@ -290,14 +212,14 @@ class MessageTypeRegistry:
 
     Example:
         >>> from omnibase_infra.runtime.registry import (
-        ...     MessageTypeRegistry,
+        ...     RegistryMessageType,
         ...     ModelMessageTypeEntry,
         ...     ModelDomainConstraint,
         ... )
         >>> from omnibase_infra.enums import EnumMessageCategory
         >>>
         >>> # Create registry and register message types
-        >>> registry = MessageTypeRegistry()
+        >>> registry = RegistryMessageType()
         >>> entry = ModelMessageTypeEntry(
         ...     message_type="UserCreated",
         ...     handler_ids=("user-handler",),
@@ -319,15 +241,6 @@ class MessageTypeRegistry:
         ...     topic_domain="user",
         ... )
 
-    Attributes:
-        _entries: Dictionary mapping message_type -> ModelMessageTypeEntry
-        _domains: Set of all registered domains
-        _handler_references: Set of all referenced handler IDs
-        _category_index: Index of message types by category
-        _domain_index: Index of message types by domain
-        _frozen: If True, registration is disabled
-        _lock: Lock protecting registration operations
-
     See Also:
         - :class:`ModelMessageTypeEntry`: Entry model definition
         - :class:`ModelDomainConstraint`: Domain constraint model
@@ -341,7 +254,7 @@ class MessageTypeRegistry:
         logger_instance: logging.Logger | None = None,
     ) -> None:
         """
-        Initialize MessageTypeRegistry with empty registries.
+        Initialize RegistryMessageType with empty registries.
 
         Creates empty message type registry. Register message types before
         freeze(). Call validate_startup() after freeze() to ensure fail-fast
@@ -351,461 +264,7 @@ class MessageTypeRegistry:
             logger_instance: Optional custom logger for structured logging.
                 If not provided, uses module-level logger.
         """
-        self._logger: logging.Logger = (
-            logger_instance if logger_instance is not None else logger
-        )
-
-        # Primary storage: message_type -> entry
-        self._entries: dict[str, ModelMessageTypeEntry] = {}
-
-        # Domain tracking
-        self._domains: set[str] = set()
-
-        # Handler reference tracking (for validation)
-        self._handler_references: set[str] = set()
-
-        # Indexes for efficient queries
-        self._category_index: dict[EnumMessageCategory, list[str]] = defaultdict(list)
-        self._domain_index: dict[str, list[str]] = defaultdict(list)
-
-        # Freeze state
-        self._frozen: bool = False
-        self._lock: threading.Lock = threading.Lock()
-
-    # =========================================================================
-    # Registration Methods
-    # =========================================================================
-
-    def register_message_type(
-        self,
-        entry: ModelMessageTypeEntry,
-    ) -> None:
-        """
-        Register a message type with its handler mappings.
-
-        Associates a message type with handler(s) and defines constraints.
-        If the message type is already registered, handlers are merged
-        (fan-out pattern).
-
-        Args:
-            entry: The message type entry containing handler mappings.
-
-        Raises:
-            ModelOnexError: If registry is frozen (INVALID_STATE)
-            ModelOnexError: If entry is None (INVALID_PARAMETER)
-            MessageTypeRegistryError: If entry validation fails
-
-        Example:
-            >>> registry.register_message_type(ModelMessageTypeEntry(
-            ...     message_type="OrderCreated",
-            ...     handler_ids=("order-handler",),
-            ...     allowed_categories=frozenset([EnumMessageCategory.EVENT]),
-            ...     domain_constraint=ModelDomainConstraint(owning_domain="order"),
-            ... ))
-
-        .. versionadded:: 0.5.0
-        """
-        if entry is None:
-            raise ModelOnexError(
-                message="Cannot register None entry. ModelMessageTypeEntry is required.",
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            )
-
-        with self._lock:
-            if self._frozen:
-                raise ModelOnexError(
-                    message="Cannot register message type: MessageTypeRegistry is frozen. "
-                    "Registration is not allowed after freeze() has been called.",
-                    error_code=EnumCoreErrorCode.INVALID_STATE,
-                )
-
-            message_type = entry.message_type
-
-            # If already registered, merge handlers (fan-out support)
-            if message_type in self._entries:
-                existing = self._entries[message_type]
-                # Validate constraints match
-                if existing.allowed_categories != entry.allowed_categories:
-                    raise MessageTypeRegistryError(
-                        f"Category constraint mismatch for message type "
-                        f"'{message_type}': existing={existing.allowed_categories}, "
-                        f"new={entry.allowed_categories}. "
-                        f"All registrations for a message type must have the same "
-                        f"allowed categories.",
-                        message_type=message_type,
-                    )
-                if (
-                    existing.domain_constraint.owning_domain
-                    != entry.domain_constraint.owning_domain
-                ):
-                    raise MessageTypeRegistryError(
-                        f"Domain constraint mismatch for message type "
-                        f"'{message_type}': existing domain="
-                        f"'{existing.domain_constraint.owning_domain}', "
-                        f"new domain='{entry.domain_constraint.owning_domain}'. "
-                        f"All registrations for a message type must have the same "
-                        f"owning domain.",
-                        message_type=message_type,
-                        domain=entry.domain_constraint.owning_domain,
-                    )
-
-                # Merge handlers
-                for handler_id in entry.handler_ids:
-                    if handler_id not in existing.handler_ids:
-                        self._entries[message_type] = existing.with_additional_handler(
-                            handler_id
-                        )
-                        self._handler_references.add(handler_id)
-                        existing = self._entries[message_type]
-
-                self._logger.debug(
-                    "Merged handlers for message type '%s': %s",
-                    message_type,
-                    self._entries[message_type].handler_ids,
-                )
-            else:
-                # New registration
-                self._entries[message_type] = entry
-
-                # Track domain
-                domain = entry.domain_constraint.owning_domain
-                self._domains.add(domain)
-
-                # Track handler references
-                for handler_id in entry.handler_ids:
-                    self._handler_references.add(handler_id)
-
-                # Update indexes
-                for category in entry.allowed_categories:
-                    self._category_index[category].append(message_type)
-                self._domain_index[domain].append(message_type)
-
-                self._logger.debug(
-                    "Registered message type '%s' with handlers %s "
-                    "(domain=%s, categories=%s)",
-                    message_type,
-                    entry.handler_ids,
-                    domain,
-                    [c.value for c in entry.allowed_categories],
-                )
-
-    def register_simple(
-        self,
-        message_type: str,
-        handler_id: str,
-        category: EnumMessageCategory,
-        domain: str,
-        *,
-        description: str | None = None,
-        allow_cross_domains: frozenset[str] | None = None,
-    ) -> None:
-        """
-        Convenience method to register a message type with minimal parameters.
-
-        Creates a ModelMessageTypeEntry internally with sensible defaults.
-
-        Args:
-            message_type: The message type name (e.g., "UserCreated").
-            handler_id: The handler ID to process this type.
-            category: The allowed message category.
-            domain: The owning domain.
-            description: Optional description of the message type.
-            allow_cross_domains: Optional set of additional domains to allow.
-
-        Raises:
-            ModelOnexError: If registry is frozen (INVALID_STATE)
-            MessageTypeRegistryError: If validation fails
-
-        Example:
-            >>> registry.register_simple(
-            ...     message_type="UserCreated",
-            ...     handler_id="user-handler",
-            ...     category=EnumMessageCategory.EVENT,
-            ...     domain="user",
-            ...     description="User creation event",
-            ... )
-
-        .. versionadded:: 0.5.0
-        """
-        constraint = ModelDomainConstraint(
-            owning_domain=domain,
-            allowed_cross_domains=allow_cross_domains or frozenset(),
-        )
-
-        entry = ModelMessageTypeEntry(
-            message_type=message_type,
-            handler_ids=(handler_id,),
-            allowed_categories=frozenset([category]),
-            domain_constraint=constraint,
-            description=description,
-            registered_at=datetime.now(UTC),
-        )
-
-        self.register_message_type(entry)
-
-    def freeze(self) -> None:
-        """
-        Freeze the registry to prevent further modifications.
-
-        Once frozen, registration methods will raise ModelOnexError with
-        INVALID_STATE. This enables thread-safe concurrent access during
-        the query phase.
-
-        Idempotent: Calling freeze() multiple times has no additional effect.
-
-        Example:
-            >>> registry.register_message_type(entry)
-            >>> registry.freeze()
-            >>> assert registry.is_frozen
-
-        Note:
-            This is a one-way operation. There is no unfreeze() method
-            by design, as unfreezing would defeat thread-safety guarantees.
-
-        .. versionadded:: 0.5.0
-        """
-        with self._lock:
-            if self._frozen:
-                # Idempotent - already frozen
-                return
-
-            self._frozen = True
-            self._logger.info(
-                "MessageTypeRegistry frozen with %d message types across %d domains",
-                len(self._entries),
-                len(self._domains),
-            )
-
-    # =========================================================================
-    # Query Methods
-    # =========================================================================
-
-    def get_handlers(
-        self,
-        message_type: str,
-        topic_category: EnumMessageCategory,
-        topic_domain: str,
-    ) -> list[str]:
-        """
-        Get handler IDs for a message type with constraint validation.
-
-        Validates that:
-        1. The message type is registered
-        2. The topic category is allowed for this message type
-        3. The topic domain matches domain constraints
-
-        Args:
-            message_type: The message type to look up.
-            topic_category: The category inferred from the topic.
-            topic_domain: The domain extracted from the topic.
-
-        Returns:
-            List of handler IDs that can process this message type.
-
-        Raises:
-            ModelOnexError: If registry is not frozen (INVALID_STATE)
-            MessageTypeRegistryError: If message type not registered
-            MessageTypeRegistryError: If category constraint violated
-            MessageTypeRegistryError: If domain constraint violated
-
-        Example:
-            >>> handlers = registry.get_handlers(
-            ...     message_type="UserCreated",
-            ...     topic_category=EnumMessageCategory.EVENT,
-            ...     topic_domain="user",
-            ... )
-            >>> # Returns ["user-handler", "audit-handler"] etc.
-
-        .. versionadded:: 0.5.0
-        """
-        self._require_frozen("get_handlers")
-
-        # Look up entry
-        entry = self._entries.get(message_type)
-        if entry is None:
-            registered = sorted(self._entries.keys())[:10]
-            suffix = "..." if len(self._entries) > 10 else ""
-            raise MessageTypeRegistryError(
-                f"No handler mapping for message type '{message_type}'. "
-                f"Registered types: {registered}{suffix}",
-                message_type=message_type,
-                registered_types=registered,
-            )
-
-        # Check if entry is enabled
-        if not entry.enabled:
-            raise MessageTypeRegistryError(
-                f"Message type '{message_type}' is registered but disabled.",
-                message_type=message_type,
-            )
-
-        # Validate category constraint
-        category_outcome = entry.validate_category(topic_category)
-        if not category_outcome:
-            raise MessageTypeRegistryError(
-                category_outcome.error_message
-                or f"Category validation failed for '{message_type}'",
-                message_type=message_type,
-                category=topic_category,
-            )
-
-        # Validate domain constraint
-        domain_outcome = entry.domain_constraint.validate_consumption(
-            topic_domain,
-            message_type,
-        )
-        if not domain_outcome:
-            raise MessageTypeRegistryError(
-                domain_outcome.error_message
-                or f"Domain validation failed for '{message_type}'",
-                message_type=message_type,
-                domain=topic_domain,
-            )
-
-        return list(entry.handler_ids)
-
-    def get_handlers_unchecked(
-        self,
-        message_type: str,
-    ) -> list[str] | None:
-        """
-        Get handler IDs for a message type without constraint validation.
-
-        Use this method when you need to look up handlers without
-        performing category or domain validation (e.g., for introspection).
-
-        Args:
-            message_type: The message type to look up.
-
-        Returns:
-            List of handler IDs if registered, None if not found.
-
-        Raises:
-            ModelOnexError: If registry is not frozen (INVALID_STATE)
-
-        .. versionadded:: 0.5.0
-        """
-        self._require_frozen("get_handlers_unchecked")
-
-        entry = self._entries.get(message_type)
-        if entry is None or not entry.enabled:
-            return None
-        return list(entry.handler_ids)
-
-    def get_entry(self, message_type: str) -> ModelMessageTypeEntry | None:
-        """
-        Get the registry entry for a message type.
-
-        Args:
-            message_type: The message type to look up.
-
-        Returns:
-            The registry entry if found, None otherwise.
-
-        Raises:
-            ModelOnexError: If registry is not frozen (INVALID_STATE)
-
-        .. versionadded:: 0.5.0
-        """
-        self._require_frozen("get_entry")
-        return self._entries.get(message_type)
-
-    def has_message_type(self, message_type: str) -> bool:
-        """
-        Check if a message type is registered.
-
-        Args:
-            message_type: The message type to check.
-
-        Returns:
-            True if registered and enabled, False otherwise.
-
-        Raises:
-            ModelOnexError: If registry is not frozen (INVALID_STATE)
-
-        .. versionadded:: 0.5.0
-        """
-        self._require_frozen("has_message_type")
-        entry = self._entries.get(message_type)
-        return entry is not None and entry.enabled
-
-    def list_message_types(
-        self,
-        category: EnumMessageCategory | None = None,
-        domain: str | None = None,
-    ) -> list[str]:
-        """
-        List registered message types with optional filtering.
-
-        Args:
-            category: Optional filter by allowed category.
-            domain: Optional filter by owning domain.
-
-        Returns:
-            List of message type names matching the filters, sorted.
-
-        Raises:
-            ModelOnexError: If registry is not frozen (INVALID_STATE)
-
-        Example:
-            >>> # List all event message types
-            >>> registry.list_message_types(category=EnumMessageCategory.EVENT)
-            ['OrderCreated', 'UserCreated', 'UserUpdated']
-            >>> # List all message types in user domain
-            >>> registry.list_message_types(domain="user")
-            ['UserCreated', 'UserUpdated']
-
-        .. versionadded:: 0.5.0
-        """
-        self._require_frozen("list_message_types")
-
-        # Apply filters
-        if category is not None and domain is not None:
-            # Both filters: intersection of category and domain indexes
-            cat_types = set(self._category_index.get(category, []))
-            dom_types = set(self._domain_index.get(domain, []))
-            result = cat_types & dom_types
-        elif category is not None:
-            result = set(self._category_index.get(category, []))
-        elif domain is not None:
-            result = set(self._domain_index.get(domain, []))
-        else:
-            result = set(self._entries.keys())
-
-        # Filter to enabled entries only
-        enabled_result = [mt for mt in result if self._entries[mt].enabled]
-
-        return sorted(enabled_result)
-
-    def list_domains(self) -> list[str]:
-        """
-        List all domains that have registered message types.
-
-        Returns:
-            List of unique domain names, sorted alphabetically.
-
-        Raises:
-            ModelOnexError: If registry is not frozen (INVALID_STATE)
-
-        .. versionadded:: 0.5.0
-        """
-        self._require_frozen("list_domains")
-        return sorted(self._domains)
-
-    def list_handlers(self) -> list[str]:
-        """
-        List all handler IDs referenced in the registry.
-
-        Returns:
-            List of unique handler IDs, sorted alphabetically.
-
-        Raises:
-            ModelOnexError: If registry is not frozen (INVALID_STATE)
-
-        .. versionadded:: 0.5.0
-        """
-        self._require_frozen("list_handlers")
-        return sorted(self._handler_references)
+        self._init_registration_state(logger_instance)
 
     # =========================================================================
     # Validation Methods
@@ -887,12 +346,12 @@ class MessageTypeRegistry:
         # Log validation result
         if errors:
             self._logger.warning(
-                "MessageTypeRegistry startup validation failed with %d errors",
+                "RegistryMessageType startup validation failed with %d errors",
                 len(errors),
             )
         else:
             self._logger.info(
-                "MessageTypeRegistry startup validation passed "
+                "RegistryMessageType startup validation passed"
                 "(%d message types, %d handlers, %d domains)",
                 len(self._entries),
                 len(self._handler_references),
@@ -1033,20 +492,6 @@ class MessageTypeRegistry:
         return len(self._domains)
 
     # =========================================================================
-    # Private Helpers
-    # =========================================================================
-
-    def _require_frozen(self, method_name: str) -> None:
-        """Raise error if registry is not frozen."""
-        if not self._frozen:
-            raise ModelOnexError(
-                message=f"{method_name}() called before freeze(). "
-                f"Registration MUST complete and freeze() MUST be called "
-                f"before queries. This is required for thread safety.",
-                error_code=EnumCoreErrorCode.INVALID_STATE,
-            )
-
-    # =========================================================================
     # Dunder Methods
     # =========================================================================
 
@@ -1063,7 +508,7 @@ class MessageTypeRegistry:
     def __str__(self) -> str:
         """Human-readable string representation."""
         return (
-            f"MessageTypeRegistry[entries={len(self._entries)}, "
+            f"RegistryMessageType[entries={len(self._entries)}, "
             f"domains={len(self._domains)}, frozen={self._frozen}]"
         )
 
@@ -1081,7 +526,7 @@ class MessageTypeRegistry:
         )
 
         return (
-            f"MessageTypeRegistry("
+            f"RegistryMessageType("
             f"entries={type_repr}, "
             f"domains={domain_repr}, "
             f"frozen={self._frozen})"

@@ -11,7 +11,7 @@ Core Principle:
 This node follows the ONEX declarative pattern:
     - DECLARATIVE effect driven by contract.yaml
     - Zero custom storage logic - all behavior from handler protocol
-    - Lightweight shell that delegates to ProtocolRegistrationStorageHandler
+    - Lightweight shell that delegates to ProtocolRegistrationPersistence
     - Pattern: "Contract-driven, handlers wired externally"
 
 Extends NodeEffect from omnibase_core for external I/O operations.
@@ -39,12 +39,12 @@ Pluggable Backends:
         RegistryInfraRegistrationStorage,
     )
     from omnibase_infra.handlers.registration_storage import (
-        PostgresRegistrationStorageHandler,
+        HandlerRegistrationStoragePostgres,
     )
 
     # Create container and register handler
     container = ModelONEXContainer()
-    handler = PostgresRegistrationStorageHandler(dsn="postgresql://...")
+    handler = HandlerRegistrationStoragePostgres(dsn="postgresql://...")
     RegistryInfraRegistrationStorage.register(container)
     RegistryInfraRegistrationStorage.register_handler(container, handler)
 
@@ -60,7 +60,7 @@ Design Decisions:
 
 Related:
     - contract.yaml: Capability definitions and IO operations
-    - ProtocolRegistrationStorageHandler: Handler protocol for backends
+    - ProtocolRegistrationPersistence: Handler protocol for backends
     - models/: Input, output, and record models
 """
 

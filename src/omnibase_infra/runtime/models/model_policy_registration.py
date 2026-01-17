@@ -3,7 +3,7 @@
 """Policy Registration Model.
 
 This module provides the Pydantic model for policy registration parameters,
-used to register policy plugins with the PolicyRegistry.
+used to register policy plugins with the RegistryPolicy.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.runtime.util_version import normalize_version
+from omnibase_infra.types import PolicyTypeInput
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -21,7 +22,8 @@ if TYPE_CHECKING:
     # Type alias for policy class - uses TYPE_CHECKING to avoid circular import
     PolicyClass = type[ProtocolPolicy]
 else:
-    # At runtime, use generic type to avoid import
+    # NOTE: At runtime we use generic type to avoid circular import.
+    # Type checkers see proper protocol type via TYPE_CHECKING block.
     PolicyClass = type  # type: ignore[assignment,misc]
 
 
@@ -29,7 +31,7 @@ class ModelPolicyRegistration(BaseModel):
     """Model for policy registration parameters.
 
     Encapsulates all parameters needed to register a policy plugin with
-    the PolicyRegistry. This model reduces the number of parameters in
+    the RegistryPolicy. This model reduces the number of parameters in
     the register() method signature.
 
     Attributes:
@@ -67,7 +69,7 @@ class ModelPolicyRegistration(BaseModel):
         ...,
         description="Policy implementation class that implements ProtocolPolicy",
     )
-    policy_type: str | EnumPolicyType = Field(
+    policy_type: PolicyTypeInput = Field(
         ...,
         description="Policy type - either 'orchestrator' or 'reducer'",
     )
@@ -116,7 +118,7 @@ class ModelPolicyRegistration(BaseModel):
 
     @field_validator("policy_type")
     @classmethod
-    def validate_policy_type(cls, v: str | EnumPolicyType) -> str | EnumPolicyType:
+    def validate_policy_type(cls, v: PolicyTypeInput) -> PolicyTypeInput:
         """Validate policy_type is a valid EnumPolicyType value.
 
         Args:

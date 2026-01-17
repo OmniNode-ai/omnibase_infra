@@ -27,7 +27,7 @@ import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
@@ -227,7 +227,7 @@ class IntrospectableTestNode(MixinNodeIntrospection):
         node_id: UUID | None = None,
         node_type: EnumNodeKind = EnumNodeKind.EFFECT,
         version: str = "1.0.0",
-        event_bus: InMemoryEventBus | None = None,
+        event_bus: EventBusInmemory | None = None,
     ) -> None:
         """Initialize the test node.
 
@@ -640,13 +640,13 @@ def introspection_event_factory() -> ProtocolIntrospectionEventFactory:
 
 
 @pytest.fixture
-async def event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
+async def event_bus() -> AsyncGenerator[EventBusInmemory, None]:
     """Create and start an in-memory event bus.
 
     Yields:
-        InMemoryEventBus instance.
+        EventBusInmemory instance.
     """
-    bus = InMemoryEventBus(environment="test", group="workflow")
+    bus = EventBusInmemory(environment="test", group="workflow")
     await bus.start()
     yield bus
     await bus.close()
@@ -654,7 +654,7 @@ async def event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
 
 @pytest.fixture
 def test_node_factory(
-    event_bus: InMemoryEventBus,
+    event_bus: EventBusInmemory,
 ) -> ProtocolTestNodeFactory:
     """Factory for creating IntrospectableTestNode instances.
 
@@ -681,7 +681,7 @@ def test_node_factory(
 
 
 @pytest.fixture
-def test_node(event_bus: InMemoryEventBus) -> IntrospectableTestNode:
+def test_node(event_bus: EventBusInmemory) -> IntrospectableTestNode:
     """Create an introspectable test node.
 
     Args:

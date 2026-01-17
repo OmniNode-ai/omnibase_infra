@@ -25,7 +25,7 @@ Usage:
 
 Related:
     - OMN-57: Event bus performance testing (Phase 9)
-    - InMemoryEventBus: Primary implementation under test
+    - EventBusInmemory: Primary implementation under test
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from statistics import mean, median, quantiles, stdev
 
 import pytest
 
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from tests.performance.event_bus.conftest import generate_unique_topic
 
@@ -58,7 +58,7 @@ class TestPublishLatency:
     @pytest.mark.asyncio
     async def test_publish_latency_distribution_1000(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Measure p50, p95, p99 publish latencies for 1000 operations.
@@ -120,7 +120,7 @@ class TestPublishLatency:
         topic = generate_unique_topic()
 
         # Create fresh bus for cold start measurement
-        cold_bus = InMemoryEventBus(environment="cold-test", group="latency")
+        cold_bus = EventBusInmemory(environment="cold-test", group="latency")
         await cold_bus.start()
 
         # Cold publish (first operation)
@@ -163,7 +163,7 @@ class TestPublishLatency:
     )
     async def test_publish_latency_with_headers(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
         sample_headers: ModelEventHeaders,
     ) -> None:
@@ -224,7 +224,7 @@ class TestEndToEndLatency:
     @pytest.mark.asyncio
     async def test_publish_to_receive_latency(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Measure publish-to-receive latency.
@@ -285,7 +285,7 @@ class TestEndToEndLatency:
     )
     async def test_e2e_latency_with_multiple_subscribers(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Measure E2E latency with multiple subscribers.
@@ -357,7 +357,7 @@ class TestEndToEndLatency:
     )
     async def test_latency_consistency_over_time(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test that latency remains consistent over extended operation.
@@ -422,7 +422,7 @@ class TestLatencyUnderLoad:
         Tests with 1, 5, 10, and 20 concurrent publishers.
         """
         topic = generate_unique_topic()
-        bus = InMemoryEventBus(environment="load-test", group="concurrency")
+        bus = EventBusInmemory(environment="load-test", group="concurrency")
         await bus.start()
 
         concurrency_levels = [1, 5, 10, 20]
@@ -435,7 +435,7 @@ class TestLatencyUnderLoad:
             latencies_ref: list[float],
             topic_ref: str,
             msg_bytes: bytes,
-            bus_ref: InMemoryEventBus,
+            bus_ref: EventBusInmemory,
         ) -> Callable[[int], Awaitable[None]]:
             async def publisher(pub_id: int) -> None:
                 for i in range(ops):
@@ -497,7 +497,7 @@ class TestLatencyUnderLoad:
         topic = generate_unique_topic()
 
         # Create bus with small history to trigger eviction
-        bus = InMemoryEventBus(
+        bus = EventBusInmemory(
             environment="history-test",
             group="pressure",
             max_history=100,  # Small history
@@ -534,7 +534,7 @@ class TestLatencyUnderLoad:
     @pytest.mark.asyncio
     async def test_subscriber_processing_impact(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Measure impact of slow subscriber on publish latency.

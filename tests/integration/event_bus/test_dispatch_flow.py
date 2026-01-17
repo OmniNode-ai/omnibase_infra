@@ -22,7 +22,7 @@ from uuid import uuid4
 import pytest
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.models.dispatch import ModelTopicParser
 
@@ -32,11 +32,11 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-async def event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
-    """Provide a started InMemoryEventBus instance."""
-    from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+async def event_bus() -> AsyncGenerator[EventBusInmemory, None]:
+    """Provide a started EventBusInmemory instance."""
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
-    bus = InMemoryEventBus(environment="test", group="dispatch-flow")
+    bus = EventBusInmemory(environment="test", group="dispatch-flow")
     await bus.start()
     yield bus
     await bus.close()
@@ -61,7 +61,7 @@ class TestEndToEndDispatchFlow:
     @pytest.mark.asyncio
     async def test_simple_event_flow(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify simple event publish/subscribe flow works end-to-end."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -90,7 +90,7 @@ class TestEndToEndDispatchFlow:
     @pytest.mark.asyncio
     async def test_command_flow(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify command publish/subscribe flow works end-to-end."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -117,7 +117,7 @@ class TestEndToEndDispatchFlow:
     @pytest.mark.asyncio
     async def test_intent_flow(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify intent publish/subscribe flow works end-to-end."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -144,7 +144,7 @@ class TestEndToEndDispatchFlow:
     @pytest.mark.asyncio
     async def test_multiple_messages_ordering(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify multiple messages are received in order."""
         topic = f"test.ordering.{uuid4().hex[:8]}"
@@ -166,7 +166,7 @@ class TestEndToEndDispatchFlow:
     @pytest.mark.asyncio
     async def test_envelope_publish_flow(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify envelope publishing works end-to-end."""
         import json
@@ -299,7 +299,7 @@ class TestMessageCategoryRouting:
     @pytest.mark.asyncio
     async def test_category_routing_with_event_bus(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         topic_parser,
     ) -> None:
         """Verify messages are routed correctly based on parsed category."""
@@ -478,7 +478,7 @@ class TestFanOutMultipleSubscribers:
     @pytest.mark.asyncio
     async def test_same_topic_multiple_groups(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify message is delivered to all subscriber groups."""
         topic = f"test.fanout.{uuid4().hex[:8]}"
@@ -512,7 +512,7 @@ class TestFanOutMultipleSubscribers:
     @pytest.mark.asyncio
     async def test_multiple_handlers_same_group(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify multiple handlers in same group all receive message."""
         topic = f"test.samegroup.{uuid4().hex[:8]}"
@@ -533,14 +533,14 @@ class TestFanOutMultipleSubscribers:
 
         await event_bus.publish(topic, None, b"shared-group-message")
 
-        # InMemoryEventBus delivers to all handlers in same group
+        # EventBusInmemory delivers to all handlers in same group
         assert len(handler1_messages) == 1
         assert len(handler2_messages) == 1
 
     @pytest.mark.asyncio
     async def test_fanout_with_different_topics(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify messages only go to subscribed topics."""
         topic1 = f"test.topic1.{uuid4().hex[:8]}"
@@ -575,7 +575,7 @@ class TestFanOutMultipleSubscribers:
     @pytest.mark.asyncio
     async def test_broadcast_to_environment(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify broadcast_to_environment reaches subscribers."""
         import json
@@ -602,7 +602,7 @@ class TestFanOutMultipleSubscribers:
     @pytest.mark.asyncio
     async def test_send_to_group(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify send_to_group reaches specific group subscribers."""
         import json
@@ -631,7 +631,7 @@ class TestFanOutMultipleSubscribers:
     @pytest.mark.asyncio
     async def test_high_volume_fanout(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify fanout handles high message volume."""
         topic = f"test.volume.{uuid4().hex[:8]}"
@@ -666,7 +666,7 @@ class TestFanOutMultipleSubscribers:
     @pytest.mark.asyncio
     async def test_unsubscribe_stops_delivery(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify unsubscribe stops message delivery to handler."""
         topic = f"test.unsub.{uuid4().hex[:8]}"

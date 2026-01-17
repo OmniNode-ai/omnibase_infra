@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
-from omnibase_infra.runtime.validation import (
+from omnibase_infra.runtime.util_validation import (
     MAX_GRACE_PERIOD_SECONDS,
     MIN_GRACE_PERIOD_SECONDS,
     TOPIC_NAME_PATTERN,

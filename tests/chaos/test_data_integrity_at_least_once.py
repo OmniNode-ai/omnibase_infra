@@ -45,7 +45,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 
 from .conftest import ChaosConfig
 
@@ -163,7 +163,7 @@ class ResilientEventProcessor:
 
     def __init__(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         chaos_injector: ChaosInjector,
         backend_executor: AsyncMock,
     ) -> None:
@@ -350,13 +350,13 @@ def chaos_injector(chaos_config: ChaosConfig) -> ChaosInjector:
 
 
 @pytest.fixture
-def idempotency_store() -> InMemoryIdempotencyStore:
+def idempotency_store() -> StoreIdempotencyInmemory:
     """Create in-memory idempotency store for tests.
 
     Returns:
-        Fresh InMemoryIdempotencyStore instance.
+        Fresh StoreIdempotencyInmemory instance.
     """
-    return InMemoryIdempotencyStore()
+    return StoreIdempotencyInmemory()
 
 
 @pytest.fixture
@@ -401,7 +401,7 @@ class TestAtLeastOnceDelivery:
     @pytest.mark.asyncio
     async def test_all_events_eventually_processed(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         chaos_injector: ChaosInjector,
         mock_backend: AsyncMock,
         event_factory: Callable[[], EventRecord],
@@ -447,7 +447,7 @@ class TestAtLeastOnceDelivery:
     @pytest.mark.asyncio
     async def test_retry_mechanism_handles_transient_failures(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
         event_factory: Callable[[], EventRecord],
     ) -> None:
@@ -489,7 +489,7 @@ class TestAtLeastOnceDelivery:
     @pytest.mark.asyncio
     async def test_no_data_loss_under_high_failure_rate(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
         event_factory: Callable[[], EventRecord],
     ) -> None:
@@ -542,7 +542,7 @@ class TestFailureRecovery:
     @pytest.mark.asyncio
     async def test_recovery_after_process_restart_simulation(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
         event_factory: Callable[[], EventRecord],
     ) -> None:
@@ -598,7 +598,7 @@ class TestFailureRecovery:
     @pytest.mark.asyncio
     async def test_partial_failure_does_not_lose_completed_work(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
         event_factory: Callable[[], EventRecord],
     ) -> None:
@@ -657,7 +657,7 @@ class TestRetryExhaustion:
     @pytest.mark.asyncio
     async def test_retry_exhaustion_reports_failure(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
         event_factory: Callable[[], EventRecord],
     ) -> None:
@@ -707,7 +707,7 @@ class TestEventSequenceCompleteness:
     @pytest.mark.asyncio
     async def test_event_sequence_completeness_verified(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
         mock_backend: AsyncMock,
         event_factory: Callable[[], EventRecord],
     ) -> None:

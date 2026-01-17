@@ -40,6 +40,7 @@ from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models.registration.model_node_introspection_event import (
@@ -63,6 +64,9 @@ def _normalize_metadata(metadata: dict[str, object] | None) -> dict[str, object]
     converts bytes values to strings using UTF-8 decoding to ensure consistent
     string-based metadata handling downstream.
 
+    Uses duck-typing (hasattr check for decode method) instead of isinstance
+    to align with protocol-based design principles.
+
     Args:
         metadata: Optional metadata dictionary with potentially mixed value types.
 
@@ -74,10 +78,11 @@ def _normalize_metadata(metadata: dict[str, object] | None) -> dict[str, object]
 
     normalized: dict[str, object] = {}
     for key, value in metadata.items():
-        if isinstance(value, bytes):
+        # Duck-type: check for decode method (bytes-like) instead of isinstance
+        if hasattr(value, "decode"):
             try:
                 normalized[key] = value.decode("utf-8")
-            except UnicodeDecodeError:
+            except (UnicodeDecodeError, AttributeError):
                 # If decoding fails, use repr as fallback
                 normalized[key] = repr(value)
         else:
@@ -97,13 +102,21 @@ class IntrospectionEventRouter:
     distributed tracing. If no correlation ID is present, it generates
     a new one to ensure all operations can be traced.
 
+    This class follows the container-based dependency injection pattern,
+    receiving a ModelONEXContainer for service resolution while also
+    accepting explicit dependencies for router-specific configuration.
+
     Attributes:
+        _container: ONEX service container for dependency resolution.
         _dispatcher: The DispatcherNodeIntrospected to route events to.
         _event_bus: Event bus implementing ProtocolEventBusLike for publishing.
         _output_topic: The topic to publish output events to.
 
     Example:
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> container = ModelONEXContainer()
         >>> router = IntrospectionEventRouter(
+        ...     container=container,
         ...     dispatcher=introspection_dispatcher,
         ...     event_bus=event_bus,
         ...     output_topic="registration.output",
@@ -114,24 +127,105 @@ class IntrospectionEventRouter:
         ...     group_id="my-group",
         ...     on_message=router.handle_message,
         ... )
+
+    See Also:
+        - docs/patterns/container_dependency_injection.md for detailed DI patterns.
     """
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         dispatcher: DispatcherNodeIntrospected,
         event_bus: ProtocolEventBusLike,
         output_topic: str,
     ) -> None:
-        """Initialize the event router.
+        """Initialize IntrospectionEventRouter with container-based dependency injection.
+
+        Follows the ONEX container-based DI pattern where the container is passed
+        as the first parameter for service resolution, with additional explicit
+        parameters for router-specific configuration.
 
         Args:
+            container: ONEX service container for dependency resolution. Provides
+                access to service_registry for resolving shared services.
             dispatcher: The DispatcherNodeIntrospected to route events to.
             event_bus: Event bus implementing ProtocolEventBusLike for publishing.
             output_topic: The topic to publish output events to.
+
+        Raises:
+            ValueError: If output_topic is empty.
+
+        Example:
+            >>> from omnibase_core.container import ModelONEXContainer
+            >>> container = ModelONEXContainer()
+            >>> router = IntrospectionEventRouter(
+            ...     container=container,
+            ...     dispatcher=introspection_dispatcher,
+            ...     event_bus=event_bus,
+            ...     output_topic="registration.output",
+            ... )
+
+        See Also:
+            - docs/patterns/container_dependency_injection.md for DI patterns.
         """
+        if not output_topic:
+            raise ValueError("output_topic cannot be empty")
+
+        self._container = container
         self._dispatcher = dispatcher
         self._event_bus = event_bus
         self._output_topic = output_topic
+
+        logger.debug(
+            "IntrospectionEventRouter initialized",
+            extra={
+                "output_topic": output_topic,
+                "dispatcher_type": type(self._dispatcher).__name__,
+                "event_bus_type": type(self._event_bus).__name__,
+            },
+        )
+
+    @property
+    def container(self) -> ModelONEXContainer:
+        """Return the ONEX service container.
+
+        The ModelONEXContainer provides protocol-based service resolution:
+
+        - get_service_async(protocol_type, service_name=None, correlation_id=None):
+          Async service resolution with caching and logging.
+        - get_service_sync(protocol_type, service_name=None):
+          Sync service resolution with optional performance monitoring.
+        - get_service(protocol_type, service_name=None):
+          Compatibility alias for get_service_sync().
+        - get_service_optional(protocol_type, service_name=None):
+          Returns None if service not found (non-throwing).
+        - service_registry property:
+          Direct access to ServiceRegistry for service registration.
+
+        Returns:
+            The ModelONEXContainer instance passed during initialization.
+
+        Example:
+            >>> # Resolve a service from the container by protocol (async)
+            >>> from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+            >>> policy = await router.container.get_service_async(ProtocolPolicy)
+        """
+        return self._container
+
+    @property
+    def output_topic(self) -> str:
+        """Return the configured output topic for event publishing."""
+        return self._output_topic
+
+    @property
+    def dispatcher(self) -> DispatcherNodeIntrospected:
+        """Return the dispatcher instance."""
+        return self._dispatcher
+
+    @property
+    def event_bus(self) -> ProtocolEventBusLike:
+        """Return the event bus instance."""
+        return self._event_bus
 
     def _extract_correlation_id_from_message(self, msg: ModelEventMessage) -> UUID:
         """Extract correlation ID from message headers or generate new one.
@@ -139,6 +233,9 @@ class IntrospectionEventRouter:
         Attempts to extract the correlation_id from message headers to ensure
         proper propagation for distributed tracing. Falls back to generating
         a new UUID if no correlation ID is found.
+
+        Uses duck-typing patterns for type detection instead of isinstance checks
+        to align with protocol-based design principles.
 
         Args:
             msg: The incoming event message.
@@ -154,42 +251,45 @@ class IntrospectionEventRouter:
                 hasattr(headers, "correlation_id")
                 and headers.correlation_id is not None
             ):
-                # ModelEventHeaders.correlation_id is already a UUID
-                if isinstance(headers.correlation_id, UUID):
-                    return headers.correlation_id
-                # Handle string or bytes if headers come from raw Kafka
+                # Duck-type: normalize correlation_id to UUID
+                # Works uniformly for UUID objects, strings, and bytes
                 try:
-                    if isinstance(headers.correlation_id, bytes):
-                        return UUID(headers.correlation_id.decode("utf-8"))
-                    elif isinstance(headers.correlation_id, str):
-                        return UUID(headers.correlation_id)
-                except (ValueError, TypeError):
+                    correlation_id = headers.correlation_id
+                    # Check for bytes-like (has decode method) - duck typing
+                    if hasattr(correlation_id, "decode"):
+                        correlation_id = correlation_id.decode("utf-8")
+                    # Convert to UUID (handles UUID objects via str() and strings directly)
+                    return UUID(str(correlation_id))
+                except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
                     pass  # Fall through to try payload extraction
 
         # If we can peek at the payload, try to extract correlation_id
         # This happens when we can parse the message but before full validation
         try:
             if msg.value is not None:
-                if isinstance(msg.value, bytes):
+                # Duck-type: check for decode method (bytes-like) first
+                if hasattr(msg.value, "decode"):
                     payload_dict = json.loads(msg.value.decode("utf-8"))
-                elif isinstance(msg.value, str):
-                    payload_dict = json.loads(msg.value)
-                elif isinstance(msg.value, dict):
-                    payload_dict = msg.value
                 else:
-                    payload_dict = None
+                    # Try JSON parsing (works for strings)
+                    # Falls back to treating as dict-like if TypeError
+                    try:
+                        payload_dict = json.loads(msg.value)
+                    except TypeError:
+                        # Already a dict or dict-like object
+                        payload_dict = msg.value
 
                 if payload_dict:
                     # Check envelope-level correlation_id first
                     if "correlation_id" in payload_dict:
                         return UUID(str(payload_dict["correlation_id"]))
-                    # Check payload-level correlation_id
-                    if "payload" in payload_dict and isinstance(
-                        payload_dict["payload"], dict
-                    ):
-                        if "correlation_id" in payload_dict["payload"]:
-                            return UUID(str(payload_dict["payload"]["correlation_id"]))
-        except (json.JSONDecodeError, ValueError, TypeError, KeyError):
+                    # Check payload-level correlation_id (duck-type dict check via 'in')
+                    payload_content = payload_dict.get("payload")
+                    if payload_content and hasattr(payload_content, "get"):
+                        nested_corr_id = payload_content.get("correlation_id")
+                        if nested_corr_id is not None:
+                            return UUID(str(nested_corr_id))
+        except (json.JSONDecodeError, ValueError, TypeError, KeyError, AttributeError):
             pass  # Fall through to generate new ID
 
         # Generate new correlation ID as last resort
@@ -233,34 +333,43 @@ class IntrospectionEventRouter:
                 )
                 return
 
-            # Parse raw bytes as JSON
-            if isinstance(msg.value, bytes):
+            # Parse message value using duck-typing patterns
+            # Check for bytes-like (has decode method) first
+            if hasattr(msg.value, "decode"):
                 logger.debug(
-                    "Parsing message value as bytes (correlation_id=%s)",
+                    "Parsing message value as bytes-like (correlation_id=%s)",
                     callback_correlation_id,
                     extra={"value_length": len(msg.value)},
                 )
                 payload_dict = json.loads(msg.value.decode("utf-8"))
-            elif isinstance(msg.value, str):
-                logger.debug(
-                    "Parsing message value as string (correlation_id=%s)",
-                    callback_correlation_id,
-                    extra={"value_length": len(msg.value)},
-                )
-                payload_dict = json.loads(msg.value)
-            elif isinstance(msg.value, dict):
-                logger.debug(
-                    "Message value already dict (correlation_id=%s)",
-                    callback_correlation_id,
-                )
-                payload_dict = msg.value
             else:
-                logger.debug(
-                    "Unexpected message value type: %s (correlation_id=%s)",
-                    type(msg.value).__name__,
-                    callback_correlation_id,
-                )
-                return
+                # Try JSON parsing (works for strings)
+                try:
+                    logger.debug(
+                        "Parsing message value as string-like (correlation_id=%s)",
+                        callback_correlation_id,
+                        extra={
+                            "value_length": len(msg.value)
+                            if hasattr(msg.value, "__len__")
+                            else None
+                        },
+                    )
+                    payload_dict = json.loads(msg.value)
+                except TypeError:
+                    # Already a dict-like object (has keys/items)
+                    if hasattr(msg.value, "keys"):
+                        logger.debug(
+                            "Message value already dict-like (correlation_id=%s)",
+                            callback_correlation_id,
+                        )
+                        payload_dict = msg.value
+                    else:
+                        logger.debug(
+                            "Unexpected message value type: %s (correlation_id=%s)",
+                            type(msg.value).__name__,
+                            callback_correlation_id,
+                        )
+                        return
 
             # Parse as ModelEventEnvelope containing ModelNodeIntrospectionEvent
             logger.debug(

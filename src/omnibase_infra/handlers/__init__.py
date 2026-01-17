@@ -10,13 +10,15 @@ Handlers are responsible for:
 - Error handling and logging
 
 Available Handlers:
-- HttpRestHandler: HTTP/REST protocol handler (MVP: GET, POST only)
+- HandlerHttpRest: HTTP/REST protocol handler (MVP: GET, POST only)
 - HandlerDb: PostgreSQL database handler (MVP: query, execute only)
 - HandlerVault: HashiCorp Vault secret management handler (MVP: KV v2 secrets)
 - HandlerConsul: HashiCorp Consul service discovery handler (MVP: KV, service registration)
 - HandlerMCP: Model Context Protocol handler for AI agent tool integration
 - HandlerFileSystem: Filesystem handler with path whitelisting and size limits
 - HandlerManifestPersistence: Execution manifest persistence with filesystem storage
+- HandlerGraph: Graph database handler (Memgraph/Neo4j via Bolt protocol)
+- HandlerQdrant: Qdrant vector database handler (MVP: create, upsert, search, delete)
 
 Response Models:
 - ModelDbQueryPayload: Database query result payload
@@ -24,16 +26,20 @@ Response Models:
 - ModelDbDescribeResponse: Database handler metadata
 - ModelConsulHandlerPayload: Consul operation result payload
 - ModelConsulHandlerResponse: Consul handler response envelope
+- ModelGraphHandlerResponse: Graph handler response envelope
+- ModelQdrantHandlerResponse: Qdrant handler response envelope
 """
 
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
-from omnibase_infra.handlers.handler_http import HttpRestHandler
+from omnibase_infra.handlers.handler_graph import HandlerGraph
+from omnibase_infra.handlers.handler_http import HandlerHttpRest
 from omnibase_infra.handlers.handler_manifest_persistence import (
     HandlerManifestPersistence,
 )
 from omnibase_infra.handlers.handler_mcp import HandlerMCP
+from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
 from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.handlers.models import (
     ModelConsulHandlerPayload,
@@ -42,18 +48,28 @@ from omnibase_infra.handlers.models import (
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
+from omnibase_infra.handlers.models.model_graph_handler_response import (
+    ModelGraphHandlerResponse,
+)
+from omnibase_infra.handlers.models.model_qdrant_handler_response import (
+    ModelQdrantHandlerResponse,
+)
 
 __all__: list[str] = [
     "HandlerConsul",
     "HandlerDb",
     "HandlerFileSystem",
+    "HandlerGraph",
     "HandlerManifestPersistence",
     "HandlerMCP",
+    "HandlerQdrant",
     "HandlerVault",
-    "HttpRestHandler",
+    "HandlerHttpRest",
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",
     "ModelDbDescribeResponse",
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
+    "ModelGraphHandlerResponse",
+    "ModelQdrantHandlerResponse",
 ]

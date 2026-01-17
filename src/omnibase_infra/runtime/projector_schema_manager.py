@@ -32,6 +32,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     RuntimeHostError,
 )
 
@@ -467,9 +468,16 @@ class ProjectorSchemaValidator:
             ) from e
 
         except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="table_exists",
+                target_name=f"{effective_schema}.{table_name}",
+                correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
+            )
             raise InfraTimeoutError(
                 "Table existence check timed out",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except Exception as e:
@@ -532,9 +540,16 @@ class ProjectorSchemaValidator:
             ) from e
 
         except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_table_columns",
+                target_name=f"{effective_schema}.{table_name}",
+                correlation_id=correlation_id,
+                # timeout_seconds omitted - database timeout is connection-pool level, not available here
+            )
             raise InfraTimeoutError(
                 "Column introspection timed out",
-                context=ctx,
+                context=timeout_ctx,
             ) from e
 
         except Exception as e:

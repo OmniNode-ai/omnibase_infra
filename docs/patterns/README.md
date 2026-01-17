@@ -21,6 +21,7 @@ This directory contains detailed implementation guides and best practices for ON
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns
 - **[Utility Directory Structure](./utility_directory_structure.md)** - Distinction between `utils/` and `shared/utils/` directories
 - **[Registry clear() Policy](./registry_clear_policy.md)** - When and how to implement clear() methods for test isolation vs production safety
+- **[Mixin Dependencies](./mixin_dependencies.md)** - Mixin composition patterns, dependency requirements, and inheritance order
 
 ### Infrastructure Integration
 - **[Consul Integration](./consul_integration.md)** - HashiCorp Consul connection, health checks, service registration, security patterns
@@ -89,6 +90,9 @@ This directory contains detailed implementation guides and best practices for ON
 | Improve test error messages | [Testing Patterns](./testing_patterns.md) | Writing Effective Messages |
 | Add registry clear() method | [Registry clear() Policy](./registry_clear_policy.md) | Implementation Patterns |
 | Decide if registry needs clear() | [Registry clear() Policy](./registry_clear_policy.md) | When to/NOT to Implement |
+| Compose multiple mixins | [Mixin Dependencies](./mixin_dependencies.md) | Mixin Composition Patterns |
+| Understand mixin requirements | [Mixin Dependencies](./mixin_dependencies.md) | Quick Reference Table |
+| Check mixin inheritance order | [Mixin Dependencies](./mixin_dependencies.md) | Correct Inheritance Order |
 
 ### Transport Types
 
@@ -195,6 +199,12 @@ Registry clear() Policy
     ├── Depends on: Testing Patterns (test isolation)
     ├── References: Async Thread Safety (lock patterns)
     └── Used by: PolicyRegistry, RegistryCompute, payload registries
+
+Mixin Dependencies
+    ├── Mixin composition patterns and dependency documentation
+    ├── Depends on: Container DI (for understanding composition)
+    ├── References: Circuit Breaker, Error Handling, all mixin classes
+    └── Used by: All classes composing multiple mixins
 ```
 
 ## Usage Examples

@@ -27,7 +27,7 @@ from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetad
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumChainViolationType, EnumValidationSeverity
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
-from omnibase_infra.validation.chain_propagation_validator import (
+from omnibase_infra.validation.validator_chain_propagation import (
     ChainPropagationValidator,
 )
 

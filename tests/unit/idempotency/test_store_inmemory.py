@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for InMemoryIdempotencyStore.
+"""Unit tests for StoreIdempotencyInmemory.
 
 These tests verify the in-memory idempotency store implementation
 conforms to ProtocolIdempotencyStore and provides correct behavior
@@ -18,8 +18,8 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.idempotency import (
-    InMemoryIdempotencyStore,
     ModelIdempotencyRecord,
+    StoreIdempotencyInmemory,
 )
 
 
@@ -32,12 +32,12 @@ class TestInMemoryIdempotencyStoreProtocol:
     """
 
     def test_conforms_to_protocol(self) -> None:
-        """InMemoryIdempotencyStore should conform to ProtocolIdempotencyStore.
+        """StoreIdempotencyInmemory should conform to ProtocolIdempotencyStore.
 
         Verifies protocol conformance via duck typing by checking that all
         required methods exist and are callable.
         """
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
 
         # Verify all ProtocolIdempotencyStore methods via duck typing
         # Required methods: check_and_record, is_processed, mark_processed, cleanup_expired
@@ -62,7 +62,7 @@ class TestCheckAndRecord:
     @pytest.mark.asyncio
     async def test_first_call_returns_true(self) -> None:
         """First call for a message_id should return True."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         result = await store.check_and_record(message_id, domain="test")
@@ -72,7 +72,7 @@ class TestCheckAndRecord:
     @pytest.mark.asyncio
     async def test_duplicate_returns_false(self) -> None:
         """Second call for same message_id should return False."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         await store.check_and_record(message_id, domain="test")
@@ -83,7 +83,7 @@ class TestCheckAndRecord:
     @pytest.mark.asyncio
     async def test_different_domains_are_isolated(self) -> None:
         """Same message_id in different domains should be independent."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         result1 = await store.check_and_record(message_id, domain="domain1")
@@ -97,7 +97,7 @@ class TestCheckAndRecord:
     @pytest.mark.asyncio
     async def test_none_domain_works(self) -> None:
         """None domain should work correctly."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         result1 = await store.check_and_record(message_id)  # None domain
@@ -109,7 +109,7 @@ class TestCheckAndRecord:
     @pytest.mark.asyncio
     async def test_stores_correlation_id(self) -> None:
         """Correlation ID should be stored with the record."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
         correlation_id = uuid4()
 
@@ -124,7 +124,7 @@ class TestCheckAndRecord:
     @pytest.mark.asyncio
     async def test_concurrent_access_atomic(self) -> None:
         """Concurrent calls for same message_id should be atomic."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         # Simulate concurrent access
@@ -144,7 +144,7 @@ class TestIsProcessed:
     @pytest.mark.asyncio
     async def test_returns_true_for_processed(self) -> None:
         """Should return True for processed messages."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         await store.check_and_record(message_id, domain="test")
@@ -155,7 +155,7 @@ class TestIsProcessed:
     @pytest.mark.asyncio
     async def test_returns_false_for_unprocessed(self) -> None:
         """Should return False for unprocessed messages."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         result = await store.is_processed(message_id, domain="test")
@@ -165,7 +165,7 @@ class TestIsProcessed:
     @pytest.mark.asyncio
     async def test_respects_domain(self) -> None:
         """Should respect domain when checking."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         await store.check_and_record(message_id, domain="domain1")
@@ -180,7 +180,7 @@ class TestMarkProcessed:
     @pytest.mark.asyncio
     async def test_marks_message_as_processed(self) -> None:
         """Should mark message as processed."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         await store.mark_processed(message_id, domain="test")
@@ -190,7 +190,7 @@ class TestMarkProcessed:
     @pytest.mark.asyncio
     async def test_idempotent_operation(self) -> None:
         """Calling mark_processed multiple times should be safe."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
 
         await store.mark_processed(message_id, domain="test")
@@ -201,7 +201,7 @@ class TestMarkProcessed:
     @pytest.mark.asyncio
     async def test_uses_provided_timestamp(self) -> None:
         """Should use provided processed_at timestamp."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
         custom_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -214,7 +214,7 @@ class TestMarkProcessed:
     @pytest.mark.asyncio
     async def test_uses_current_time_when_not_provided(self) -> None:
         """Should use current time when processed_at not provided."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
         before = datetime.now(UTC)
 
@@ -232,7 +232,7 @@ class TestCleanupExpired:
     @pytest.mark.asyncio
     async def test_removes_old_entries(self) -> None:
         """Should remove entries older than TTL."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         old_time = datetime.now(UTC) - timedelta(seconds=100)
         recent_time = datetime.now(UTC) - timedelta(seconds=10)
 
@@ -251,7 +251,7 @@ class TestCleanupExpired:
     @pytest.mark.asyncio
     async def test_returns_count_of_removed(self) -> None:
         """Should return count of removed entries."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         old_time = datetime.now(UTC) - timedelta(seconds=100)
 
         for _ in range(5):
@@ -264,7 +264,7 @@ class TestCleanupExpired:
     @pytest.mark.asyncio
     async def test_no_removal_when_nothing_expired(self) -> None:
         """Should return 0 when nothing to clean up."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         recent_time = datetime.now(UTC) - timedelta(seconds=10)
 
         await store.mark_processed(uuid4(), domain="test", processed_at=recent_time)
@@ -282,7 +282,7 @@ class TestUtilityMethods:
     @pytest.mark.asyncio
     async def test_clear_removes_all_records(self) -> None:
         """clear() should remove all records."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
 
         await store.check_and_record(uuid4(), domain="test1")
         await store.check_and_record(uuid4(), domain="test2")
@@ -295,7 +295,7 @@ class TestUtilityMethods:
     @pytest.mark.asyncio
     async def test_get_record_count_returns_correct_count(self) -> None:
         """get_record_count() should return correct count."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
 
         assert await store.get_record_count() == 0
 
@@ -308,7 +308,7 @@ class TestUtilityMethods:
     @pytest.mark.asyncio
     async def test_get_all_records_returns_all_records(self) -> None:
         """get_all_records() should return all records."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         ids = [uuid4(), uuid4(), uuid4()]
 
         for msg_id in ids:
@@ -323,7 +323,7 @@ class TestUtilityMethods:
     @pytest.mark.asyncio
     async def test_get_record_returns_specific_record(self) -> None:
         """get_record() should return specific record by key."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
         message_id = uuid4()
         correlation_id = uuid4()
 
@@ -342,7 +342,7 @@ class TestUtilityMethods:
     @pytest.mark.asyncio
     async def test_get_record_returns_none_for_missing(self) -> None:
         """get_record() should return None for non-existent records."""
-        store = InMemoryIdempotencyStore()
+        store = StoreIdempotencyInmemory()
 
         record = await store.get_record(uuid4(), domain="test")
 

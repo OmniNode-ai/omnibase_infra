@@ -44,7 +44,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 
 # =============================================================================
 # Helper Classes
@@ -101,7 +101,7 @@ class MultiEffectWorkflowExecutor:
 
     def __init__(
         self,
-        idempotency_store: InMemoryIdempotencyStore,
+        idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Initialize the workflow executor.
 
@@ -241,14 +241,14 @@ class MultiEffectWorkflowExecutor:
 
 
 @pytest.fixture
-def workflow_idempotency_store() -> InMemoryIdempotencyStore:
+def workflow_idempotency_store() -> StoreIdempotencyInmemory:
     """Create in-memory idempotency store for workflow testing."""
-    return InMemoryIdempotencyStore()
+    return StoreIdempotencyInmemory()
 
 
 @pytest.fixture
 def workflow_executor(
-    workflow_idempotency_store: InMemoryIdempotencyStore,
+    workflow_idempotency_store: StoreIdempotencyInmemory,
 ) -> MultiEffectWorkflowExecutor:
     """Create workflow executor for testing."""
     return MultiEffectWorkflowExecutor(
@@ -545,7 +545,7 @@ class TestPartialRecovery:
     @pytest.mark.asyncio
     async def test_retry_failed_effect_only(
         self,
-        workflow_idempotency_store: InMemoryIdempotencyStore,
+        workflow_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Test retrying only the failed effect.
 
@@ -613,7 +613,7 @@ class TestPartialRecovery:
     @pytest.mark.asyncio
     async def test_concurrent_partial_failures_isolated(
         self,
-        workflow_idempotency_store: InMemoryIdempotencyStore,
+        workflow_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Test that concurrent workflow failures are isolated.
 
@@ -674,7 +674,7 @@ class TestPartialFailureWithIdempotency:
     @pytest.mark.asyncio
     async def test_idempotency_prevents_duplicate_effects(
         self,
-        workflow_idempotency_store: InMemoryIdempotencyStore,
+        workflow_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Test that idempotency prevents duplicate effect execution.
 
@@ -723,7 +723,7 @@ class TestPartialFailureWithIdempotency:
     @pytest.mark.asyncio
     async def test_partial_failure_with_correlation_tracking(
         self,
-        workflow_idempotency_store: InMemoryIdempotencyStore,
+        workflow_idempotency_store: StoreIdempotencyInmemory,
     ) -> None:
         """Test that correlation ID is tracked through partial failures.
 

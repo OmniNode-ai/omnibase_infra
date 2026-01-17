@@ -21,8 +21,8 @@ from unittest.mock import patch
 import aiohttp
 import pytest
 
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.services.service_health import ServiceHealth
 from tests.conftest import seed_mock_handlers
 
@@ -40,7 +40,7 @@ class TestShutdownHealthIntegration:
         - healthy: False (since not running)
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
@@ -75,12 +75,12 @@ class TestShutdownHealthIntegration:
         This test verifies that calling health_check() while shutdown is
         in progress does not raise exceptions and returns a consistent state.
 
-        Note: Due to the fast nature of InMemoryEventBus shutdown, we may
+        Note: Due to the fast nature of EventBusInmemory shutdown, we may
         not catch the exact transitional state, but we verify no exceptions
         occur and the final state is correct.
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
 
         async def noop_populate() -> None:
@@ -124,7 +124,7 @@ class TestShutdownHealthIntegration:
         3. HTTP request to /health should return 503 (unhealthy)
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
         # Use port 0 for automatic port assignment to avoid conflicts
         health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
@@ -186,7 +186,7 @@ class TestShutdownHealthIntegration:
         explicitly tests the complete shutdown flow.
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
         health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
 
@@ -243,7 +243,7 @@ class TestShutdownHealthIntegration:
         import logging
 
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
         health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
 
@@ -298,7 +298,7 @@ class TestShutdownHealthIntegration:
         repeatedly after shutdown without causing issues.
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
 
         async def noop_populate() -> None:
@@ -330,7 +330,7 @@ class TestShutdownHealthIntegration:
         also be closed, and its health_check() should reflect this.
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
 
         async def noop_populate() -> None:
@@ -362,7 +362,7 @@ class TestShutdownHealthIntegration:
         with reduced functionality. After shutdown, degraded should be False.
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
 
         async def noop_populate() -> None:
@@ -402,7 +402,7 @@ class TestServiceHealthShutdownBehavior:
         Calling stop() multiple times should not raise exceptions.
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
         health_server = ServiceHealth(runtime=runtime, port=0)
 
@@ -433,7 +433,7 @@ class TestServiceHealthShutdownBehavior:
         When runtime was never started, health endpoint should return 503.
         """
         # Arrange - runtime never started
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
         health_server = ServiceHealth(runtime=runtime, port=0)
 
@@ -472,7 +472,7 @@ class TestServiceHealthShutdownBehavior:
         Both endpoints are aliases and should return 503 after runtime shutdown.
         """
         # Arrange
-        event_bus = InMemoryEventBus()
+        event_bus = EventBusInmemory()
         runtime = RuntimeHostProcess(event_bus=event_bus)
         health_server = ServiceHealth(runtime=runtime, port=0)
 

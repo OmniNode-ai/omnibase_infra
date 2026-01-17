@@ -36,7 +36,7 @@ from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
-from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
 
 # ============================================================================
 # Test Event Types (for category inference)
@@ -3290,7 +3290,9 @@ class TestContextAwareDispatch:
         should only be reached if there's a bug in the dispatch engine's internal
         logic (node_kind should be validated at registration time).
         """
-        from omnibase_infra.runtime.message_dispatch_engine import DispatchEntryInternal
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            DispatchEntryInternal,
+        )
 
         # Create a DispatchEntryInternal with node_kind=None
         # This simulates an internal state that shouldn't occur in normal operation

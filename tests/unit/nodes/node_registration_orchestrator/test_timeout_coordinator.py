@@ -38,11 +38,12 @@ from pydantic import ValidationError
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -448,7 +449,11 @@ class TestTimeoutCoordinatorErrorHandling:
     ) -> None:
         """Test that coordinate() catches and returns timeout errors from query."""
         mock_timeout_query.find_overdue_entities.side_effect = InfraTimeoutError(
-            "Query timed out"
+            "Query timed out",
+            context=ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="find_overdue_entities",
+            ),
         )
 
         tick = create_mock_tick()

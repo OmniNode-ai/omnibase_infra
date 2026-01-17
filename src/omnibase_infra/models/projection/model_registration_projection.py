@@ -36,7 +36,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 )
 
 # Valid contract types for nodes (excludes runtime_host which is not a contract type)
-# Derived from EnumContractType.valid_type_values() for backwards compatibility
+# Derived from EnumContractType.valid_type_values() for type consistency
 ContractType = Literal["effect", "compute", "reducer", "orchestrator"]
 VALID_CONTRACT_TYPES: tuple[str, ...] = EnumContractType.valid_type_values()
 

@@ -42,11 +42,12 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -611,7 +612,11 @@ class TestServiceTimeoutScannerErrorHandling:
     ) -> None:
         """Test find_overdue_entities propagates timeout errors."""
         mock_reader.get_overdue_ack_registrations.side_effect = InfraTimeoutError(
-            "Query timed out"
+            "Query timed out",
+            context=ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_overdue_ack_registrations",
+            ),
         )
 
         with pytest.raises(InfraTimeoutError):
@@ -666,7 +671,11 @@ class TestServiceTimeoutScannerErrorHandling:
         mock_reader.get_overdue_ack_registrations.return_value = []
         # Liveness query fails
         mock_reader.get_overdue_liveness_registrations.side_effect = InfraTimeoutError(
-            "Liveness query timed out"
+            "Liveness query timed out",
+            context=ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="get_overdue_liveness_registrations",
+            ),
         )
 
         with pytest.raises(InfraTimeoutError):

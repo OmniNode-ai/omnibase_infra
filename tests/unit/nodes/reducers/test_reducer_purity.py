@@ -1271,7 +1271,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         # Check for mutable types
@@ -1322,7 +1322,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         # Create first reducer instance and run reduce
@@ -1357,7 +1357,7 @@ class TestAdditionalBehavioralGates:
             for name, value in vars(RegistrationReducer).items()
             if not name.startswith("_")
             and not callable(value)
-            and not isinstance(value, (property, classmethod, staticmethod))
+            and not isinstance(value, property | classmethod | staticmethod)
         }
 
         assert class_vars_before == class_vars_after, (

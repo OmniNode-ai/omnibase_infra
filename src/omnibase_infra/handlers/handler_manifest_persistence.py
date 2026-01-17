@@ -338,7 +338,7 @@ class HandlerManifestPersistence(
                 error_message=f"Permission denied: {operation}",
             )
 
-        if isinstance(error, (OSError, IOError)):
+        if isinstance(error, OSError | IOError):
             # General I/O errors are retriable (disk full, temp unavailable, etc.)
             return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.CONNECTION,
@@ -507,7 +507,7 @@ class HandlerManifestPersistence(
             # initial_delay_ms -> convert to seconds (default: 100ms = 0.1s)
             initial_delay_ms = retry_policy.get("initial_delay_ms")
             if initial_delay_ms is not None:
-                is_valid_type = isinstance(initial_delay_ms, (int, float))
+                is_valid_type = isinstance(initial_delay_ms, int | float)
                 if not is_valid_type or initial_delay_ms <= 0:
                     raise ProtocolConfigurationError(
                         "Invalid retry_policy.initial_delay_ms: must be a "
@@ -520,7 +520,7 @@ class HandlerManifestPersistence(
             # max_delay_ms -> convert to seconds (default: 5000ms = 5.0s)
             max_delay_ms = retry_policy.get("max_delay_ms")
             if max_delay_ms is not None:
-                if not isinstance(max_delay_ms, (int, float)) or max_delay_ms <= 0:
+                if not isinstance(max_delay_ms, int | float) or max_delay_ms <= 0:
                     raise ProtocolConfigurationError(
                         "Invalid retry_policy.max_delay_ms: must be a positive "
                         f"number, got {type(max_delay_ms).__name__}={max_delay_ms!r}",
@@ -531,7 +531,7 @@ class HandlerManifestPersistence(
             # exponential_base (default: 2.0) - must be >= 1.0
             exponential_base = retry_policy.get("exponential_base")
             if exponential_base is not None:
-                is_valid_type = isinstance(exponential_base, (int, float))
+                is_valid_type = isinstance(exponential_base, int | float)
                 if not is_valid_type or exponential_base < 1.0:
                     raise ProtocolConfigurationError(
                         "Invalid retry_policy.exponential_base: must be a "

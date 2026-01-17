@@ -24,7 +24,7 @@ CI/CD Graceful Skip Behavior:
 
 Container Wiring Pattern:
     This module uses the declarative orchestrator pattern:
-    1. wire_infrastructure_services() - Register PolicyRegistry, etc.
+    1. wire_infrastructure_services() - Register RegistryPolicy, etc.
     2. wire_registration_handlers() - Register handlers with projection reader
     3. NodeRegistrationOrchestrator - Declarative workflow orchestrator
 
@@ -94,7 +94,7 @@ if TYPE_CHECKING:
     import asyncpg
 
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
@@ -312,7 +312,7 @@ async def wired_container(
     """Container with infrastructure services and registration handlers wired.
 
     This fixture creates a fully wired ModelONEXContainer with:
-    1. Infrastructure services (PolicyRegistry, ProtocolBindingRegistry, RegistryCompute)
+    1. Infrastructure services (RegistryPolicy, RegistryProtocolBinding, RegistryCompute)
     2. Registration handlers (HandlerNodeIntrospected, HandlerRuntimeTick, etc.)
     3. ProjectionReaderRegistration for state queries
 
@@ -329,7 +329,7 @@ async def wired_container(
         ModelONEXContainer: Fully wired container for dependency injection.
     """
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.runtime.container_wiring import (
+    from omnibase_infra.runtime.util_container_wiring import (
         wire_infrastructure_services,
         wire_registration_handlers,
     )
@@ -370,7 +370,7 @@ async def projection_reader(
     Returns:
         ProjectionReaderRegistration for state queries.
     """
-    from omnibase_infra.runtime.container_wiring import (
+    from omnibase_infra.runtime.util_container_wiring import (
         get_projection_reader_from_container,
     )
 
@@ -389,7 +389,7 @@ async def handler_node_introspected(
     Returns:
         HandlerNodeIntrospected for processing introspection events.
     """
-    from omnibase_infra.runtime.container_wiring import (
+    from omnibase_infra.runtime.util_container_wiring import (
         get_handler_node_introspected_from_container,
     )
 
@@ -402,19 +402,19 @@ async def handler_node_introspected(
 
 
 @pytest.fixture
-async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
-    """Connected KafkaEventBus with proper cleanup.
+async def real_kafka_event_bus() -> AsyncGenerator[EventBusKafka, None]:
+    """Connected EventBusKafka with proper cleanup.
 
-    This fixture creates a real KafkaEventBus connected to the
+    This fixture creates a real EventBusKafka connected to the
     infrastructure server's Kafka/Redpanda cluster.
 
     Yields:
-        KafkaEventBus: Started event bus ready for publish/subscribe.
+        EventBusKafka: Started event bus ready for publish/subscribe.
 
     Note:
         The event bus is stopped and cleaned up after each test.
     """
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
     if not KAFKA_AVAILABLE:
@@ -439,7 +439,7 @@ async def real_kafka_event_bus() -> AsyncGenerator[KafkaEventBus, None]:
         circuit_breaker_reset_timeout=60.0,
         enable_auto_commit=False,
     )
-    bus = KafkaEventBus(config=config)
+    bus = EventBusKafka(config=config)
 
     await bus.start()
 
@@ -744,7 +744,7 @@ async def timeout_scanner(
 @pytest.fixture
 async def timeout_emitter(
     timeout_scanner: TimeoutScanner,
-    real_kafka_event_bus: KafkaEventBus,
+    real_kafka_event_bus: EventBusKafka,
     real_projector: ProjectorShell,
 ) -> TimeoutEmitter:
     """Create TimeoutEmitter for emitting timeout events.
@@ -877,7 +877,7 @@ def unique_correlation_id() -> UUID:
 
 @pytest.fixture
 async def introspectable_test_node(
-    real_kafka_event_bus: KafkaEventBus,
+    real_kafka_event_bus: EventBusKafka,
     unique_node_id: UUID,
 ) -> ProtocolIntrospectableTestNode:
     """Test node implementing MixinNodeIntrospection for E2E testing.
@@ -901,7 +901,7 @@ async def introspectable_test_node(
         def __init__(
             self,
             node_id: UUID,
-            event_bus: KafkaEventBus,
+            event_bus: EventBusKafka,
             node_type: EnumNodeKind = EnumNodeKind.EFFECT,
             version: str = "1.0.0",
         ) -> None:

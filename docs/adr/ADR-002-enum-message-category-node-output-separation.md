@@ -50,7 +50,7 @@ We separated the concerns into two distinct enums:
 
 ### EnumMessageCategory (Routing)
 
-Location: `omnibase_infra/enums/enum_message_category.py`
+Location: `src/omnibase_infra/enums/enum_message_category.py`
 
 ```python
 class EnumMessageCategory(str, Enum):
@@ -69,7 +69,7 @@ class EnumMessageCategory(str, Enum):
 
 ### EnumNodeOutputType (Validation)
 
-Location: `omnibase_infra/enums/enum_node_output_type.py`
+Location: `src/omnibase_infra/enums/enum_node_output_type.py`
 
 ```python
 class EnumNodeOutputType(str, Enum):
@@ -253,8 +253,8 @@ Each enum can evolve independently:
 
 - `src/omnibase_infra/enums/enum_message_category.py` - Reduced to 3 values (EVENT, COMMAND, INTENT)
 - `src/omnibase_infra/enums/enum_node_output_type.py` - New file with 4 values (EVENT, COMMAND, INTENT, PROJECTION)
-- `src/omnibase_infra/validation/execution_shape_validator.py` - Updated to use union types
-- `src/omnibase_infra/validation/runtime_shape_validator.py` - Updated to use union types
+- `src/omnibase_infra/validation/validator_execution_shape.py` - Updated to use union types
+- `src/omnibase_infra/validation/validator_runtime_shape.py` - Updated to use union types
 - `src/omnibase_infra/models/validation/model_execution_shape_rule.py` - Uses EnumNodeOutputType for allowed/forbidden types
 
 ### Migration Pattern
@@ -313,32 +313,33 @@ uppercase_patterns = {
 # Phase 4: Lenient substring matching (fallback)
 ```
 
-The `_MESSAGE_CATEGORY_PATTERNS` constant is used for legacy purposes in the
-`_is_return_type_allowed` method context mapping.
-
 ### Runtime Validator Usage
 
 ```python
 from omnibase_infra.validation import RuntimeShapeValidator
-from omnibase_infra.enums import EnumHandlerType, EnumNodeOutputType
+from omnibase_infra.enums import EnumNodeArchetype, EnumNodeOutputType
+from omnibase_infra.models.validation import ModelOutputValidationParams
 
 validator = RuntimeShapeValidator()
 
-# Validate reducer output
-violation = validator.validate_handler_output(
-    handler_type=EnumHandlerType.REDUCER,
+# Validate reducer output using ModelOutputValidationParams
+params = ModelOutputValidationParams(
+    node_archetype=EnumNodeArchetype.REDUCER,
     output=my_projection,
     output_category=EnumNodeOutputType.PROJECTION,  # Correct - projections use EnumNodeOutputType
 )
+violation = validator.validate_handler_output(params)
 ```
 
 ## References
 
 - **Ticket**: OMN-974 - Resolve EnumMessageCategory drift between core and infra
 - **PR**: #64 - fix(enums): resolve EnumMessageCategory drift between core and infra
+- **Related ADR**: See companion ADR at `docs/decisions/adr-enum-message-category-vs-node-output-type.md` (legacy `docs/decisions/` location) focusing on routing vs validation distinction
 - **Related Files**:
   - `src/omnibase_infra/enums/enum_node_output_type.py`
   - `src/omnibase_infra/enums/enum_message_category.py`
-  - `src/omnibase_infra/validation/execution_shape_validator.py`
-  - `src/omnibase_infra/validation/runtime_shape_validator.py`
+  - `src/omnibase_infra/validation/validator_execution_shape.py`
+  - `src/omnibase_infra/validation/validator_runtime_shape.py`
   - `src/omnibase_infra/models/validation/model_execution_shape_rule.py`
+  - `src/omnibase_infra/runtime/service_message_dispatch_engine.py`

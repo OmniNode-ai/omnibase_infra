@@ -71,7 +71,7 @@ from .verification_helpers import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.nodes.effects import NodeRegistryEffect
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
@@ -233,7 +233,7 @@ class OrchestratorPipeline:
     async def process_message(self, message: ModelEventMessage) -> None:
         """Process a Kafka message through the full pipeline.
 
-        This is the callback registered with KafkaEventBus.subscribe().
+        This is the callback registered with EventBusKafka.subscribe().
         It deserializes the message and routes through handler -> reducer -> effect.
 
         Pipeline Stages:
@@ -693,7 +693,7 @@ async def orchestrator_pipeline(
 
 @pytest.fixture
 async def ensure_test_topic_exists(
-    real_kafka_event_bus: KafkaEventBus,
+    real_kafka_event_bus: EventBusKafka,
 ) -> str:
     """Validate and return the pre-existing test topic name.
 
@@ -950,7 +950,7 @@ async def ensure_test_topic_exists(
 
 @pytest.fixture
 async def running_orchestrator_consumer(
-    real_kafka_event_bus: KafkaEventBus,
+    real_kafka_event_bus: EventBusKafka,
     orchestrator_pipeline: OrchestratorTestContext,
     ensure_test_topic_exists: str,  # Ensures topic exists before subscribing
 ) -> AsyncGenerator[OrchestratorTestContext, None]:
@@ -1025,7 +1025,7 @@ class TestFullOrchestratorFlow:
 
     async def test_introspection_triggers_full_pipeline_processing(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         running_orchestrator_consumer: OrchestratorTestContext,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -1094,7 +1094,7 @@ class TestFullOrchestratorFlow:
 
     async def test_handler_reducer_effect_chain_execution(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         running_orchestrator_consumer: OrchestratorTestContext,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -1169,7 +1169,7 @@ class TestFullOrchestratorFlow:
 
     async def test_multiple_events_processed_in_order(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         running_orchestrator_consumer: OrchestratorTestContext,
     ) -> None:
         """Test that multiple introspection events are processed.
@@ -1236,7 +1236,7 @@ class TestFullOrchestratorFlow:
 
     async def test_malformed_message_handled_gracefully(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         running_orchestrator_consumer: OrchestratorTestContext,
         unique_node_id: UUID,
         unique_correlation_id: UUID,
@@ -1328,7 +1328,7 @@ class TestFullPipelineWithRealInfrastructure:
 
     async def test_introspection_creates_postgres_projection(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         projection_reader: ProjectionReaderRegistration,
         real_projector: ProjectorShell,
         unique_node_id: UUID,
@@ -1500,7 +1500,7 @@ class TestPipelineLifecycle:
 
     async def test_consumer_starts_and_receives_messages(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
         ensure_test_topic_exists: str,
     ) -> None:
@@ -1557,7 +1557,7 @@ class TestPipelineLifecycle:
 
     async def test_consumer_handles_shutdown_gracefully(
         self,
-        real_kafka_event_bus: KafkaEventBus,
+        real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
         ensure_test_topic_exists: str,
     ) -> None:

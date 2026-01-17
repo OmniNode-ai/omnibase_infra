@@ -32,7 +32,7 @@ Exports:
     EnumNodeArchetype: 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
     EnumNodeOutputType: Node output types for execution shape validation
     EnumNonRetryableErrorCategory: Non-retryable error categories for DLQ
-    EnumPolicyType: Policy types for PolicyRegistry plugins
+    EnumPolicyType: Policy types for RegistryPolicy plugins
     EnumRegistrationState: Registration FSM states for two-way registration
     EnumRegistrationStatus: Registration workflow status (IDLE, PENDING, PARTIAL, COMPLETE, FAILED)
     EnumRegistryResponseStatus: Registry operation response status (SUCCESS, PARTIAL, FAILED)

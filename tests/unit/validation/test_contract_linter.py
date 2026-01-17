@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.validation.contract_linter import (
+from omnibase_infra.validation.linter_contract import (
     ContractLinter,
     ContractRuleId,
     EnumContractViolationSeverity,

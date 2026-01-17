@@ -45,7 +45,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
-from omnibase_infra.validation.chain_propagation_validator import (
+from omnibase_infra.validation.validator_chain_propagation import (
     ChainPropagationValidator,
     get_causation_id,
     get_correlation_id,

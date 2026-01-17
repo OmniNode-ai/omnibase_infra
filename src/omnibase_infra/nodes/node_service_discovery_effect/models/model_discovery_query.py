@@ -76,7 +76,7 @@ class ModelDiscoveryQuery(BaseModel):
         >>> query = ModelDiscoveryQuery()
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     service_name: str | None = Field(
         default=None,

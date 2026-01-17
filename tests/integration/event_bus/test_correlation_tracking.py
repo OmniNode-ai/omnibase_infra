@@ -23,7 +23,7 @@ from uuid import UUID, uuid4
 import pytest
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.event_bus.models import ModelEventMessage
 
 # =============================================================================
@@ -32,11 +32,11 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-async def event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
-    """Provide a started InMemoryEventBus instance."""
-    from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+async def event_bus() -> AsyncGenerator[EventBusInmemory, None]:
+    """Provide a started EventBusInmemory instance."""
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
-    bus = InMemoryEventBus(environment="test", group="correlation-test")
+    bus = EventBusInmemory(environment="test", group="correlation-test")
     await bus.start()
     yield bus
     await bus.close()
@@ -65,7 +65,7 @@ class TestCorrelationIdPropagation:
     @pytest.mark.asyncio
     async def test_correlation_id_preserved_in_publish_subscribe(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -94,7 +94,7 @@ class TestCorrelationIdPropagation:
     @pytest.mark.asyncio
     async def test_correlation_id_auto_generated_when_not_provided(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -106,7 +106,7 @@ class TestCorrelationIdPropagation:
 
         await event_bus.subscribe(unique_topic, unique_group, handler)
 
-        # Publish without explicit headers - InMemoryEventBus creates defaults
+        # Publish without explicit headers - EventBusInmemory creates defaults
         await event_bus.publish(unique_topic, None, b"test-value")
 
         assert len(received_messages) == 1
@@ -116,7 +116,7 @@ class TestCorrelationIdPropagation:
     @pytest.mark.asyncio
     async def test_different_messages_have_different_correlation_ids(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -141,7 +141,7 @@ class TestCorrelationIdPropagation:
     @pytest.mark.asyncio
     async def test_correlation_id_propagated_to_multiple_subscribers(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
     ) -> None:
         """Verify correlation ID is propagated to all subscribers."""
@@ -179,7 +179,7 @@ class TestCorrelationIdPropagation:
     @pytest.mark.asyncio
     async def test_correlation_id_format_is_uuid(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -219,7 +219,7 @@ class TestCorrelationIdContextManagement:
     @pytest.mark.asyncio
     async def test_correlation_id_survives_message_history(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
     ) -> None:
         """Verify correlation ID is preserved in event history."""
@@ -244,7 +244,7 @@ class TestCorrelationIdContextManagement:
     @pytest.mark.asyncio
     async def test_trace_id_preserved_alongside_correlation_id(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -280,7 +280,7 @@ class TestCorrelationIdContextManagement:
     @pytest.mark.asyncio
     async def test_parent_span_id_propagation(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
         unique_group: str,
     ) -> None:
@@ -321,7 +321,7 @@ class TestMultiHopCorrelationTracking:
     @pytest.mark.asyncio
     async def test_correlation_id_preserved_across_republish(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify correlation ID is preserved when a subscriber republishes."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -373,7 +373,7 @@ class TestMultiHopCorrelationTracking:
     @pytest.mark.asyncio
     async def test_three_hop_correlation_chain(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify correlation ID survives a three-hop message chain."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -429,7 +429,7 @@ class TestMultiHopCorrelationTracking:
     @pytest.mark.asyncio
     async def test_fan_out_preserves_correlation_id(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify correlation ID is preserved in fan-out scenarios."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -499,7 +499,7 @@ class TestErrorScenarioCorrelation:
     @pytest.mark.asyncio
     async def test_correlation_id_preserved_when_handler_fails(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
     ) -> None:
         """Verify correlation ID is preserved even when handler fails."""
@@ -535,7 +535,7 @@ class TestErrorScenarioCorrelation:
     @pytest.mark.asyncio
     async def test_correlation_id_in_event_history_after_error(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         unique_topic: str,
     ) -> None:
         """Verify correlation ID is preserved in history even after handler error."""
@@ -566,7 +566,7 @@ class TestErrorScenarioCorrelation:
     @pytest.mark.asyncio
     async def test_correlation_id_tracked_with_circuit_breaker_open(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Verify correlation tracking works even when circuit breaker opens."""
         from omnibase_infra.event_bus.models import ModelEventHeaders

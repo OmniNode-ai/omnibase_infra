@@ -35,7 +35,7 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
@@ -287,7 +287,7 @@ class TestA1IntrospectionPublish:
     async def test_a1_introspection_event_structure(
         self,
         test_node: IntrospectableTestNode,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Introspection event has required structure for registration.
 
@@ -345,7 +345,7 @@ class TestA1IntrospectionPublish:
     async def test_a1_introspection_event_stable_node_id(
         self,
         test_node_factory: Callable[..., IntrospectableTestNode],
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Node ID is stable across multiple introspection emissions.
 
@@ -384,7 +384,7 @@ class TestA1IntrospectionPublish:
     async def test_a1_introspection_event_valid_node_types(
         self,
         test_node_factory: Callable[..., IntrospectableTestNode],
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Each ONEX node type can emit valid introspection events.
 
@@ -421,7 +421,7 @@ class TestA1IntrospectionPublish:
     async def test_a1_introspection_event_endpoints_and_metadata(
         self,
         test_node: IntrospectableTestNode,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Introspection event includes endpoints and metadata dicts.
 
@@ -473,7 +473,7 @@ class TestA2TwoWayIntrospectionLoop:
 
     async def test_a2_registry_requests_introspection(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Registry can publish introspection request to event bus.
 
@@ -510,7 +510,7 @@ class TestA2TwoWayIntrospectionLoop:
     async def test_a2_node_responds_to_introspection_request(
         self,
         test_node: IntrospectableTestNode,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Node responds to introspection request with event.
 
@@ -545,7 +545,7 @@ class TestA2TwoWayIntrospectionLoop:
         await test_node.publish_introspection()
 
         # Assert - response was emitted
-        # Note: Due to direct callback invocation in InMemoryEventBus,
+        # Note: Due to direct callback invocation in EventBusInmemory,
         # the response should already be captured
         history = await event_bus.get_event_history(limit=10)
         assert len(history) > 0, "Node should emit introspection response"
@@ -559,7 +559,7 @@ class TestA2TwoWayIntrospectionLoop:
 
     async def test_a2_correlation_id_preserved_in_loop(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Correlation ID is preserved throughout request-response loop.
 
@@ -624,7 +624,7 @@ class TestA2TwoWayIntrospectionLoop:
     async def test_a2_multiple_nodes_respond_with_unique_correlation(
         self,
         test_node_factory: Callable[..., IntrospectableTestNode],
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
     ) -> None:
         """Multiple nodes can respond independently, each with unique IDs.
 
@@ -681,7 +681,7 @@ class TestWorkflowIntegration:
         tracked_reducer: TrackedRegistrationReducer,
         tracked_effect: TrackedNodeRegistryEffect,
         test_node: IntrospectableTestNode,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         consul_client: StubConsulClient,
         postgres_adapter: StubPostgresAdapter,
         call_tracker: CallOrderTracker,

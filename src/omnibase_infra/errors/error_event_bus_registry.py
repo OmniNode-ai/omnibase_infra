@@ -57,7 +57,7 @@ class EventBusRegistryError(RuntimeHostError):
         >>> raise EventBusRegistryError(
         ...     "Event bus kind is already registered",
         ...     bus_kind="inmemory",
-        ...     existing_class="InMemoryEventBus",
+        ...     existing_class="EventBusInmemory",
         ... )
     """
 

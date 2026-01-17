@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Kafka Event Bus configuration model.
 
-Provides a Pydantic configuration model for KafkaEventBus with support for
+Provides a Pydantic configuration model for EventBusKafka with support for
 environment variable overrides, YAML configuration loading, and sensible
 defaults for production deployment.
 
@@ -115,9 +115,9 @@ logger = logging.getLogger(__name__)
 
 
 class ModelKafkaEventBusConfig(BaseModel):
-    """Configuration model for KafkaEventBus.
+    """Configuration model for EventBusKafka.
 
-    Defines all required configuration options for KafkaEventBus including
+    Defines all required configuration options for EventBusKafka including
     connection settings, resilience patterns (circuit breaker, retry),
     and Kafka producer/consumer options.
 

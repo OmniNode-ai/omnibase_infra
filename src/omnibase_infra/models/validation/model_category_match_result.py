@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Category match result model for message type detection.
 
-This model replaces the tuple pattern ``tuple[bool, EnumMessageCategory | EnumNodeOutputType | None]``
+This model replaces the tuple pattern ``tuple[bool, MessageOutputCategory | None]``
 that was used for category matching operations in the routing coverage validator.
 By using a structured model, we provide:
 
@@ -48,9 +48,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
-
-# Type alias for the category union - improves readability
-type CategoryType = EnumMessageCategory | EnumNodeOutputType
+from omnibase_infra.types import MessageOutputCategory
 
 
 class ModelCategoryMatchResult(BaseModel):
@@ -139,7 +137,7 @@ class ModelCategoryMatchResult(BaseModel):
     matched: bool = Field(
         description="Whether the category matching criteria was satisfied.",
     )
-    category: CategoryType | None = Field(
+    category: MessageOutputCategory | None = Field(
         default=None,
         description="The matched category (EnumMessageCategory or EnumNodeOutputType), "
         "or None if no specific category was identified.",
@@ -192,6 +190,9 @@ class ModelCategoryMatchResult(BaseModel):
 
         .. versionadded:: 0.6.1
         """
+        # Single type check is sufficient - EnumMessageCategory is the only message
+        # category enum. EnumNodeOutputType contains PROJECTION which is NOT a
+        # routable message category (it's for reducer state aggregation outputs).
         return isinstance(self.category, EnumMessageCategory)
 
     @property
@@ -219,7 +220,9 @@ class ModelCategoryMatchResult(BaseModel):
         return self.category == EnumNodeOutputType.PROJECTION
 
     @classmethod
-    def matched_with_category(cls, category: CategoryType) -> ModelCategoryMatchResult:
+    def matched_with_category(
+        cls, category: MessageOutputCategory
+    ) -> ModelCategoryMatchResult:
         """Create a successful match result with a specific category.
 
         Use this factory when the matching operation found a pattern that

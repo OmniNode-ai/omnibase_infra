@@ -14,7 +14,7 @@ Migration Note:
     Migration Path (OMN-1000):
         1. When omnibase_spi 0.5.0+ is released with ProtocolIdempotencyStore,
            update pyproject.toml to require the new version
-        2. Update imports in InMemoryIdempotencyStore and PostgresIdempotencyStore
+        2. Update imports in StoreIdempotencyInmemory and StoreIdempotencyPostgres
            to use: `from omnibase_spi.protocols import ProtocolIdempotencyStore`
         3. Remove this local protocol definition
         4. Run tests to verify compatibility
@@ -29,8 +29,8 @@ Protocol Methods:
     - cleanup_expired: Remove entries older than TTL
 
 Implementations:
-    - InMemoryIdempotencyStore: In-memory store for testing (OMN-945)
-    - PostgresIdempotencyStore: Production PostgreSQL store (OMN-945)
+    - StoreIdempotencyInmemory: In-memory store for testing (OMN-945)
+    - StoreIdempotencyPostgres: Production PostgreSQL store (OMN-945)
 
 Security Considerations:
     - Concurrency Safety: All implementations MUST be safe for concurrent access.
@@ -84,7 +84,7 @@ class ProtocolIdempotencyStore(Protocol):
         - Domain-isolated: Messages can be namespaced by domain for isolated deduplication
 
     Example:
-        >>> store: ProtocolIdempotencyStore = InMemoryIdempotencyStore()
+        >>> store: ProtocolIdempotencyStore = StoreIdempotencyInmemory()
         >>> message_id = uuid4()
         >>> is_new = await store.check_and_record(message_id, domain="orders")
         >>> if is_new:

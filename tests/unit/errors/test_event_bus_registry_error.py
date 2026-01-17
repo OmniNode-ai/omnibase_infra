@@ -12,7 +12,7 @@ All tests validate:
 - Inheritance chain
 - Structured context fields via ModelInfraErrorContext
 - Domain-specific context fields (bus_kind, bus_class, etc.)
-- Integration with EventBusBindingRegistry
+- Integration with RegistryEventBusBinding
 """
 
 from uuid import uuid4
@@ -27,7 +27,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.runtime.registry.registry_event_bus_binding import (
-    EventBusBindingRegistry,
+    RegistryEventBusBinding,
 )
 
 
@@ -74,10 +74,10 @@ class TestEventBusRegistryErrorBasic:
         error = EventBusRegistryError(
             "Event bus kind 'inmemory' is already registered",
             bus_kind="inmemory",
-            existing_class="InMemoryEventBus",
+            existing_class="EventBusInmemory",
         )
         assert error.model.context["bus_kind"] == "inmemory"
-        assert error.model.context["existing_class"] == "InMemoryEventBus"
+        assert error.model.context["existing_class"] == "EventBusInmemory"
 
 
 class TestEventBusRegistryErrorWithContext:
@@ -173,11 +173,11 @@ class TestEventBusRegistryErrorChaining:
 
 
 class TestEventBusRegistryErrorIntegration:
-    """Integration tests with EventBusBindingRegistry."""
+    """Integration tests with RegistryEventBusBinding."""
 
     def test_registry_raises_error_on_get_unregistered(self) -> None:
         """Test that registry raises EventBusRegistryError on get unregistered."""
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.get("nonexistent")
@@ -194,7 +194,7 @@ class TestEventBusRegistryErrorIntegration:
             async def publish_envelope(self, envelope: object, topic: str) -> None:
                 pass
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
         registry.register("test", MockEventBus)  # type: ignore[arg-type]
 
         with pytest.raises(EventBusRegistryError) as exc_info:
@@ -211,7 +211,7 @@ class TestEventBusRegistryErrorIntegration:
         class InvalidBus:
             """Bus without publish methods."""
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.register("invalid", InvalidBus)  # type: ignore[arg-type]
@@ -227,7 +227,7 @@ class TestEventBusRegistryErrorIntegration:
         class InvalidBusNonCallable:
             publish_envelope = "not_callable"
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.register("invalid", InvalidBusNonCallable)  # type: ignore[arg-type]
@@ -283,7 +283,7 @@ class TestEventBusRegistryErrorCorrelationId:
         class InvalidBus:
             """Bus without publish methods."""
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.register("invalid", InvalidBus)  # type: ignore[arg-type]
@@ -299,7 +299,7 @@ class TestEventBusRegistryErrorCorrelationId:
         class InvalidBusNonCallable:
             publish_envelope = "not_callable"
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.register("invalid", InvalidBusNonCallable)  # type: ignore[arg-type]
@@ -316,7 +316,7 @@ class TestEventBusRegistryErrorCorrelationId:
             async def publish_envelope(self, envelope: object, topic: str) -> None:
                 pass
 
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
         registry.register("test", MockEventBus)  # type: ignore[arg-type]
 
         with pytest.raises(EventBusRegistryError) as exc_info:
@@ -329,7 +329,7 @@ class TestEventBusRegistryErrorCorrelationId:
 
     def test_get_unregistered_error_has_correlation_id(self) -> None:
         """Test that get unregistered error includes correlation_id."""
-        registry = EventBusBindingRegistry()
+        registry = RegistryEventBusBinding()
 
         with pytest.raises(EventBusRegistryError) as exc_info:
             registry.get("nonexistent")

@@ -64,7 +64,7 @@ Usage in Handler Loading Flow:
                self._descriptors[descriptor.handler_id] = descriptor
 
     2. **wire_default_handlers() / wire_handlers_from_contract()**: During
-       handler class registration with the ProtocolBindingRegistry.
+       handler class registration with the RegistryProtocolBinding.
 
        Location: ``omnibase_infra/runtime/wiring.py``
 

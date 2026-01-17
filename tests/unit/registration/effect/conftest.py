@@ -40,7 +40,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -54,14 +54,14 @@ from omnibase_infra.models.registration import (
 
 
 @pytest.fixture
-def inmemory_idempotency_store() -> InMemoryIdempotencyStore:
-    """Create InMemoryIdempotencyStore for testing.
+def inmemory_idempotency_store() -> StoreIdempotencyInmemory:
+    """Create StoreIdempotencyInmemory for testing.
 
     Returns a fresh in-memory idempotency store instance suitable for
     testing registration deduplication without external dependencies.
 
     Returns:
-        InMemoryIdempotencyStore: A new in-memory idempotency store.
+        StoreIdempotencyInmemory: A new in-memory idempotency store.
 
     Example:
         >>> async def test_dedup(inmemory_idempotency_store):
@@ -70,19 +70,19 @@ def inmemory_idempotency_store() -> InMemoryIdempotencyStore:
         ...     assert await store.check_and_record(msg_id) is True
         ...     assert await store.check_and_record(msg_id) is False
     """
-    return InMemoryIdempotencyStore()
+    return StoreIdempotencyInmemory()
 
 
 @pytest.fixture
-async def initialized_idempotency_store() -> AsyncIterator[InMemoryIdempotencyStore]:
-    """Create and initialize InMemoryIdempotencyStore for async tests.
+async def initialized_idempotency_store() -> AsyncIterator[StoreIdempotencyInmemory]:
+    """Create and initialize StoreIdempotencyInmemory for async tests.
 
     Yields an initialized store instance and ensures cleanup after test.
 
     Yields:
-        InMemoryIdempotencyStore: An initialized in-memory store.
+        StoreIdempotencyInmemory: An initialized in-memory store.
     """
-    store = InMemoryIdempotencyStore()
+    store = StoreIdempotencyInmemory()
     yield store
     await store.clear()
 

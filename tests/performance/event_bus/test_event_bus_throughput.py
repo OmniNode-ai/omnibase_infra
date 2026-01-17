@@ -25,7 +25,7 @@ Usage:
 
 Related:
     - OMN-57: Event bus performance testing (Phase 9)
-    - InMemoryEventBus: Primary implementation under test
+    - EventBusInmemory: Primary implementation under test
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
-from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
 from tests.performance.event_bus.conftest import generate_unique_topic
 
@@ -51,13 +51,13 @@ class TestSinglePublisherThroughput:
     @pytest.mark.asyncio
     async def test_1000_sequential_publishes(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test 1000 sequential publish operations.
 
         Validates that sequential publishing achieves > 1000 events/sec
-        with the InMemoryEventBus.
+        with the EventBusInmemory.
 
         Performance Target:
             > 1000 events/sec (lenient for CI)
@@ -96,7 +96,7 @@ class TestSinglePublisherThroughput:
     )
     async def test_10000_sequential_publishes(
         self,
-        high_volume_event_bus: InMemoryEventBus,
+        high_volume_event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test 10000 sequential publish operations.
@@ -130,7 +130,7 @@ class TestSinglePublisherThroughput:
     @pytest.mark.asyncio
     async def test_sustained_throughput_1_second(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Measure sustained throughput over 1 second.
@@ -178,7 +178,7 @@ class TestBatchPublishing:
     @pytest.mark.asyncio
     async def test_batch_publish_100_messages(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test publishing 100 messages in rapid succession.
@@ -217,7 +217,7 @@ class TestBatchPublishing:
     )
     async def test_batch_publish_1000_messages(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test publishing 1000 messages in rapid succession.
@@ -249,7 +249,7 @@ class TestBatchPublishing:
     @pytest.mark.asyncio
     async def test_large_message_throughput(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         large_message_bytes: bytes,
     ) -> None:
         """Test throughput with larger (~1KB) messages.
@@ -293,7 +293,7 @@ class TestConcurrentPublishers:
     @pytest.mark.asyncio
     async def test_10_concurrent_publishers(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test 10 concurrent publishers each publishing 100 messages.
@@ -349,7 +349,7 @@ class TestConcurrentPublishers:
     )
     async def test_50_concurrent_publishers(
         self,
-        high_volume_event_bus: InMemoryEventBus,
+        high_volume_event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test 50 concurrent publishers (stress test).
@@ -397,7 +397,7 @@ class TestConcurrentPublishers:
     @pytest.mark.asyncio
     async def test_concurrent_multi_topic(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test concurrent publishing to multiple topics.
@@ -452,7 +452,7 @@ class TestPublishWithSubscribers:
     @pytest.mark.asyncio
     async def test_throughput_with_single_subscriber(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test throughput with one active subscriber.
@@ -500,7 +500,7 @@ class TestPublishWithSubscribers:
     @pytest.mark.asyncio
     async def test_throughput_with_multiple_subscribers(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test throughput with multiple subscribers on same topic.
@@ -552,7 +552,7 @@ class TestPublishWithSubscribers:
     @pytest.mark.asyncio
     async def test_fan_out_throughput(
         self,
-        event_bus: InMemoryEventBus,
+        event_bus: EventBusInmemory,
         sample_message_bytes: bytes,
     ) -> None:
         """Test fan-out pattern with many subscribers.

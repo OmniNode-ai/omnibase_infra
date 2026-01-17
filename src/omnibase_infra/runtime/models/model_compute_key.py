@@ -29,7 +29,7 @@ class ModelComputeKey(BaseModel):
         >>> key = ModelComputeKey(plugin_id="json_normalizer", version="1.0.0")
         >>> print(key.to_tuple())
         ('json_normalizer', '1.0.0')
-        >>> # Create from tuple for backward compatibility
+        >>> # Create from tuple
         >>> key2 = ModelComputeKey.from_tuple(("xml_parser", "2.1.0"))
         >>> print(key2.plugin_id)
         'xml_parser'
@@ -49,6 +49,7 @@ class ModelComputeKey(BaseModel):
         frozen=True,  # Make hashable for dict keys
         str_strip_whitespace=True,
         from_attributes=True,  # pytest-xdist compatibility
+        extra="forbid",
     )
 
     @field_validator("version")
@@ -75,7 +76,7 @@ class ModelComputeKey(BaseModel):
         return validate_version_lenient(v)
 
     def to_tuple(self) -> tuple[str, str]:
-        """Convert to tuple for backward compatibility.
+        """Convert to tuple representation.
 
         Returns:
             Tuple of (plugin_id, version)
@@ -84,7 +85,7 @@ class ModelComputeKey(BaseModel):
 
     @classmethod
     def from_tuple(cls, key_tuple: tuple[str, str]) -> ModelComputeKey:
-        """Create from tuple for backward compatibility.
+        """Create from tuple representation.
 
         Validates the input tuple before creating the key instance.
 

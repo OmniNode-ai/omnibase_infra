@@ -24,7 +24,7 @@ import pytest
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
-    from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
 # =============================================================================
 # Fixtures
@@ -46,11 +46,11 @@ def sample_headers() -> dict[str, object]:
 
 
 @pytest.fixture
-async def started_event_bus() -> AsyncGenerator[InMemoryEventBus, None]:
-    """Provide a started InMemoryEventBus instance."""
-    from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+async def started_event_bus() -> AsyncGenerator[EventBusInmemory, None]:
+    """Provide a started EventBusInmemory instance."""
+    from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
-    bus = InMemoryEventBus(environment="test", group="schema-validation")
+    bus = EventBusInmemory(environment="test", group="schema-validation")
     await bus.start()
     yield bus
     await bus.close()
@@ -542,7 +542,7 @@ class TestHeaderCompleteness:
     @pytest.mark.asyncio
     async def test_published_message_has_complete_headers(
         self,
-        started_event_bus: InMemoryEventBus,
+        started_event_bus: EventBusInmemory,
     ) -> None:
         """Verify published messages have complete headers."""
         from omnibase_infra.event_bus.models import ModelEventMessage
@@ -572,7 +572,7 @@ class TestHeaderCompleteness:
     @pytest.mark.asyncio
     async def test_custom_headers_preserved_through_publish(
         self,
-        started_event_bus: InMemoryEventBus,
+        started_event_bus: EventBusInmemory,
     ) -> None:
         """Verify custom headers are preserved through publish/subscribe cycle."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -618,7 +618,7 @@ class TestHeaderCompleteness:
     @pytest.mark.asyncio
     async def test_message_metadata_preserved(
         self,
-        started_event_bus: InMemoryEventBus,
+        started_event_bus: EventBusInmemory,
     ) -> None:
         """Verify message metadata (topic, key, offset, partition) is preserved."""
         from omnibase_infra.event_bus.models import ModelEventMessage
@@ -638,15 +638,15 @@ class TestHeaderCompleteness:
         assert msg.topic == "test.metadata"
         assert msg.key == b"msg-key"
         assert msg.value == b"msg-value"
-        assert msg.offset is not None  # Should have offset from InMemoryEventBus
+        assert msg.offset is not None  # Should have offset from EventBusInmemory
         assert (
             msg.partition is not None
-        )  # Should have partition (0 for InMemoryEventBus)
+        )  # Should have partition (0 for EventBusInmemory)
 
     @pytest.mark.asyncio
     async def test_sequential_messages_have_unique_ids(
         self,
-        started_event_bus: InMemoryEventBus,
+        started_event_bus: EventBusInmemory,
     ) -> None:
         """Verify sequential messages have unique correlation and message IDs."""
         from omnibase_infra.event_bus.models import ModelEventMessage

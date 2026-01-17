@@ -33,7 +33,7 @@ Usage:
 
 Related:
     - NodeServiceDiscoveryEffect: Node that consumes registered dependencies
-    - ProtocolServiceDiscoveryHandler: Protocol for handlers
+    - ProtocolDiscoveryOperations: Protocol for handlers
     - ModelONEXContainer: DI container for dependency resolution
     - OMN-1131: Capability-oriented node architecture
 """
@@ -47,7 +47,7 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-        ProtocolServiceDiscoveryHandler,
+        ProtocolDiscoveryOperations,
     )
 
 
@@ -83,7 +83,7 @@ class RegistryInfraServiceDiscovery:
             RegistryInfraServiceDiscovery.register(container)
 
             # Explicit handler registration
-            consul_handler = ConsulServiceDiscoveryHandler(config)
+            consul_handler = HandlerServiceDiscoveryConsul(config)
             RegistryInfraServiceDiscovery.register_with_handler(
                 container,
                 handler=consul_handler,
@@ -115,21 +115,21 @@ class RegistryInfraServiceDiscovery:
 
         # Import here to avoid circular imports
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
         )
 
         # Register protocol with lazy resolution
         # The actual implementation is determined at resolution time
         # based on configuration (CONSUL_AGENT_URL, K8S_NAMESPACE, etc.)
         container.register_factory(
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
             RegistryInfraServiceDiscovery._create_handler_from_config,
         )
 
     @staticmethod
     def register_with_handler(
         container: ModelONEXContainer,
-        handler: ProtocolServiceDiscoveryHandler,
+        handler: ProtocolDiscoveryOperations,
     ) -> None:
         """Register service discovery dependencies with explicit handler.
 
@@ -141,11 +141,11 @@ class RegistryInfraServiceDiscovery:
             handler: Pre-configured handler implementation.
 
         Raises:
-            ProtocolConfigurationError: If handler does not implement ProtocolServiceDiscoveryHandler.
+            TypeError: If handler does not implement ProtocolDiscoveryOperations.
 
         Example:
             >>> container = ModelONEXContainer()
-            >>> handler = ConsulServiceDiscoveryHandler(config)
+            >>> handler = HandlerServiceDiscoveryConsul(config)
             >>> RegistryInfraServiceDiscovery.register_with_handler(
             ...     container,
             ...     handler=handler,
@@ -153,31 +153,33 @@ class RegistryInfraServiceDiscovery:
         """
         # Import at runtime for isinstance check (protocol is @runtime_checkable)
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolServiceDiscoveryHandler,
+            ProtocolDiscoveryOperations,
         )
 
-        if not isinstance(handler, ProtocolServiceDiscoveryHandler):
-            context = ModelInfraErrorContext(
-                operation="register_handler",
-                target_name="ProtocolServiceDiscoveryHandler",
-                # NOTE: transport_type intentionally omitted - this validation
-                # applies to multi-backend handlers (Consul, K8s, Etcd, etc.)
-            )
-            raise ProtocolConfigurationError(
-                f"Handler must implement ProtocolServiceDiscoveryHandler, "
-                f"got {type(handler).__name__}",
-                context=context,
+        # NOTE: isinstance() is intentionally used here instead of duck typing for:
+        # 1. Fail-fast validation: Immediately reject invalid handlers at registration
+        #    time rather than discovering missing methods at runtime during operations
+        # 2. Type safety: The @runtime_checkable decorator enables structural subtyping
+        #    checks that verify all required Protocol methods exist
+        # 3. Clear error messages: TypeError with specific protocol name aids debugging
+        # Duck typing (hasattr checks) would defer validation to method call time,
+        # making it harder to diagnose misconfigured handlers.
+        # See: conftest.py "Protocol Compliance Strategy" for when to use each approach.
+        if not isinstance(handler, ProtocolDiscoveryOperations):
+            raise TypeError(
+                f"Handler must implement ProtocolDiscoveryOperations, "
+                f"got {type(handler).__name__}"
             )
 
         if container.service_registry is None:
             return
 
-        container.register_instance(ProtocolServiceDiscoveryHandler, handler)
+        container.register_instance(ProtocolDiscoveryOperations, handler)
 
     @staticmethod
     def _create_handler_from_config(
         _container: ModelONEXContainer,
-    ) -> ProtocolServiceDiscoveryHandler:
+    ) -> ProtocolDiscoveryOperations:
         """Create handler based on configuration.
 
         Factory function that creates the appropriate handler
