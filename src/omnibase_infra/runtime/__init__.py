@@ -144,6 +144,9 @@ from omnibase_infra.runtime.handler_plugin_loader import (
     HandlerPluginLoader,
     MAX_CONTRACT_SIZE,
 )
+
+# Binding config resolver (OMN-765)
+from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
 from omnibase_infra.runtime.protocol_handler_plugin_loader import (
     ProtocolHandlerPluginLoader,
 )
@@ -274,6 +277,8 @@ __all__: list[str] = [
     "HandlerPluginLoader",
     "MAX_CONTRACT_SIZE",
     "ProtocolHandlerPluginLoader",
+    # Binding config resolver (OMN-765)
+    "BindingConfigResolver",
     # Handler discovery protocol and implementation (OMN-1133)
     "ContractHandlerDiscovery",
     "ProtocolHandlerDiscovery",

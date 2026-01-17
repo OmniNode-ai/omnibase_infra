@@ -1,0 +1,243 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Configuration model for BindingConfigResolver.
+
+.. versionadded:: 0.8.0
+    Initial implementation for OMN-765.
+
+This module provides the Pydantic configuration model for the BindingConfigResolver,
+which resolves handler-specific configuration from multiple sources (file, env, vault).
+
+Example:
+    >>> from pathlib import Path
+    >>> config = ModelBindingConfigResolverConfig(
+    ...     config_dir=Path("/workspace/configs"),
+    ...     cache_ttl_seconds=600.0,
+    ...     env_prefix="HANDLER",
+    ... )
+    >>> resolver = BindingConfigResolver(config=config)
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class ModelBindingConfigResolverConfig(BaseModel):
+    """Configuration for BindingConfigResolver.
+
+    Configures the binding configuration resolution system that supports
+    multiple configuration sources with priority-based resolution.
+
+    Source Priority Order (config_ref schemes):
+        1. vault:// - Vault secrets for production configuration
+        2. env:// - Environment variables for local development
+        3. file:// - File-based configuration for Kubernetes deployments
+
+    Environment Variable Override Pattern:
+        When env_prefix is set (e.g., "HANDLER"), the resolver looks for:
+        {env_prefix}_{HANDLER_TYPE}_{FIELD} (e.g., HANDLER_DB_POOL_SIZE)
+
+    Attributes:
+        config_dir: Base directory for relative file:// paths.
+            If None, file:// paths must be absolute.
+        enable_caching: Whether to cache resolved configurations.
+        cache_ttl_seconds: Time-to-live for cached configurations (0-86400).
+        env_prefix: Prefix for environment variable overrides.
+            Pattern: {env_prefix}_{HANDLER_TYPE}_{FIELD}
+        secret_resolver: Optional SecretResolver instance for vault:// resolution.
+            This is injected at runtime and excluded from serialization.
+        strict_validation: If True, fail on unknown fields in resolved config.
+            If False, ignore unknown fields.
+        allowed_schemes: Set of allowed config_ref URI schemes for security.
+            Only these schemes can be used in config_ref values.
+
+    Example:
+        >>> config = ModelBindingConfigResolverConfig(
+        ...     config_dir=Path("/etc/onex/handlers"),
+        ...     cache_ttl_seconds=300.0,
+        ...     env_prefix="ONEX_HANDLER",
+        ...     strict_validation=True,
+        ... )
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        frozen=True,
+        extra="forbid",
+        from_attributes=True,
+    )
+
+    # Base configuration directory for relative file:// paths
+    config_dir: Path | None = Field(
+        default=None,
+        description="Base directory for resolving relative file:// paths. "
+        "If None, all file:// paths must be absolute.",
+    )
+
+    # Cache settings
+    enable_caching: bool = Field(
+        default=True,
+        description="Whether to cache resolved configurations. "
+        "Disable for development or when configurations change frequently.",
+    )
+    cache_ttl_seconds: float = Field(
+        default=300.0,
+        ge=0.0,
+        le=86400.0,
+        description="Time-to-live for cached configurations in seconds (0-86400). "
+        "Default is 5 minutes.",
+    )
+
+    # Environment variable override settings
+    env_prefix: str = Field(
+        default="HANDLER",
+        description="Prefix for environment variable overrides. "
+        "Pattern: {env_prefix}_{HANDLER_TYPE}_{FIELD}. "
+        "Must be a valid Python identifier.",
+    )
+
+    # SecretResolver instance for vault:// resolution
+    # NOTE: object is used instead of Any for generic type per ONEX policy
+    # This field is excluded from serialization as it's a runtime dependency
+    secret_resolver: object | None = Field(
+        default=None,
+        exclude=True,
+        description="Optional SecretResolver instance for vault:// resolution. "
+        "Injected at runtime, not serialized.",
+    )
+
+    # Validation strictness
+    strict_validation: bool = Field(
+        default=True,
+        description="If True, fail on unknown fields in resolved configuration. "
+        "If False, ignore unknown fields.",
+    )
+
+    # Allowed config_ref schemes (for security)
+    allowed_schemes: frozenset[str] = Field(
+        default=frozenset({"file", "env", "vault"}),
+        description="Set of allowed config_ref URI schemes for security. "
+        "Only these schemes can be used in config_ref values.",
+    )
+
+    @field_validator("cache_ttl_seconds")
+    @classmethod
+    def validate_cache_ttl(cls, value: float) -> float:
+        """Validate cache TTL is within acceptable range.
+
+        Args:
+            value: The cache TTL in seconds.
+
+        Returns:
+            The validated TTL value.
+
+        Raises:
+            ValueError: If TTL is outside valid range (0-86400).
+        """
+        if value < 0.0:
+            msg = f"cache_ttl_seconds must be >= 0, got {value}"
+            raise ValueError(msg)
+        if value > 86400.0:
+            msg = f"cache_ttl_seconds must be <= 86400 (24 hours), got {value}"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("env_prefix")
+    @classmethod
+    def validate_env_prefix(cls, value: str) -> str:
+        """Validate env_prefix is a valid identifier.
+
+        The prefix must be a valid Python identifier (alphanumeric and underscores,
+        not starting with a digit) to ensure it can be used in environment variable
+        names.
+
+        Args:
+            value: The environment variable prefix.
+
+        Returns:
+            The validated prefix (uppercase).
+
+        Raises:
+            ValueError: If prefix is not a valid identifier.
+        """
+        if not value:
+            msg = "env_prefix cannot be empty"
+            raise ValueError(msg)
+
+        # Check if it's a valid Python identifier
+        # Must match: [a-zA-Z_][a-zA-Z0-9_]*
+        identifier_pattern = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+        if not identifier_pattern.match(value):
+            msg = (
+                f"env_prefix must be a valid identifier "
+                f"(alphanumeric and underscores, not starting with digit), got '{value}'"
+            )
+            raise ValueError(msg)
+
+        # Return uppercase for consistency with environment variable conventions
+        return value.upper()
+
+    @field_validator("config_dir")
+    @classmethod
+    def validate_config_dir(cls, value: Path | None) -> Path | None:
+        """Validate config_dir exists if provided.
+
+        Args:
+            value: The configuration directory path, or None.
+
+        Returns:
+            The validated path, or None.
+
+        Raises:
+            ValueError: If path is provided but does not exist or is not a directory.
+        """
+        if value is None:
+            return None
+
+        if not value.exists():
+            msg = f"config_dir does not exist: {value}"
+            raise ValueError(msg)
+
+        if not value.is_dir():
+            msg = f"config_dir is not a directory: {value}"
+            raise ValueError(msg)
+
+        return value
+
+    @field_validator("allowed_schemes")
+    @classmethod
+    def validate_allowed_schemes(cls, value: frozenset[str]) -> frozenset[str]:
+        """Validate allowed_schemes contains only recognized schemes.
+
+        Args:
+            value: The set of allowed URI schemes.
+
+        Returns:
+            The validated scheme set.
+
+        Raises:
+            ValueError: If set is empty or contains unrecognized schemes.
+        """
+        if not value:
+            msg = "allowed_schemes cannot be empty"
+            raise ValueError(msg)
+
+        # Known valid schemes
+        valid_schemes = {"file", "env", "vault"}
+        unknown_schemes = value - valid_schemes
+
+        if unknown_schemes:
+            msg = (
+                f"allowed_schemes contains unrecognized schemes: {unknown_schemes}. "
+                f"Valid schemes are: {valid_schemes}"
+            )
+            raise ValueError(msg)
+
+        return value
+
+
+__all__: list[str] = ["ModelBindingConfigResolverConfig"]
