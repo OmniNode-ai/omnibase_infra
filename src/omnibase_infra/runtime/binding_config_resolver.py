@@ -116,6 +116,10 @@ logger = logging.getLogger(__name__)
 # Prevents memory exhaustion from accidentally pointing at large files
 MAX_CONFIG_FILE_SIZE: Final[int] = 1024 * 1024
 
+# Maximum recursion depth for nested config resolution
+# Prevents stack overflow on deeply nested or circular configs
+_MAX_NESTED_CONFIG_DEPTH: Final[int] = 20
+
 # Fields that can be overridden via environment variables
 # Maps from environment variable field name (uppercase) to model field name
 _ENV_OVERRIDE_FIELDS: Final[dict[str, str]] = {
@@ -191,7 +195,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             container: ONEX container for dependency resolution.
 
         Raises:
-            RuntimeError: If ModelBindingConfigResolverConfig is not registered
+            ProtocolConfigurationError: If ModelBindingConfigResolverConfig is not registered
                 in the container's service registry.
         """
         self._container = container
@@ -204,10 +208,15 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 )
             )
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to resolve ModelBindingConfigResolverConfig from container. "
-                f"Ensure config is registered via container.service_registry.register_instance(). "
-                f"Original error: {e}"
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="init",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Failed to resolve ModelBindingConfigResolverConfig from container. "
+                "Ensure config is registered via container.service_registry.register_instance().",
+                context=context,
             ) from e
 
         # Resolve SecretResolver from container (optional dependency)
@@ -503,8 +512,34 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             )
             tasks.append(task)
 
-        # Gather results - raises on first failure
-        return list(await asyncio.gather(*tasks))
+        # Gather results - collect all exceptions for better error reporting
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Check for exceptions and aggregate them
+        errors: list[str] = []
+        configs: list[ModelBindingConfig] = []
+
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                handler_type = bindings[i].get("handler_type", f"binding[{i}]")
+                errors.append(f"{handler_type}: {result}")
+            else:
+                # Type narrowing: result is ModelBindingConfig after BaseException check
+                configs.append(result)
+
+        if errors:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_many_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to resolve {len(errors)} configuration(s): {'; '.join(errors)}",
+                context=context,
+            )
+
+        return configs
 
     # === Cache Management ===
 
@@ -1445,7 +1480,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
             if env_value is not None:
                 # Convert value based on expected type
-                converted = self._convert_env_value(env_value, model_field)
+                converted = self._convert_env_value(env_value, model_field, env_name)
                 if converted is not None:
                     if env_field in _RETRY_POLICY_FIELDS:
                         retry_overrides[model_field] = converted
@@ -1473,15 +1508,21 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self,
         value: str,
         field: str,
+        env_name: str,
     ) -> object | None:
         """Convert environment variable string to appropriate type.
 
         Args:
             value: String value from environment.
             field: Field name to determine type.
+            env_name: Full environment variable name for error messages.
 
         Returns:
             Converted value, or None if conversion fails.
+
+        Raises:
+            ProtocolConfigurationError: If strict_env_coercion is enabled
+                and the value cannot be converted to the expected type.
         """
         # Boolean fields
         if field == "enabled":
@@ -1498,9 +1539,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             try:
                 return int(value)
             except ValueError:
-                logger.warning(
-                    "Invalid integer value in environment variable for field: %s",
-                    field,
+                self._handle_conversion_error(
+                    env_name=env_name,
+                    field=field,
+                    expected_type="integer",
                 )
                 return None
 
@@ -1509,9 +1551,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             try:
                 return float(value)
             except ValueError:
-                logger.warning(
-                    "Invalid float value in environment variable for field: %s",
-                    field,
+                self._handle_conversion_error(
+                    env_name=env_name,
+                    field=field,
+                    expected_type="float",
                 )
                 return None
 
@@ -1521,10 +1564,55 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         return value
 
+    def _handle_conversion_error(
+        self,
+        env_name: str,
+        field: str,
+        expected_type: str,
+    ) -> None:
+        """Handle type conversion error based on strict_env_coercion setting.
+
+        In strict mode, raises ProtocolConfigurationError.
+        In lenient mode, logs a warning with structured context.
+
+        Args:
+            env_name: Full environment variable name.
+            field: Field name that was being set.
+            expected_type: Expected type name (e.g., "integer", "float").
+
+        Raises:
+            ProtocolConfigurationError: If strict_env_coercion is enabled.
+        """
+        if self._config.strict_env_coercion:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="convert_env_value",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid {expected_type} value in environment variable "
+                f"'{env_name}' for field '{field}'",
+                context=context,
+            )
+
+        logger.warning(
+            "Invalid %s value in environment variable '%s' for field '%s'; "
+            "override will be skipped",
+            expected_type,
+            env_name,
+            field,
+            extra={
+                "env_var": env_name,
+                "field": field,
+                "expected_type": expected_type,
+            },
+        )
+
     def _resolve_vault_refs(
         self,
         config: dict[str, object],
         correlation_id: UUID,
+        depth: int = 0,
     ) -> dict[str, object]:
         """Resolve any vault:// references in config values.
 
@@ -1534,10 +1622,26 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Args:
             config: Configuration dictionary.
             correlation_id: Correlation ID for error tracking.
+            depth: Current recursion depth (default 0).
 
         Returns:
             Configuration with vault references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum.
         """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_vault_refs",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             return config
@@ -1575,7 +1679,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     result[key] = value  # Keep original on error
             elif isinstance(value, dict):
                 # Recursively resolve nested dicts
-                result[key] = self._resolve_vault_refs(value, correlation_id)
+                result[key] = self._resolve_vault_refs(value, correlation_id, depth + 1)
             else:
                 result[key] = value
 
@@ -1585,16 +1689,33 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self,
         config: dict[str, object],
         correlation_id: UUID,
+        depth: int = 0,
     ) -> dict[str, object]:
         """Resolve any vault:// references in config values asynchronously.
 
         Args:
             config: Configuration dictionary.
             correlation_id: Correlation ID for error tracking.
+            depth: Current recursion depth (default 0).
 
         Returns:
             Configuration with vault references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum.
         """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_vault_refs_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             return config
@@ -1635,7 +1756,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             elif isinstance(value, dict):
                 # Recursively resolve nested dicts
                 result[key] = await self._resolve_vault_refs_async(
-                    value, correlation_id
+                    value, correlation_id, depth + 1
                 )
             else:
                 result[key] = value

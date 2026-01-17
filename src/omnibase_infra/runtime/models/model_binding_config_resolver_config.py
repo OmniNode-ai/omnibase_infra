@@ -15,7 +15,7 @@ Example:
     ...     cache_ttl_seconds=600.0,
     ...     env_prefix="HANDLER",
     ... )
-    >>> resolver = BindingConfigResolver(config=config)
+    >>> resolver = BindingConfigResolver(container=container)
 """
 
 from __future__ import annotations
@@ -115,34 +115,21 @@ class ModelBindingConfigResolverConfig(BaseModel):
         "If False, ignore unknown fields.",
     )
 
+    # Environment variable type coercion strictness
+    strict_env_coercion: bool = Field(
+        default=False,
+        description="If True, raise ProtocolConfigurationError when environment "
+        "variable values cannot be converted to the expected type. "
+        "If False, log a warning and skip the override. "
+        "Default is False for backwards compatibility.",
+    )
+
     # Allowed config_ref schemes (for security)
     allowed_schemes: frozenset[str] = Field(
         default=frozenset({"file", "env", "vault"}),
         description="Set of allowed config_ref URI schemes for security. "
         "Only these schemes can be used in config_ref values.",
     )
-
-    @field_validator("cache_ttl_seconds")
-    @classmethod
-    def validate_cache_ttl(cls, value: float) -> float:
-        """Validate cache TTL is within acceptable range.
-
-        Args:
-            value: The cache TTL in seconds.
-
-        Returns:
-            The validated TTL value.
-
-        Raises:
-            ValueError: If TTL is outside valid range (0-86400).
-        """
-        if value < 0.0:
-            msg = f"cache_ttl_seconds must be >= 0, got {value}"
-            raise ValueError(msg)
-        if value > 86400.0:
-            msg = f"cache_ttl_seconds must be <= 86400 (24 hours), got {value}"
-            raise ValueError(msg)
-        return value
 
     @field_validator("env_prefix")
     @classmethod

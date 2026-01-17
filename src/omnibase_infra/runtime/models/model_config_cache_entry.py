@@ -11,16 +11,14 @@ in the BindingConfigResolver.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from omnibase_infra.runtime.models.model_binding_config import ModelBindingConfig
+from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.runtime.models.model_binding_config import ModelBindingConfig
 
 
-@dataclass
-class ModelConfigCacheEntry:
+class ModelConfigCacheEntry(BaseModel):
     """Internal cache entry for resolved configurations.
 
     Attributes:
@@ -29,9 +27,27 @@ class ModelConfigCacheEntry:
         source: Description of the configuration source (for debugging).
     """
 
-    config: ModelBindingConfig
-    expires_at: datetime
-    source: str
+    model_config = ConfigDict(
+        strict=True,
+        frozen=True,
+        extra="forbid",
+        from_attributes=True,
+    )
+
+    config: ModelBindingConfig = Field(
+        ...,
+        description="The resolved binding configuration.",
+    )
+
+    expires_at: datetime = Field(
+        ...,
+        description="When this cache entry expires.",
+    )
+
+    source: str = Field(
+        ...,
+        description="Description of the configuration source (for debugging).",
+    )
 
     def is_expired(self) -> bool:
         """Check if this cache entry has expired.

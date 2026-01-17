@@ -31,7 +31,9 @@ class ModelBindingConfig(BaseModel):
         priority: Execution priority for handler ordering. Higher values execute
             first. Use negative values to ensure late execution.
         config_ref: Reference to external configuration. Supported schemes:
-            - "file://path/to/config.yaml" - Load from YAML file
+            - "file:///absolute/path/config.yaml" - Absolute file path
+            - "file://relative/path/config.yaml" - Relative file path
+            - "file:configs/handler.yaml" - Shorthand relative path
             - "env:PREFIX_" - Load from environment variables with prefix
             - "vault:secret/path" - Load from Vault secret path
         config: Inline configuration dictionary. If both config_ref and config
@@ -94,7 +96,7 @@ class ModelBindingConfig(BaseModel):
         min_length=1,
         max_length=512,
         description="Reference to external configuration. "
-        "Supported schemes: file://, env:, vault:",
+        "Supported schemes: file: (including file://), env:, vault:",
     )
 
     config: dict[str, object] | None = Field(
@@ -142,7 +144,8 @@ class ModelBindingConfig(BaseModel):
         if v is None:
             return v
 
-        supported_schemes = ("file://", "env:", "vault:")
+        # Use "file:" to accept both "file://path" and shorthand "file:path" formats
+        supported_schemes = ("file:", "env:", "vault:")
         if not any(v.startswith(scheme) for scheme in supported_schemes):
             raise ValueError(
                 f"config_ref must start with one of {supported_schemes}, got: {v!r}"
