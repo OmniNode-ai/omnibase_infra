@@ -266,6 +266,12 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
+# pytest-asyncio 0.25+ requires explicit fixture loop scope configuration.
+# Set to "function" (default) to make configuration explicit and avoid deprecation warnings.
+# Test modules using session/module-scoped async fixtures must override via pytestmark:
+#   pytestmark = [pytest.mark.asyncio(loop_scope="session")]
+# See: tests/conftest.py for detailed documentation on loop_scope configuration.
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "unit: Unit tests that test individual components in isolation",
     "integration: Integration tests that test multiple components together",

@@ -54,6 +54,7 @@ from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import pytest
@@ -249,15 +250,43 @@ SCHEMA_FILE = (
 def _build_postgres_dsn() -> str:
     """Build PostgreSQL DSN from environment variables.
 
+    Credentials (user and password) are URL-encoded using quote_plus() to handle
+    special characters like @, :, /, %, etc. that would otherwise break the DSN
+    format.
+
     Returns:
         PostgreSQL connection string in standard format.
+
+    Raises:
+        ValueError: If POSTGRES_HOST or POSTGRES_PASSWORD is not set.
 
     Note:
         This function should only be called after verifying
         POSTGRES_PASSWORD is set.
+
+    Example:
+        >>> # With special characters in credentials
+        >>> # user="user@domain", password="p@ss:word#123"
+        >>> dsn = _build_postgres_dsn()
+        >>> # Returns: postgresql://user%40domain:p%40ss%3Aword%23123@host:port/db
     """
+    if not POSTGRES_HOST:
+        raise ValueError(
+            "POSTGRES_HOST is required but not set. "
+            "Set POSTGRES_HOST environment variable to enable E2E tests."
+        )
+    if not POSTGRES_PASSWORD:
+        raise ValueError(
+            "POSTGRES_PASSWORD is required but not set. "
+            "Set POSTGRES_PASSWORD environment variable to enable E2E tests."
+        )
+
+    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
+    encoded_user = quote_plus(POSTGRES_USER, safe="")
+    encoded_password = quote_plus(POSTGRES_PASSWORD, safe="")
+
     return (
-        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
+        f"postgresql://{encoded_user}:{encoded_password}"
         f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
     )
 

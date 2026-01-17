@@ -135,7 +135,7 @@ from tests.helpers.util_kafka import (
     wait_for_topic_metadata,
 )
 
-# Re-export for backwards compatibility with any code importing from this module
+# Re-export for convenience - allows importing from this module instead of util_kafka
 __all__ = [
     "wait_for_consumer_ready",
     "wait_for_topic_metadata",
@@ -171,8 +171,8 @@ __all__ = [
 #   This is intentional for test stability - environment configuration should
 #   be set before test collection, not modified during test execution.
 #
-#   For dynamic reconfiguration needs (rare), re-import this module or call
-#   validate_bootstrap_servers() directly with the new value.
+#   For dynamic reconfiguration needs (rare), reimport the module to refresh
+#   the cached validation result.
 #
 # EMPTY VALUE HANDLING:
 #   The validation handles these edge cases:

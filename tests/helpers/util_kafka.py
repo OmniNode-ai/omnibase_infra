@@ -198,25 +198,20 @@ Override in tests via environment variable or explicit port in bootstrap_servers
 """
 
 # =============================================================================
-# aiokafka Version Compatibility
+# aiokafka Response Format Documentation
 # =============================================================================
-# The aiokafka library has different response formats across versions.
-# This module handles multiple formats to ensure compatibility.
+# This module requires aiokafka 0.11.0+.
 #
-# Response Format Detection:
-#   - topic_errors (list of tuples): aiokafka 0.8.0+ (newer format)
-#   - topic_error_codes (dict): aiokafka <0.8.0 (older format)
+# Response Formats:
+#   - create_topics(): Returns response with topic_errors attribute
+#     (list of tuples: (topic_name, error_code, error_message))
+#   - describe_topics(): Returns dict format: {'topic_name': TopicDescription(...)}
 #
 # Tuple Format Variations (for topic_errors):
 #   - Protocol v0: (topic_name, error_code) - 2-tuple
 #   - Protocol v1+: (topic_name, error_code, error_message) - 3-tuple
 #
-# describe_topics Response Formats:
-#   - Dict format (aiokafka 0.11.0+): {'topic_name': TopicDescription(...)}
-#   - List format (older): [{'error_code': 0, 'topic': 'name', 'partitions': [...]}]
-#
-# The code uses runtime detection (hasattr, isinstance, len checks) to handle
-# all formats gracefully without requiring version-specific imports.
+# The code uses length guards to safely handle both protocol versions.
 # =============================================================================
 
 AIOKAFKA_TOPIC_ERRORS_MIN_TUPLE_LEN = 2
@@ -968,9 +963,9 @@ async def wait_for_topic_metadata(
     This function polls until the topic appears with the expected number of
     partitions available.
 
-    This function handles both response formats from aiokafka's describe_topics():
-    - **List format** (older versions): `[{'error_code': 0, 'topic': 'name', 'partitions': [...]}]`
-    - **Dict format** (aiokafka 0.11.0+): `{'topic_name': TopicDescription(error_code=0, ...)}`
+    Response Format:
+        aiokafka 0.11.0+ returns dict format: {'topic_name': TopicDescription(...)}
+        where TopicDescription has error_code and partitions attributes.
 
     Args:
         admin_client: The AIOKafkaAdminClient instance for broker communication.
@@ -992,7 +987,7 @@ async def wait_for_topic_metadata(
 
     while (asyncio.get_running_loop().time() - start_time) < timeout:
         try:
-            # describe_topics is a coroutine method on AIOKafkaAdminClient
+            # describe_topics returns dict format: {'topic_name': TopicDescription}
             description = await admin_client.describe_topics([topic_name])
 
             if not description:
@@ -1000,92 +995,60 @@ async def wait_for_topic_metadata(
                 await asyncio.sleep(0.5)
                 continue
 
-            # Handle dict format (aiokafka 0.11.0+): {'topic_name': TopicDescription}
-            if isinstance(description, dict):
-                if topic_name in description:
-                    topic_info: object = description[topic_name]
-                    # TopicDescription may be an object with attributes or dict-like
-                    error_code: int | None = (
-                        getattr(topic_info, "error_code", None)
-                        if hasattr(topic_info, "error_code")
-                        else topic_info.get("error_code", -1)
-                        if isinstance(topic_info, dict)
-                        else -1
-                    )
-                    partitions: list[object] = (
-                        getattr(topic_info, "partitions", [])
-                        if hasattr(topic_info, "partitions")
-                        else topic_info.get("partitions", [])
-                        if isinstance(topic_info, dict)
-                        else []
-                    )
+            # Dict format (aiokafka 0.11.0+): {'topic_name': TopicDescription}
+            if not isinstance(description, dict):
+                raise TypeError(
+                    f"Unexpected describe_topics response type: {type(description).__name__}. "
+                    f"Expected dict (aiokafka 0.11.0+ format). Got: {description!r}"
+                )
 
-                    if (error_code is None or error_code == 0) and len(
-                        partitions
-                    ) >= expected_partitions:
-                        logger.debug(
-                            "Topic %s ready with %d partitions (dict format)",
-                            topic_name,
-                            len(partitions),
-                        )
-                        return True
+            if topic_name in description:
+                topic_info: object = description[topic_name]
+                # TopicDescription may be an object with attributes or dict-like
+                error_code: int | None = (
+                    getattr(topic_info, "error_code", None)
+                    if hasattr(topic_info, "error_code")
+                    else topic_info.get("error_code", -1)
+                    if isinstance(topic_info, dict)
+                    else -1
+                )
+                partitions: list[object] = (
+                    getattr(topic_info, "partitions", [])
+                    if hasattr(topic_info, "partitions")
+                    else topic_info.get("partitions", [])
+                    if isinstance(topic_info, dict)
+                    else []
+                )
+
+                if (error_code is None or error_code == 0) and len(
+                    partitions
+                ) >= expected_partitions:
                     logger.debug(
-                        "Topic %s not ready: error_code=%s, partitions=%d (dict format)",
+                        "Topic %s ready with %d partitions",
                         topic_name,
-                        error_code,
                         len(partitions),
-                    )
-                else:
-                    # Dict response but topic not found - may still be propagating
-                    logger.debug(
-                        "Topic %s not in dict response keys: %s",
-                        topic_name,
-                        list(description.keys()),
-                    )
-
-            # Handle list format (older aiokafka): [{'error_code': 0, 'topic': ..., 'partitions': [...]}]
-            elif isinstance(description, list) and len(description) > 0:
-                topic_info_item: object = description[0]
-                # List items are typically dicts
-                list_error_code: int
-                list_partitions: list[object]
-                if isinstance(topic_info_item, dict):
-                    list_error_code = topic_info_item.get("error_code", -1)
-                    list_partitions = topic_info_item.get("partitions", [])
-                else:
-                    # Object with attributes
-                    list_error_code = getattr(topic_info_item, "error_code", -1)
-                    list_partitions = getattr(topic_info_item, "partitions", [])
-
-                if list_error_code == 0 and len(list_partitions) >= expected_partitions:
-                    logger.debug(
-                        "Topic %s ready with %d partitions (list format)",
-                        topic_name,
-                        len(list_partitions),
                     )
                     return True
                 logger.debug(
-                    "Topic %s not ready: error_code=%s, partitions=%d (list format)",
+                    "Topic %s not ready: error_code=%s, partitions=%d",
                     topic_name,
-                    list_error_code,
-                    len(list_partitions),
+                    error_code,
+                    len(partitions),
                 )
             else:
-                # Unknown format but truthy - log warning and accept for compatibility
-                # This may indicate a new aiokafka version with different response format
-                logger.warning(
-                    "Topic %s: unknown describe_topics response format (type=%s). "
-                    "Accepting as ready for compatibility, but this may indicate a new "
-                    "aiokafka version. Consider updating util_kafka.py to handle this format. "
-                    "Response: %r",
+                # Dict response but topic not found - may still be propagating
+                logger.debug(
+                    "Topic %s not in response keys: %s",
                     topic_name,
-                    type(description).__name__,
-                    description,
+                    list(description.keys()),
                 )
-                return True
 
+        except TypeError:
+            # Re-raise TypeErrors - they indicate programming errors
+            # (e.g., unexpected response format), not transient Kafka issues
+            raise
         except Exception as e:
-            # Log exception type for diagnostics - helps identify if specific
+            # Log other exceptions for diagnostics - helps identify if specific
             # Kafka exceptions should be added to the handler
             exc_type_name = type(e).__name__
             logger.debug(
@@ -1244,21 +1207,17 @@ class KafkaTopicManager:
             )
 
             # Check for errors in the response
-            # Handle both aiokafka response formats for version compatibility:
-            # - topic_errors: List of (topic, error_code, error_message) tuples (newer versions)
-            # - topic_error_codes: Dict mapping topic to error_code (older versions)
-            has_topic_errors: bool = hasattr(response, "topic_errors")
-            has_topic_error_codes: bool = hasattr(response, "topic_error_codes")
-            logger.debug(
-                "create_topics response for '%s': has_topic_errors=%s, has_topic_error_codes=%s",
-                topic_name,
-                has_topic_errors,
-                has_topic_error_codes,
-            )
+            # aiokafka 0.11.0+ uses topic_errors: List of (topic, error_code, error_message) tuples
+            if not hasattr(response, "topic_errors"):
+                raise TypeError(
+                    f"Unexpected create_topics response: missing 'topic_errors' attribute. "
+                    f"Expected aiokafka 0.11.0+ format. Response type: {type(response).__name__}"
+                )
 
-            if has_topic_errors and response.topic_errors:
+            if response.topic_errors:
                 logger.debug(
-                    "Using topic_errors format (newer aiokafka): %s",
+                    "create_topics response for '%s': topic_errors=%s",
+                    topic_name,
                     response.topic_errors,
                 )
                 for topic_error in response.topic_errors:
@@ -1325,36 +1284,8 @@ class KafkaTopicManager:
                             context=context,
                             kafka_error_code=topic_error_code,
                         )
-            elif has_topic_error_codes and response.topic_error_codes:
-                # Older aiokafka format: dict mapping topic name to error code
-                logger.debug(
-                    "Using topic_error_codes format (older aiokafka): %s",
-                    response.topic_error_codes,
-                )
-                topic_key: str
-                error_code_value: int
-                for topic_key, error_code_value in response.topic_error_codes.items():
-                    if error_code_value != 0:
-                        if error_code_value == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
-                            raise TopicAlreadyExistsError
-
-                        # Create error context with correlation ID for tracing
-                        correlation_id = uuid4()
-                        context = ModelInfraErrorContext.with_correlation(
-                            correlation_id=correlation_id,
-                            transport_type=EnumInfraTransportType.KAFKA,
-                            operation="create_topic",
-                            target_name=topic_key,
-                        )
-                        raise InfraUnavailableError(
-                            f"Failed to create topic '{topic_key}': "
-                            f"{get_kafka_error_hint(error_code_value)}",
-                            context=context,
-                            kafka_error_code=error_code_value,
-                        )
             else:
-                # Neither format has errors - topic created successfully
-                # or response format is unknown (may indicate new aiokafka version)
+                # No errors in response - topic created successfully
                 logger.debug(
                     "Topic '%s' created successfully (no errors in response)",
                     topic_name,

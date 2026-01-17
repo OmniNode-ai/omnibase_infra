@@ -123,8 +123,20 @@ def service() -> MockServiceWithCircuitBreaker:
 
 @pytest.fixture
 def low_threshold_service() -> MockServiceWithCircuitBreaker:
-    """Create service with low threshold for faster testing."""
-    return MockServiceWithCircuitBreaker(threshold=3, reset_timeout=0.1)
+    """Create service with low failure threshold for faster circuit tripping.
+
+    Uses threshold=3 so circuit opens after 3 failures (quick setup).
+    Uses reset_timeout=60.0s so circuit stays OPEN during test assertions.
+
+    Note:
+        Tests that need to test HALF_OPEN transitions should create their own
+        service instance with a short reset_timeout (e.g., 0.01s). See
+        TestStateTransitionRaceConditions for examples.
+
+    Returns:
+        MockServiceWithCircuitBreaker with threshold=3, reset_timeout=60.0s.
+    """
+    return MockServiceWithCircuitBreaker(threshold=3, reset_timeout=60.0)
 
 
 # =============================================================================
@@ -165,7 +177,13 @@ class TestConcurrentCircuitChecks:
     async def test_concurrent_checks_when_open(
         self, low_threshold_service: MockServiceWithCircuitBreaker
     ) -> None:
-        """Test concurrent circuit checks when circuit is open."""
+        """Test concurrent circuit checks when circuit is open.
+
+        Verifies that when the circuit breaker is open, concurrent operations
+        all receive InfraUnavailableError (fail-fast behavior). Uses the
+        low_threshold_service fixture with 60s reset_timeout to ensure the
+        circuit stays OPEN during all assertions.
+        """
         # First, trip the circuit
         for _ in range(3):
             try:
@@ -331,7 +349,12 @@ class TestConcurrentResetOperations:
     async def test_concurrent_manual_resets(
         self, low_threshold_service: MockServiceWithCircuitBreaker
     ) -> None:
-        """Test concurrent manual reset operations are safe."""
+        """Test concurrent manual reset operations are safe.
+
+        Verifies that calling _reset_circuit_breaker() concurrently from
+        multiple coroutines is thread-safe. Uses the low_threshold_service
+        fixture with 60s reset_timeout to ensure deterministic test behavior.
+        """
         # Trip the circuit
         for _ in range(3):
             try:
@@ -366,10 +389,14 @@ class TestStateTransitionRaceConditions:
 
     @pytest.mark.asyncio
     async def test_open_to_half_open_transition_race(self) -> None:
-        """Test OPEN to HALF_OPEN transition under concurrent access."""
+        """Test OPEN to HALF_OPEN transition under concurrent access.
+
+        Uses a 50ms reset_timeout (short enough for fast tests, long enough
+        for CI stability) and waits 100ms to ensure HALF_OPEN transition.
+        """
         service = MockServiceWithCircuitBreaker(
             threshold=2,
-            reset_timeout=0.01,  # Very short timeout for testing
+            reset_timeout=0.05,  # 50ms: CI-stable yet fast
         )
 
         # Trip the circuit
@@ -383,8 +410,8 @@ class TestStateTransitionRaceConditions:
         state = await service.get_circuit_state()
         assert state["open"] is True
 
-        # Wait for reset timeout
-        await asyncio.sleep(0.02)
+        # Wait for reset timeout (2x for reliability margin)
+        await asyncio.sleep(0.1)
 
         # Concurrent checks should handle HALF_OPEN transition correctly
         num_concurrent = 20
@@ -416,10 +443,14 @@ class TestStateTransitionRaceConditions:
 
     @pytest.mark.asyncio
     async def test_half_open_to_closed_on_success(self) -> None:
-        """Test HALF_OPEN to CLOSED transition on successful operation."""
+        """Test HALF_OPEN to CLOSED transition on successful operation.
+
+        Uses a 50ms reset_timeout and waits 100ms to ensure HALF_OPEN transition
+        before verifying that a successful operation closes the circuit.
+        """
         service = MockServiceWithCircuitBreaker(
             threshold=2,
-            reset_timeout=0.01,
+            reset_timeout=0.05,  # 50ms: CI-stable yet fast
         )
 
         # Trip circuit
@@ -429,8 +460,8 @@ class TestStateTransitionRaceConditions:
             except ValueError:
                 pass
 
-        # Wait for HALF_OPEN
-        await asyncio.sleep(0.02)
+        # Wait for HALF_OPEN (2x for reliability margin)
+        await asyncio.sleep(0.1)
 
         # Success should transition to CLOSED
         result = await service.perform_operation(should_fail=False)
@@ -445,13 +476,16 @@ class TestStateTransitionRaceConditions:
     async def test_half_open_to_open_on_failure(self) -> None:
         """Test HALF_OPEN to OPEN transition on failed operation.
 
+        Uses threshold=1 so a single failure re-opens the circuit immediately
+        after HALF_OPEN transition. Uses 50ms reset_timeout and waits 100ms
+        to ensure reliable HALF_OPEN transition.
+
         Note: After transitioning to HALF_OPEN, the failure count is reset to 0.
         Therefore, we need threshold number of failures to re-open the circuit.
-        With threshold=1, a single failure will re-open immediately.
         """
         service = MockServiceWithCircuitBreaker(
             threshold=1,  # Single failure re-opens circuit
-            reset_timeout=0.01,
+            reset_timeout=0.05,  # 50ms: CI-stable yet fast
         )
 
         # Trip circuit with single failure (threshold=1)
@@ -464,8 +498,8 @@ class TestStateTransitionRaceConditions:
         state = await service.get_circuit_state()
         assert state["open"] is True
 
-        # Wait for HALF_OPEN
-        await asyncio.sleep(0.02)
+        # Wait for HALF_OPEN (2x for reliability margin)
+        await asyncio.sleep(0.1)
 
         # Failure should transition back to OPEN
         try:
@@ -592,10 +626,18 @@ class TestCircuitBreakerStress:
 
     @pytest.mark.asyncio
     async def test_rapid_open_close_cycles_stress(self) -> None:
-        """Stress test with rapid circuit open/close cycles."""
+        """Stress test with rapid circuit open/close cycles.
+
+        This test verifies the circuit breaker handles rapid state transitions
+        without crashing or producing unexpected errors. Uses a 10ms reset_timeout
+        (short for rapid cycling, but CI-stable) with 20 concurrent cycles.
+
+        Note: This is a stress test - it accepts both success and
+        InfraUnavailableError as valid outcomes during rapid state changes.
+        """
         service = MockServiceWithCircuitBreaker(
             threshold=3,
-            reset_timeout=0.001,  # Very fast reset
+            reset_timeout=0.01,  # 10ms: fast enough for stress, CI-stable
         )
 
         cycles = 20
@@ -611,8 +653,8 @@ class TestCircuitBreakerStress:
                     except (ValueError, InfraUnavailableError):
                         pass
 
-                # Wait for reset
-                await asyncio.sleep(0.002)
+                # Wait for reset (2x timeout for reliability)
+                await asyncio.sleep(0.02)
 
                 # Verify can operate again
                 await service.perform_operation(should_fail=False)

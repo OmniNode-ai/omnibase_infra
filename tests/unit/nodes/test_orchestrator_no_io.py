@@ -549,15 +549,15 @@ class TestContractIOOperationsAreEffectNodes:
                         else ""
                     )
                     misclassified_nodes.append(
-                        f"{node_id}: Contract declares EFFECT but test expects pure computation.\n"
-                        f"  - Contract declares: node_type='{node['node_type']}' (external I/O)\n"
-                        f"  - Test expects: node is in 'non_io_exceptions' allowlist (pure computation)\n"
+                        f"{node_id}: Contract-test mismatch for node classification.\n"
+                        f"  CONTRACT: node_type='{node['node_type']}' (indicates external I/O)\n"
+                        f"  TEST: Node is in 'non_io_exceptions' allowlist (expects pure computation)\n"
                         f"  {keyword_note}\n"
-                        f"  RESOLUTION - Determine what '{node_id}' actually does:\n"
-                        f"    - If it performs NO external I/O (pure transformation/computation):\n"
-                        f"      Update contract.yaml: Change node_type to 'COMPUTE_GENERIC' or 'REDUCER_GENERIC'\n"
-                        f"    - If it DOES perform external I/O (network, database, filesystem):\n"
-                        f"      Update this test: Remove '{node_id}' from non_io_exceptions set"
+                        f"  RESOLUTION - Verify what '{node_id}' actually does:\n"
+                        f"    A) If node performs pure computation (no network/database/filesystem):\n"
+                        f"       -> Update contract.yaml: Change node_type to 'COMPUTE_GENERIC' or 'REDUCER_GENERIC'\n"
+                        f"    B) If node performs external I/O (network, database, filesystem):\n"
+                        f"       -> Update this test: Remove '{node_id}' from non_io_exceptions set"
                     )
                 continue
 

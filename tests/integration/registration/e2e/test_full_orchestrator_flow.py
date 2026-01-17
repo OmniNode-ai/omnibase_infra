@@ -840,42 +840,19 @@ async def validate_test_topic_exists(
             )
 
         # Get the topic description from describe_topics response.
-        # aiokafka.describe_topics() return format varies by version:
-        #   - Older versions: Dict[str, TopicDescription] keyed by topic name
-        #   - Newer versions (0.11.0+): List[dict] with 'topic' field in each item
-        # We handle both formats for compatibility.
-        topic_metadata: object | None = None
-
-        if isinstance(topic_descriptions, dict):
-            # Dict format (older aiokafka versions)
-            topic_metadata = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
-            if topic_metadata is None:
-                pytest.fail(
-                    f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
-                    f"Available topics: {list(topic_descriptions.keys())}"
-                    f"{topic_creation_hint}"
-                )
-        elif isinstance(topic_descriptions, list):
-            # List format (aiokafka 0.11.0+)
-            # Each item is a dict/namedtuple with 'topic' field
-            for item in topic_descriptions:
-                item_topic = _extract_topic_field(item, "topic")
-                if item_topic == TEST_INTROSPECTION_TOPIC:
-                    topic_metadata = item
-                    break
-            if topic_metadata is None:
-                available_topics = [
-                    _extract_topic_field(item, "topic") for item in topic_descriptions
-                ]
-                pytest.fail(
-                    f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
-                    f"Available topics: {available_topics}"
-                    f"{topic_creation_hint}"
-                )
-        else:
+        # aiokafka 0.11.0+ returns dict format: {'topic_name': TopicDescription(...)}
+        if not isinstance(topic_descriptions, dict):
             pytest.fail(
                 f"Unexpected describe_topics response type: {type(topic_descriptions).__name__}.\n"
-                f"Expected dict or list, got: {topic_descriptions!r}"
+                f"Expected dict (aiokafka 0.11.0+ format), got: {topic_descriptions!r}"
+                f"{topic_creation_hint}"
+            )
+
+        topic_metadata: object | None = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
+        if topic_metadata is None:
+            pytest.fail(
+                f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
+                f"Available topics: {list(topic_descriptions.keys())}"
                 f"{topic_creation_hint}"
             )
 

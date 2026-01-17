@@ -1088,7 +1088,7 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
                 server_info = await self._driver.get_server_info()
                 version = server_info.agent if server_info else None
             except Exception:
-                pass  # Version info is optional
+                pass
 
             health = ModelGraphHealthStatus(
                 healthy=True,
