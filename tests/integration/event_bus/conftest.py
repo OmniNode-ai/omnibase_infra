@@ -75,7 +75,6 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import AsyncGenerator, Callable, Coroutine
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -89,12 +88,6 @@ logger = logging.getLogger(__name__)
 pytestmark = [
     pytest.mark.kafka,
 ]
-
-if TYPE_CHECKING:
-    # TYPE_CHECKING imports: These imports are only used for type annotations.
-    # AIOKafkaAdminClient is heavy (imports Kafka protocol, etc.) and only
-    # needed for type hints in this fixture module, not runtime execution.
-    from aiokafka.admin import AIOKafkaAdminClient
 
 # =============================================================================
 # Configuration
@@ -167,6 +160,27 @@ __all__ = [
 # =============================================================================
 # Validate KAFKA_BOOTSTRAP_SERVERS at module load time to provide clear
 # skip reasons when configuration is missing or malformed.
+#
+# CACHING BEHAVIOR:
+#   This validation result is cached at module import time. If the
+#   KAFKA_BOOTSTRAP_SERVERS environment variable is modified at runtime
+#   (e.g., via os.environ["KAFKA_BOOTSTRAP_SERVERS"] = "new:9092"), the
+#   cached validation result will NOT be updated.
+#
+#   This is intentional for test stability - environment configuration should
+#   be set before test collection, not modified during test execution.
+#
+#   For dynamic reconfiguration needs (rare), re-import this module or call
+#   validate_bootstrap_servers() directly with the new value.
+#
+# EMPTY VALUE HANDLING:
+#   The validation handles these edge cases:
+#   - None: Returns invalid with skip reason
+#   - Empty string "": Returns invalid with skip reason
+#   - Whitespace-only "  ": Returns invalid with skip reason
+#   - Comma-only ",,,": Returns invalid with skip reason (no valid entries)
+#   - Malformed port "host:abc": Returns invalid with skip reason
+#   - Port out of range "host:99999": Returns invalid with skip reason
 
 _kafka_config_validation: KafkaConfigValidationResult = validate_bootstrap_servers(
     KAFKA_BOOTSTRAP_SERVERS

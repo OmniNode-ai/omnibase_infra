@@ -12,8 +12,19 @@ This module provides comprehensive async race condition tests for:
 These tests verify that the circuit breaker mixin properly handles
 concurrent access patterns that would occur in production systems.
 
-All tests use asyncio.gather() for true concurrent execution
-and are designed to be deterministic.
+Test Design Notes:
+    - All tests use asyncio.gather() for true concurrent execution
+    - Tests use deterministic assertions that account for valid race outcomes
+      (e.g., "circuit is open OR we observed InfraUnavailableError")
+    - Tests with timing dependencies use long reset_timeouts (60s) to prevent
+      auto-transitions during test execution, avoiding CI flakiness
+    - Lock-based synchronization ensures correct state access patterns
+
+Reliability:
+    These tests are designed to be CI-stable by:
+    - Avoiding absolute timing assertions
+    - Accepting all valid concurrent execution outcomes
+    - Using explicit synchronization where needed
 """
 
 from __future__ import annotations

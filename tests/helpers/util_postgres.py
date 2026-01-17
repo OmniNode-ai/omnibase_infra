@@ -36,7 +36,10 @@ import re
 import socket
 from dataclasses import dataclass
 from urllib.parse import quote_plus
+from uuid import uuid4
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from tests.infrastructure_config import DEFAULT_POSTGRES_PORT, REMOTE_INFRA_HOST
 
 logger = logging.getLogger(__name__)
@@ -237,6 +240,11 @@ class PostgresConfig:
             PostgresConfig instance with values from environment.
         """
         host: str | None = os.getenv(host_var)
+        # Normalize empty or whitespace-only host to None
+        # This prevents malformed DSN like "postgresql://user:pass@:5432/db"
+        if host is not None and not host.strip():
+            host = None
+
         if host is None and fallback_host is not None:
             host = fallback_host
         elif host is None:
@@ -276,7 +284,8 @@ class PostgresConfig:
             PostgreSQL connection string in standard format.
 
         Raises:
-            ValueError: If host or password is not configured.
+            ProtocolConfigurationError: If host or password is not configured.
+                Includes correlation ID, transport type, and remediation hints.
 
         Example:
             >>> config = PostgresConfig(host="localhost", port=5432,
@@ -298,8 +307,20 @@ class PostgresConfig:
                 missing.append("host")
             if self.password is None:
                 missing.append("password")
-            raise ValueError(
-                f"PostgreSQL configuration incomplete. Missing: {', '.join(missing)}"
+
+            # Create error context with correlation ID for tracing
+            correlation_id = uuid4()
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="build_dsn",
+                target_name=self.database,
+            )
+            raise ProtocolConfigurationError(
+                f"PostgreSQL configuration incomplete. Missing: {', '.join(missing)}. "
+                "Hint: Ensure POSTGRES_HOST and POSTGRES_PASSWORD environment variables "
+                "are set, or provide them explicitly in PostgresConfig.",
+                context=context,
             )
 
         # URL-encode credentials to handle special characters (@, :, /, %, etc.)
@@ -332,7 +353,7 @@ def build_postgres_dsn(
     format.
 
     Args:
-        host: PostgreSQL server hostname.
+        host: PostgreSQL server hostname (must not be empty).
         port: PostgreSQL server port.
         database: Database name.
         user: Database username.
@@ -342,7 +363,9 @@ def build_postgres_dsn(
         PostgreSQL connection string in standard format.
 
     Raises:
-        ValueError: If password is None or empty (after normalization).
+        ProtocolConfigurationError: If host is empty, or if password is None or empty
+            (after normalization). Includes correlation ID, transport type, and
+            remediation hints.
 
     Example:
         >>> build_postgres_dsn("localhost", 5432, "test", "postgres", "secret")
@@ -352,6 +375,24 @@ def build_postgres_dsn(
         >>> build_postgres_dsn("localhost", 5432, "test", "postgres", "p@ss/word")
         'postgresql://postgres:p%40ss%2Fword@localhost:5432/test'
     """
+    # Validate host is not empty or whitespace-only
+    # This prevents malformed DSN like "postgresql://user:pass@:5432/db"
+    if not host or not host.strip():
+        # Create error context with correlation ID for tracing
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="build_dsn",
+            target_name=database,
+        )
+        raise ProtocolConfigurationError(
+            "PostgreSQL host is required. Empty or whitespace-only host "
+            "is not supported to prevent malformed DSN construction. "
+            "Hint: Provide a valid hostname or IP address.",
+            context=context,
+        )
+
     # Normalize empty or whitespace-only password to None
     # This prevents malformed DSN like "postgresql://user:@host:5432/db"
     normalized_password: str | None = password
@@ -359,9 +400,19 @@ def build_postgres_dsn(
         normalized_password = None
 
     if normalized_password is None:
-        raise ValueError(
+        # Create error context with correlation ID for tracing
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="build_dsn",
+            target_name=database,
+        )
+        raise ProtocolConfigurationError(
             "PostgreSQL password is required. Empty or whitespace-only passwords "
-            "are not supported to prevent malformed DSN construction."
+            "are not supported to prevent malformed DSN construction. "
+            "Hint: Ensure POSTGRES_PASSWORD environment variable is set.",
+            context=context,
         )
 
     # URL-encode credentials to handle special characters (@, :, /, %, etc.)

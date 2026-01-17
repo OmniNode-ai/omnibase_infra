@@ -549,12 +549,15 @@ class TestContractIOOperationsAreEffectNodes:
                         else ""
                     )
                     misclassified_nodes.append(
-                        f"{node_id}: incorrectly marked as '{node['node_type']}' (EFFECT) "
-                        f"but this node is in the pure-computation allowlist (non_io_exceptions).{keyword_note} "
-                        f"Pure computation nodes should use 'COMPUTE_GENERIC' or 'REDUCER_GENERIC', "
-                        f"not 'EFFECT_GENERIC'. "
-                        f"If this node actually performs external I/O (network, database, filesystem), "
-                        f"remove it from non_io_exceptions set in this test."
+                        f"{node_id}: CONFIGURATION CONFLICT detected.\n"
+                        f"  - Contract node_type: '{node['node_type']}' (EFFECT)\n"
+                        f"  - Test allowlist: node is in 'non_io_exceptions' (pure computation)\n"
+                        f"  {keyword_note}\n"
+                        f"  FIX REQUIRED (choose ONE):\n"
+                        f"    A) If node performs PURE COMPUTATION (no external I/O):\n"
+                        f"       Change contract.yaml node_type to 'COMPUTE_GENERIC' or 'REDUCER_GENERIC'\n"
+                        f"    B) If node performs EXTERNAL I/O (network, database, filesystem):\n"
+                        f"       Remove '{node_id}' from non_io_exceptions set in this test file"
                     )
                 continue
 

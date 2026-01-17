@@ -47,7 +47,6 @@ Related Tickets:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import socket
@@ -121,7 +120,11 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Imported from tests.helpers.util_kafka for shared use across test modules.
 # See tests/helpers/util_kafka.py for the canonical implementations.
-from tests.helpers.util_kafka import wait_for_consumer_ready, wait_for_topic_metadata
+from tests.helpers.util_kafka import (
+    KafkaTopicManager,
+    wait_for_consumer_ready,
+    wait_for_topic_metadata,
+)
 
 # =============================================================================
 # Envelope Helper
@@ -467,6 +470,10 @@ async def ensure_test_topic() -> AsyncGenerator[
     isolation, preventing cross-test pollution when multiple test processes
     run concurrently.
 
+    Implementation:
+        Uses KafkaTopicManager from tests.helpers.util_kafka for centralized
+        topic lifecycle management and error handling.
+
     Yields:
         Async function that creates a topic with the given name and partition count.
         Returns the topic name (with UUID suffix) for convenience.
@@ -476,81 +483,28 @@ async def ensure_test_topic() -> AsyncGenerator[
             topic = await ensure_test_topic("test.e2e.introspection")
             # Topic now exists as "test.e2e.introspection-<uuid>" and can be used
     """
-    from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-    from aiokafka.errors import TopicAlreadyExistsError
+    if not KAFKA_BOOTSTRAP_SERVERS:
+        pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
 
-    admin: AIOKafkaAdminClient | None = None
-    created_topics: list[str] = []
+    # Use the shared KafkaTopicManager for topic lifecycle management
+    async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
 
-    async def _create_topic(topic_name: str, partitions: int = 1) -> str:
-        """Create a topic with the given name and partition count.
+        async def _create_topic(topic_name: str, partitions: int = 1) -> str:
+            """Create a topic with the given name and partition count.
 
-        Args:
-            topic_name: Base name of the topic to create (UUID will be appended).
-            partitions: Number of partitions (default: 1).
+            Args:
+                topic_name: Base name of the topic to create (UUID will be appended).
+                partitions: Number of partitions (default: 1).
 
-        Returns:
-            The full topic name with UUID suffix.
-        """
-        nonlocal admin, created_topics
+            Returns:
+                The full topic name with UUID suffix.
+            """
+            # Append UUID for parallel test isolation
+            unique_topic_name = f"{topic_name}-{uuid4().hex[:12]}"
+            return await manager.create_topic(unique_topic_name, partitions=partitions)
 
-        # Append UUID for parallel test isolation
-        unique_topic_name = f"{topic_name}-{uuid4().hex[:12]}"
-
-        # Lazy initialization of admin client
-        if admin is None:
-            admin = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-            await admin.start()
-
-        try:
-            await admin.create_topics(
-                [
-                    NewTopic(
-                        name=unique_topic_name,
-                        num_partitions=partitions,
-                        replication_factor=1,
-                    )
-                ]
-            )
-            created_topics.append(unique_topic_name)
-
-            # Wait for topic metadata to propagate
-            await wait_for_topic_metadata(
-                admin, unique_topic_name, expected_partitions=partitions
-            )
-        except TopicAlreadyExistsError:
-            # Topic already exists - still wait for metadata in case just created
-            if admin is not None:
-                await wait_for_topic_metadata(
-                    admin,
-                    unique_topic_name,
-                    timeout=5.0,
-                    expected_partitions=partitions,
-                )
-
-        return unique_topic_name
-
-    yield _create_topic
-
-    # Cleanup: delete created topics
-    if admin is not None:
-        if created_topics:
-            try:
-                await admin.delete_topics(created_topics)
-                logger.debug("Cleaned up test topics: %s", created_topics)
-            except Exception as e:
-                logger.warning(
-                    "Cleanup failed for Kafka topics %s: %s",
-                    created_topics,
-                    sanitize_error_message(e),
-                )
-        try:
-            await admin.close()
-        except Exception as e:
-            logger.warning(
-                "Failed to close Kafka admin client: %s",
-                sanitize_error_message(e),
-            )
+        yield _create_topic
+        # Cleanup is handled automatically by KafkaTopicManager context exit
 
 
 @pytest.fixture

@@ -46,7 +46,6 @@ Related:
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from collections.abc import Awaitable, Callable
 from statistics import mean, median, quantiles, stdev
@@ -67,9 +66,12 @@ pytestmark = [
 # Performance tests with relative thresholds (ratios, comparisons) are unreliable
 # in CI due to variable resource availability, shared runners, and noisy neighbors.
 # These tests provide value locally but should be skipped in CI to prevent flakiness.
-IS_CI = os.getenv("CI", "").lower() in ("true", "1", "yes") or os.getenv(
-    "GITHUB_ACTIONS", ""
-).lower() in ("true", "1")
+#
+# Uses the shared is_ci_environment() helper from omnibase_infra.testing for consistent
+# CI detection across the codebase.
+from omnibase_infra.testing import is_ci_environment
+
+IS_CI = is_ci_environment()
 
 # -----------------------------------------------------------------------------
 # Publish Latency Tests

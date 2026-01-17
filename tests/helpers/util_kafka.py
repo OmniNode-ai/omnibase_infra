@@ -53,17 +53,22 @@ import asyncio
 import logging
 import re
 from typing import TYPE_CHECKING
+from uuid import uuid4
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+)
 
 if TYPE_CHECKING:
     from aiokafka.admin import AIOKafkaAdminClient
-    from aiokafka.errors import KafkaError
 
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
 # Module-level logger for diagnostics
 logger = logging.getLogger(__name__)
-
-
 # =============================================================================
 # Kafka Error Code Constants
 # =============================================================================
@@ -189,6 +194,34 @@ This value is used when:
 
 Override in tests via environment variable or explicit port in bootstrap_servers.
 """
+
+# =============================================================================
+# aiokafka Version Compatibility
+# =============================================================================
+# The aiokafka library has different response formats across versions.
+# This module handles multiple formats to ensure compatibility.
+#
+# Response Format Detection:
+#   - topic_errors (list of tuples): aiokafka 0.8.0+ (newer format)
+#   - topic_error_codes (dict): aiokafka <0.8.0 (older format)
+#
+# Tuple Format Variations (for topic_errors):
+#   - Protocol v0: (topic_name, error_code) - 2-tuple
+#   - Protocol v1+: (topic_name, error_code, error_message) - 3-tuple
+#
+# describe_topics Response Formats:
+#   - Dict format (aiokafka 0.11.0+): {'topic_name': TopicDescription(...)}
+#   - List format (older): [{'error_code': 0, 'topic': 'name', 'partitions': [...]}]
+#
+# The code uses runtime detection (hasattr, isinstance, len checks) to handle
+# all formats gracefully without requiring version-specific imports.
+# =============================================================================
+
+AIOKAFKA_TOPIC_ERRORS_MIN_TUPLE_LEN = 2
+"""Minimum tuple length for topic_errors entries (topic, error_code)."""
+
+AIOKAFKA_TOPIC_ERRORS_FULL_TUPLE_LEN = 3
+"""Full tuple length for topic_errors entries (topic, error_code, error_message)."""
 
 
 def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
@@ -1002,7 +1035,9 @@ class KafkaTopicManager:
             The started AIOKafkaAdminClient.
 
         Raises:
-            RuntimeError: If connection to the broker fails.
+            InfraConnectionError: If connection to the broker fails. Includes
+                correlation ID, transport type, and remediation hints for
+                common connection issues.
         """
         if self._admin is not None:
             return self._admin
@@ -1019,7 +1054,17 @@ class KafkaTopicManager:
             host, port = parse_bootstrap_servers(self.bootstrap_servers)
             # Include exception type in error message for better diagnostics
             exc_type_name = type(conn_err).__name__
-            raise RuntimeError(
+
+            # Create error context with correlation ID for tracing
+            correlation_id = uuid4()
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="connect_admin_client",
+                target_name=self.bootstrap_servers,
+            )
+
+            raise InfraConnectionError(
                 f"Failed to connect to Kafka broker at {self.bootstrap_servers} "
                 f"({exc_type_name}). "
                 f"Hint: Verify the broker is running and accessible:\n"
@@ -1028,7 +1073,8 @@ class KafkaTopicManager:
                 f"  3. For Redpanda, check health: 'curl -s http://<host>:9644/v1/status/ready'\n"
                 f"  4. Verify KAFKA_BOOTSTRAP_SERVERS env var is correct\n"
                 f"  5. If using Docker, ensure network connectivity to {self.bootstrap_servers}\n"
-                f"Original error: {conn_err}"
+                f"Original error: {conn_err}",
+                context=context,
             ) from conn_err
 
         return self._admin
@@ -1050,7 +1096,9 @@ class KafkaTopicManager:
             The topic name (for chaining convenience).
 
         Raises:
-            RuntimeError: If topic creation fails with a non-recoverable error.
+            InfraUnavailableError: If topic creation fails with a non-recoverable
+                Kafka error. Includes correlation ID, transport type, error code,
+                and remediation hints.
         """
         from aiokafka.admin import NewTopic
         from aiokafka.errors import TopicAlreadyExistsError
@@ -1087,16 +1135,51 @@ class KafkaTopicManager:
                     response.topic_errors,
                 )
                 for topic_error in response.topic_errors:
-                    _topic_name: str
-                    topic_error_code: int
-                    topic_error_message: str
-                    _topic_name, topic_error_code, topic_error_message = topic_error
+                    # Handle both protocol v0 (2-tuple) and v1+ (3-tuple) formats:
+                    # - Protocol v0: (topic_name, error_code)
+                    # - Protocol v1+: (topic_name, error_code, error_message)
+                    # Use length guard to safely extract elements
+                    topic_error_tuple: tuple[object, ...] = (
+                        tuple(topic_error)
+                        if not isinstance(topic_error, tuple)
+                        else topic_error
+                    )
+                    if len(topic_error_tuple) < AIOKAFKA_TOPIC_ERRORS_MIN_TUPLE_LEN:
+                        logger.warning(
+                            "Unexpected topic_error format (len=%d, min=%d): %r",
+                            len(topic_error_tuple),
+                            AIOKAFKA_TOPIC_ERRORS_MIN_TUPLE_LEN,
+                            topic_error,
+                        )
+                        continue
+
+                    _topic_name: str = str(topic_error_tuple[0])
+                    topic_error_code: int = int(topic_error_tuple[1])
+                    # Protocol v1+ includes error_message as third element
+                    topic_error_message: str = (
+                        str(topic_error_tuple[2])
+                        if len(topic_error_tuple)
+                        >= AIOKAFKA_TOPIC_ERRORS_FULL_TUPLE_LEN
+                        else ""
+                    )
+
                     if topic_error_code != 0:
                         if topic_error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
                             raise TopicAlreadyExistsError
-                        raise RuntimeError(
+
+                        # Create error context with correlation ID for tracing
+                        correlation_id = uuid4()
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.KAFKA,
+                            operation="create_topic",
+                            target_name=topic_name,
+                        )
+                        raise InfraUnavailableError(
                             f"Failed to create topic '{topic_name}': "
-                            f"{get_kafka_error_hint(topic_error_code, topic_error_message)}"
+                            f"{get_kafka_error_hint(topic_error_code, topic_error_message)}",
+                            context=context,
+                            kafka_error_code=topic_error_code,
                         )
             elif has_topic_error_codes and response.topic_error_codes:
                 # Older aiokafka format: dict mapping topic name to error code
@@ -1110,9 +1193,20 @@ class KafkaTopicManager:
                     if error_code_value != 0:
                         if error_code_value == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
                             raise TopicAlreadyExistsError
-                        raise RuntimeError(
+
+                        # Create error context with correlation ID for tracing
+                        correlation_id = uuid4()
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.KAFKA,
+                            operation="create_topic",
+                            target_name=topic_key,
+                        )
+                        raise InfraUnavailableError(
                             f"Failed to create topic '{topic_key}': "
-                            f"{get_kafka_error_hint(error_code_value)}"
+                            f"{get_kafka_error_hint(error_code_value)}",
+                            context=context,
+                            kafka_error_code=error_code_value,
                         )
             else:
                 # Neither format has errors - topic created successfully
@@ -1210,6 +1304,9 @@ __all__ = [
     "get_kafka_error_hint",
     # Configuration constants
     "KAFKA_DEFAULT_PORT",
+    # aiokafka version compatibility constants
+    "AIOKAFKA_TOPIC_ERRORS_MIN_TUPLE_LEN",
+    "AIOKAFKA_TOPIC_ERRORS_FULL_TUPLE_LEN",
     # Utilities
     "parse_bootstrap_servers",
     "normalize_ipv6_bootstrap_server",

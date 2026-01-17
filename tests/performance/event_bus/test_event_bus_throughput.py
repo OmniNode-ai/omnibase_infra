@@ -45,7 +45,6 @@ Related:
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from collections.abc import Awaitable, Callable
 
@@ -53,15 +52,18 @@ import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
-from tests.performance.event_bus.conftest import generate_unique_topic
 
 # CI environment detection for skipping flaky performance tests
 # High-throughput tests with absolute thresholds (e.g., >5000 events/sec) are unreliable
 # in CI due to variable CPU/memory resources on shared runners.
 # These tests provide value locally but should be skipped in CI to prevent flakiness.
-IS_CI = os.getenv("CI", "").lower() in ("true", "1", "yes") or os.getenv(
-    "GITHUB_ACTIONS", ""
-).lower() in ("true", "1")
+#
+# Uses the shared is_ci_environment() helper from omnibase_infra.testing for consistent
+# CI detection across the codebase.
+from omnibase_infra.testing import is_ci_environment
+from tests.performance.event_bus.conftest import generate_unique_topic
+
+IS_CI = is_ci_environment()
 
 # -----------------------------------------------------------------------------
 # Single Publisher Throughput Tests
