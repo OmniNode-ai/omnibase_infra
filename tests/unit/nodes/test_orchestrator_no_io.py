@@ -538,13 +538,18 @@ class TestContractIOOperationsAreEffectNodes:
             }
 
             if node_id in non_io_exceptions:
-                # These should NOT be effect nodes despite keyword matches
+                # These should NOT be effect nodes - they are pure computation
                 # Use .lower() for case-insensitive comparison (contracts use UPPERCASE)
                 if node_type.lower() == "effect_generic":
+                    keyword_note = (
+                        " (Note: this node matched I/O keywords but is known to be pure computation)"
+                        if suggests_io
+                        else ""
+                    )
                     misclassified_nodes.append(
                         f"{node_id}: marked as '{node['node_type']}' but this node is in the "
-                        f"known pure-computation allowlist (despite containing I/O keywords like "
-                        f"'execute', 'read', etc.). Nodes performing pure computation should use "
+                        f"known pure-computation allowlist.{keyword_note} "
+                        f"Nodes performing pure computation should use "
                         f"'COMPUTE_GENERIC' or 'REDUCER_GENERIC', not 'EFFECT_GENERIC'. "
                         f"If this node truly performs external I/O, remove it from non_io_exceptions."
                     )

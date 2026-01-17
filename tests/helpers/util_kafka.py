@@ -124,9 +124,59 @@ KAFKA_ERROR_REMEDIATION_HINTS: dict[int, str] = {
     ),
 }
 
-# Named constants for Kafka error codes (for readable conditionals)
+# =============================================================================
+# Kafka Error Code Constants
+# =============================================================================
+# Named constants for Kafka error codes (for readable conditionals).
+# Reference: https://kafka.apache.org/protocol.html#protocol_error_codes
+#
+# Using named constants instead of magic numbers improves:
+# - Code readability: "if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS" is clearer
+# - Maintainability: Single source of truth for error code values
+# - Searchability: Easy to find all usages of a specific error code
+# =============================================================================
+
 KAFKA_ERROR_TOPIC_ALREADY_EXISTS = 36
-KAFKA_ERROR_INVALID_PARTITIONS = 37  # Also used for memory limit in Redpanda
+"""Topic with this name already exists (error_code=36)."""
+
+KAFKA_ERROR_INVALID_PARTITIONS = 37
+"""Invalid number of partitions (error_code=37). Also indicates memory limit issues in Redpanda."""
+
+KAFKA_ERROR_INVALID_REPLICATION_FACTOR = 38
+"""Invalid replication factor (error_code=38). Cannot exceed number of brokers."""
+
+KAFKA_ERROR_INVALID_REPLICA_ASSIGNMENT = 39
+"""Invalid replica assignment (error_code=39). Specified broker IDs may not exist."""
+
+KAFKA_ERROR_INVALID_CONFIG = 40
+"""Invalid topic configuration (error_code=40). Check topic config parameters."""
+
+KAFKA_ERROR_NOT_CONTROLLER = 41
+"""Not the cluster controller (error_code=41). Retriable - cluster may be electing new controller."""
+
+KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED = 29
+"""Cluster authorization failed (error_code=29). Client lacks ClusterAction permission."""
+
+# =============================================================================
+# Default Configuration Constants
+# =============================================================================
+# Configurable defaults for Kafka connection settings.
+# These can be overridden via environment variables in test fixtures.
+# =============================================================================
+
+KAFKA_DEFAULT_PORT = 29092
+"""Default Kafka/Redpanda port for external connections (outside Docker network).
+
+The default port 29092 is the external advertised port for Redpanda/Kafka
+when running in Docker. Internal Docker connections typically use port 9092.
+
+This value is used when:
+- Bootstrap servers string has no explicit port
+- Bare IPv6 addresses are provided without port specification
+- Error messages suggest default configuration
+
+Override in tests via environment variable or explicit port in bootstrap_servers.
+"""
 
 
 def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
@@ -225,6 +275,48 @@ def _is_likely_bare_ipv6(address: str) -> bool:
     return bool(_BARE_IPV6_PATTERN.fullmatch(address))
 
 
+def normalize_ipv6_bootstrap_server(bootstrap_server: str) -> str:
+    """Normalize a bootstrap server string, wrapping bare IPv6 addresses in brackets.
+
+    Kafka bootstrap servers require IPv6 addresses to be enclosed in brackets
+    when a port is specified (RFC 3986 URI format). This function ensures bare
+    IPv6 addresses are properly formatted for Kafka client connections.
+
+    Args:
+        bootstrap_server: A single bootstrap server string (host:port or bare IPv6).
+
+    Returns:
+        The normalized bootstrap server string with IPv6 addresses bracketed.
+
+    Examples:
+        >>> normalize_ipv6_bootstrap_server("localhost:9092")
+        'localhost:9092'
+        >>> normalize_ipv6_bootstrap_server("[::1]:9092")
+        '[::1]:9092'
+        >>> normalize_ipv6_bootstrap_server("::1")
+        '[::1]:29092'
+        >>> normalize_ipv6_bootstrap_server("2001:db8::1")
+        '[2001:db8::1]:29092'
+        >>> normalize_ipv6_bootstrap_server("192.168.1.1:9092")
+        '192.168.1.1:9092'
+    """
+    if not bootstrap_server or not bootstrap_server.strip():
+        return bootstrap_server
+
+    stripped = bootstrap_server.strip()
+
+    # Already bracketed IPv6 - return as-is
+    if stripped.startswith("["):
+        return stripped
+
+    # Bare IPv6 - wrap in brackets and add default port
+    if _is_likely_bare_ipv6(stripped):
+        return f"[{stripped}]:{KAFKA_DEFAULT_PORT}"
+
+    # Standard format (hostname:port or IPv4:port) - return as-is
+    return stripped
+
+
 class KafkaConfigValidationResult:
     """Result of KAFKA_BOOTSTRAP_SERVERS validation.
 
@@ -258,6 +350,62 @@ class KafkaConfigValidationResult:
         return self.is_valid
 
 
+def _validate_single_server(server: str) -> tuple[bool, str, str, str | None]:
+    """Validate a single bootstrap server entry.
+
+    Args:
+        server: A single server string (already stripped of whitespace).
+
+    Returns:
+        Tuple of (is_valid, host, port, error_message).
+        error_message is None if validation passes.
+    """
+    default_port: str = str(KAFKA_DEFAULT_PORT)
+
+    # Parse host and port
+    host: str
+    port: str
+    host, port = parse_bootstrap_servers(server)
+
+    # Validate port is numeric (when explicitly provided)
+    # Skip port validation for bare IPv6 addresses (they contain multiple colons
+    # which are part of the address, not host:port separators)
+    if ":" in server and not _is_likely_bare_ipv6(server):
+        # Extract port part for validation
+        port_str: str
+        if server.startswith("["):
+            # IPv6 format: [::1]:9092
+            bracket_close: int = server.rfind("]")
+            if bracket_close != -1 and bracket_close < len(server) - 1:
+                port_str = server[bracket_close + 2 :]
+            else:
+                port_str = ""
+        else:
+            # Standard format: host:port
+            port_str = server.rsplit(":", 1)[-1] if ":" in server else ""
+
+        if port_str and not port_str.isdigit():
+            return (
+                False,
+                host,
+                port_str,
+                f"invalid port '{port_str}' (must be numeric)",
+            )
+
+        if port_str:
+            port_num: int = int(port_str)
+            if port_num < 1 or port_num > 65535:
+                return (
+                    False,
+                    host,
+                    port_str,
+                    f"invalid port {port_num} (must be 1-65535)",
+                )
+            port = port_str
+
+    return (True, host, port, None)
+
+
 def validate_bootstrap_servers(
     bootstrap_servers: str | None,
 ) -> KafkaConfigValidationResult:
@@ -265,10 +413,21 @@ def validate_bootstrap_servers(
 
     Performs comprehensive validation of the bootstrap servers string:
     - Checks for empty/whitespace-only values
+    - Handles comma-separated lists of servers (e.g., "server1:9092,server2:9092")
     - Validates host:port format (including IPv4 and bracketed IPv6)
     - Validates port is numeric and in valid range (1-65535)
     - Handles bare IPv6 addresses (treats as host with default port)
+    - Handles edge cases: trailing commas, whitespace between entries
     - Returns structured result with skip reason for tests
+
+    Comma-Separated Server Lists:
+        Supports multiple bootstrap servers in the standard Kafka format:
+        - "server1:9092,server2:9092,server3:9092"
+        - Whitespace around commas is trimmed: "server1:9092 , server2:9092"
+        - Empty entries are filtered: "server1:9092,,server2:9092" -> valid
+        - Trailing commas are handled: "server1:9092," -> valid (ignores empty)
+
+        The returned host/port are from the FIRST valid server in the list.
 
     IPv6 Address Support:
         - Bracketed IPv6 with port: "[::1]:9092" - fully validated
@@ -294,6 +453,11 @@ def validate_bootstrap_servers(
         >>> assert result.host == "localhost"
         >>> assert result.port == "9092"
 
+        >>> result = validate_bootstrap_servers("server1:9092,server2:9092")
+        >>> assert result.is_valid
+        >>> assert result.host == "server1"  # First server in list
+        >>> assert result.port == "9092"
+
         >>> result = validate_bootstrap_servers("[::1]:9092")
         >>> assert result.is_valid
         >>> assert result.host == "[::1]"
@@ -304,17 +468,20 @@ def validate_bootstrap_servers(
         >>> assert result.host == "::1"
         >>> assert result.port == "29092"  # Default port for bare IPv6
     """
+    # Use string conversion of default port for consistent return type
+    default_port: str = str(KAFKA_DEFAULT_PORT)
+
     # Handle None (defensive)
     if bootstrap_servers is None:
         return KafkaConfigValidationResult(
             is_valid=False,
             host="<not set>",
-            port="29092",
+            port=default_port,
             error_message="KAFKA_BOOTSTRAP_SERVERS is not set (None)",
             skip_reason=(
                 "KAFKA_BOOTSTRAP_SERVERS not configured. "
                 "Set environment variable to enable Kafka integration tests. "
-                "Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
+                f"Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:{KAFKA_DEFAULT_PORT}"
             ),
         )
 
@@ -323,78 +490,89 @@ def validate_bootstrap_servers(
         return KafkaConfigValidationResult(
             is_valid=False,
             host="<not set>",
-            port="29092",
+            port=default_port,
             error_message="KAFKA_BOOTSTRAP_SERVERS is empty or whitespace-only",
             skip_reason=(
                 "KAFKA_BOOTSTRAP_SERVERS is empty or not set. "
                 "Set environment variable to enable Kafka integration tests. "
-                "Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
+                f"Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:{KAFKA_DEFAULT_PORT}"
             ),
         )
 
-    stripped: str = bootstrap_servers.strip()
+    # Split on commas and filter out empty/whitespace-only entries
+    # This handles: trailing commas, whitespace around commas, multiple commas
+    raw_servers: list[str] = [
+        s.strip() for s in bootstrap_servers.split(",") if s.strip()
+    ]
 
-    # Parse host and port
-    host: str
-    port: str
-    host, port = parse_bootstrap_servers(stripped)
+    # If all entries were empty/whitespace after splitting
+    if not raw_servers:
+        return KafkaConfigValidationResult(
+            is_valid=False,
+            host="<not set>",
+            port=default_port,
+            error_message=(
+                "KAFKA_BOOTSTRAP_SERVERS contains only commas or whitespace"
+            ),
+            skip_reason=(
+                "KAFKA_BOOTSTRAP_SERVERS contains no valid server entries. "
+                "Set environment variable to enable Kafka integration tests. "
+                f"Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:{KAFKA_DEFAULT_PORT}"
+            ),
+        )
 
-    # Validate port is numeric (when explicitly provided)
-    # Skip port validation for bare IPv6 addresses (they contain multiple colons
-    # which are part of the address, not host:port separators)
-    if ":" in stripped and not _is_likely_bare_ipv6(stripped):
-        # Extract port part for validation
-        port_str: str
-        if stripped.startswith("["):
-            # IPv6 format: [::1]:9092
-            bracket_close: int = stripped.rfind("]")
-            if bracket_close != -1 and bracket_close < len(stripped) - 1:
-                port_str = stripped[bracket_close + 2 :]
-            else:
-                port_str = ""
+    # Validate each server in the list
+    # Track first valid and first entry (for error messages when all invalid)
+    first_valid_host: str | None = None
+    first_valid_port: str | None = None
+    first_entry_host: str | None = None
+    first_entry_port: str | None = None
+    validation_errors: list[str] = []
+
+    for server in raw_servers:
+        is_valid, host, port, error_msg = _validate_single_server(server)
+
+        # Always track first entry for error messages
+        if first_entry_host is None:
+            first_entry_host = host
+            first_entry_port = port
+
+        if is_valid:
+            if first_valid_host is None:
+                first_valid_host = host
+                first_valid_port = port
         else:
-            # Standard format: host:port
-            port_str = stripped.rsplit(":", 1)[-1] if ":" in stripped else ""
+            validation_errors.append(f"'{server}': {error_msg}")
 
-        if port_str and not port_str.isdigit():
-            return KafkaConfigValidationResult(
-                is_valid=False,
-                host=host,
-                port=port_str,
-                error_message=(
-                    f"KAFKA_BOOTSTRAP_SERVERS has invalid port: '{port_str}' "
-                    f"(must be numeric)"
-                ),
-                skip_reason=(
-                    f"KAFKA_BOOTSTRAP_SERVERS has invalid port: '{port_str}'. "
-                    f"Port must be a number. "
-                    f"Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
-                ),
-            )
+    # If there were any validation errors
+    if validation_errors:
+        # Format error message
+        if len(validation_errors) == 1:
+            error_detail = validation_errors[0]
+        else:
+            error_detail = "; ".join(validation_errors)
 
-        if port_str:
-            port_num: int = int(port_str)
-            if port_num < 1 or port_num > 65535:
-                return KafkaConfigValidationResult(
-                    is_valid=False,
-                    host=host,
-                    port=port_str,
-                    error_message=(
-                        f"KAFKA_BOOTSTRAP_SERVERS has invalid port: {port_num} "
-                        f"(must be 1-65535)"
-                    ),
-                    skip_reason=(
-                        f"KAFKA_BOOTSTRAP_SERVERS has invalid port: {port_num}. "
-                        f"Port must be between 1 and 65535. "
-                        f"Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092"
-                    ),
-                )
+        # Use first valid host if available, otherwise first entry host
+        # (for better error messages showing what was provided)
+        display_host = first_valid_host or first_entry_host or "<invalid>"
+        display_port = first_valid_port or first_entry_port or default_port
 
-    # Valid configuration
+        return KafkaConfigValidationResult(
+            is_valid=False,
+            host=display_host,
+            port=display_port,
+            error_message=f"KAFKA_BOOTSTRAP_SERVERS has invalid entries: {error_detail}",
+            skip_reason=(
+                f"KAFKA_BOOTSTRAP_SERVERS has invalid entries: {error_detail}. "
+                f"Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:{KAFKA_DEFAULT_PORT}"
+            ),
+        )
+
+    # Valid configuration - return first server's host/port for display
     return KafkaConfigValidationResult(
         is_valid=True,
-        host=host,
-        port=port,
+        host=first_valid_host or "<not set>",
+        port=first_valid_port or default_port,
         error_message=None,
         skip_reason=None,
     )
@@ -442,9 +620,12 @@ def parse_bootstrap_servers(bootstrap_servers: str) -> tuple[str, str]:
         >>> parse_bootstrap_servers("2001:db8::1")
         ('2001:db8::1', '29092')
     """
+    # Use string conversion of default port for consistent return type
+    default_port: str = str(KAFKA_DEFAULT_PORT)
+
     # Handle empty/whitespace-only input
     if not bootstrap_servers or not bootstrap_servers.strip():
-        return ("<not set>", "29092")
+        return ("<not set>", default_port)
 
     stripped: str = bootstrap_servers.strip()
 
@@ -455,25 +636,25 @@ def parse_bootstrap_servers(bootstrap_servers: str) -> tuple[str, str]:
             # Has closing bracket and something after it
             if stripped[bracket_close + 1] == ":":
                 host: str = stripped[: bracket_close + 1]
-                port: str = stripped[bracket_close + 2 :] or "29092"
+                port: str = stripped[bracket_close + 2 :] or default_port
                 return (host, port)
         # Malformed bracketed IPv6 - return as-is with default port
-        return (stripped, "29092")
+        return (stripped, default_port)
 
     # Handle bare IPv6 addresses (without brackets)
     # These contain multiple colons which are part of the address, not separators
     if _is_likely_bare_ipv6(stripped):
-        return (stripped, "29092")
+        return (stripped, default_port)
 
     # Standard host:port format - use rsplit to handle single colon
     if ":" in stripped:
         parts: list[str] = stripped.rsplit(":", 1)
         host = parts[0] or "<not set>"
-        port = parts[1] if len(parts) > 1 and parts[1] else "29092"
+        port = parts[1] if len(parts) > 1 and parts[1] else default_port
         return (host, port)
 
     # No colon - just hostname
-    return (stripped, "29092")
+    return (stripped, default_port)
 
 
 async def wait_for_consumer_ready(
@@ -650,16 +831,16 @@ async def wait_for_topic_metadata(
             # Handle dict format (aiokafka 0.11.0+): {'topic_name': TopicDescription}
             if isinstance(description, dict):
                 if topic_name in description:
-                    topic_info = description[topic_name]
+                    topic_info: object = description[topic_name]
                     # TopicDescription may be an object with attributes or dict-like
-                    error_code = (
+                    error_code: int | None = (
                         getattr(topic_info, "error_code", None)
                         if hasattr(topic_info, "error_code")
                         else topic_info.get("error_code", -1)
                         if isinstance(topic_info, dict)
                         else -1
                     )
-                    partitions = (
+                    partitions: list[object] = (
                         getattr(topic_info, "partitions", [])
                         if hasattr(topic_info, "partitions")
                         else topic_info.get("partitions", [])
@@ -692,28 +873,30 @@ async def wait_for_topic_metadata(
 
             # Handle list format (older aiokafka): [{'error_code': 0, 'topic': ..., 'partitions': [...]}]
             elif isinstance(description, list) and len(description) > 0:
-                topic_info = description[0]
+                topic_info_item: object = description[0]
                 # List items are typically dicts
-                if isinstance(topic_info, dict):
-                    error_code = topic_info.get("error_code", -1)
-                    partitions = topic_info.get("partitions", [])
+                list_error_code: int
+                list_partitions: list[object]
+                if isinstance(topic_info_item, dict):
+                    list_error_code = topic_info_item.get("error_code", -1)
+                    list_partitions = topic_info_item.get("partitions", [])
                 else:
                     # Object with attributes
-                    error_code = getattr(topic_info, "error_code", -1)
-                    partitions = getattr(topic_info, "partitions", [])
+                    list_error_code = getattr(topic_info_item, "error_code", -1)
+                    list_partitions = getattr(topic_info_item, "partitions", [])
 
-                if error_code == 0 and len(partitions) >= expected_partitions:
+                if list_error_code == 0 and len(list_partitions) >= expected_partitions:
                     logger.debug(
                         "Topic %s ready with %d partitions (list format)",
                         topic_name,
-                        len(partitions),
+                        len(list_partitions),
                     )
                     return True
                 logger.debug(
                     "Topic %s not ready: error_code=%s, partitions=%d (list format)",
                     topic_name,
-                    error_code,
-                    len(partitions),
+                    list_error_code,
+                    len(list_partitions),
                 )
             else:
                 # Unknown format but truthy - accept as success for compatibility
@@ -879,13 +1062,16 @@ class KafkaTopicManager:
                     response.topic_errors,
                 )
                 for topic_error in response.topic_errors:
-                    _, error_code, error_message = topic_error
-                    if error_code != 0:
-                        if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
+                    _topic_name: str
+                    topic_error_code: int
+                    topic_error_message: str
+                    _topic_name, topic_error_code, topic_error_message = topic_error
+                    if topic_error_code != 0:
+                        if topic_error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
                             raise TopicAlreadyExistsError
                         raise RuntimeError(
                             f"Failed to create topic '{topic_name}': "
-                            f"{get_kafka_error_hint(error_code, error_message)}"
+                            f"{get_kafka_error_hint(topic_error_code, topic_error_message)}"
                         )
             elif has_topic_error_codes and response.topic_error_codes:
                 # Older aiokafka format: dict mapping topic name to error code
@@ -893,13 +1079,15 @@ class KafkaTopicManager:
                     "Using topic_error_codes format (older aiokafka): %s",
                     response.topic_error_codes,
                 )
-                for topic, error_code in response.topic_error_codes.items():
-                    if error_code != 0:
-                        if error_code == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
+                topic_key: str
+                error_code_value: int
+                for topic_key, error_code_value in response.topic_error_codes.items():
+                    if error_code_value != 0:
+                        if error_code_value == KAFKA_ERROR_TOPIC_ALREADY_EXISTS:
                             raise TopicAlreadyExistsError
                         raise RuntimeError(
-                            f"Failed to create topic '{topic}': "
-                            f"{get_kafka_error_hint(error_code)}"
+                            f"Failed to create topic '{topic_key}': "
+                            f"{get_kafka_error_hint(error_code_value)}"
                         )
             else:
                 # Neither format has errors - topic created successfully
@@ -976,13 +1164,21 @@ __all__ = [
     "wait_for_topic_metadata",
     # Topic management
     "KafkaTopicManager",
-    # Error handling
+    # Error code constants (Kafka protocol error codes)
     "KAFKA_ERROR_REMEDIATION_HINTS",
     "KAFKA_ERROR_TOPIC_ALREADY_EXISTS",
     "KAFKA_ERROR_INVALID_PARTITIONS",
+    "KAFKA_ERROR_INVALID_REPLICATION_FACTOR",
+    "KAFKA_ERROR_INVALID_REPLICA_ASSIGNMENT",
+    "KAFKA_ERROR_INVALID_CONFIG",
+    "KAFKA_ERROR_NOT_CONTROLLER",
+    "KAFKA_ERROR_CLUSTER_AUTHORIZATION_FAILED",
     "get_kafka_error_hint",
+    # Configuration constants
+    "KAFKA_DEFAULT_PORT",
     # Utilities
     "parse_bootstrap_servers",
+    "normalize_ipv6_bootstrap_server",
     # Validation
     "validate_bootstrap_servers",
     "KafkaConfigValidationResult",

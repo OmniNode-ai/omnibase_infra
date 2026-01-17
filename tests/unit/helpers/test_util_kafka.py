@@ -170,6 +170,7 @@ class TestValidateBootstrapServers:
         """Test validation fails for non-numeric port."""
         result = validate_bootstrap_servers("localhost:abc")
         assert result.is_valid is False
+        # Host is preserved from the first entry for better error messages
         assert result.host == "localhost"
         assert result.port == "abc"
         assert result.error_message is not None
@@ -261,6 +262,93 @@ class TestValidateBootstrapServers:
         assert result.skip_reason is not None
         assert "export KAFKA_BOOTSTRAP_SERVERS" in result.skip_reason
         assert "29092" in result.skip_reason
+
+    # =========================================================================
+    # Comma-Separated Server List Tests
+    # =========================================================================
+
+    def test_multiple_servers_valid(self) -> None:
+        """Test validation passes for comma-separated server list."""
+        result = validate_bootstrap_servers("server1:9092,server2:9093")
+        assert result.is_valid is True
+        # First server's host/port is returned
+        assert result.host == "server1"
+        assert result.port == "9092"
+        assert result.error_message is None
+
+    def test_multiple_servers_with_whitespace(self) -> None:
+        """Test validation passes with whitespace around commas."""
+        result = validate_bootstrap_servers("server1:9092 , server2:9093")
+        assert result.is_valid is True
+        assert result.host == "server1"
+        assert result.port == "9092"
+
+    def test_trailing_comma_handled(self) -> None:
+        """Test validation passes with trailing comma (empty entry filtered)."""
+        result = validate_bootstrap_servers("server1:9092,")
+        assert result.is_valid is True
+        assert result.host == "server1"
+        assert result.port == "9092"
+
+    def test_leading_comma_handled(self) -> None:
+        """Test validation passes with leading comma (empty entry filtered)."""
+        result = validate_bootstrap_servers(",server1:9092")
+        assert result.is_valid is True
+        assert result.host == "server1"
+        assert result.port == "9092"
+
+    def test_double_comma_handled(self) -> None:
+        """Test validation passes with double comma (empty entry filtered)."""
+        result = validate_bootstrap_servers("server1:9092,,server2:9093")
+        assert result.is_valid is True
+        assert result.host == "server1"
+        assert result.port == "9092"
+
+    def test_only_commas_invalid(self) -> None:
+        """Test validation fails for only commas."""
+        result = validate_bootstrap_servers(",,,")
+        assert result.is_valid is False
+        assert result.host == "<not set>"
+        assert "no valid server entries" in result.skip_reason.lower()
+
+    def test_commas_and_whitespace_invalid(self) -> None:
+        """Test validation fails for commas and whitespace only."""
+        result = validate_bootstrap_servers(", , , ")
+        assert result.is_valid is False
+        assert result.host == "<not set>"
+
+    def test_one_valid_one_invalid_server(self) -> None:
+        """Test validation fails when one server has invalid port."""
+        result = validate_bootstrap_servers("server1:9092,server2:abc")
+        assert result.is_valid is False
+        # First valid server's host is preserved
+        assert result.host == "server1"
+        assert result.port == "9092"
+        assert "invalid entries" in result.error_message.lower()
+        assert "server2:abc" in result.error_message
+
+    def test_all_servers_invalid(self) -> None:
+        """Test validation fails when all servers have invalid ports."""
+        result = validate_bootstrap_servers("server1:abc,server2:xyz")
+        assert result.is_valid is False
+        # First entry's host is preserved for error messages
+        assert result.host == "server1"
+        assert result.port == "abc"
+        assert "invalid entries" in result.error_message.lower()
+
+    def test_three_servers_valid(self) -> None:
+        """Test validation passes for three comma-separated servers."""
+        result = validate_bootstrap_servers("s1:9092,s2:9093,s3:9094")
+        assert result.is_valid is True
+        assert result.host == "s1"
+        assert result.port == "9092"
+
+    def test_mixed_ipv4_and_ipv6_servers(self) -> None:
+        """Test validation passes for mixed IPv4 and IPv6 servers."""
+        result = validate_bootstrap_servers("192.168.1.1:9092,[::1]:9093")
+        assert result.is_valid is True
+        assert result.host == "192.168.1.1"
+        assert result.port == "9092"
 
 
 class TestKafkaConfigValidationResultBool:

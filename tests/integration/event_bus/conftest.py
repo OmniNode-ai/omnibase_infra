@@ -100,7 +100,7 @@ if TYPE_CHECKING:
 # KAFKA_BOOTSTRAP_SERVERS must be set via environment variable.
 # No hardcoded default to ensure portability across CI/CD environments.
 # Tests will skip via fixture if not set. Example: export KAFKA_BOOTSTRAP_SERVERS=localhost:29092
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
 
 # =============================================================================
 # Kafka Helpers (shared implementations)
@@ -140,7 +140,9 @@ __all__ = [
 # Validate KAFKA_BOOTSTRAP_SERVERS at module load time to provide clear
 # skip reasons when configuration is missing or malformed.
 
-_kafka_config_validation = validate_bootstrap_servers(KAFKA_BOOTSTRAP_SERVERS)
+_kafka_config_validation: KafkaConfigValidationResult = validate_bootstrap_servers(
+    KAFKA_BOOTSTRAP_SERVERS
+)
 
 
 # =============================================================================
@@ -185,7 +187,11 @@ async def ensure_test_topic() -> AsyncGenerator[
     # - Non-numeric port (e.g., "localhost:abc")
     # - Port out of range (must be 1-65535)
     if not _kafka_config_validation:
-        pytest.skip(_kafka_config_validation.skip_reason)
+        ensure_skip_reason: str = (
+            _kafka_config_validation.skip_reason
+            or "KAFKA_BOOTSTRAP_SERVERS not configured"
+        )
+        pytest.skip(ensure_skip_reason)
 
     # SAFETY: At this point, KAFKA_BOOTSTRAP_SERVERS is guaranteed to be valid
     # because validate_bootstrap_servers() returned is_valid=True
@@ -230,8 +236,8 @@ async def created_unique_topic(
     """
     import uuid
 
-    topic_name = f"test.integration.{uuid.uuid4().hex[:12]}"
-    await ensure_test_topic(topic_name)
+    topic_name: str = f"test.integration.{uuid.uuid4().hex[:12]}"
+    await ensure_test_topic(topic_name, 1)
     return topic_name
 
 
@@ -248,8 +254,8 @@ async def created_unique_dlq_topic(
     """
     import uuid
 
-    topic_name = f"test-dlq.dlq.intents.{uuid.uuid4().hex[:8]}"
-    await ensure_test_topic(topic_name)
+    topic_name: str = f"test-dlq.dlq.intents.{uuid.uuid4().hex[:8]}"
+    await ensure_test_topic(topic_name, 1)
     return topic_name
 
 
@@ -262,8 +268,8 @@ async def created_broadcast_topic(
     Returns:
         The created broadcast topic name.
     """
-    topic_name = "integration-test.broadcast"
-    await ensure_test_topic(topic_name)
+    topic_name: str = "integration-test.broadcast"
+    await ensure_test_topic(topic_name, 1)
     return topic_name
 
 
@@ -298,7 +304,11 @@ async def topic_factory() -> AsyncGenerator[
     # - Non-numeric port (e.g., "localhost:abc")
     # - Port out of range (must be 1-65535)
     if not _kafka_config_validation:
-        pytest.skip(_kafka_config_validation.skip_reason)
+        factory_skip_reason: str = (
+            _kafka_config_validation.skip_reason
+            or "KAFKA_BOOTSTRAP_SERVERS not configured"
+        )
+        pytest.skip(factory_skip_reason)
 
     # SAFETY: At this point, KAFKA_BOOTSTRAP_SERVERS is guaranteed to be valid
     # because validate_bootstrap_servers() returned is_valid=True

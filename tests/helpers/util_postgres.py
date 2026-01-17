@@ -52,12 +52,24 @@ logger = logging.getLogger(__name__)
 # Pattern matches:
 #   - CREATE INDEX CONCURRENTLY
 #   - CREATE UNIQUE INDEX CONCURRENTLY
-#   - REINDEX ... CONCURRENTLY (any REINDEX variant with CONCURRENTLY)
+#   - REINDEX [options] {INDEX|TABLE|SCHEMA|DATABASE|SYSTEM} CONCURRENTLY
+#
+# PostgreSQL REINDEX CONCURRENTLY syntax (from docs):
+#   REINDEX [ ( option [, ...] ) ] { INDEX | TABLE | SCHEMA | DATABASE | SYSTEM }
+#       [ CONCURRENTLY ] name
 #
 # The pattern uses word boundaries (\b) to avoid partial matches.
+# The REINDEX portion explicitly matches the object type keywords to avoid
+# false positives from `.*` greedy matching (e.g., matching across statements).
 # Note: Comment/string stripping is handled by _strip_sql_comments() before matching.
 CONCURRENT_DDL_PATTERN = re.compile(
-    r"\b(CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY|REINDEX\s+.*CONCURRENTLY)\b",
+    r"\b("
+    r"CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY"
+    r"|"
+    # REINDEX with optional parenthesized options, then object type, then CONCURRENTLY
+    # Options are like: (VERBOSE), (VERBOSE, TABLESPACE new_tablespace)
+    r"REINDEX\s+(\([^)]*\)\s+)?(INDEX|TABLE|SCHEMA|DATABASE|SYSTEM)\s+CONCURRENTLY"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -109,6 +121,15 @@ def should_skip_migration(sql: str) -> bool:
     This function strips SQL comments before matching to avoid false positives
     from CONCURRENTLY appearing in comments.
 
+    The pattern specifically matches:
+      - CREATE INDEX CONCURRENTLY
+      - CREATE UNIQUE INDEX CONCURRENTLY
+      - REINDEX {INDEX|TABLE|SCHEMA|DATABASE|SYSTEM} CONCURRENTLY
+      - REINDEX (options) {INDEX|TABLE|SCHEMA|DATABASE|SYSTEM} CONCURRENTLY
+
+    The REINDEX pattern requires a valid object type keyword (INDEX, TABLE, etc.)
+    to avoid false positives from overly broad matching.
+
     Args:
         sql: The SQL content of the migration file.
 
@@ -123,6 +144,12 @@ def should_skip_migration(sql: str) -> bool:
         >>> should_skip_migration("REINDEX TABLE CONCURRENTLY my_table;")
         True
         >>> should_skip_migration("REINDEX INDEX CONCURRENTLY my_index;")
+        True
+        >>> should_skip_migration("REINDEX SCHEMA CONCURRENTLY my_schema;")
+        True
+        >>> should_skip_migration("REINDEX DATABASE CONCURRENTLY my_db;")
+        True
+        >>> should_skip_migration("REINDEX (VERBOSE) TABLE CONCURRENTLY my_table;")
         True
 
     Examples - Statements that will NOT be skipped (returns False):
@@ -313,10 +340,13 @@ def build_postgres_dsn(
         'postgresql://postgres:secret@localhost:5432/test'
         >>> build_postgres_dsn("localhost", 5432, "test", "user@domain", "p@ss:word#123")
         'postgresql://user%40domain:p%40ss%3Aword%23123@localhost:5432/test'
+        >>> build_postgres_dsn("localhost", 5432, "test", "postgres", "")
+        'postgresql://postgres:@localhost:5432/test'
     """
     # URL-encode credentials to handle special characters (@, :, #, %, etc.)
+    # An empty password is valid in PostgreSQL (e.g., trust authentication)
     encoded_user: str = quote(user, safe="")
-    encoded_password: str = quote(password, safe="")
+    encoded_password: str = quote(password, safe="") if password else ""
 
     return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
 
