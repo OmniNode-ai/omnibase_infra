@@ -19,6 +19,7 @@ This directory contains detailed implementation guides and best practices for ON
 
 ### Architecture
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns
+- **[Protocol Patterns](./protocol_patterns.md)** - Protocol vs ABC vs concrete base, mixin composition, plugin interfaces
 - **[Utility Directory Structure](./utility_directory_structure.md)** - Distinction between `utils/` and `shared/utils/` directories
 - **[Registry clear() Policy](./registry_clear_policy.md)** - When and how to implement clear() methods for test isolation vs production safety
 
@@ -66,6 +67,9 @@ This directory contains detailed implementation guides and best practices for ON
 | Implement resilient dispatchers | [Dispatcher Resilience](./dispatcher_resilience.md) | Dispatcher Implementation Pattern |
 | Track requests across services | [Correlation ID](./correlation_id_tracking.md) | Correlation ID Flow |
 | Inject dependencies | [Container DI](./container_dependency_injection.md) | Constructor Injection |
+| Choose Protocol vs ABC | [Protocol Patterns](./protocol_patterns.md) | Decision Matrix |
+| Define mixin interfaces | [Protocol Patterns](./protocol_patterns.md) | Exemplar: ProtocolCircuitBreakerAware |
+| Create plugin contracts | [Protocol Patterns](./protocol_patterns.md) | Mini-Exemplars |
 | Choose utility location | [Utility Directory Structure](./utility_directory_structure.md) | Decision Matrix |
 | Handle cache fallback | [Error Recovery](./error_recovery_patterns.md) | Graceful Degradation |
 | Refresh expired tokens | [Error Recovery](./error_recovery_patterns.md) | Credential Refresh |
@@ -150,6 +154,12 @@ Container Dependency Injection
     ├── Service management and resolution
     ├── Used by: All infrastructure services
     └── References: Bootstrap, testing patterns
+
+Protocol Patterns
+    ├── Structural typing via typing.Protocol (PEP 544)
+    ├── Enables cross-mixin method access without inheritance
+    ├── Depends on: None (foundational pattern)
+    └── References: ProtocolCircuitBreakerAware, ProtocolPluginCompute, ProtocolArchitectureRule
 
 Utility Directory Structure
     ├── Documents utils/ vs shared/utils/ distinction
