@@ -45,8 +45,8 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
-from omnibase_core.enums import EnumNodeKind
 
+from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
 

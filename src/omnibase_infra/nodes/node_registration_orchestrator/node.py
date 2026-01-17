@@ -57,7 +57,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
-
 from omnibase_infra.models.routing import ModelRoutingSubcontract
 from omnibase_infra.runtime.contract_loaders import load_handler_routing_subcontract
 

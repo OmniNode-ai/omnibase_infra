@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
 
+from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
 from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
 
 

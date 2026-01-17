@@ -68,8 +68,8 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 import asyncpg
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
     InfraConnectionError,

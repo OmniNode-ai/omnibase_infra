@@ -35,11 +35,19 @@ Exports:
     ModelHealthCheckResult: Result of component health check operation
     ModelHealthCheckResponse: HTTP response model for health check endpoints
     ModelProjectorPluginLoaderConfig: Projector plugin loader configuration model
+    ModelSecretSourceSpec: Source specification for a single secret
+    SecretSourceType: Type alias for secret source types (env, vault, file)
+    ModelSecretMapping: Mapping from logical name to source specification
+    ModelSecretResolverConfig: Configuration for SecretResolver
+    ModelCachedSecret: Cached secret with TTL tracking
+    ModelSecretCacheStats: Cache statistics for observability
+    ModelSecretSourceInfo: Non-sensitive source information for introspection
 """
 
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
     ModelBatchLifecycleResult,
 )
+from omnibase_infra.runtime.models.model_cached_secret import ModelCachedSecret
 from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
 from omnibase_infra.runtime.models.model_compute_registration import (
     ModelComputeRegistration,
@@ -94,6 +102,16 @@ from omnibase_infra.runtime.models.model_runtime_scheduler_metrics import (
     ModelRuntimeSchedulerMetrics,
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
+from omnibase_infra.runtime.models.model_secret_cache_stats import ModelSecretCacheStats
+from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
+from omnibase_infra.runtime.models.model_secret_resolver_config import (
+    ModelSecretResolverConfig,
+)
+from omnibase_infra.runtime.models.model_secret_source_info import ModelSecretSourceInfo
+from omnibase_infra.runtime.models.model_secret_source_spec import (
+    ModelSecretSourceSpec,
+    SecretSourceType,
+)
 from omnibase_infra.runtime.models.model_shutdown_batch_result import (
     ModelShutdownBatchResult,
 )
@@ -101,6 +119,7 @@ from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownCon
 
 __all__: list[str] = [
     "ModelBatchLifecycleResult",
+    "ModelCachedSecret",
     "ModelComputeKey",
     "ModelComputeRegistration",
     "ModelDomainPluginConfig",
@@ -127,6 +146,12 @@ __all__: list[str] = [
     "ModelRuntimeSchedulerConfig",
     "ModelRuntimeSchedulerMetrics",
     "ModelRuntimeTick",
+    "ModelSecretCacheStats",
+    "ModelSecretMapping",
+    "ModelSecretResolverConfig",
+    "ModelSecretSourceInfo",
+    "ModelSecretSourceSpec",
+    "SecretSourceType",
     "ModelShutdownBatchResult",
     "ModelShutdownConfig",
 ]

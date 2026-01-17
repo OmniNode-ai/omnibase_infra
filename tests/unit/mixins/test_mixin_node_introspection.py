@@ -41,8 +41,9 @@ import time
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ValidationError
+
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 # Test UUIDs - use deterministic values for reproducible tests
 TEST_NODE_UUID_1 = UUID("00000000-0000-0000-0000-000000000001")

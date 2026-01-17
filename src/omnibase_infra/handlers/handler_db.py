@@ -74,8 +74,8 @@ import logging
 from uuid import UUID, uuid4
 
 import asyncpg
-from omnibase_core.models.dispatch import ModelHandlerOutput
 
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,

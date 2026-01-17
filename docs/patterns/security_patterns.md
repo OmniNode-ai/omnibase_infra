@@ -621,6 +621,8 @@ def get_user_permissions(roles: frozenset[EnumRole]) -> frozenset[EnumPermission
 
 ## Secret Management
 
+**See Also**: [Secret Resolver Pattern](./secret_resolver.md) - Centralized secret resolution with caching, multiple sources, and migration guide.
+
 ### Vault Integration
 
 ONEX uses HashiCorp Vault for centralized secret management.
@@ -1795,6 +1797,7 @@ Use this checklist before deploying to production:
 - [Error Handling Patterns](./error_handling_patterns.md) - Error context and sanitization
 - [Error Recovery Patterns](./error_recovery_patterns.md) - Credential refresh, circuit breakers
 - [Correlation ID Tracking](./correlation_id_tracking.md) - Request tracing
+- [Secret Resolver Pattern](./secret_resolver.md) - Centralized secret resolution with caching and migration guide
 - [Policy Registry Trust Model](./policy_registry_trust_model.md) - Policy security model
 - [Container Dependency Injection](./container_dependency_injection.md) - Service resolution
 - [Handler Plugin Loader](./handler_plugin_loader.md#security-considerations) - Dynamic import security, threat model, deployment checklist

@@ -21,9 +21,9 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
 from omnibase_infra.models.snapshot.model_subject_ref import ModelSubjectRef
 
 

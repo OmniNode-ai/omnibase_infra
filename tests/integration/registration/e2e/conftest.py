@@ -59,10 +59,10 @@ from uuid import UUID, uuid4
 
 import pytest
 from dotenv import load_dotenv
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
@@ -92,8 +92,8 @@ elif _project_env_file.exists():
 
 if TYPE_CHECKING:
     import asyncpg
-    from omnibase_core.container import ModelONEXContainer
 
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator import (
@@ -329,7 +329,6 @@ async def wired_container(
         ModelONEXContainer: Fully wired container for dependency injection.
     """
     from omnibase_core.container import ModelONEXContainer
-
     from omnibase_infra.runtime.util_container_wiring import (
         wire_infrastructure_services,
         wire_registration_handlers,

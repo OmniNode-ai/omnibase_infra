@@ -77,7 +77,6 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-
     from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
     from omnibase_infra.runtime.registry_policy import RegistryPolicy
 
@@ -582,7 +581,6 @@ async def container_with_registries() -> ModelONEXContainer:
             ModelONEXContainer (still loading) causes a circular import failure.
     """
     from omnibase_core.container import ModelONEXContainer
-
     from omnibase_infra.runtime.util_container_wiring import (
         ServiceRegistryUnavailableError,
         wire_infrastructure_services,

@@ -25,9 +25,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.registration.model_node_capabilities import (

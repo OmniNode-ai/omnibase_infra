@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.enums import EnumBackendType
 
 

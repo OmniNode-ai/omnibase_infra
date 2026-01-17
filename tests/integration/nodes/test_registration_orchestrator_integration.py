@@ -36,6 +36,7 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 

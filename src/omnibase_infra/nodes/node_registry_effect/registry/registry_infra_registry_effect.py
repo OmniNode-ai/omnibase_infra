@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
     from omnibase_infra.nodes.node_registry_effect.node import NodeRegistryEffect
 
 

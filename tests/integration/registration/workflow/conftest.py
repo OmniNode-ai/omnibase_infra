@@ -24,14 +24,13 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID, uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
-
     from omnibase_infra.models.registration.model_node_capabilities import (
         ModelNodeCapabilities,
     )

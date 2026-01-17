@@ -16,9 +16,9 @@ from uuid import UUID, uuid4
 
 import hvac.exceptions
 import pytest
-from omnibase_core.enums import EnumCoreErrorCode
 from pydantic import SecretStr, ValidationError
 
+from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -1633,7 +1633,6 @@ class TestHandlerVaultErrorCodeValidation:
     ) -> None:
         """Test ValidationError raises ProtocolConfigurationError with correct error code."""
         from omnibase_core.enums import EnumCoreErrorCode
-
         from omnibase_infra.errors import ProtocolConfigurationError
 
         handler = HandlerVault()
@@ -1659,8 +1658,8 @@ class TestHandlerVaultErrorCodeValidation:
     ) -> None:
         """Test InfraConnectionError for Vault uses SERVICE_UNAVAILABLE error code."""
         import hvac.exceptions
-        from omnibase_core.enums import EnumCoreErrorCode
 
+        from omnibase_core.enums import EnumCoreErrorCode
         from omnibase_infra.errors import InfraConnectionError
 
         handler = HandlerVault()
@@ -1687,7 +1686,6 @@ class TestHandlerVaultErrorCodeValidation:
     ) -> None:
         """Test InfraAuthenticationError uses AUTHENTICATION_ERROR code."""
         from omnibase_core.enums import EnumCoreErrorCode
-
         from omnibase_infra.errors import InfraAuthenticationError
 
         handler = HandlerVault()
@@ -1712,7 +1710,6 @@ class TestHandlerVaultErrorCodeValidation:
     ) -> None:
         """Test InfraTimeoutError uses TIMEOUT_ERROR code."""
         from omnibase_core.enums import EnumCoreErrorCode
-
         from omnibase_infra.errors import InfraTimeoutError
 
         handler = HandlerVault()
@@ -1748,7 +1745,6 @@ class TestHandlerVaultErrorCodeValidation:
     ) -> None:
         """Test InfraUnavailableError uses SERVICE_UNAVAILABLE code."""
         from omnibase_core.enums import EnumCoreErrorCode
-
         from omnibase_infra.errors import InfraUnavailableError
 
         handler = HandlerVault()
@@ -1794,8 +1790,8 @@ class TestHandlerVaultErrorCodeValidation:
     ) -> None:
         """Test SecretResolutionError uses RESOURCE_NOT_FOUND code."""
         import hvac.exceptions
-        from omnibase_core.enums import EnumCoreErrorCode
 
+        from omnibase_core.enums import EnumCoreErrorCode
         from omnibase_infra.errors import SecretResolutionError
 
         handler = HandlerVault()

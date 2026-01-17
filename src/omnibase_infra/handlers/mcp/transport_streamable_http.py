@@ -45,11 +45,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     import uvicorn
+    from starlette.applications import Starlette
+
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
         ProtocolMCPToolDefinition,
     )
-    from starlette.applications import Starlette
 
 logger = logging.getLogger(__name__)
 

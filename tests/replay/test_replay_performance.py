@@ -42,8 +42,8 @@ import time
 from uuid import uuid4
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,

@@ -14,14 +14,14 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from pydantic import SecretStr
+
 from omnibase_core.models.common.model_schema_value import ModelSchemaValue
 from omnibase_core.models.vector import (
     EnumVectorDistanceMetric,
     ModelEmbedding,
     ModelVectorConnectionConfig,
 )
-from pydantic import SecretStr
-
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,

@@ -25,8 +25,8 @@ import logging
 from uuid import UUID
 
 import asyncpg
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,

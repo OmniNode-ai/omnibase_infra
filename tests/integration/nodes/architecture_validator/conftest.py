@@ -23,8 +23,8 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
+from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_infra.nodes.architecture_validator.node import NodeArchitectureValidator
 from omnibase_infra.nodes.architecture_validator.validators import (
     RuleNoDirectDispatch,

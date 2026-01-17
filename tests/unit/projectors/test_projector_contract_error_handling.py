@@ -26,8 +26,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from pydantic import ValidationError
+
+from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
 # =============================================================================
 # Test Markers

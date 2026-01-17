@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
     from omnibase_infra.nodes.node_registration_storage_effect.protocols import (
         ProtocolRegistrationPersistence,
     )

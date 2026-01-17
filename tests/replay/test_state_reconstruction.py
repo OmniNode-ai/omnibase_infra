@@ -31,8 +31,8 @@ Related Tickets:
 from __future__ import annotations
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState

@@ -81,7 +81,6 @@ from tests.integration.handlers.conftest import POSTGRES_AVAILABLE
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
-
     from omnibase_infra.handlers import HandlerDb
 
 # =============================================================================

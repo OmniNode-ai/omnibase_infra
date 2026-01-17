@@ -23,7 +23,6 @@ from collections.abc import Callable
 
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.primitives import ModelSemVer
-
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.util_version import normalize_version
 

@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-from omnibase_core.enums import EnumNodeKind
 
+from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )

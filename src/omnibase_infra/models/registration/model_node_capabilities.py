@@ -12,8 +12,9 @@ Note:
     would not correctly handle this distinction.
 """
 
-from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_core.types import JsonType
 
 
 class ModelNodeCapabilities(BaseModel):

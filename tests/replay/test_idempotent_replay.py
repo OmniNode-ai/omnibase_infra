@@ -46,8 +46,8 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
