@@ -52,7 +52,6 @@ from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
-
     from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
     from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
         ProtocolPostgresAdapter,

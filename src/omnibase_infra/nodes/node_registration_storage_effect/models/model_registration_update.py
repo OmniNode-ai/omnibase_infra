@@ -21,8 +21,9 @@ Related:
 
 from __future__ import annotations
 
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 
 class ModelRegistrationUpdate(BaseModel):

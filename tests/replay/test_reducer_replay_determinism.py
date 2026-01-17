@@ -41,8 +41,8 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -54,7 +54,6 @@ from tests.helpers.replay_utils import compare_outputs
 
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
-
     from tests.replay.conftest import EventFactory, NodeType
 
 

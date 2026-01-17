@@ -253,6 +253,10 @@ ignore = [
     "TC006",     # Add quotes to type expression in cast (style preference)
 ]
 
+[tool.ruff.lint.isort]
+# Both omnibase packages are first-party to avoid blank lines between them
+known-first-party = ["omnibase_core", "omnibase_infra", "omnibase_spi"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

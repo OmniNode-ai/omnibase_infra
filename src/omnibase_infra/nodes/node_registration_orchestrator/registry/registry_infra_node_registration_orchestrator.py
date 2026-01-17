@@ -91,7 +91,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.runtime.contract_loaders import (

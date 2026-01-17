@@ -38,8 +38,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,

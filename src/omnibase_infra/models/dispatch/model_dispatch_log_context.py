@@ -31,10 +31,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from omnibase_core.enums import EnumCoreErrorCode
-from omnibase_core.types import PrimitiveValue
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.types import PrimitiveValue
 from omnibase_infra.enums import EnumMessageCategory
 
 # Sentinel values for "not set" state

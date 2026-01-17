@@ -40,10 +40,10 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_category_match_result import (

@@ -332,7 +332,6 @@ class TestProjectorPluginLoaderContractLoading:
     ) -> None:
         """Invalid contract should raise validation error."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -374,7 +373,6 @@ class TestProjectorPluginLoaderContractLoading:
     ) -> None:
         """Malformed YAML should raise parse error."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -632,7 +630,6 @@ class TestProjectorPluginLoaderSecurity:
     ) -> None:
         """Root path should be rejected as base_path to prevent DoS."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
@@ -716,7 +713,6 @@ class TestProjectorPluginLoaderSecurity:
     ) -> None:
         """Files exceeding 10MB should be rejected."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.projector_plugin_loader import (
             MAX_CONTRACT_SIZE,
             ProjectorPluginLoader,
@@ -848,7 +844,6 @@ class TestProjectorPluginLoaderModes:
     ) -> None:
         """Strict mode should fail fast on first error."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
@@ -955,7 +950,6 @@ class TestProjectorPluginLoaderContractValidation:
     ) -> None:
         """Required fields should be validated."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -996,7 +990,6 @@ behavior:
     ) -> None:
         """Schema structure should be validated."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )
@@ -1023,7 +1016,6 @@ behavior:
     ) -> None:
         """consumed_events should not be empty."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.projector_plugin_loader import (
             ProjectorPluginLoader,
         )

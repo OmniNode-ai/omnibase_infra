@@ -11,6 +11,7 @@ represent the same recursive type alias for JSON-compatible values:
 from __future__ import annotations
 
 import pytest
+
 from omnibase_core.types import JsonType
 
 
@@ -314,7 +315,6 @@ class TestJsonTypeReExport:
     def test_json_type_from_core_equals_infra_json_type(self) -> None:
         """JsonType from omnibase_core should equal re-exported JsonType."""
         from omnibase_core.types import JsonType as CoreJsonType
-
         from omnibase_infra.models.types import JsonType as InfraJsonType
 
         # Both should reference the same type

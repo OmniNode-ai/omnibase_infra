@@ -10,8 +10,8 @@ Note on Type Annotations:
 import time
 
 import pytest
-from omnibase_core.errors import OnexError
 
+from omnibase_core.errors import OnexError
 from omnibase_infra.plugins.examples.plugin_json_normalizer import (
     PluginJsonNormalizer,
 )

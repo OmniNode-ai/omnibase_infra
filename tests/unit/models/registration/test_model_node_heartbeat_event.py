@@ -17,9 +17,9 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.enums import EnumNodeKind
 from pydantic import ValidationError
 
+from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # Fixed test timestamp for deterministic testing (time injection pattern)

@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from omnibase_core.types import JsonType
 from pydantic import ConfigDict, Field
 
+from omnibase_core.types import JsonType
 from omnibase_infra.handlers.models.http.enum_http_operation_type import (
     EnumHttpOperationType,
 )

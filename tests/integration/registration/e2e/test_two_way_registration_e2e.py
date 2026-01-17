@@ -44,10 +44,10 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.enums import EnumIntrospectionReason, EnumRegistrationState
 from omnibase_infra.models.discovery import (
     DEFAULT_HEARTBEAT_TOPIC,
@@ -82,8 +82,8 @@ from .verification_helpers import (
 
 if TYPE_CHECKING:
     import asyncpg
-    from omnibase_core.container import ModelONEXContainer
 
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -1728,7 +1728,6 @@ class TestSuite5RegistryRecovery:
 
         # Step 2: Create a NEW container and orchestrator (simulating restart)
         from omnibase_core.container import ModelONEXContainer as ContainerClass
-
         from omnibase_infra.runtime.util_container_wiring import (
             wire_infrastructure_services,
             wire_registration_handlers,

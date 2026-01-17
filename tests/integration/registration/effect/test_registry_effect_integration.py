@@ -35,8 +35,8 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.nodes.effects import NodeRegistryEffect
 from omnibase_infra.nodes.effects.models import ModelRegistryRequest
 from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (

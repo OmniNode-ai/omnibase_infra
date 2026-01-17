@@ -28,8 +28,8 @@ from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.enums import EnumNodeKind
 
+from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import (

@@ -53,6 +53,8 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
+from pydantic import BaseModel
+
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
@@ -62,8 +64,6 @@ from omnibase_core.models.projectors import (
     ModelProjectorContract,
     ModelProjectorSchema,
 )
-from pydantic import BaseModel
-
 from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 # =============================================================================

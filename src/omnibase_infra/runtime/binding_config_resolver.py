@@ -108,7 +108,6 @@ from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-
     from omnibase_infra.runtime.secret_resolver import SecretResolver
 
 logger = logging.getLogger(__name__)

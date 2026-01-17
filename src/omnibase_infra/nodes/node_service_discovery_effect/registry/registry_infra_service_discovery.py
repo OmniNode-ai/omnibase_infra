@@ -46,7 +46,6 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
     from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
         ProtocolDiscoveryOperations,
     )

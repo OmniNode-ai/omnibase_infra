@@ -25,10 +25,10 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection

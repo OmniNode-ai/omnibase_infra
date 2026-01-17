@@ -141,12 +141,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast, overload
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
+
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import PrimitiveValue
-from pydantic import ValidationError
-
 from omnibase_infra.enums import (
     EnumDispatchStatus,
     EnumInfraTransportType,

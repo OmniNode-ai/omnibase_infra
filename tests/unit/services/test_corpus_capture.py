@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.errors import OnexError
 from omnibase_core.models.manifest.model_contract_identity import ModelContractIdentity
@@ -25,7 +26,6 @@ from omnibase_core.models.manifest.model_execution_manifest import (
 )
 from omnibase_core.models.manifest.model_node_identity import ModelNodeIdentity
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
 from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy

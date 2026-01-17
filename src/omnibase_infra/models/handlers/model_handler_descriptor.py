@@ -25,9 +25,10 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.types import JsonType
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 def _parse_version(v: ModelSemVer | str | dict[str, JsonType]) -> ModelSemVer:

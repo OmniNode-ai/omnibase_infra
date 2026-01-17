@@ -26,9 +26,9 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import ValidationError
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelStorageQuery,
     ModelUpsertResult,
