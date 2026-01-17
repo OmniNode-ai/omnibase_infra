@@ -86,6 +86,14 @@ SENSITIVE_PATTERNS: tuple[str, ...] = (
     # AWS-specific
     "aws_secret",
     "aws_access",
+    # Vault-specific
+    "vault_token",
+    "vault-token",
+    "x-vault-token",
+    # Consul-specific
+    "consul_http_token",
+    "consul-http-token",
+    "x-consul-token",
     # Database-specific
     "db_password",
     "database_password",
