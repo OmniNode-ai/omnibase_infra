@@ -28,6 +28,7 @@ This directory contains detailed implementation guides and best practices for ON
 
 ### Security
 - **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
+- **[Secret Resolver](./secret_resolver.md)** - Centralized secret resolution with caching, multiple sources (env, file, Vault), convention fallback, and migration guide
 - **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
 - **[Handler Plugin Loader](./handler_plugin_loader.md)** - Contract-driven handler discovery with comprehensive security documentation for dynamic imports, threat model, and deployment checklist
 
@@ -77,6 +78,9 @@ This directory contains detailed implementation guides and best practices for ON
 | Validate user input | [Security Patterns](./security_patterns.md) | Input Validation |
 | Configure TLS/SSL | [Security Patterns](./security_patterns.md) | Network Security |
 | Manage secrets with Vault | [Security Patterns](./security_patterns.md) | Secret Management |
+| Centralized secret resolution | [Secret Resolver](./secret_resolver.md) | Quick Start |
+| Migrate from os.getenv | [Secret Resolver](./secret_resolver.md) | Migration Guide |
+| Configure secret caching | [Secret Resolver](./secret_resolver.md) | Caching |
 | Connect to Consul | [Consul Integration](./consul_integration.md) | Connection Patterns |
 | Register service with Consul | [Consul Integration](./consul_integration.md) | Service Registration |
 | Consul health checks | [Consul Integration](./consul_integration.md) | Health Checks |
@@ -175,6 +179,12 @@ Security Patterns
     ├── Includes: Error sanitization, input validation, auth, secrets, network security
     ├── Depends on: All error patterns, Correlation ID Tracking
     └── References: Vault, Kafka, PostgreSQL, TLS configuration
+
+Secret Resolver
+    ├── Centralized secret resolution with caching
+    ├── Sources: Environment variables, file-based, Vault
+    ├── Depends on: Security Patterns, Error Handling
+    └── References: SecretResolver, ModelSecretResolverConfig, HandlerVault
 
 Handler Plugin Loader
     ├── Contract-driven handler discovery with dynamic imports
