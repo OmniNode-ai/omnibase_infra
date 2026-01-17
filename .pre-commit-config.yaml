@@ -80,6 +80,14 @@ repos:
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
+      # Root directory cleanliness - no ephemeral files in root
+      - id: onex-validate-clean-root
+        name: ONEX Root Directory Cleanliness
+        entry: poetry run python scripts/validate.py clean_root
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # Architecture validation - one model per file
       - id: onex-validate-architecture
         name: ONEX Architecture Validation
@@ -186,4 +194,4 @@ ci:
   autoupdate_schedule: weekly
   submodules: false
   # Skip ONEX validation hooks in CI (they require omnibase_core)
-  skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]
+  skip: [onex-validate-clean-root, onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]
