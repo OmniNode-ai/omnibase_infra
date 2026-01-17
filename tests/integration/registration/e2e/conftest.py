@@ -122,6 +122,7 @@ logger = logging.getLogger(__name__)
 # See tests/helpers/util_kafka.py for the canonical implementations.
 from tests.helpers.util_kafka import (
     KafkaTopicManager,
+    create_topic_factory_function,
     wait_for_consumer_ready,
     wait_for_topic_metadata,
 )
@@ -487,23 +488,10 @@ async def ensure_test_topic() -> AsyncGenerator[
         pytest.skip("Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)")
 
     # Use the shared KafkaTopicManager for topic lifecycle management
+    # Use create_topic_factory_function to avoid duplicating topic creation logic
     async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
-
-        async def _create_topic(topic_name: str, partitions: int = 1) -> str:
-            """Create a topic with the given name and partition count.
-
-            Args:
-                topic_name: Base name of the topic to create (UUID will be appended).
-                partitions: Number of partitions (default: 1).
-
-            Returns:
-                The full topic name with UUID suffix.
-            """
-            # Append UUID for parallel test isolation
-            unique_topic_name = f"{topic_name}-{uuid4().hex[:12]}"
-            return await manager.create_topic(unique_topic_name, partitions=partitions)
-
-        yield _create_topic
+        # UUID suffix for E2E test isolation (parallel test execution)
+        yield create_topic_factory_function(manager, add_uuid_suffix=True)
         # Cleanup is handled automatically by KafkaTopicManager context exit
 
 

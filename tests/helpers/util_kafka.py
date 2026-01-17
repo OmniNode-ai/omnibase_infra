@@ -52,6 +52,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import socket
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -271,7 +273,7 @@ def get_kafka_error_hint(error_code: int, error_message: str = "") -> str:
 _BARE_IPV6_PATTERN = re.compile(r"^[0-9a-fA-F:.]+$")
 
 
-def _is_likely_bare_ipv6(address: str) -> bool:
+def _is_likely_bare_ipv6(address: str, warn_ambiguous: bool = True) -> bool:
     """Detect if address appears to be a bare IPv6 address without brackets.
 
     This is a heuristic check based on:
@@ -279,16 +281,24 @@ def _is_likely_bare_ipv6(address: str) -> bool:
     - Does not start with '[' (bracketed IPv6 uses [::1]:port format)
     - Contains only valid IPv6 characters (hex digits, colons, dots for v4 suffix)
 
-    Note:
-        Bare IPv6 addresses with ports are ambiguous. For example, "::1:9092"
-        could be interpreted as IPv6 "::1" with port 9092, or as the full
-        IPv6 address "::1:9092". This function treats such addresses as bare
-        IPv6 (the entire string is the host, use default port).
+    Ambiguity Warning:
+        Bare IPv6 addresses with port-like suffixes are ambiguous. For example,
+        "::1:9092" could be interpreted as:
+        - IPv6 address "::1" with port 9092
+        - Full IPv6 address "::1:9092" without a port
+
+        This function treats such addresses as bare IPv6 (the entire string is
+        the host, using default port). When warn_ambiguous=True (default), a
+        warning is logged for addresses that end with a segment that looks like
+        a common port number (1-65535 range with 4-5 digits).
 
         For unambiguous IPv6 with port, use bracketed format: [::1]:9092
 
     Args:
         address: The address string to check.
+        warn_ambiguous: If True, log a warning when the address ends with a
+            segment that looks like a port number (e.g., ":9092"). This helps
+            users identify potentially ambiguous configurations. Default: True.
 
     Returns:
         True if the address appears to be a bare IPv6 address.
@@ -317,7 +327,37 @@ def _is_likely_bare_ipv6(address: str) -> bool:
 
     # Check if it contains only valid IPv6 characters
     # Allows: hex digits (0-9, a-f, A-F), colons, and dots (for IPv4-mapped)
-    return bool(_BARE_IPV6_PATTERN.fullmatch(address))
+    is_bare_ipv6: bool = bool(_BARE_IPV6_PATTERN.fullmatch(address))
+
+    # Warn about ambiguous addresses that look like they might have a port
+    # e.g., "::1:9092" could be "::1" with port 9092 or IPv6 "::1:9092"
+    if is_bare_ipv6 and warn_ambiguous:
+        # Extract the last segment after the final colon
+        last_colon_idx: int = address.rfind(":")
+        if last_colon_idx > 0:
+            last_segment: str = address[last_colon_idx + 1 :]
+            # Check if last segment looks like a port number (4-5 decimal digits)
+            # Common ports: 9092 (Kafka), 29092 (Redpanda external), etc.
+            if last_segment.isdigit() and len(last_segment) >= 4:
+                port_value: int = int(last_segment)
+                if 1024 <= port_value <= 65535:
+                    logger.warning(
+                        "Ambiguous bare IPv6 address detected: '%s'. "
+                        "The trailing segment '%s' looks like a port number, but "
+                        "is being treated as part of the IPv6 address. "
+                        "If you intended to specify a port, use bracketed format: "
+                        "'[%s]:%s' (assuming address is '%s' without the last segment). "
+                        "Current interpretation: host='%s', port=%d (default).",
+                        address,
+                        last_segment,
+                        address[:last_colon_idx],
+                        last_segment,
+                        address[:last_colon_idx],
+                        address,
+                        KAFKA_DEFAULT_PORT,
+                    )
+
+    return is_bare_ipv6
 
 
 def normalize_ipv6_bootstrap_server(bootstrap_server: str) -> str:
@@ -360,6 +400,93 @@ def normalize_ipv6_bootstrap_server(bootstrap_server: str) -> str:
 
     # Standard format (hostname:port or IPv4:port) - return as-is
     return stripped
+
+
+def check_host_reachability(
+    host: str,
+    port: int,
+    timeout: float = 5.0,
+) -> tuple[bool, str | None]:
+    """Check if a host:port is reachable using IPv6-aware socket connection.
+
+    Uses socket.getaddrinfo() for address family agnostic resolution, which
+    correctly handles both IPv4 and IPv6 addresses. This is preferred over
+    manual address parsing for reachability checks.
+
+    Args:
+        host: The hostname or IP address to check. IPv6 addresses should be
+            provided without brackets (e.g., "::1" not "[::1]").
+        port: The port number to connect to.
+        timeout: Connection timeout in seconds (default: 5.0).
+
+    Returns:
+        A tuple of (is_reachable, error_message). If reachable, error_message
+        is None. If not reachable, error_message contains the failure reason.
+
+    Examples:
+        >>> is_reachable, error = check_host_reachability("localhost", 9092)
+        >>> if not is_reachable:
+        ...     print(f"Connection failed: {error}")
+
+        >>> # IPv6 loopback
+        >>> is_reachable, error = check_host_reachability("::1", 9092)
+
+        >>> # IPv4-mapped IPv6
+        >>> is_reachable, error = check_host_reachability("::ffff:127.0.0.1", 9092)
+
+    Note:
+        This function is for diagnostic purposes in tests and error messages.
+        It should not be used as a health check in production code - use
+        proper health endpoints instead.
+    """
+    # Strip brackets from IPv6 if present (defensive - shouldn't happen but safe)
+    clean_host: str = host
+    if host.startswith("[") and host.endswith("]"):
+        clean_host = host[1:-1]
+
+    try:
+        # Use getaddrinfo for address family agnostic resolution
+        # This handles IPv4, IPv6, and hostnames correctly
+        # Returns list of (family, type, proto, canonname, sockaddr) tuples
+        addr_info = socket.getaddrinfo(
+            clean_host,
+            port,
+            socket.AF_UNSPEC,  # Any address family (IPv4 or IPv6)
+            socket.SOCK_STREAM,  # TCP
+        )
+
+        if not addr_info:
+            return (False, f"No address info found for {clean_host}:{port}")
+
+        # Try each resolved address until one succeeds
+        last_error: str | None = None
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            try:
+                with socket.socket(family, socktype, proto) as sock:
+                    sock.settimeout(timeout)
+                    sock.connect(sockaddr)
+                    return (True, None)
+            except OSError as e:
+                # Record error but try next address
+                # sockaddr is (host, port) for IPv4 or (host, port, flow, scope) for IPv6
+                # sockaddr[0] is always the host string, but mypy needs explicit str()
+                addr_str: str
+                if isinstance(sockaddr, tuple) and len(sockaddr) > 0:
+                    addr_str = str(sockaddr[0])
+                else:
+                    addr_str = str(sockaddr)
+                last_error = f"{addr_str}: {e}"
+                continue
+
+        return (False, f"All addresses failed. Last error: {last_error}")
+
+    except socket.gaierror as e:
+        # DNS resolution failure
+        return (False, f"DNS resolution failed for {clean_host}: {e}")
+    except TimeoutError:
+        return (False, f"Connection timed out after {timeout}s")
+    except OSError as e:
+        return (False, f"Socket error: {e}")
 
 
 class KafkaConfigValidationResult:
@@ -1154,7 +1281,24 @@ class KafkaTopicManager:
                         continue
 
                     _topic_name: str = str(topic_error_tuple[0])
-                    topic_error_code: int = int(topic_error_tuple[1])
+                    # Extract error code with type-safe handling
+                    # Kafka protocol returns int, but tuple is typed as object
+                    raw_error_code = topic_error_tuple[1]
+                    topic_error_code: int
+                    if isinstance(raw_error_code, int):
+                        topic_error_code = raw_error_code
+                    elif isinstance(raw_error_code, str) and raw_error_code.isdigit():
+                        topic_error_code = int(raw_error_code)
+                    else:
+                        # Unexpected type - log warning and skip this entry
+                        logger.warning(
+                            "Unexpected error code type in topic_error tuple: "
+                            "type=%s, value=%r, tuple=%r",
+                            type(raw_error_code).__name__,
+                            raw_error_code,
+                            topic_error_tuple,
+                        )
+                        continue
                     # Protocol v1+ includes error_message as third element
                     topic_error_message: str = (
                         str(topic_error_tuple[2])
@@ -1283,6 +1427,59 @@ class KafkaTopicManager:
         return self._admin
 
 
+# =============================================================================
+# Topic Fixture Factory Helper
+# =============================================================================
+
+
+def create_topic_factory_function(
+    manager: KafkaTopicManager,
+    add_uuid_suffix: bool = False,
+) -> Callable[[str, int], Coroutine[object, object, str]]:
+    """Create a topic factory function for use in pytest fixtures.
+
+    This helper eliminates duplication between conftest.py files that need
+    to create test topics with similar patterns but different configurations.
+
+    The returned callable creates topics using the provided KafkaTopicManager
+    and optionally adds UUID suffixes for parallel test isolation.
+
+    Args:
+        manager: KafkaTopicManager instance to use for topic operations.
+        add_uuid_suffix: If True, append a UUID hex suffix to topic names
+            for parallel test isolation. Default: False.
+
+    Returns:
+        Async callable that creates topics with the given name and partition count.
+
+    Example:
+        >>> async with KafkaTopicManager(bootstrap_servers) as manager:
+        ...     create_topic = create_topic_factory_function(manager, add_uuid_suffix=True)
+        ...     topic = await create_topic("test.integration.mytopic", 3)
+        ...     # topic is "test.integration.mytopic-<uuid12>"
+    """
+
+    async def _create_topic(topic_name: str, partitions: int = 1) -> str:
+        """Create a topic with the given name and partition count.
+
+        Args:
+            topic_name: Base name of the topic to create.
+            partitions: Number of partitions (default: 1).
+
+        Returns:
+            The actual topic name (may include UUID suffix).
+        """
+        actual_topic_name = topic_name
+        if add_uuid_suffix:
+            actual_topic_name = f"{topic_name}-{uuid4().hex[:12]}"
+
+        return await manager.create_topic(actual_topic_name, partitions=partitions)
+
+    # Type annotation for the return type
+    factory: Callable[[str, int], Coroutine[object, object, str]] = _create_topic
+    return factory
+
+
 __all__ = [
     # Consumer readiness
     "wait_for_consumer_ready",
@@ -1290,6 +1487,8 @@ __all__ = [
     "wait_for_topic_metadata",
     # Topic management
     "KafkaTopicManager",
+    # Topic fixture helpers
+    "create_topic_factory_function",
     # Error code constants (Kafka protocol error codes)
     "KAFKA_ERROR_REMEDIATION_HINTS",
     "KAFKA_ERROR_TOPIC_ALREADY_EXISTS",
@@ -1310,6 +1509,7 @@ __all__ = [
     # Utilities
     "parse_bootstrap_servers",
     "normalize_ipv6_bootstrap_server",
+    "check_host_reachability",
     # Validation
     "validate_bootstrap_servers",
     "KafkaConfigValidationResult",

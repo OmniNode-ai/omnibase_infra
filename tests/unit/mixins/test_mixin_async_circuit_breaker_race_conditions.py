@@ -16,15 +16,16 @@ Test Design Notes:
     - All tests use asyncio.gather() for true concurrent execution
     - Tests use deterministic assertions that account for valid race outcomes
       (e.g., "circuit is open OR we observed InfraUnavailableError")
-    - Tests with timing dependencies use long reset_timeouts (60s) to prevent
-      auto-transitions during test execution, avoiding CI flakiness
+    - Tests with timing dependencies use long reset_timeouts (60s) to ensure
+      deterministic state (no auto-transitions during test execution)
     - Lock-based synchronization ensures correct state access patterns
 
 Reliability:
-    These tests are designed to be CI-stable by:
-    - Avoiding absolute timing assertions
-    - Accepting all valid concurrent execution outcomes
-    - Using explicit synchronization where needed
+    These tests are designed to be deterministic and CI-stable through:
+    - Avoiding timing-based assertions that depend on execution speed
+    - Using long reset_timeouts where state must remain stable during assertions
+    - Accepting all valid concurrent execution outcomes (race-condition-aware)
+    - Using explicit synchronization for shared state access
 """
 
 from __future__ import annotations
@@ -238,20 +239,16 @@ class TestConcurrentFailureRecording:
         """Test that concurrent failures properly trigger circuit open.
 
         This test verifies that when failures exceed threshold, the circuit
-        breaker opens. We use a long reset_timeout to prevent auto-transition
-        to HALF_OPEN during test execution.
+        breaker opens. We use a long reset_timeout (60s) to ensure the circuit
+        remains open for the final state assertion - no auto-transition to
+        HALF_OPEN can occur during test execution.
 
-        The test validates circuit breaker behavior by checking that EITHER:
-        1. The final state shows circuit is open, OR
-        2. At least one operation received InfraUnavailableError (circuit opened
-           during execution and blocked subsequent operations)
-
-        Note: Uses its own service instance with long reset_timeout (60s) to
-        prevent timing-related flakiness in CI environments where the default
-        0.1s timeout could elapse during concurrent operation execution.
+        With 5 concurrent operations exceeding the threshold of 3, and a 60s
+        reset_timeout, the circuit MUST be open when we check the final state.
+        The long timeout makes this deterministic rather than timing-dependent.
         """
-        # Use long reset_timeout to prevent auto-transition to HALF_OPEN
-        # during test execution (prevents CI flakiness)
+        # Use long reset_timeout (60s) to ensure circuit remains open for
+        # final state assertion - no auto-transition to HALF_OPEN is possible
         service = MockServiceWithCircuitBreaker(threshold=3, reset_timeout=60.0)
 
         num_concurrent = 5  # More than threshold (3)
@@ -266,7 +263,7 @@ class TestConcurrentFailureRecording:
             except ValueError:
                 pass  # Expected failure before circuit opened
             except InfraUnavailableError:
-                # Circuit opened during concurrent operations - this is success!
+                # Circuit opened during concurrent operations
                 async with lock:
                     circuit_open_count += 1
             except Exception as e:
@@ -277,16 +274,15 @@ class TestConcurrentFailureRecording:
 
         assert len(errors) == 0, f"Unexpected errors: {errors}"
 
-        # Verify circuit breaker behavior: EITHER circuit is open now OR
-        # we observed it open during execution (InfraUnavailableError)
+        # With 60s reset_timeout, the circuit MUST be open at this point.
+        # The long timeout ensures no auto-transition to HALF_OPEN occurred.
         state = await service.get_circuit_state()
-        circuit_triggered = state["open"] is True or circuit_open_count > 0
 
-        assert circuit_triggered, (
-            f"Circuit breaker should have triggered: "
-            f"final_state_open={state['open']}, "
-            f"failures={state['failures']}, "
-            f"circuit_open_errors_seen={circuit_open_count}"
+        assert state["open"] is True, (
+            f"Circuit breaker MUST be open with 60s reset_timeout. "
+            f"Got: open={state['open']}, failures={state['failures']}, "
+            f"circuit_open_errors_during_execution={circuit_open_count}. "
+            f"This indicates a bug in circuit breaker state management."
         )
 
 

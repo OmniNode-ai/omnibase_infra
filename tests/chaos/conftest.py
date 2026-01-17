@@ -40,6 +40,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -47,6 +48,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
 )
 from omnibase_infra.idempotency import StoreIdempotencyInmemory
+from omnibase_infra.models.errors import ModelTimeoutErrorContext
 
 # =============================================================================
 # Module-Level Markers - IMPORTANT PYTEST BEHAVIOR
@@ -341,9 +343,10 @@ class FailureInjector:
         """
         if self.should_timeout():
             self.timeout_count += 1
-            context = ModelInfraErrorContext(
+            context = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,  # Default for chaos simulation
                 operation=operation,
-                correlation_id=correlation_id,
+                correlation_id=correlation_id if correlation_id else uuid4(),
             )
             raise InfraTimeoutError(
                 f"Chaos injection: simulated timeout in '{operation}'",

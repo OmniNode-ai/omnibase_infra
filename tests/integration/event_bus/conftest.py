@@ -127,6 +127,7 @@ from tests.helpers.util_kafka import (
     KAFKA_ERROR_TOPIC_ALREADY_EXISTS,
     KafkaConfigValidationResult,
     KafkaTopicManager,
+    create_topic_factory_function,
     get_kafka_error_hint,
     parse_bootstrap_servers,
     validate_bootstrap_servers,
@@ -242,21 +243,10 @@ async def ensure_test_topic() -> AsyncGenerator[
     )
 
     # Use the shared KafkaTopicManager for topic lifecycle management
+    # Use create_topic_factory_function to avoid duplicating topic creation logic
     async with KafkaTopicManager(KAFKA_BOOTSTRAP_SERVERS) as manager:
-
-        async def _create_topic(topic_name: str, partitions: int = 1) -> str:
-            """Create a topic with the given name and partition count.
-
-            Args:
-                topic_name: Name of the topic to create.
-                partitions: Number of partitions (default: 1).
-
-            Returns:
-                The topic name (for chaining convenience).
-            """
-            return await manager.create_topic(topic_name, partitions=partitions)
-
-        yield _create_topic
+        # No UUID suffix for integration tests (caller controls naming)
+        yield create_topic_factory_function(manager, add_uuid_suffix=False)
         # Cleanup is handled automatically by KafkaTopicManager context exit
 
 

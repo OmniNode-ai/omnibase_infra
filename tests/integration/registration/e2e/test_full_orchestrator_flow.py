@@ -97,7 +97,7 @@ pytestmark = [
 # =============================================================================
 
 # Pre-existing topic used for E2E tests. This topic must exist in Kafka/Redpanda
-# before running tests. The ensure_test_topic_exists fixture validates topic
+# before running tests. The validate_test_topic_exists fixture validates topic
 # existence and fails fast with clear error messages if the topic is missing.
 #
 # Test Isolation Strategy:
@@ -726,7 +726,7 @@ async def orchestrator_pipeline(
 
 
 @pytest.fixture
-async def ensure_test_topic_exists(
+async def validate_test_topic_exists(
     real_kafka_event_bus: EventBusKafka,
 ) -> str:
     """Validate and return the pre-existing test topic name.
@@ -1008,7 +1008,7 @@ async def ensure_test_topic_exists(
 async def running_orchestrator_consumer(
     real_kafka_event_bus: EventBusKafka,
     orchestrator_pipeline: OrchestratorTestContext,
-    ensure_test_topic_exists: str,  # Ensures topic exists before subscribing
+    validate_test_topic_exists: str,  # Ensures topic exists before subscribing
 ) -> AsyncGenerator[OrchestratorTestContext, None]:
     """Start a Kafka consumer that routes messages through the pipeline.
 
@@ -1027,7 +1027,7 @@ async def running_orchestrator_consumer(
     Args:
         real_kafka_event_bus: Real Kafka event bus (configured with enable_auto_commit=False).
         orchestrator_pipeline: Context containing pipeline and connected mocks.
-        ensure_test_topic_exists: Fixture that validates the topic is ready.
+        validate_test_topic_exists: Fixture that validates the topic is ready.
 
     Yields:
         OrchestratorTestContext with pipeline, mocks, and unsubscribe function.
@@ -1041,14 +1041,14 @@ async def running_orchestrator_consumer(
     unique_group_id = f"e2e-orchestrator-test-{uuid4().hex[:8]}"
     # Subscribe to the introspection topic (topic is guaranteed to exist)
     unsubscribe = await real_kafka_event_bus.subscribe(
-        topic=ensure_test_topic_exists,  # Use the ensured topic name
+        topic=validate_test_topic_exists,  # Use the ensured topic name
         group_id=unique_group_id,
         on_message=orchestrator_pipeline.pipeline.process_message,
     )
 
     # Wait for consumer to be ready to receive messages.
     # See wait_for_consumer_ready docstring for known limitations.
-    await wait_for_consumer_ready(real_kafka_event_bus, ensure_test_topic_exists)
+    await wait_for_consumer_ready(real_kafka_event_bus, validate_test_topic_exists)
 
     # Create a new context with the unsubscribe function included
     context = OrchestratorTestContext(
@@ -1558,7 +1558,7 @@ class TestPipelineLifecycle:
         self,
         real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
-        ensure_test_topic_exists: str,
+        validate_test_topic_exists: str,
     ) -> None:
         """Test that consumer starts and receives messages.
 
@@ -1571,9 +1571,9 @@ class TestPipelineLifecycle:
             received_messages.append(msg)
             message_received.set()
 
-        # Subscribe (topic is guaranteed to exist via ensure_test_topic_exists fixture)
+        # Subscribe (topic is guaranteed to exist via validate_test_topic_exists fixture)
         unsubscribe = await real_kafka_event_bus.subscribe(
-            topic=ensure_test_topic_exists,
+            topic=validate_test_topic_exists,
             group_id=f"lifecycle-test-{unique_correlation_id.hex[:8]}",
             on_message=handler,
         )
@@ -1582,7 +1582,7 @@ class TestPipelineLifecycle:
             # Wait for consumer to be ready to receive messages.
             # See wait_for_consumer_ready docstring for known limitations.
             await wait_for_consumer_ready(
-                real_kafka_event_bus, ensure_test_topic_exists
+                real_kafka_event_bus, validate_test_topic_exists
             )
 
             # Publish test message
@@ -1594,7 +1594,7 @@ class TestPipelineLifecycle:
             )
 
             await real_kafka_event_bus.publish(
-                topic=ensure_test_topic_exists,
+                topic=validate_test_topic_exists,
                 key=b"test-key",
                 value=b'{"test": true}',
                 headers=headers,
@@ -1615,7 +1615,7 @@ class TestPipelineLifecycle:
         self,
         real_kafka_event_bus: EventBusKafka,
         unique_correlation_id: UUID,
-        ensure_test_topic_exists: str,
+        validate_test_topic_exists: str,
     ) -> None:
         """Test that consumer handles shutdown without errors.
 
@@ -1629,7 +1629,7 @@ class TestPipelineLifecycle:
 
         # Subscribe and immediately unsubscribe (topic is guaranteed to exist)
         unsubscribe = await real_kafka_event_bus.subscribe(
-            topic=ensure_test_topic_exists,
+            topic=validate_test_topic_exists,
             group_id=f"shutdown-test-{unique_correlation_id.hex[:8]}",
             on_message=handler,
         )
@@ -1637,7 +1637,7 @@ class TestPipelineLifecycle:
         # Brief wait before testing shutdown (tests cleanup, not message receipt).
         # Using wait_for_consumer_ready for consistency, though this test doesn't
         # actually need to receive messages.
-        await wait_for_consumer_ready(real_kafka_event_bus, ensure_test_topic_exists)
+        await wait_for_consumer_ready(real_kafka_event_bus, validate_test_topic_exists)
 
         # Unsubscribe should not raise
         await unsubscribe()
