@@ -18,8 +18,8 @@ All tests validate:
 from uuid import uuid4
 
 import pytest
-from omnibase_core.errors import ModelOnexError
 
+from omnibase_core.errors import ModelOnexError
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     EventBusRegistryError,

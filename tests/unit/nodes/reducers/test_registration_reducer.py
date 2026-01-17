@@ -36,13 +36,13 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
+
 from omnibase_core.enums import EnumReductionType, EnumStreamingMode
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
-from pydantic import ValidationError
-
 from omnibase_infra.enums import EnumConfirmationEventType
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,

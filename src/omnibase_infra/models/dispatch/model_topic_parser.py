@@ -122,7 +122,6 @@ import re
 from functools import lru_cache
 
 from omnibase_core.enums import EnumTopicType
-
 from omnibase_infra.enums import EnumMessageCategory, EnumTopicStandard
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 from omnibase_infra.types import TypeCacheInfo

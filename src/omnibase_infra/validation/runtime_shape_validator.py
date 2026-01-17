@@ -158,7 +158,6 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
-
 from omnibase_infra.enums import (
     EnumExecutionShapeViolation,
     EnumInfraTransportType,

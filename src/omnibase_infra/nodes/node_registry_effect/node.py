@@ -57,7 +57,6 @@ from omnibase_core.nodes.node_effect import NodeEffect
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
     from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
     from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
         ProtocolPostgresAdapter,

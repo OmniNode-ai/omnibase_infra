@@ -452,7 +452,6 @@ class TestHandlerContractSourceErrors:
         failed to parse, not a generic YAML parsing error.
         """
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -472,7 +471,6 @@ class TestHandlerContractSourceErrors:
     async def test_raises_on_nonexistent_path(self, tmp_path: Path) -> None:
         """discover_handlers() should raise for non-existent contract paths."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -492,7 +490,6 @@ class TestHandlerContractSourceErrors:
     def test_raises_on_empty_contract_paths(self) -> None:
         """HandlerContractSource should raise if contract_paths is empty."""
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -1918,7 +1915,6 @@ output_model: "test.models.Output"
         import stat
 
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.handler_contract_source import (
             HandlerContractSource,
         )
@@ -2019,7 +2015,6 @@ output_model: "test.models.Output"
         from unittest.mock import patch
 
         from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
         from omnibase_infra.runtime.handler_contract_source import (
             MAX_CONTRACT_SIZE,
             HandlerContractSource,

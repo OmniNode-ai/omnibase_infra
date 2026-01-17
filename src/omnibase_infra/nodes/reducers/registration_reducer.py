@@ -346,11 +346,11 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel, ConfigDict, field_validator
+
 from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
-from pydantic import BaseModel, ConfigDict, field_validator
-
 from omnibase_infra.enums import EnumConfirmationEventType
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,

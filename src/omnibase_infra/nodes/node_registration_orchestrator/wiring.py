@@ -57,8 +57,8 @@ class WiringResult(TypedDict):
 
 if TYPE_CHECKING:
     import asyncpg
-    from omnibase_core.container import ModelONEXContainer
 
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.handlers.handler_consul import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
@@ -395,7 +395,6 @@ async def wire_registration_handlers(
     _validate_service_registry(container, "wire_registration_handlers")
 
     from omnibase_core.models.primitives import ModelSemVer
-
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,

@@ -385,7 +385,6 @@ class TestOrchestratorIsPureCoordinator:
         break if source formatting changes.
         """
         from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
-
         from omnibase_infra.nodes.node_registration_orchestrator.node import (
             NodeRegistrationOrchestrator,
         )

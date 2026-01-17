@@ -16,8 +16,8 @@ Registry classes covered:
 from datetime import UTC
 
 import pytest
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
+from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.errors import (
     ComputeRegistryError,

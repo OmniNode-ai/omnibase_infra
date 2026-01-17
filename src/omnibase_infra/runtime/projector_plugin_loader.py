@@ -35,12 +35,12 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import yaml
+from pydantic import ValidationError
+
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.projectors import ModelProjectorContract
-from pydantic import ValidationError
-
 from omnibase_infra.models.projectors import (
     ModelProjectorDiscoveryResult,
     ModelProjectorValidationError,

@@ -26,8 +26,8 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import hvac
-from omnibase_core.models.dispatch import ModelHandlerOutput
 
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,

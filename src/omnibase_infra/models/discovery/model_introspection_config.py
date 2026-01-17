@@ -24,8 +24,9 @@ import re
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from omnibase_core.enums import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_core.enums import EnumNodeKind
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus

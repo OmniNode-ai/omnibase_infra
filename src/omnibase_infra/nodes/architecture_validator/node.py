@@ -45,7 +45,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_compute import NodeCompute
-
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.nodes.architecture_validator.models.model_architecture_violation import (

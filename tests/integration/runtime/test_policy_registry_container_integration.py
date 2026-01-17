@@ -21,6 +21,7 @@ Design Principles:
 from __future__ import annotations
 
 import pytest
+
 from omnibase_core.container import ModelONEXContainer
 
 # Skip message for omnibase_core 0.6.2 circular import bug

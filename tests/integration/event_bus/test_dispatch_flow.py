@@ -741,7 +741,6 @@ class TestDispatchResult:
     def test_dispatch_result_with_error_transformation(self) -> None:
         """Verify with_error() creates new result with error info."""
         from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-
         from omnibase_infra.models.dispatch import (
             EnumDispatchStatus,
             ModelDispatchResult,

@@ -34,10 +34,10 @@ from unittest.mock import ANY, AsyncMock
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
-from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import ValidationError
 
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import (
     InfraConnectionError,

@@ -47,8 +47,8 @@ from uuid import UUID, uuid4
 
 # Import asyncpg at module level to avoid redundant imports inside methods
 import asyncpg
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,

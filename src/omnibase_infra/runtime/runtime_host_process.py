@@ -74,8 +74,6 @@ from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
-
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.idempotency import ModelIdempotencyGuardConfig
     from omnibase_infra.idempotency.protocol_idempotency_store import (
@@ -85,6 +83,7 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
+    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 from omnibase_infra.models.types import JsonDict
 

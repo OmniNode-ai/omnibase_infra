@@ -13,9 +13,9 @@ from typing import Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )

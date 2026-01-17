@@ -20,10 +20,10 @@ All tests validate:
 from uuid import uuid4
 
 import pytest
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.errors import ModelOnexError
 from pydantic import ValidationError
 
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.errors import ModelOnexError
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.errors.error_infra import (

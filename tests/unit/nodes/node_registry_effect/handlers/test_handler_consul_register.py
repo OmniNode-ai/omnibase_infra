@@ -20,9 +20,9 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 from omnibase_infra.nodes.node_registry_effect.handlers.handler_consul_register import (
     HandlerConsulRegister,

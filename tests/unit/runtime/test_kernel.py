@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
-from omnibase_core.container import ModelONEXContainer
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import ProtocolConfigurationError
 
 # Import shared service registry availability check

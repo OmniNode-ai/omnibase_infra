@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 if TYPE_CHECKING:

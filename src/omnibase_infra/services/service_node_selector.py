@@ -44,7 +44,6 @@ from typing import TYPE_CHECKING, NamedTuple, Never
 from uuid import UUID, uuid4
 
 from omnibase_core.container import ModelONEXContainer
-
 from omnibase_infra.enums import EnumSelectionStrategy
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 

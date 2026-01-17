@@ -117,7 +117,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from omnibase_core.types import JsonType
-
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.handlers.handler_consul import HandlerConsul

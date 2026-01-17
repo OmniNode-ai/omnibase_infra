@@ -64,10 +64,10 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from pydantic import ValidationError
 
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumDispatchStatus,
     EnumInfraTransportType,

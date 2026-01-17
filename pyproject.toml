@@ -249,6 +249,14 @@ ignore = [
     "TC006",     # Add quotes to type expression in cast (style preference)
 ]
 
+[tool.ruff.lint.isort]
+# Ensure consistent import sorting between local and CI
+known-first-party = ["omnibase_infra", "omnibase_core", "omnibase_spi", "tests"]
+# Force combine as imports for consistency
+force-single-line = false
+# Split imports from same package
+split-on-trailing-comma = true
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

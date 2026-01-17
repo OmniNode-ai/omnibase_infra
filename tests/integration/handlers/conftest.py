@@ -112,7 +112,6 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
-
     from omnibase_infra.handlers import HandlerConsul, HandlerDb, HandlerVault
 
 

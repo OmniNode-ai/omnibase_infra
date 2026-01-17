@@ -31,8 +31,8 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,

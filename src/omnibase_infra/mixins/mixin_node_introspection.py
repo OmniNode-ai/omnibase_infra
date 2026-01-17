@@ -208,7 +208,6 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.enums import EnumInfraTransportType, EnumIntrospectionReason
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.discovery import (
@@ -229,7 +228,6 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
-
     from omnibase_infra.event_bus.models import ModelEventMessage
 
 logger = logging.getLogger(__name__)

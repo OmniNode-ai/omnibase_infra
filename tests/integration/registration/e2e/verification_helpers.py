@@ -26,9 +26,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from omnibase_core.enums import EnumNodeKind
 from pydantic import ValidationError
 
+from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
@@ -46,9 +46,9 @@ from omnibase_infra.models.registration import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from pydantic import BaseModel
 
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.projectors import ProjectionReaderRegistration

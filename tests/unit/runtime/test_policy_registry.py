@@ -22,8 +22,8 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
-from omnibase_core.models.primitives.model_semver import ModelSemVer
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.runtime.models import ModelPolicyKey

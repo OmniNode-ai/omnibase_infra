@@ -5,8 +5,8 @@
 from datetime import UTC, datetime
 
 import pytest
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
+from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.registry.model_domain_constraint import (
     ModelDomainConstraint,

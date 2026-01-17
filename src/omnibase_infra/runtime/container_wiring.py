@@ -55,7 +55,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from omnibase_core.models.primitives import ModelSemVer
-
 from omnibase_infra.errors import ServiceRegistryUnavailableError
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
@@ -63,8 +62,8 @@ from omnibase_infra.runtime.registry_compute import RegistryCompute
 
 if TYPE_CHECKING:
     import asyncpg
-    from omnibase_core.container import ModelONEXContainer
 
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,

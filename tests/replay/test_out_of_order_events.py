@@ -71,7 +71,6 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 
 if TYPE_CHECKING:
     from omnibase_core.nodes import ModelReducerOutput
-
     from tests.replay.conftest import EventFactory, EventSequenceLog
 
 

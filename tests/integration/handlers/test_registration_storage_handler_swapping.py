@@ -41,9 +41,9 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-
 from omnibase_infra.handlers.registration_storage.handler_mock_registration_storage import (
     MockRegistrationStorageHandler,
 )

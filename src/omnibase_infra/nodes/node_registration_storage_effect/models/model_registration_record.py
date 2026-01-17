@@ -31,9 +31,10 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelRegistrationRecord(BaseModel):

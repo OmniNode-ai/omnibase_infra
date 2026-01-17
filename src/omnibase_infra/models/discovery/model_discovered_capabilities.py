@@ -2,8 +2,9 @@
 # Copyright (c) 2025 OmniNode Team
 """Model for capabilities discovered via runtime reflection."""
 
-from omnibase_core.types import JsonType
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_core.types import JsonType
 
 
 class ModelDiscoveredCapabilities(BaseModel):
