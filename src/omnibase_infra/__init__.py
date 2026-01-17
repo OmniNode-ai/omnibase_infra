@@ -76,6 +76,8 @@ See Also
 - Runtime kernel: omnibase_infra.runtime.service_kernel
 """
 
+__version__ = "0.2.0"
+
 from . import (
     enums,
     models,
@@ -91,6 +93,7 @@ from . import (
 #   from omnibase_infra.errors import InfraConnectionError
 #   from omnibase_infra.runtime import RegistryPolicy
 __all__: list[str] = [
+    "__version__",
     "enums",
     "models",
     "nodes",
