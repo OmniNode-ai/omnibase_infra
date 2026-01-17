@@ -3,7 +3,7 @@
 """Centralized secret resolution for ONEX infrastructure.
 
 SecretResolver provides a unified interface for accessing secrets from multiple sources:
-- Vault (if configured) - **STUB: Not yet implemented, raises NotImplementedError**
+- Vault (via HandlerVault for KV v2 secrets engine)
 - Environment variables
 - File-based secrets (K8s /run/secrets)
 
@@ -11,6 +11,7 @@ Design Philosophy:
 - Dumb and deterministic: resolves and caches, does not discover or mutate
 - Explicit mappings preferred, convention fallback optional
 - Bootstrap secrets (Vault token/addr) always from env
+- Vault is treated as an injected dependency, SecretResolver owns mapping + caching + policy
 
 Example:
     Bootstrap phase (env-only for Vault credentials)::
@@ -18,15 +19,30 @@ Example:
         vault_token = os.environ.get("VAULT_TOKEN")
         vault_addr = os.environ.get("VAULT_ADDR")
 
-    Initialize resolver::
+    Initialize resolver with Vault handler::
+
+        vault_handler = HandlerVault()
+        await vault_handler.initialize({...})
 
         config = ModelSecretResolverConfig(mappings=[...])
         resolver = SecretResolver(config=config, vault_handler=vault_handler)
 
-    Resolve secrets::
+    Resolve secrets with correlation ID for tracing::
 
-        db_password = resolver.get_secret("database.postgres.password")
-        api_key = resolver.get_secret("llm.openai.api_key", required=False)
+        db_password = resolver.get_secret(
+            "database.postgres.password",
+            correlation_id=request.correlation_id,
+        )
+        api_key = await resolver.get_secret_async(
+            "llm.openai.api_key",
+            required=False,
+            correlation_id=request.correlation_id,
+        )
+
+    Get resolution metrics::
+
+        metrics = resolver.get_resolution_metrics()
+        # {"success_counts": {"env": 5, "vault": 3}, "failure_counts": {...}, ...}
 
 Security Considerations:
     - Secret values are wrapped in SecretStr to prevent accidental logging
@@ -36,6 +52,7 @@ Security Considerations:
     - File paths are never logged (prevents information disclosure)
     - Path traversal attacks are blocked for file-based secrets
     - Bootstrap secrets bypass normal resolution to prevent circular dependencies
+    - Vault paths are never logged (could reveal secret structure)
 
 Memory Handling:
     Raw secret values (plain strings) are briefly held in local variables during
@@ -50,28 +67,45 @@ Memory Handling:
     The brief exposure window is minimized by immediately wrapping values in SecretStr
     after retrieval and never storing raw strings in instance attributes.
 
-Vault Integration Status:
-    The Vault integration is currently a **stub implementation**. When a secret is
-    configured with source_type="vault":
+Vault Integration:
+    Vault secrets are resolved via HandlerVault (KV v2 secrets engine only).
 
-    - If vault_handler is None: Returns None with a warning log (graceful degradation)
-    - If vault_handler is provided: Raises NotImplementedError with guidance
+    Path Format: "mount_point/path/to/secret#field"
+        - mount_point: The secrets engine mount (e.g., "secret")
+        - path: The secret path within the mount (e.g., "myapp/db")
+        - field: Optional specific field to extract (e.g., "password")
 
-    To use Vault secrets today, configure them via 'env' or 'file' source types
-    until full Vault integration is implemented. See docs/patterns/secret_resolver.md
-    for migration guidance.
+    Examples:
+        - "secret/myapp/db#password" -> Reads "password" field from secret at myapp/db
+        - "secret/myapp/db" -> Reads first field value from secret
 
-    TODO: Implement full Vault integration (follow-up ticket required)
-    Implementation will require:
-    1. Create envelope for vault.read_secret operation with correlation_id
-    2. Call HandlerVault.execute() for KV v2 secret retrieval
-    3. Parse path to extract mount/path/field from "secret/data/path#field" format
-    4. Handle error responses:
-       - 404 (NotFound): Return None
-       - 403 (Forbidden): Raise InfraAuthenticationError
-       - Timeout: Raise InfraTimeoutError with ModelTimeoutErrorContext
-       - Other: Raise SecretResolutionError with sanitized message
-    5. Extract data[field] from response or first value if no field specified
+    Graceful Degradation:
+        - If vault_handler is None: Returns None with a warning log
+        - Vault errors are wrapped in SecretResolutionError with correlation ID
+
+    Error Handling:
+        - InfraAuthenticationError: Auth failures (403)
+        - InfraTimeoutError: Request timeouts
+        - InfraUnavailableError: Circuit breaker open
+        - SecretResolutionError: Other Vault errors (sanitized message)
+
+Observability (OMN-1374):
+    SecretResolver includes built-in metrics tracking:
+
+    - Resolution latency by source type (env, file, vault, cache)
+    - Cache hit/miss rates (via get_cache_stats())
+    - Resolution success/failure counts by source type
+
+    External metrics collection via ProtocolSecretResolverMetrics:
+        metrics_collector = MyPrometheusMetrics()
+        resolver = SecretResolver(config=config, metrics_collector=metrics_collector)
+
+    Structured logging includes:
+        - logical_name: The secret being resolved
+        - source_type: Where the secret came from
+        - cache_hit: Whether it was a cache hit
+        - correlation_id: For distributed tracing
+        - latency_ms: Resolution time (on success)
 """
 
 from __future__ import annotations
@@ -80,15 +114,23 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 from pydantic import SecretStr
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, SecretResolutionError
+from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    SecretResolutionError,
+)
 from omnibase_infra.runtime.models.model_cached_secret import ModelCachedSecret
 from omnibase_infra.runtime.models.model_secret_cache_stats import ModelSecretCacheStats
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
@@ -103,7 +145,95 @@ from omnibase_infra.runtime.models.model_secret_source_spec import (
 if TYPE_CHECKING:
     from omnibase_infra.handlers.handler_vault import HandlerVault
 
+from typing import Protocol, runtime_checkable
+
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ProtocolSecretResolverMetrics(Protocol):
+    """Protocol for SecretResolver metrics collection.
+
+    Implementations can hook into secret resolution operations to collect:
+    - Resolution latency by source type (env, file, vault, cache)
+    - Cache hit/miss rates
+    - Resolution failure counts by source type
+    - Success counts by source type
+
+    All methods are optional (duck-typed). If a method is not implemented,
+    the metric simply won't be recorded.
+
+    Thread Safety:
+        Implementations MUST be thread-safe. Metrics may be recorded from
+        concurrent resolution operations.
+
+    Example Implementation::
+
+        from prometheus_client import Counter, Histogram
+
+        class PrometheusSecretResolverMetrics:
+            def __init__(self) -> None:
+                self._latency = Histogram(
+                    'secret_resolution_latency_ms',
+                    'Latency of secret resolution in milliseconds',
+                    ['source_type'],
+                )
+                self._cache_hits = Counter('secret_cache_hits_total', 'Cache hits')
+                self._cache_misses = Counter('secret_cache_misses_total', 'Cache misses')
+                self._failures = Counter(
+                    'secret_resolution_failures_total',
+                    'Resolution failures',
+                    ['source_type'],
+                )
+
+            def record_resolution_latency(
+                self, source_type: str, latency_ms: float
+            ) -> None:
+                self._latency.labels(source_type=source_type).observe(latency_ms)
+
+            def record_cache_hit(self) -> None:
+                self._cache_hits.inc()
+
+            def record_cache_miss(self) -> None:
+                self._cache_misses.inc()
+
+            def record_resolution_failure(self, source_type: str) -> None:
+                self._failures.labels(source_type=source_type).inc()
+    """
+
+    def record_resolution_latency(self, source_type: str, latency_ms: float) -> None:
+        """Record latency for a secret resolution operation.
+
+        Args:
+            source_type: Source type (env, file, vault, cache)
+            latency_ms: Time in milliseconds for the operation
+        """
+        ...
+
+    def record_cache_hit(self) -> None:
+        """Record a cache hit."""
+        ...
+
+    def record_cache_miss(self) -> None:
+        """Record a cache miss."""
+        ...
+
+    def record_resolution_success(self, source_type: str) -> None:
+        """Record a successful resolution.
+
+        Args:
+            source_type: Source type (env, file, vault)
+        """
+        ...
+
+    def record_resolution_failure(self, source_type: str) -> None:
+        """Record a resolution failure.
+
+        Args:
+            source_type: Source type (env, file, vault)
+        """
+        ...
+
 
 # Maximum file size for secret files (1MB)
 # Prevents memory exhaustion from accidentally pointing at large files
@@ -189,15 +319,18 @@ class SecretResolver:
         self,
         config: ModelSecretResolverConfig,
         vault_handler: HandlerVault | None = None,
+        metrics_collector: ProtocolSecretResolverMetrics | None = None,
     ) -> None:
         """Initialize SecretResolver.
 
         Args:
             config: Resolver configuration with mappings and TTLs
             vault_handler: Optional Vault handler for Vault-sourced secrets
+            metrics_collector: Optional external metrics collector for observability
         """
         self._config = config
         self._vault_handler = vault_handler
+        self._metrics_collector = metrics_collector
         self._cache: dict[str, ModelCachedSecret] = {}
         # Track mutable stats internally since ModelSecretCacheStats is frozen
         self._hits = 0
@@ -209,6 +342,13 @@ class SecretResolver:
         # Per-key async locks to allow parallel fetches for different secrets
         # while preventing duplicate fetches for the same secret
         self._async_key_locks: dict[str, asyncio.Lock] = {}
+
+        # === Metrics Tracking (OMN-1374) ===
+        # Resolution latency tracking (list of (source_type, latency_ms) tuples)
+        self._resolution_latencies: list[tuple[str, float]] = []
+        # Resolution success/failure counts by source type
+        self._resolution_success_counts: defaultdict[str, int] = defaultdict(int)
+        self._resolution_failure_counts: defaultdict[str, int] = defaultdict(int)
 
         # Build lookup table from mappings
         self._mappings: dict[str, ModelSecretSourceSpec] = {
@@ -226,6 +366,7 @@ class SecretResolver:
         self,
         logical_name: str,
         required: bool = True,
+        correlation_id: UUID | None = None,
     ) -> SecretStr | None:
         """Resolve a secret by logical name.
 
@@ -238,6 +379,8 @@ class SecretResolver:
         Args:
             logical_name: Dotted path (e.g., "database.postgres.password")
             required: If True, raises SecretResolutionError when not found
+            correlation_id: Optional correlation ID for distributed tracing.
+                If provided, propagates to error context for debugging.
 
         Returns:
             SecretStr if found, None if not found and required=False
@@ -245,19 +388,26 @@ class SecretResolver:
         Raises:
             SecretResolutionError: If required=True and secret not found
         """
+        # Generate correlation ID if not provided (for metrics/logging)
+        effective_correlation_id = correlation_id or uuid4()
+
         with self._lock:
             # Check cache first
             cached = self._get_from_cache(logical_name)
             if cached is not None:
+                self._record_resolution_success(
+                    logical_name, "cache", effective_correlation_id
+                )
                 return cached
 
             # Resolve from source
-            result = self._resolve_secret(logical_name)
+            result = self._resolve_secret(logical_name, effective_correlation_id)
 
             if result is None:
                 self._misses += 1
                 if required:
                     context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=effective_correlation_id,
                         transport_type=EnumInfraTransportType.RUNTIME,
                         operation="get_secret",
                         target_name="secret_resolver",
@@ -275,12 +425,14 @@ class SecretResolver:
         self,
         logical_names: list[str],
         required: bool = True,
+        correlation_id: UUID | None = None,
     ) -> dict[str, SecretStr | None]:
         """Resolve multiple secrets.
 
         Args:
             logical_names: List of dotted paths
             required: If True, raises on first missing secret
+            correlation_id: Optional correlation ID for distributed tracing.
 
         Returns:
             Dict mapping logical_name -> SecretStr | None
@@ -290,13 +442,12 @@ class SecretResolver:
             when resolving multiple secrets that involve I/O (Vault, file-based),
             prefer using ``get_secrets_async()`` which resolves in parallel via
             ``asyncio.gather()``.
-
-            TODO: Consider parallelizing sync resolution using ThreadPoolExecutor
-            for Vault/file secrets. This would require careful lock management to
-            avoid deadlocks with the per-key locking strategy. See OMN-1374.
         """
         return {
-            name: self.get_secret(name, required=required) for name in logical_names
+            name: self.get_secret(
+                name, required=required, correlation_id=correlation_id
+            )
+            for name in logical_names
         }
 
     # === Primary API (Async) ===
@@ -305,6 +456,7 @@ class SecretResolver:
         self,
         logical_name: str,
         required: bool = True,
+        correlation_id: UUID | None = None,
     ) -> SecretStr | None:
         """Async wrapper for get_secret.
 
@@ -319,6 +471,8 @@ class SecretResolver:
         Args:
             logical_name: Dotted path (e.g., "database.postgres.password")
             required: If True, raises SecretResolutionError when not found
+            correlation_id: Optional correlation ID for distributed tracing.
+                If provided, propagates to error context for debugging.
 
         Returns:
             SecretStr if found, None if not found and required=False
@@ -326,10 +480,16 @@ class SecretResolver:
         Raises:
             SecretResolutionError: If required=True and secret not found
         """
+        # Generate correlation ID if not provided (for metrics/logging)
+        effective_correlation_id = correlation_id or uuid4()
+
         # Use threading lock for cache check (fast operation, prevents race with sync)
         with self._lock:
             cached = self._get_from_cache(logical_name)
             if cached is not None:
+                self._record_resolution_success(
+                    logical_name, "cache", effective_correlation_id
+                )
                 return cached
 
         # Get or create per-key async lock for this logical_name
@@ -343,17 +503,23 @@ class SecretResolver:
             with self._lock:
                 cached = self._get_from_cache(logical_name)
                 if cached is not None:
+                    self._record_resolution_success(
+                        logical_name, "cache", effective_correlation_id
+                    )
                     return cached
 
             # Resolve from source (potentially async for Vault)
             # Note: _resolve_secret_async handles its own locking for cache writes
-            result = await self._resolve_secret_async(logical_name)
+            result = await self._resolve_secret_async(
+                logical_name, effective_correlation_id
+            )
 
             if result is None:
                 with self._lock:
                     self._misses += 1
                 if required:
                     context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=effective_correlation_id,
                         transport_type=EnumInfraTransportType.RUNTIME,
                         operation="get_secret_async",
                         target_name="secret_resolver",
@@ -392,6 +558,7 @@ class SecretResolver:
         self,
         logical_names: list[str],
         required: bool = True,
+        correlation_id: UUID | None = None,
     ) -> dict[str, SecretStr | None]:
         """Resolve multiple secrets asynchronously in parallel.
 
@@ -407,6 +574,7 @@ class SecretResolver:
         Args:
             logical_names: List of dotted paths
             required: If True, raises on first missing secret
+            correlation_id: Optional correlation ID for distributed tracing.
 
         Returns:
             Dict mapping logical_name -> SecretStr | None
@@ -421,7 +589,10 @@ class SecretResolver:
 
         # Create tasks for parallel resolution
         tasks = [
-            self.get_secret_async(name, required=required) for name in logical_names
+            self.get_secret_async(
+                name, required=required, correlation_id=correlation_id
+            )
+            for name in logical_names
         ]
 
         # Gather results - raises on first failure if required=True
@@ -466,6 +637,159 @@ class SecretResolver:
                 refreshes=self._refreshes,
                 expired_evictions=self._expired_evictions,
             )
+
+    def get_resolution_metrics(self) -> dict[str, object]:
+        """Return resolution metrics for observability.
+
+        Returns:
+            Dict containing:
+                - success_counts: Dict of source_type -> success count
+                - failure_counts: Dict of source_type -> failure count
+                - latency_samples: Number of latency samples collected
+                - avg_latency_ms: Average resolution latency (if samples > 0)
+        """
+        with self._lock:
+            avg_latency = 0.0
+            if self._resolution_latencies:
+                avg_latency = sum(lat for _, lat in self._resolution_latencies) / len(
+                    self._resolution_latencies
+                )
+
+            return {
+                "success_counts": dict(self._resolution_success_counts),
+                "failure_counts": dict(self._resolution_failure_counts),
+                "latency_samples": len(self._resolution_latencies),
+                "avg_latency_ms": avg_latency,
+                "cache_hits": self._hits,
+                "cache_misses": self._misses,
+            }
+
+    def set_metrics_collector(
+        self, collector: ProtocolSecretResolverMetrics | None
+    ) -> None:
+        """Set the external metrics collector.
+
+        Args:
+            collector: Metrics collector implementing ProtocolSecretResolverMetrics,
+                or None to disable external metrics collection.
+        """
+        self._metrics_collector = collector
+
+    def _record_resolution_success(
+        self,
+        logical_name: str,
+        source_type: str,
+        correlation_id: UUID,
+        start_time: float | None = None,
+    ) -> None:
+        """Record a successful secret resolution.
+
+        Args:
+            logical_name: The secret's logical name
+            source_type: Source type (env, file, vault, cache)
+            correlation_id: Correlation ID for tracing
+            start_time: Optional start time from time.monotonic() for latency calc
+        """
+        latency_ms = 0.0
+        if start_time is not None:
+            latency_ms = (time.monotonic() - start_time) * 1000
+
+        # Internal tracking
+        with self._lock:
+            self._resolution_success_counts[source_type] += 1
+            if start_time is not None:
+                # Keep last 1000 samples to avoid unbounded growth
+                if len(self._resolution_latencies) >= 1000:
+                    self._resolution_latencies.pop(0)
+                self._resolution_latencies.append((source_type, latency_ms))
+
+        # External metrics collector
+        if self._metrics_collector is not None:
+            try:
+                if hasattr(self._metrics_collector, "record_resolution_success"):
+                    self._metrics_collector.record_resolution_success(source_type)
+                if start_time is not None and hasattr(
+                    self._metrics_collector, "record_resolution_latency"
+                ):
+                    self._metrics_collector.record_resolution_latency(
+                        source_type, latency_ms
+                    )
+                if source_type == "cache" and hasattr(
+                    self._metrics_collector, "record_cache_hit"
+                ):
+                    self._metrics_collector.record_cache_hit()
+            except Exception as e:
+                # Never let metrics failures affect resolution
+                logger.debug(
+                    "Metrics collector error (ignored): %s",
+                    e,
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+        # Structured logging
+        logger.debug(
+            "Secret resolved successfully: %s",
+            logical_name,
+            extra={
+                "logical_name": logical_name,
+                "source_type": source_type,
+                "cache_hit": source_type == "cache",
+                "latency_ms": latency_ms,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+    def _record_resolution_failure(
+        self,
+        logical_name: str,
+        source_type: str,
+        correlation_id: UUID,
+        reason: str,
+    ) -> None:
+        """Record a failed secret resolution.
+
+        Args:
+            logical_name: The secret's logical name
+            source_type: Source type (env, file, vault, unknown)
+            correlation_id: Correlation ID for tracing
+            reason: Failure reason (not_found, handler_not_configured, etc.)
+        """
+        # Internal tracking
+        with self._lock:
+            self._resolution_failure_counts[source_type] += 1
+
+        # External metrics collector
+        if self._metrics_collector is not None:
+            try:
+                if hasattr(self._metrics_collector, "record_resolution_failure"):
+                    self._metrics_collector.record_resolution_failure(source_type)
+                if hasattr(self._metrics_collector, "record_cache_miss"):
+                    self._metrics_collector.record_cache_miss()
+            except Exception as e:
+                # Never let metrics failures affect resolution
+                logger.debug(
+                    "Metrics collector error (ignored): %s",
+                    e,
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+        # Structured logging
+        logger.debug(
+            "Secret resolution failed: %s",
+            logical_name,
+            extra={
+                "logical_name": logical_name,
+                "source_type": source_type,
+                "reason": reason,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
     # === Introspection (non-sensitive) ===
 
@@ -580,7 +904,9 @@ class SecretResolver:
 
         return SecretStr(value)
 
-    def _resolve_secret(self, logical_name: str) -> SecretStr | None:
+    def _resolve_secret(
+        self, logical_name: str, correlation_id: UUID | None = None
+    ) -> SecretStr | None:
         """Resolve secret from source and cache it.
 
         Thread Safety:
@@ -594,10 +920,14 @@ class SecretResolver:
 
         Args:
             logical_name: The logical name to resolve
+            correlation_id: Optional correlation ID for tracing
 
         Returns:
             SecretStr if found, None otherwise
         """
+        effective_correlation_id = correlation_id or uuid4()
+        start_time = time.monotonic()
+
         # SECURITY: Bootstrap secrets bypass normal resolution
         # They must come from env vars to avoid circular dependency with Vault
         if self._is_bootstrap_secret(logical_name):
@@ -605,10 +935,16 @@ class SecretResolver:
             if secret is not None:
                 # Cache write is safe here - caller holds _lock
                 self._cache_secret(logical_name, secret, "env")
+                self._record_resolution_success(
+                    logical_name, "env", effective_correlation_id, start_time
+                )
             return secret
 
         source = self._get_source_spec(logical_name)
         if source is None:
+            self._record_resolution_failure(
+                logical_name, "unknown", effective_correlation_id, "no_mapping"
+            )
             return None
 
         value: str | None = None
@@ -622,19 +958,38 @@ class SecretResolver:
                 logger.warning(
                     "Vault handler not configured for secret: %s",
                     logical_name,
-                    extra={"logical_name": logical_name},
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(effective_correlation_id),
+                    },
+                )
+                self._record_resolution_failure(
+                    logical_name,
+                    "vault",
+                    effective_correlation_id,
+                    "handler_not_configured",
                 )
                 return None
-            value = self._read_vault_secret_sync(source.source_path, logical_name)
+            value = self._read_vault_secret_sync(
+                source.source_path, logical_name, effective_correlation_id
+            )
 
         if value is None:
+            self._record_resolution_failure(
+                logical_name, source.source_type, effective_correlation_id, "not_found"
+            )
             return None
 
         secret = SecretStr(value)
         self._cache_secret(logical_name, secret, source.source_type)
+        self._record_resolution_success(
+            logical_name, source.source_type, effective_correlation_id, start_time
+        )
         return secret
 
-    async def _resolve_secret_async(self, logical_name: str) -> SecretStr | None:
+    async def _resolve_secret_async(
+        self, logical_name: str, correlation_id: UUID | None = None
+    ) -> SecretStr | None:
         """Resolve secret from source asynchronously.
 
         Thread Safety:
@@ -650,10 +1005,14 @@ class SecretResolver:
 
         Args:
             logical_name: The logical name to resolve
+            correlation_id: Optional correlation ID for tracing
 
         Returns:
             SecretStr if found, None otherwise
         """
+        effective_correlation_id = correlation_id or uuid4()
+        start_time = time.monotonic()
+
         # SECURITY: Bootstrap secrets bypass normal resolution
         # They must come from env vars to avoid circular dependency with Vault
         if self._is_bootstrap_secret(logical_name):
@@ -666,10 +1025,16 @@ class SecretResolver:
                 with self._lock:
                     if logical_name not in self._cache:
                         self._cache_secret(logical_name, secret, "env")
+                self._record_resolution_success(
+                    logical_name, "env", effective_correlation_id, start_time
+                )
             return secret
 
         source = self._get_source_spec(logical_name)
         if source is None:
+            self._record_resolution_failure(
+                logical_name, "unknown", effective_correlation_id, "no_mapping"
+            )
             return None
 
         value: str | None = None
@@ -686,14 +1051,26 @@ class SecretResolver:
                 logger.warning(
                     "Vault handler not configured for secret: %s",
                     logical_name,
-                    extra={"logical_name": logical_name},
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(effective_correlation_id),
+                    },
+                )
+                self._record_resolution_failure(
+                    logical_name,
+                    "vault",
+                    effective_correlation_id,
+                    "handler_not_configured",
                 )
                 return None
             value = await self._read_vault_secret_async(
-                source.source_path, logical_name
+                source.source_path, logical_name, effective_correlation_id
             )
 
         if value is None:
+            self._record_resolution_failure(
+                logical_name, source.source_type, effective_correlation_id, "not_found"
+            )
             return None
 
         secret = SecretStr(value)
@@ -703,6 +1080,9 @@ class SecretResolver:
         with self._lock:
             if logical_name not in self._cache:
                 self._cache_secret(logical_name, secret, source.source_type)
+        self._record_resolution_success(
+            logical_name, source.source_type, effective_correlation_id, start_time
+        )
         return secret
 
     def _get_source_spec(self, logical_name: str) -> ModelSecretSourceSpec | None:
@@ -856,10 +1236,16 @@ class SecretResolver:
             )
             return None
 
-    def _read_vault_secret_sync(self, path: str, logical_name: str = "") -> str | None:
+    def _read_vault_secret_sync(
+        self, path: str, logical_name: str = "", correlation_id: UUID | None = None
+    ) -> str | None:
         """Read secret from Vault synchronously.
 
-        Path format: "secret/data/path#field" or "secret/data/path" (returns first field)
+        This method wraps the async Vault handler for synchronous contexts.
+        It creates a new event loop if one is not running, otherwise raises
+        an error (cannot nest event loops).
+
+        Path format: "mount/path#field" or "mount/path" (returns first field value)
 
         Security:
             - This method never logs Vault paths (could reveal secret structure)
@@ -869,44 +1255,58 @@ class SecretResolver:
         Args:
             path: Vault path with optional field specifier
             logical_name: The logical name being resolved (for error context only)
+            correlation_id: Optional correlation ID for tracing
 
         Returns:
             Secret value or None if not found
 
         Raises:
-            NotImplementedError: Vault integration is not yet implemented.
-                When implemented, this method will:
-                1. Use HandlerVault.execute() with a sync wrapper
-                2. Parse the path to extract mount/path/field
-                3. Return the secret value or None if not found
-                4. Raise SecretResolutionError on Vault communication failures
-
-        Note:
-            Vault integration requires OMN-1374 (follow-up ticket).
-            Currently, configure secrets via 'env' or 'file' source types.
+            SecretResolutionError: On Vault communication failures or if called
+                from within an async context (cannot nest event loops)
+            InfraAuthenticationError: If authentication fails
+            InfraTimeoutError: If the request times out
+            InfraUnavailableError: If Vault is unavailable (circuit breaker open)
         """
         if self._vault_handler is None:
             return None
 
-        # Parse path and field (validated but not logged for security)
-        vault_path, field = self._parse_vault_path(path)
-        # Suppress unused variable warnings - these will be used when implemented
-        _ = vault_path, field
+        effective_correlation_id = correlation_id or uuid4()
 
-        # SECURITY: Do not log Vault paths as they reveal secret structure
-        raise NotImplementedError(
-            f"Vault secret resolution not yet implemented for logical name: "
-            f"{logical_name}. Configure this secret via 'env' or 'file' source "
-            f"until Vault integration is complete. "
-            f"See docs/patterns/secret_resolver.md for migration guidance."
+        # Check if we're already in an async context
+        try:
+            asyncio.get_running_loop()
+            # We're in an async context - cannot use asyncio.run()
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=effective_correlation_id,
+                transport_type=EnumInfraTransportType.VAULT,
+                operation="read_secret_sync",
+                target_name="secret_resolver",
+            )
+            raise SecretResolutionError(
+                f"Cannot resolve Vault secret synchronously from async context: "
+                f"{logical_name}. Use get_secret_async() instead.",
+                context=context,
+                logical_name=logical_name,
+            )
+        except RuntimeError:
+            # No running event loop - safe to use asyncio.run()
+            pass
+
+        # Run the async method in a new event loop
+        return asyncio.run(
+            self._read_vault_secret_async(path, logical_name, effective_correlation_id)
         )
 
     async def _read_vault_secret_async(
-        self, path: str, logical_name: str = ""
+        self, path: str, logical_name: str = "", correlation_id: UUID | None = None
     ) -> str | None:
         """Read secret from Vault asynchronously.
 
-        Path format: "secret/data/path#field" or "secret/data/path" (returns first field)
+        Path format: "mount/path#field" or "mount/path" (returns first field value)
+
+        Examples:
+            "secret/myapp/db#password" -> mount="secret", path="myapp/db", field="password"
+            "secret/myapp/db" -> mount="secret", path="myapp/db", field=None (first value)
 
         Security:
             - This method never logs Vault paths (could reveal secret structure)
@@ -914,49 +1314,127 @@ class SecretResolver:
             - Error messages are sanitized to include only logical names
 
         Args:
-            path: Vault path with optional field specifier
+            path: Vault path with optional field specifier (mount/path#field)
             logical_name: The logical name being resolved (for error context only)
+            correlation_id: Optional correlation ID for tracing
 
         Returns:
             Secret value or None if not found
 
         Raises:
-            NotImplementedError: Vault integration is not yet implemented.
-                When implemented, this method will:
-                1. Use HandlerVault.execute() for async Vault communication
-                2. Parse the path to extract mount/path/field
-                3. Return the secret value or None if not found
-                4. Raise SecretResolutionError on Vault communication failures
-
-        Implementation Plan (for follow-up ticket):
-            1. Create envelope for vault.read_secret operation
-            2. Call self._vault_handler.execute(envelope)
-            3. Handle response:
-               - Success: Extract data[field] or first value
-               - NotFound: Return None
-               - Auth failure: Raise InfraAuthenticationError
-               - Timeout: Raise InfraTimeoutError
-               - Other: Raise SecretResolutionError
-
-        Note:
-            Vault integration requires OMN-1374 (follow-up ticket).
-            Currently, configure secrets via 'env' or 'file' source types.
+            SecretResolutionError: On Vault communication failures
+            InfraAuthenticationError: If authentication fails
+            InfraTimeoutError: If the request times out
+            InfraUnavailableError: If Vault is unavailable (circuit breaker open)
         """
         if self._vault_handler is None:
             return None
 
-        # Parse path and field (validated but not logged for security)
-        vault_path, field = self._parse_vault_path(path)
-        # Suppress unused variable warnings - these will be used when implemented
-        _ = vault_path, field
+        effective_correlation_id = correlation_id or uuid4()
 
-        # SECURITY: Do not log Vault paths as they reveal secret structure
-        raise NotImplementedError(
-            f"Vault secret resolution not yet implemented for logical name: "
-            f"{logical_name}. Configure this secret via 'env' or 'file' source "
-            f"until Vault integration is complete. "
-            f"See docs/patterns/secret_resolver.md for migration guidance."
-        )
+        # Parse path into mount_point, vault_path, and optional field
+        mount_point, vault_path, field = self._parse_vault_path_components(path)
+
+        # Create envelope for vault.read_secret operation
+        envelope: dict[str, object] = {
+            "operation": "vault.read_secret",
+            "payload": {
+                "path": vault_path,
+                "mount_point": mount_point,
+            },
+            "correlation_id": str(effective_correlation_id),
+        }
+
+        try:
+            result = await self._vault_handler.execute(envelope)
+
+            # Extract secret data from handler response
+            # Response format: {"status": "success", "payload": {"data": {...}, "metadata": {...}}}
+            result_dict = result.result
+            if not isinstance(result_dict, dict):
+                logger.warning(
+                    "Unexpected Vault response format for secret: %s",
+                    logical_name,
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(effective_correlation_id),
+                    },
+                )
+                return None
+
+            status = result_dict.get("status")
+            if status != "success":
+                logger.debug(
+                    "Vault returned non-success status for secret: %s",
+                    logical_name,
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(effective_correlation_id),
+                    },
+                )
+                return None
+
+            payload = result_dict.get("payload", {})
+            if not isinstance(payload, dict):
+                return None
+
+            secret_data = payload.get("data", {})
+            if not isinstance(secret_data, dict) or not secret_data:
+                logger.debug(
+                    "No secret data found in Vault for: %s",
+                    logical_name,
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(effective_correlation_id),
+                    },
+                )
+                return None
+
+            # Extract the specific field or first value
+            if field:
+                value = secret_data.get(field)
+                if value is None:
+                    logger.debug(
+                        "Field not found in Vault secret: %s",
+                        logical_name,
+                        extra={
+                            "logical_name": logical_name,
+                            "correlation_id": str(effective_correlation_id),
+                        },
+                    )
+                    return None
+            else:
+                # No field specified - return first value
+                value = next(iter(secret_data.values()), None)
+
+            if value is None:
+                return None
+
+            # Ensure we return a string
+            return str(value)
+
+        except InfraAuthenticationError:
+            # Re-raise auth errors directly - they have proper context
+            raise
+        except InfraTimeoutError:
+            # Re-raise timeout errors directly - they have proper context
+            raise
+        except InfraUnavailableError:
+            # Re-raise unavailable errors (circuit breaker open)
+            raise
+        except Exception as e:
+            # Wrap other errors in SecretResolutionError with sanitized message
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=effective_correlation_id,
+                transport_type=EnumInfraTransportType.VAULT,
+                operation="read_secret",
+                target_name="secret_resolver",
+            )
+            raise SecretResolutionError(
+                f"Failed to resolve secret from Vault: {logical_name}",
+                context=context,
+                logical_name=logical_name,
+            ) from e
 
     def _parse_vault_path(self, path: str) -> tuple[str, str | None]:
         """Parse Vault path into path and optional field.
@@ -975,6 +1453,46 @@ class SecretResolver:
             vault_path, field = path.rsplit("#", 1)
             return vault_path, field
         return path, None
+
+    def _parse_vault_path_components(self, path: str) -> tuple[str, str, str | None]:
+        """Parse Vault path into mount_point, path, and optional field.
+
+        The path format is: "mount_point/path/to/secret#field"
+
+        For KV v2 secrets engine, the path convention is:
+            - mount_point: The secrets engine mount (e.g., "secret")
+            - path: The secret path within the mount (e.g., "myapp/db")
+            - field: Optional specific field to extract (e.g., "password")
+
+        Examples:
+            "secret/myapp/db#password" -> ("secret", "myapp/db", "password")
+            "secret/myapp/db" -> ("secret", "myapp/db", None)
+            "kv/prod/config#api_key" -> ("kv", "prod/config", "api_key")
+
+        Args:
+            path: Full Vault path with optional field specifier
+
+        Returns:
+            Tuple of (mount_point, vault_path, field_name or None)
+        """
+        # First extract field if present
+        if "#" in path:
+            path_without_field, field = path.rsplit("#", 1)
+        else:
+            path_without_field = path
+            field = None
+
+        # Split into mount_point and rest of path
+        # First component is always the mount_point
+        parts = path_without_field.split("/", 1)
+        if len(parts) == 1:
+            # No slash - entire path is the mount_point (edge case)
+            return parts[0], "", field
+
+        mount_point = parts[0]
+        vault_path = parts[1]
+
+        return mount_point, vault_path, field
 
     def _cache_secret(
         self,
@@ -1050,4 +1568,8 @@ class SecretResolver:
         return "***"
 
 
-__all__: list[str] = ["SecretResolver", "SecretSourceType"]
+__all__: list[str] = [
+    "ProtocolSecretResolverMetrics",
+    "SecretResolver",
+    "SecretSourceType",
+]
