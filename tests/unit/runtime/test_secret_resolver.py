@@ -1884,9 +1884,8 @@ class TestSecretResolverCorrelationId:
                 "missing.secret", required=True, correlation_id=test_correlation_id
             )
 
-        # Error should have correlation_id in context
-        assert exc_info.value.context is not None
-        assert exc_info.value.context.correlation_id == test_correlation_id
+        # Error should have correlation_id accessible via property
+        assert exc_info.value.correlation_id == test_correlation_id
 
 
 class TestSecretResolverMetrics:
