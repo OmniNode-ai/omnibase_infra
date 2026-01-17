@@ -10,33 +10,40 @@ publisher/subscriber patterns with correlation tracking.
 Fixtures:
     log_capture: Captures structured log records for correlation ID assertion
     correlation_id: Generates a unique correlation ID for testing
+    event_bus: Creates a SimpleAsyncEventBus instance for testing
 
 Helper Functions:
     assert_correlation_in_logs: Assert correlation ID appears in logs for given boundary
 
+Test Infrastructure:
+    SimpleAsyncEventBus: Minimal event bus for correlation propagation testing
+    AsyncMessageHandler: Type alias for async message handlers
+
 Mock Handlers:
     MockHandlerA: Publisher handler that emits events with correlation tracking
     MockHandlerB: Subscriber handler that can optionally fail for testing error paths
+    MockHandlerBForwarding: Handler variant that forwards messages to another topic
+    MockHandlerC: Handler for third-leg chain testing
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
     from typing import Protocol
 
-    # Type alias for async message handlers (must match test_correlation_propagation.py)
-    _AsyncMessageHandler = Callable[
-        [dict[str, object]], Coroutine[object, object, None]
-    ]
+# Type alias for async message handlers
+# Defined at module level for both runtime and type-checking use
+AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
+
+if TYPE_CHECKING:
 
     class ProtocolTestEventBus(Protocol):
         """Test-specific protocol for SimpleAsyncEventBus - NOT interchangeable with production.
@@ -78,7 +85,7 @@ if TYPE_CHECKING:
         See Also:
             - omnibase_infra.protocols.protocol_event_bus_like.ProtocolEventBusLike
             - omnibase_infra.event_bus.inmemory_event_bus.InMemoryEventBus
-            - test_correlation_propagation.SimpleAsyncEventBus (the implementation)
+            - SimpleAsyncEventBus (the implementation, defined in this module)
         """
 
         async def publish(self, topic: str, message: dict[str, object]) -> None:
@@ -90,7 +97,7 @@ if TYPE_CHECKING:
             """
             ...
 
-        def subscribe(self, topic: str, handler: _AsyncMessageHandler) -> None:
+        def subscribe(self, topic: str, handler: AsyncMessageHandler) -> None:
             """Subscribe a handler to a topic.
 
             Args:
@@ -260,8 +267,68 @@ def assert_correlation_in_logs(
 
 
 # =============================================================================
+# Test Event Bus Implementation
+# =============================================================================
+
+
+class SimpleAsyncEventBus:
+    """Minimal event bus for correlation propagation testing.
+
+    This event bus provides a simple publish/subscribe mechanism for testing
+    correlation ID propagation without requiring external infrastructure.
+
+    Attributes:
+        _subscribers: Dictionary mapping topic names to lists of handlers.
+
+    Example:
+        >>> bus = SimpleAsyncEventBus()
+        >>> bus.subscribe("test-topic", my_handler)
+        >>> await bus.publish("test-topic", {"data": "value"})
+    """
+
+    def __init__(self) -> None:
+        """Initialize the event bus with empty subscriber registry."""
+        self._subscribers: dict[str, list[AsyncMessageHandler]] = {}
+
+    async def publish(self, topic: str, message: dict[str, object]) -> None:
+        """Publish message to topic.
+
+        Invokes all handlers subscribed to the topic with the given message.
+        Handlers are called sequentially in subscription order.
+
+        Args:
+            topic: The topic name to publish to.
+            message: The message dictionary to send to subscribers.
+        """
+        for handler in self._subscribers.get(topic, []):
+            await handler(message)
+
+    def subscribe(
+        self,
+        topic: str,
+        handler: AsyncMessageHandler,
+    ) -> None:
+        """Subscribe handler to topic.
+
+        Registers a handler function to receive messages published to the topic.
+
+        Args:
+            topic: The topic name to subscribe to.
+            handler: Async callable that accepts a message dict.
+        """
+        if topic not in self._subscribers:
+            self._subscribers[topic] = []
+        self._subscribers[topic].append(handler)
+
+
+# =============================================================================
 # Mock Handlers
 # =============================================================================
+
+# TODO [OMN-1349]: Add edge case handling to mock handlers:
+# - MockHandlerB.handle should gracefully handle missing correlation_id (log warning, generate new)
+# - MockHandlerC.handle should validate correlation_id format before string conversion
+# - All handlers should include correlation_id in exception messages for debugging
 
 
 class MockHandlerA:
@@ -534,12 +601,25 @@ class MockHandlerC:
         )
 
 
+@pytest.fixture
+def event_bus() -> SimpleAsyncEventBus:
+    """Create a simple async event bus for testing.
+
+    Returns:
+        A fresh SimpleAsyncEventBus instance.
+    """
+    return SimpleAsyncEventBus()
+
+
 __all__ = [
+    "AsyncMessageHandler",
     "MockHandlerA",
     "MockHandlerB",
     "MockHandlerBForwarding",
     "MockHandlerC",
+    "SimpleAsyncEventBus",
     "assert_correlation_in_logs",
     "correlation_id",
+    "event_bus",
     "log_capture",
 ]

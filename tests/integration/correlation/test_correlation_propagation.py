@@ -18,8 +18,6 @@ These tests are designed to run in CI environments without external dependencies
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Coroutine
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
@@ -30,16 +28,9 @@ from tests.integration.correlation.conftest import (
     MockHandlerB,
     MockHandlerBForwarding,
     MockHandlerC,
+    SimpleAsyncEventBus,
     assert_correlation_in_logs,
 )
-
-if TYPE_CHECKING:
-    # Type alias for async message handlers - used only in type annotations
-    AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
-else:
-    # Runtime type alias for SimpleAsyncEventBus._subscribers typing
-    AsyncMessageHandler = Callable[[dict[str, object]], Coroutine[object, object, None]]
-
 
 pytestmark = [
     pytest.mark.integration,
@@ -48,82 +39,20 @@ pytestmark = [
 
 
 # =============================================================================
-# Helper Classes
-# =============================================================================
-
-
-class SimpleAsyncEventBus:
-    """Minimal event bus for correlation propagation testing.
-
-    This event bus provides a simple publish/subscribe mechanism for testing
-    correlation ID propagation without requiring external infrastructure.
-
-    Attributes:
-        _subscribers: Dictionary mapping topic names to lists of handlers.
-
-    Example:
-        >>> bus = SimpleAsyncEventBus()
-        >>> bus.subscribe("test-topic", my_handler)
-        >>> await bus.publish("test-topic", {"data": "value"})
-    """
-
-    def __init__(self) -> None:
-        """Initialize the event bus with empty subscriber registry."""
-        self._subscribers: dict[str, list[AsyncMessageHandler]] = {}
-
-    async def publish(self, topic: str, message: dict[str, object]) -> None:
-        """Publish message to topic.
-
-        Invokes all handlers subscribed to the topic with the given message.
-        Handlers are called sequentially in subscription order.
-
-        Args:
-            topic: The topic name to publish to.
-            message: The message dictionary to send to subscribers.
-        """
-        for handler in self._subscribers.get(topic, []):
-            await handler(message)
-
-    def subscribe(
-        self,
-        topic: str,
-        handler: AsyncMessageHandler,
-    ) -> None:
-        """Subscribe handler to topic.
-
-        Registers a handler function to receive messages published to the topic.
-
-        Args:
-            topic: The topic name to subscribe to.
-            handler: Async callable that accepts a message dict.
-        """
-        if topic not in self._subscribers:
-            self._subscribers[topic] = []
-        self._subscribers[topic].append(handler)
-
-
-# =============================================================================
-# Fixtures
-# =============================================================================
-
-
-@pytest.fixture
-def event_bus() -> SimpleAsyncEventBus:
-    """Create a simple async event bus for testing.
-
-    Returns:
-        A fresh SimpleAsyncEventBus instance.
-    """
-    return SimpleAsyncEventBus()
-
-
-# =============================================================================
 # Tests
 # =============================================================================
 
 
 class TestCorrelationPreservation:
-    """Tests for correlation ID preservation across handler boundaries."""
+    """Tests for correlation ID preservation across handler boundaries.
+
+    TODO [OMN-1349]: Add edge case tests for robustness:
+    - test_correlation_missing_from_message: Handler receives message without correlation_id
+    - test_correlation_malformed_uuid_string: Handler receives invalid UUID string
+    - test_correlation_none_value: Handler receives explicit None as correlation_id
+    - test_correlation_concurrent_messages: Multiple messages with different correlation IDs
+    - test_correlation_empty_message: Handler receives empty dict message
+    """
 
     async def test_correlation_preserved_handler_to_handler(
         self,

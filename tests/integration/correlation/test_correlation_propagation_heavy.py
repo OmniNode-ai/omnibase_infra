@@ -32,6 +32,7 @@ Kafka Tests:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -65,9 +66,7 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    import logging
-
-    from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.handlers import HandlerDb
 
@@ -334,6 +333,12 @@ class TestCorrelationDatabase:
         - Skips if POSTGRES_HOST not set
         - Skips if POSTGRES_PASSWORD not set
         - Uses class-level skip condition from POSTGRES_AVAILABLE flag
+
+    TODO [OMN-1349]: Add edge case tests for database correlation handling:
+    - test_correlation_in_transaction_rollback: Verify correlation preserved when transaction fails
+    - test_correlation_with_connection_pool_exhaustion: Correlation in pool timeout errors
+    - test_correlation_in_concurrent_queries: Multiple queries with different correlation IDs
+    - test_correlation_missing_from_envelope: Database envelope without correlation_id field
     """
 
     @pytest.mark.asyncio
@@ -456,6 +461,13 @@ class TestCorrelationKafka:
     Requirements:
         - KAFKA_BOOTSTRAP_SERVERS environment variable must be set
         - Real Kafka/Redpanda broker must be available
+
+    TODO [OMN-1349]: Add edge case tests for Kafka correlation handling:
+    - test_correlation_with_broker_disconnect: Correlation preserved during broker failover
+    - test_correlation_in_message_retry: Correlation maintained across retry attempts
+    - test_correlation_with_consumer_rebalance: Correlation during partition rebalancing
+    - test_correlation_missing_from_headers: Message published without correlation_id header
+    - test_correlation_header_encoding: Non-ASCII characters in correlation context
     """
 
     @pytest.fixture
@@ -467,12 +479,12 @@ class TestCorrelationKafka:
     async def kafka_event_bus(
         self,
         kafka_bootstrap_servers: str,
-    ) -> AsyncGenerator[KafkaEventBus, None]:
-        """Create and configure KafkaEventBus for correlation testing.
+    ) -> AsyncGenerator[EventBusKafka, None]:
+        """Create and configure EventBusKafka for correlation testing.
 
-        Yields a configured KafkaEventBus instance and ensures cleanup after test.
+        Yields a configured EventBusKafka instance and ensures cleanup after test.
         """
-        from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
         from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
         config = ModelKafkaEventBusConfig(
@@ -485,22 +497,34 @@ class TestCorrelationKafka:
             circuit_breaker_threshold=5,
             circuit_breaker_reset_timeout=10.0,
         )
-        bus = KafkaEventBus(config=config)
+        bus = EventBusKafka(config=config)
 
         yield bus
 
         # Cleanup: ensure bus is closed
+        # Use specific exception types and log cleanup failures for debugging
         try:
             await bus.close()
-        except Exception:
-            pass  # Ignore cleanup errors
+        except (InfraConnectionError, InfraTimeoutError) as e:
+            # Expected infrastructure errors during cleanup - log for debugging
+            # These can occur if broker was already disconnected
+            logging.getLogger(__name__).debug(
+                "Kafka bus cleanup encountered expected infrastructure error: %s",
+                e,
+            )
+        except RuntimeError as e:
+            # Event loop closed or similar runtime issues during test teardown
+            logging.getLogger(__name__).debug(
+                "Kafka bus cleanup encountered runtime error (likely event loop closed): %s",
+                e,
+            )
 
     @pytest.fixture
     async def started_kafka_bus(
         self,
-        kafka_event_bus: KafkaEventBus,
-    ) -> KafkaEventBus:
-        """Provide a started KafkaEventBus instance."""
+        kafka_event_bus: EventBusKafka,
+    ) -> EventBusKafka:
+        """Provide a started EventBusKafka instance."""
         await kafka_event_bus.start()
         return kafka_event_bus
 
@@ -539,12 +563,31 @@ class TestCorrelationKafka:
         yield topic_name
 
         # Cleanup: delete the topic
+        # Use specific exception handling for cleanup operations
         try:
             await admin.delete_topics([topic_name])
-        except Exception:
-            pass  # Ignore cleanup errors
+        except TimeoutError:
+            # Timeout during cleanup is acceptable - topic may be in use
+            logging.getLogger(__name__).debug(
+                "Timeout deleting test topic '%s' during cleanup (acceptable)",
+                topic_name,
+            )
+        except RuntimeError as e:
+            # Event loop or connection issues during teardown
+            logging.getLogger(__name__).debug(
+                "Runtime error deleting test topic '%s': %s",
+                topic_name,
+                e,
+            )
         finally:
-            await admin.close()
+            try:
+                await admin.close()
+            except RuntimeError as e:
+                # Admin client may fail to close if event loop is closing
+                logging.getLogger(__name__).debug(
+                    "Runtime error closing Kafka admin client: %s",
+                    e,
+                )
 
     @pytest.fixture
     def unique_group(self) -> str:
@@ -554,7 +597,7 @@ class TestCorrelationKafka:
     @pytest.mark.asyncio
     async def test_correlation_end_to_end_with_real_kafka(
         self,
-        started_kafka_bus: KafkaEventBus,
+        started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
         unique_group: str,
         correlation_id: UUID,
@@ -569,7 +612,7 @@ class TestCorrelationKafka:
         4. Verify consumed message has same correlation_id in headers
 
         Args:
-            started_kafka_bus: Started KafkaEventBus fixture
+            started_kafka_bus: Started EventBusKafka fixture
             created_unique_topic: Pre-created unique topic for isolation
             unique_group: Unique consumer group for isolation
             correlation_id: Test correlation ID from conftest fixture
@@ -659,7 +702,7 @@ class TestCorrelationKafka:
         Args:
             correlation_id: Test correlation ID from conftest fixture
         """
-        from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
         from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
         # Create bus with invalid bootstrap servers to simulate connection failure
@@ -671,7 +714,7 @@ class TestCorrelationKafka:
             circuit_breaker_threshold=2,
             circuit_breaker_reset_timeout=60.0,
         )
-        bus = KafkaEventBus(config=config)
+        bus = EventBusKafka(config=config)
 
         try:
             # Attempt to start should fail with connection error
@@ -715,15 +758,3 @@ class TestCorrelationKafka:
         finally:
             # Cleanup
             await bus.close()
-
-
-# =============================================================================
-# Module Exports
-# =============================================================================
-
-__all__ = [
-    "TestCorrelationDatabase",
-    "TestCorrelationErrorContext",
-    "TestCorrelationHttpBoundary",
-    "TestCorrelationKafka",
-]
