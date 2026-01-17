@@ -65,7 +65,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.runtime.models.enum_config_ref_scheme import EnumConfigRefScheme
+from omnibase_infra.runtime.enums.enum_config_ref_scheme import EnumConfigRefScheme
 from omnibase_infra.runtime.models.model_config_ref_parse_result import (
     ModelConfigRefParseResult,
 )

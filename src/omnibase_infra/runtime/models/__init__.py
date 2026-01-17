@@ -52,7 +52,7 @@ Exports:
     ModelConfigCacheEntry: Internal cache entry for BindingConfigResolver
 """
 
-from omnibase_infra.runtime.models.enum_config_ref_scheme import EnumConfigRefScheme
+from omnibase_infra.runtime.enums.enum_config_ref_scheme import EnumConfigRefScheme
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
     ModelBatchLifecycleResult,
 )

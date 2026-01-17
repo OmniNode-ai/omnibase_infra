@@ -33,17 +33,17 @@ class ModelBindingConfigResolverConfig(BaseModel):
     multiple configuration sources with priority-based resolution.
 
     Source Priority Order (config_ref schemes):
-        1. vault:// - Vault secrets for production configuration
-        2. env:// - Environment variables for local development
-        3. file:// - File-based configuration for Kubernetes deployments
+        1. vault: - Vault secrets for production configuration
+        2. env: - Environment variables for local development
+        3. file: - File-based configuration for Kubernetes deployments
 
     Environment Variable Override Pattern:
         When env_prefix is set (e.g., "HANDLER"), the resolver looks for:
         {env_prefix}_{HANDLER_TYPE}_{FIELD} (e.g., HANDLER_DB_POOL_SIZE)
 
     Attributes:
-        config_dir: Base directory for relative file:// paths.
-            If None, file:// paths must be absolute.
+        config_dir: Base directory for relative file: paths.
+            If None, file: paths must be absolute.
         enable_caching: Whether to cache resolved configurations.
         cache_ttl_seconds: Time-to-live for cached configurations (0-86400).
         env_prefix: Prefix for environment variable overrides.
@@ -74,11 +74,11 @@ class ModelBindingConfigResolverConfig(BaseModel):
         from_attributes=True,
     )
 
-    # Base configuration directory for relative file:// paths
+    # Base configuration directory for relative file: paths
     config_dir: Path | None = Field(
         default=None,
-        description="Base directory for resolving relative file:// paths. "
-        "If None, all file:// paths must be absolute.",
+        description="Base directory for resolving relative file: paths. "
+        "If None, all file: paths must be absolute.",
     )
 
     # Cache settings
@@ -129,6 +129,15 @@ class ModelBindingConfigResolverConfig(BaseModel):
         default=frozenset({"file", "env", "vault"}),
         description="Set of allowed config_ref URI schemes for security. "
         "Only these schemes can be used in config_ref values.",
+    )
+
+    # Vault error handling behavior
+    fail_on_vault_error: bool = Field(
+        default=False,
+        description="If True, raise ProtocolConfigurationError when a vault: "
+        "reference fails to resolve. If False, log an error and keep the original "
+        "placeholder value (which may be insecure). "
+        "Set to True in production to prevent silent security fallbacks.",
     )
 
     @field_validator("env_prefix")

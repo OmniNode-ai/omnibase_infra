@@ -158,7 +158,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         2. Parse config_ref if present (file://, env:, vault:)
         3. Load base config (from ref or inline)
         4. Apply environment variable overrides
-        5. Resolve any vault:// references for secrets
+        5. Resolve any vault: references for secrets
         6. Validate and construct ModelBindingConfig
 
     Thread Safety:
@@ -207,7 +207,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     ModelBindingConfigResolverConfig
                 )
             )
-        except Exception as e:
+        except (LookupError, KeyError, TypeError, AttributeError) as e:
+            # LookupError/KeyError: service not registered
+            # TypeError: invalid interface specification
+            # AttributeError: container/registry missing expected methods
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="init",
@@ -229,7 +232,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 SecretResolver
             )
         except Exception:
-            # SecretResolver is optional - if not registered, vault:// schemes won't work
+            # SecretResolver is optional - if not registered, vault: schemes won't work
             pass
 
         self._cache: dict[str, ModelConfigCacheEntry] = {}
@@ -773,7 +776,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         # Apply environment variable overrides (highest priority)
         merged_config = self._apply_env_overrides(merged_config, handler_type)
 
-        # Resolve any vault:// references in the config
+        # Resolve any vault: references in the config
         merged_config = self._resolve_vault_refs(merged_config, correlation_id)
 
         # Validate and construct the final config
@@ -818,7 +821,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         # Apply environment variable overrides (highest priority)
         merged_config = self._apply_env_overrides(merged_config, handler_type)
 
-        # Resolve any vault:// references in the config (async)
+        # Resolve any vault: references in the config (async)
         merged_config = await self._resolve_vault_refs_async(
             merged_config, correlation_id
         )
@@ -1448,6 +1451,31 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """
         return self._secret_resolver
 
+    def _parse_vault_reference(self, value: str) -> tuple[str, str | None]:
+        """Parse a vault: reference string into path and optional fragment.
+
+        Extracts the vault path and optional fragment from a vault reference.
+        The fragment is specified after a '#' character in the reference.
+
+        Args:
+            value: The vault reference string (e.g., "vault:secret/path#field").
+
+        Returns:
+            Tuple of (vault_path, fragment) where fragment may be None.
+            The vault_path has the "vault:" prefix removed.
+
+        Example:
+            >>> self._parse_vault_reference("vault:secret/data/db#password")
+            ("secret/data/db", "password")
+            >>> self._parse_vault_reference("vault:secret/data/config")
+            ("secret/data/config", None)
+        """
+        vault_path = value[6:]  # Remove "vault:" prefix
+        fragment = None
+        if "#" in vault_path:
+            vault_path, fragment = vault_path.rsplit("#", 1)
+        return vault_path, fragment
+
     def _apply_env_overrides(
         self,
         config: dict[str, object],
@@ -1614,9 +1642,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         correlation_id: UUID,
         depth: int = 0,
     ) -> dict[str, object]:
-        """Resolve any vault:// references in config values.
+        """Resolve any vault: references in config values.
 
-        Scans all string values for vault:// prefix and resolves them
+        Scans all string values for vault: prefix and resolves them
         using the SecretResolver.
 
         Args:
@@ -1628,7 +1656,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             Configuration with vault references resolved.
 
         Raises:
-            ProtocolConfigurationError: If recursion depth exceeds maximum.
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if fail_on_vault_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -1649,15 +1678,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         result: dict[str, object] = {}
         for key, value in config.items():
             if isinstance(value, str) and value.startswith("vault:"):
-                # Parse and resolve vault reference
-                vault_path = value[6:]  # Remove "vault:" prefix
-                fragment = None
-                if "#" in vault_path:
-                    vault_path, fragment = vault_path.rsplit("#", 1)
-
-                logical_name = vault_path
-                if fragment:
-                    logical_name = f"{vault_path}#{fragment}"
+                # Parse vault reference using helper method
+                vault_path, fragment = self._parse_vault_reference(value)
+                logical_name = f"{vault_path}#{fragment}" if fragment else vault_path
 
                 try:
                     secret = secret_resolver.get_secret(logical_name, required=False)
@@ -1666,17 +1689,31 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     else:
                         result[key] = value  # Keep original if not found
                 except Exception as e:
-                    logger.warning(
-                        "Failed to resolve vault reference",
+                    # Log at ERROR level since silent fallback may be insecure
+                    # Use logger.exception to include traceback for debugging
+                    logger.exception(
+                        "Failed to resolve vault reference for config key '%s'",
+                        key,
                         extra={
                             "correlation_id": str(correlation_id),
                             "vault_path": logical_name,
                             "config_key": key,
-                            "error": str(e),
-                            "error_type": type(e).__name__,
                         },
                     )
-                    result[key] = value  # Keep original on error
+                    # Respect fail_on_vault_error config option
+                    if self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.VAULT,
+                            operation="resolve_vault_refs",
+                            target_name="binding_config_resolver",
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Failed to resolve vault reference for config key '{key}'",
+                            context=context,
+                        ) from e
+                    # Keep original on error (may be insecure - logged above)
+                    result[key] = value
             elif isinstance(value, dict):
                 # Recursively resolve nested dicts
                 result[key] = self._resolve_vault_refs(value, correlation_id, depth + 1)
@@ -1691,7 +1728,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         correlation_id: UUID,
         depth: int = 0,
     ) -> dict[str, object]:
-        """Resolve any vault:// references in config values asynchronously.
+        """Resolve any vault: references in config values asynchronously.
 
         Args:
             config: Configuration dictionary.
@@ -1702,7 +1739,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             Configuration with vault references resolved.
 
         Raises:
-            ProtocolConfigurationError: If recursion depth exceeds maximum.
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if fail_on_vault_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -1723,15 +1761,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         result: dict[str, object] = {}
         for key, value in config.items():
             if isinstance(value, str) and value.startswith("vault:"):
-                # Parse and resolve vault reference
-                vault_path = value[6:]  # Remove "vault:" prefix
-                fragment = None
-                if "#" in vault_path:
-                    vault_path, fragment = vault_path.rsplit("#", 1)
-
-                logical_name = vault_path
-                if fragment:
-                    logical_name = f"{vault_path}#{fragment}"
+                # Parse vault reference using helper method
+                vault_path, fragment = self._parse_vault_reference(value)
+                logical_name = f"{vault_path}#{fragment}" if fragment else vault_path
 
                 try:
                     secret = await secret_resolver.get_secret_async(
@@ -1742,17 +1774,31 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     else:
                         result[key] = value  # Keep original if not found
                 except Exception as e:
-                    logger.warning(
-                        "Failed to resolve vault reference",
+                    # Log at ERROR level since silent fallback may be insecure
+                    # Use logger.exception to include traceback for debugging
+                    logger.exception(
+                        "Failed to resolve vault reference for config key '%s'",
+                        key,
                         extra={
                             "correlation_id": str(correlation_id),
                             "vault_path": logical_name,
                             "config_key": key,
-                            "error": str(e),
-                            "error_type": type(e).__name__,
                         },
                     )
-                    result[key] = value  # Keep original on error
+                    # Respect fail_on_vault_error config option
+                    if self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.VAULT,
+                            operation="resolve_vault_refs_async",
+                            target_name="binding_config_resolver",
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Failed to resolve vault reference for config key '{key}'",
+                            context=context,
+                        ) from e
+                    # Keep original on error (may be insecure - logged above)
+                    result[key] = value
             elif isinstance(value, dict):
                 # Recursively resolve nested dicts
                 result[key] = await self._resolve_vault_refs_async(
@@ -1794,8 +1840,15 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     operation="validate_config",
                     target_name=f"handler:{handler_type}",
                 )
+                # Log the detailed error for debugging, but don't expose in exception
+                logger.debug(
+                    "Retry policy validation failed for handler '%s': %s",
+                    handler_type,
+                    e,
+                    extra={"correlation_id": str(correlation_id)},
+                )
                 raise ProtocolConfigurationError(
-                    f"Invalid retry policy configuration: {e}",
+                    f"Invalid retry policy configuration for handler '{handler_type}'",
                     context=context,
                 ) from e
 
@@ -1813,8 +1866,16 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 operation="validate_config",
                 target_name=f"handler:{handler_type}",
             )
+            # Log the detailed error for debugging, but don't expose config values
+            # in the exception message (could contain secrets or sensitive data)
+            logger.debug(
+                "Handler configuration validation failed for '%s': %s",
+                handler_type,
+                e,
+                extra={"correlation_id": str(correlation_id)},
+            )
             raise ProtocolConfigurationError(
-                f"Invalid handler configuration: {e}",
+                f"Invalid handler configuration for type '{handler_type}'",
                 context=context,
             ) from e
 
