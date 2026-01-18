@@ -361,8 +361,15 @@ class TestBindingConfigResolverFileSource:
                     config_ref="file:../secret.yaml",
                 )
 
-            # Should detect path traversal in parsing
-            assert "traversal" in str(exc_info.value).lower()
+            # Should raise a generic error that doesn't expose the path traversal details
+            # Security: detailed parse errors are logged at DEBUG level, not in exception
+            error_msg = str(exc_info.value).lower()
+            assert "invalid config reference format" in error_msg
+            # Ensure the actual path is NOT exposed in the error message
+            assert "../secret.yaml" not in error_msg
+            assert (
+                "traversal" not in error_msg
+            )  # Details logged at DEBUG, not in exception
 
     def test_relative_path_resolution(self) -> None:
         """Relative paths resolved against config_dir."""
@@ -1649,7 +1656,13 @@ class TestBindingConfigResolverSecurity:
                     config_ref="http://example.com/config",
                 )
 
-            assert "unknown" in str(exc_info.value).lower()
+            # Should raise a generic error that doesn't expose the invalid scheme
+            # Security: detailed parse errors are logged at DEBUG level, not in exception
+            error_msg = str(exc_info.value).lower()
+            assert "invalid config reference format" in error_msg
+            # Ensure the scheme and URL are NOT exposed in the error message
+            assert "http" not in error_msg
+            assert "example.com" not in error_msg
 
     def test_source_description_sanitized(self) -> None:
         """Source description in cache doesn't expose paths."""

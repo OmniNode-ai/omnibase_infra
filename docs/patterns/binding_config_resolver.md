@@ -146,7 +146,7 @@ The BindingConfigResolver solves these problems with a single resolution interfa
 │  │  1. Start with config from config_ref (if provided)             │    │
 │  │  2. Overlay inline_config (takes precedence)                    │    │
 │  │  3. Apply environment variable overrides (highest priority)     │    │
-│  │  4. Resolve vault:// references in values                       │    │
+│  │  4. Resolve vault: references in values                         │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │                              │                                           │
 │                              ▼                                           │
@@ -171,7 +171,7 @@ The BindingConfigResolver solves these problems with a single resolution interfa
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `config_dir` | `Path \| None` | `None` | Base directory for relative `file://` paths |
+| `config_dir` | `Path \| None` | `None` | Base directory for relative `file:` paths |
 | `enable_caching` | `bool` | `True` | Whether to cache resolved configurations |
 | `cache_ttl_seconds` | `float` | `300.0` | TTL for cached configs (0-86400) |
 | `env_prefix` | `str` | `"HANDLER"` | Prefix for environment variable overrides |

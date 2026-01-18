@@ -519,18 +519,26 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Check for exceptions and aggregate them
-        errors: list[str] = []
+        failed_handler_types: list[str] = []
         configs: list[ModelBindingConfig] = []
 
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 handler_type = bindings[i].get("handler_type", f"binding[{i}]")
-                errors.append(f"{handler_type}: {result}")
+                failed_handler_types.append(str(handler_type))
+                # Log the detailed error for debugging, but don't expose in exception
+                # (exception message could contain sensitive config values)
+                logger.debug(
+                    "Configuration resolution failed for handler '%s': %s",
+                    handler_type,
+                    result,
+                    extra={"correlation_id": str(correlation_id)},
+                )
             else:
                 # Type narrowing: result is ModelBindingConfig after BaseException check
                 configs.append(result)
 
-        if errors:
+        if failed_handler_types:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
@@ -538,7 +546,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 target_name="binding_config_resolver",
             )
             raise ProtocolConfigurationError(
-                f"Failed to resolve {len(errors)} configuration(s): {'; '.join(errors)}",
+                f"Failed to resolve {len(failed_handler_types)} configuration(s) "
+                f"for handlers: {', '.join(failed_handler_types)}",
                 context=context,
             )
 
@@ -859,8 +868,15 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 operation="load_from_ref",
                 target_name="binding_config_resolver",
             )
+            # Log the detailed error for debugging, but don't expose parse details
+            # in the exception message (config_ref could contain sensitive paths)
+            logger.debug(
+                "Config reference parsing failed: %s",
+                parse_result.error_message,
+                extra={"correlation_id": str(correlation_id)},
+            )
             raise ProtocolConfigurationError(
-                f"Invalid config reference: {parse_result.error_message}",
+                "Invalid config reference format",
                 context=context,
             )
 
@@ -935,8 +951,15 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 operation="load_from_ref_async",
                 target_name="binding_config_resolver",
             )
+            # Log the detailed error for debugging, but don't expose parse details
+            # in the exception message (config_ref could contain sensitive paths)
+            logger.debug(
+                "Config reference parsing failed: %s",
+                parse_result.error_message,
+                extra={"correlation_id": str(correlation_id)},
+            )
             raise ProtocolConfigurationError(
-                f"Invalid config reference: {parse_result.error_message}",
+                "Invalid config reference format",
                 context=context,
             )
 
