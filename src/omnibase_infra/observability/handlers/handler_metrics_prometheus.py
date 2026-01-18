@@ -148,6 +148,9 @@ _MAX_CORRELATION_ID_LENGTH: int = 64
 # Timeout for metrics generation to prevent blocking (seconds)
 _METRICS_GENERATION_TIMEOUT: float = 5.0
 
+# Timeout for Pushgateway operations (seconds)
+_PUSH_GATEWAY_TIMEOUT: float = 10.0
+
 # Histogram buckets for scrape duration (in seconds)
 # Covers typical scrape times from 1ms to 5s timeout
 _SCRAPE_DURATION_BUCKETS: tuple[float, ...] = (
@@ -616,6 +619,11 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             )
 
         except Exception:
+            # NOTE: Broad Exception catch is intentional here to ensure observability
+            # (duration recording) even for unexpected errors, while returning a
+            # generic 500 response that prevents internal details from leaking.
+            # The exception is fully logged internally for debugging.
+            #
             # Record duration even on error for observability
             duration_seconds = time.perf_counter() - start_time
             histogram = _get_scrape_duration_histogram()
@@ -849,7 +857,26 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         )
 
         # Generate metrics from default Prometheus registry
-        metrics_bytes = generate_latest()
+        # generate_latest() is synchronous, so run in executor with timeout
+        # to prevent blocking the event loop
+        try:
+            loop = asyncio.get_running_loop()
+            metrics_bytes = await asyncio.wait_for(
+                loop.run_in_executor(None, generate_latest),
+                timeout=_METRICS_GENERATION_TIMEOUT,
+            )
+        except TimeoutError:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="metrics.scrape",
+                target_name="metrics_prometheus_handler",
+            )
+            raise RuntimeHostError(
+                f"Metrics generation timed out after {_METRICS_GENERATION_TIMEOUT}s",
+                context=context,
+            ) from None
+
         metrics_text = metrics_bytes.decode("utf-8")
 
         payload = ModelMetricsHandlerPayload(
@@ -908,7 +935,7 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         )
 
         # Use prometheus_client's push_to_gateway functionality
-        # Note: This is a synchronous operation, so we run it in executor
+        # Note: This is a synchronous operation, so we run it in executor with timeout
         # NOTE: Broad Exception catch is intentional here because push_to_gateway
         # can raise various exceptions: URLError for network issues, HTTPError for
         # gateway errors, and other unexpected exceptions from the prometheus_client
@@ -917,13 +944,16 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             from prometheus_client import REGISTRY, push_to_gateway
 
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: push_to_gateway(
-                    push_gateway_url,
-                    job=job_name,
-                    registry=REGISTRY,
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: push_to_gateway(
+                        push_gateway_url,
+                        job=job_name,
+                        registry=REGISTRY,
+                    ),
                 ),
+                timeout=_PUSH_GATEWAY_TIMEOUT,
             )
 
             pushed_at = datetime.now(UTC).isoformat()
@@ -946,7 +976,23 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
 
             return self._build_response(payload, correlation_id, input_envelope_id)
 
+        except TimeoutError:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="metrics.push",
+                target_name="metrics_prometheus_handler",
+            )
+            raise RuntimeHostError(
+                f"Pushgateway request timed out after {_PUSH_GATEWAY_TIMEOUT}s",
+                context=context,
+            ) from None
+
         except Exception as e:
+            # NOTE: Broad Exception catch is intentional here because httpx and
+            # network operations can raise many exception types (ConnectionError,
+            # ProtocolError, etc.). We wrap all in RuntimeHostError with correlation
+            # context while preserving the error chain for debugging.
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.HTTP,

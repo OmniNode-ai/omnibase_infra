@@ -38,11 +38,10 @@ class ModelMetricsSinkConfig(BaseModel):
     allowing zero-config usage.
 
     Note:
-        The ModelMetricsPolicy (cardinality policy) is intentionally NOT included
-        in this config model. Policy is passed separately to the sink constructor
-        to allow runtime policy injection without serializing the full policy
-        object into configuration. This enables dynamic policy updates and
-        cleaner separation between static config and runtime behavior.
+        This config model only contains static configuration (metric_prefix,
+        histogram_buckets). Label cardinality enforcement is handled separately
+        by the sink's runtime policy, which is passed directly to the
+        SinkMetricsPrometheus constructor to enable dynamic policy updates.
 
     Attributes:
         metric_prefix: Optional prefix added to all metric names. Useful for
@@ -63,11 +62,8 @@ class ModelMetricsSinkConfig(BaseModel):
             histogram_buckets=(0.001, 0.005, 0.01, 0.05, 0.1),
         )
 
-        # Policy is passed separately to the sink
-        from omnibase_core.models.observability import ModelMetricsPolicy
-        policy = ModelMetricsPolicy(...)
+        # Apply config to sink
         sink = SinkMetricsPrometheus(
-            policy=policy,
             metric_prefix=config.metric_prefix,
             histogram_buckets=config.histogram_buckets,
         )

@@ -578,7 +578,12 @@ class TestThreadSafety:
 
         # All threads should complete without errors
         assert len(results) == num_threads
-        # drop_counts should be monotonically non-decreasing
+        # drop_counts should be monotonically non-decreasing.
+        # NOTE: This assertion verifies thread-safety of the drop_count property.
+        # The list is populated by concurrent threads reading drop_count, and while
+        # the append order may not reflect exact temporal ordering, the drop_count
+        # value itself is monotonically non-decreasing (it only ever increases).
+        # If this assertion fails, it indicates a thread-safety bug in the sink.
         for i in range(1, len(drop_counts)):
             assert drop_counts[i] >= drop_counts[i - 1]
 

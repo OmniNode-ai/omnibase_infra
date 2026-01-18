@@ -549,9 +549,10 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
     ) -> ModelLoggingHandlerResponse:
         """Handle logging.configure operation.
 
-        Note: Configuration changes require re-creating the sink, which
-        involves flushing the current buffer. This operation acquires
-        the config lock to ensure thread safety.
+        Note: Configuration changes require re-creating the sink. To prevent
+        log loss, operations are ordered: validate config, create new sink,
+        swap references, then flush old sink. This eliminates the window where
+        logs could be lost between flush and new sink creation.
 
         Args:
             payload: Configuration payload (same fields as ModelLoggingHandlerConfig)
@@ -573,8 +574,8 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                     context=ctx,
                 )
 
-            # Flush current buffer before reconfiguration
-            self._sink.flush()
+            # Capture old sink reference for flush after swap
+            old_sink = self._sink
 
             # Merge existing config with new values
             current_dict = self._config.model_dump()
@@ -598,19 +599,24 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                     context=ctx,
                 ) from e
 
-            # Create new sink with updated config
+            # Create new sink with updated config (BEFORE swap to prevent log loss)
             new_sink = SinkLoggingStructured(
                 max_buffer_size=new_config.buffer_size,
                 output_format=new_config.output_format,
                 drop_policy=new_config.drop_policy,
             )
 
-            # Swap sink and config
+            # Swap sink and config references (new logs now go to new sink)
             self._config = new_config
             self._sink = new_sink
 
             # Reset drop count tracker for new sink
             self._last_drop_count = 0
+
+            # Flush old sink AFTER swap to ensure all buffered entries are written.
+            # This eliminates the log loss window that existed when flush happened
+            # before new sink creation.
+            old_sink.flush()
 
             # Handle flush interval changes
             if self._config.flush_interval_seconds > 0:

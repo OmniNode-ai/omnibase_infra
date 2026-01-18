@@ -6,6 +6,29 @@ This module provides a structured logging sink that implements the
 ProtocolHotPathLoggingSink protocol. It buffers log entries in memory
 and flushes them to structlog with JSON formatting.
 
+Output Format Policy:
+    The sink supports two output formats controlled by the ``output_format`` parameter:
+    - **json** (default): Machine-readable JSON format for production environments.
+      Each log line is a complete JSON object suitable for ingestion by log
+      aggregators (ELK, Loki, Datadog, etc.).
+    - **console**: Human-readable colored output for local development only.
+
+    For production deployments, JSON format is strongly recommended as it enables:
+    - Structured querying in log aggregation systems
+    - Consistent parsing across services
+    - Machine-readable context fields for alerting and dashboards
+
+Required Context Keys:
+    The sink automatically adds the following keys to every log entry:
+    - ``original_timestamp``: ISO-8601 timestamp when emit() was called
+    - ``level``: Log level (added by structlog.stdlib.add_log_level)
+    - ``timestamp``: ISO-8601 timestamp when flush() was called (added by TimeStamper)
+
+    Callers SHOULD include these recommended context keys for observability:
+    - ``correlation_id``: Request/operation correlation ID for distributed tracing
+    - ``node_id``: ONEX node identifier for multi-node debugging
+    - ``operation``: Current operation name for filtering
+
 Buffer Management:
     The sink maintains a thread-safe buffer of log entries. When the buffer
     reaches capacity, oldest entries are dropped to make room for new ones
@@ -17,6 +40,14 @@ Thread Safety:
     acquires the lock briefly to append entries, while flush() acquires the
     lock to copy and clear the buffer before releasing it to perform I/O.
     This design minimizes lock contention in hot paths.
+
+Instance Isolation:
+    This implementation uses structlog.wrap_logger() instead of structlog.configure()
+    to create instance-specific loggers. This design choice ensures:
+    - No global state modification (safe for libraries and multi-tenant apps)
+    - Multiple instances can coexist with different output formats
+    - No configuration conflicts in test environments
+    - Thread-safe: each instance has its own processor chain
 
 Fallback Behavior:
     If structlog fails during flush, the sink falls back to writing directly
@@ -174,9 +205,26 @@ class SinkLoggingStructured:
         """Configure and return a structlog logger instance.
 
         This method creates an instance-specific logger using structlog.wrap_logger()
-        instead of structlog.configure(). This avoids modifying global state,
-        preventing conflicts when multiple SinkLoggingStructured instances
-        are created with different configurations.
+        instead of structlog.configure(). This is a critical design choice that:
+
+        1. **Avoids global state**: structlog.configure() modifies module-level state,
+           which would cause conflicts when multiple SinkLoggingStructured instances
+           exist with different output formats (e.g., JSON for production, console
+           for local debugging).
+
+        2. **Enables library safety**: Library code should never modify global logging
+           configuration, as this can unexpectedly affect the host application.
+
+        3. **Supports testing**: Tests can create multiple instances with different
+           configurations without cleanup/teardown concerns.
+
+        Processor Chain:
+            The processor chain is configured per-instance:
+            - add_log_level: Adds 'level' key to every log entry
+            - TimeStamper: Adds ISO-8601 'timestamp' at flush time
+            - StackInfoRenderer: Formats stack traces when present
+            - UnicodeDecoder: Ensures proper Unicode handling
+            - JSONRenderer or ConsoleRenderer: Final output formatting
 
         Returns:
             Configured structlog BoundLogger instance with instance-specific processors.
@@ -184,7 +232,9 @@ class SinkLoggingStructured:
         Note:
             Using wrap_logger() is the recommended pattern for library code that
             should not modify global logging configuration. Each instance gets
-            its own processor chain based on its output_format setting.
+            its own processor chain based on its output_format setting. This means
+            two instances can coexist: one writing JSON to a file, another writing
+            colored console output for debugging.
         """
         # Configure processors based on output format
         processors: list[structlog.types.Processor] = [
@@ -268,6 +318,33 @@ class SinkLoggingStructured:
                      MUST be strings to ensure serialization safety and
                      prevent type coercion issues in hot paths.
 
+        Automatically Added Keys:
+            The sink automatically adds these keys (callers should NOT include them):
+            - ``original_timestamp``: ISO-8601 timestamp captured at emit() time
+            - ``level``: Log level string (added by structlog processor)
+            - ``timestamp``: ISO-8601 timestamp at flush() time (added by structlog)
+
+        Recommended Context Keys:
+            For effective observability, callers SHOULD include:
+            - ``correlation_id``: UUID for distributed tracing across services
+            - ``node_id``: ONEX node identifier (e.g., "node_registration_orchestrator")
+            - ``operation``: Current operation name (e.g., "validate_contract")
+
+            Example with recommended keys:
+            ```python
+            sink.emit(
+                level=EnumLogLevel.INFO,
+                message="Contract validation completed",
+                context={
+                    "correlation_id": str(correlation_id),
+                    "node_id": "node_contract_validator",
+                    "operation": "validate_contract",
+                    "contract_path": "/path/to/contract.yaml",
+                    "validation_result": "passed",
+                }
+            )
+            ```
+
         Note:
             This method is synchronous (def, not async def) by design.
             It MUST complete without blocking to maintain hot-path performance.
@@ -345,8 +422,21 @@ class SinkLoggingStructured:
     def _emit_entry(self, entry: BufferedLogEntry) -> None:
         """Emit a single log entry to structlog.
 
+        This method maps the EnumLogLevel to the appropriate structlog method
+        and constructs the final context dict with required keys.
+
         Args:
             entry: The buffered log entry to emit.
+
+        Context Keys Added:
+            - ``original_timestamp``: Preserved from emit() time to track latency
+              between buffering and flushing. This is distinct from structlog's
+              ``timestamp`` which reflects flush time.
+
+        Note:
+            The structlog processor chain adds additional keys:
+            - ``level``: Log level string (via add_log_level processor)
+            - ``timestamp``: ISO-8601 timestamp at flush time (via TimeStamper)
         """
         # Map the log level to structlog method name
         level_str = str(entry.level.value).lower()

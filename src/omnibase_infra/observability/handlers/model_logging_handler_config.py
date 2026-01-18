@@ -37,8 +37,6 @@ class ModelLoggingHandlerConfig(BaseModel):
         output_format: Output format for log entries. Either "json" for
             machine-readable JSON or "console" for human-readable colored output.
             Default: "json".
-        output_file: Optional file path for log output. When set, logs are
-            written to both stdout and the specified file. Default: None.
         drop_policy: Policy for handling buffer overflow. Currently only
             "drop_oldest" is supported, which removes the oldest entries when
             buffer is full (preserves recent logs). Default: "drop_oldest".
@@ -61,10 +59,6 @@ class ModelLoggingHandlerConfig(BaseModel):
     output_format: Literal["json", "console"] = Field(
         default="json",
         description="Output format for log entries",
-    )
-    output_file: str | None = Field(
-        default=None,
-        description="Optional file path for log output",
     )
     drop_policy: Literal["drop_oldest"] = Field(
         default="drop_oldest",
