@@ -193,5 +193,6 @@ ci:
   autofix_prs: true
   autoupdate_schedule: weekly
   submodules: false
-  # Skip ONEX validation hooks in CI (they require omnibase_core)
-  skip: [onex-validate-clean-root, onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]
+  # Skip ONEX validation hooks in CI that require omnibase_core imports
+  # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
+  skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]

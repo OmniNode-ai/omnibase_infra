@@ -440,6 +440,10 @@ def run_clean_root(verbose: bool = False) -> bool:
 
     except Exception as e:
         print(f"Clean Root: ERROR ({type(e).__name__}: {e})")
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
         return False
 
 
