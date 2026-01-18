@@ -11,6 +11,9 @@ import pytest
 from scripts.validation.validate_markdown_links import (
     _heading_to_anchor,
     extract_headings_as_anchors,
+    is_external_link,
+    is_http_link,
+    normalize_url_for_validation,
 )
 
 
@@ -242,3 +245,121 @@ More paragraphs here.
         assert "installation-1-1" in anchors
         assert "configuration-1" in anchors
         assert len(anchors) == 5
+
+
+class TestIsExternalLink:
+    """Tests for external link detection."""
+
+    def test_http_link(self) -> None:
+        """HTTP links are external."""
+        assert is_external_link("http://example.com") is True
+
+    def test_https_link(self) -> None:
+        """HTTPS links are external."""
+        assert is_external_link("https://example.com") is True
+
+    def test_protocol_relative_link(self) -> None:
+        """Protocol-relative links are external."""
+        assert is_external_link("//example.com/path") is True
+
+    def test_mailto_link(self) -> None:
+        """Mailto links are external."""
+        assert is_external_link("mailto:user@example.com") is True
+
+    def test_tel_link(self) -> None:
+        """Tel links are external."""
+        assert is_external_link("tel:+1234567890") is True
+
+    def test_ftp_link(self) -> None:
+        """FTP links are external."""
+        assert is_external_link("ftp://ftp.example.com") is True
+
+    def test_javascript_link(self) -> None:
+        """JavaScript links are external (and should be skipped)."""
+        assert is_external_link("javascript:void(0)") is True
+
+    def test_data_link(self) -> None:
+        """Data URIs are external (and should be skipped)."""
+        assert is_external_link("data:text/plain;base64,SGVsbG8=") is True
+
+    def test_file_link(self) -> None:
+        """File links are external (and should be skipped)."""
+        assert is_external_link("file:///path/to/file") is True
+
+    def test_relative_path_not_external(self) -> None:
+        """Relative paths are not external."""
+        assert is_external_link("./docs/README.md") is False
+        assert is_external_link("../README.md") is False
+        assert is_external_link("docs/README.md") is False
+
+    def test_anchor_link_not_external(self) -> None:
+        """Anchor-only links are not external."""
+        assert is_external_link("#section") is False
+
+    def test_repo_root_relative_not_external(self) -> None:
+        """Repo-root relative links (starting with /) are not external."""
+        assert is_external_link("/docs/README.md") is False
+
+
+class TestIsHttpLink:
+    """Tests for HTTP/HTTPS link detection (for network validation)."""
+
+    def test_http_is_http_link(self) -> None:
+        """HTTP links can be validated."""
+        assert is_http_link("http://example.com") is True
+
+    def test_https_is_http_link(self) -> None:
+        """HTTPS links can be validated."""
+        assert is_http_link("https://example.com") is True
+
+    def test_protocol_relative_is_http_link(self) -> None:
+        """Protocol-relative links are treated as HTTPS."""
+        assert is_http_link("//example.com/path") is True
+
+    def test_mailto_not_http_link(self) -> None:
+        """Mailto links cannot be validated via HTTP."""
+        assert is_http_link("mailto:user@example.com") is False
+
+    def test_tel_not_http_link(self) -> None:
+        """Tel links cannot be validated via HTTP."""
+        assert is_http_link("tel:+1234567890") is False
+
+    def test_ftp_not_http_link(self) -> None:
+        """FTP links cannot be validated via HTTP."""
+        assert is_http_link("ftp://ftp.example.com") is False
+
+    def test_javascript_not_http_link(self) -> None:
+        """JavaScript links cannot be validated."""
+        assert is_http_link("javascript:void(0)") is False
+
+    def test_data_not_http_link(self) -> None:
+        """Data URIs cannot be validated via HTTP."""
+        assert is_http_link("data:text/plain;base64,SGVsbG8=") is False
+
+
+class TestNormalizeUrlForValidation:
+    """Tests for URL normalization before validation."""
+
+    def test_protocol_relative_to_https(self) -> None:
+        """Protocol-relative URLs should be normalized to HTTPS."""
+        assert normalize_url_for_validation("//example.com") == "https://example.com"
+        assert (
+            normalize_url_for_validation("//example.com/path")
+            == "https://example.com/path"
+        )
+
+    def test_http_unchanged(self) -> None:
+        """HTTP URLs should not be changed."""
+        assert (
+            normalize_url_for_validation("http://example.com") == "http://example.com"
+        )
+
+    def test_https_unchanged(self) -> None:
+        """HTTPS URLs should not be changed."""
+        assert (
+            normalize_url_for_validation("https://example.com") == "https://example.com"
+        )
+
+    def test_relative_path_unchanged(self) -> None:
+        """Relative paths should not be changed."""
+        assert normalize_url_for_validation("./docs/README.md") == "./docs/README.md"

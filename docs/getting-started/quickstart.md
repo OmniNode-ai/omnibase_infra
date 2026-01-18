@@ -161,11 +161,23 @@ flowchart LR
 
 ## Your First Node
 
-Every ONEX node has three parts:
+Every ONEX node has this canonical structure:
 
-1. **`models/`** - Pydantic models for typed input/output
-2. **`contract.yaml`** - Declares what the node does (the "what")
-3. **`node.py`** - Extends base class, contains no logic (declarative)
+```
+nodes/<node_name>/
+├── contract.yaml     # Declares what the node does (the "what")
+├── node.py          # Extends base class, contains no logic (declarative)
+├── models/          # Pydantic models for typed input/output
+└── registry/        # registry_infra_<name>.py (optional, for DI bindings)
+```
+
+**Required components:**
+1. **`contract.yaml`** - Declares node behavior, routing, and metadata
+2. **`node.py`** - Extends base class (`NodeEffect`, `NodeCompute`, `NodeReducer`, `NodeOrchestrator`)
+3. **`models/`** - Pydantic models for typed input/output
+
+**Optional component:**
+4. **`registry/`** - Contains `registry_infra_<name>.py` for dependency injection bindings
 
 ### Example: A Minimal Effect Node
 

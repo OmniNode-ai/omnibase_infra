@@ -54,54 +54,50 @@ Use `_GENERIC` suffix in contracts:
 
 ## Subcontracts
 
-> **Note**: Subcontracts are an **optional** modularity pattern. Most nodes work perfectly fine with a single `contract.yaml` file. Only consider extracting subcontracts when contract files become unwieldy (>100 lines in a section) or when sharing configurations across multiple nodes.
+> **Note**: Subcontracts are **inline YAML sections** within `contract.yaml`, not external files. Most nodes work perfectly fine with a single `contract.yaml` file. The term "subcontract" refers to logical groupings of related configuration within the contract file.
 
-### Subcontract Concepts vs Implementation
+### Current Implementation
 
-ONEX contracts reference 6 conceptual subcontract categories that appear in contract.yaml comments as **architectural guidance for future extraction**:
+**ONEX subcontracts are always inline sections** within the main `contract.yaml` file. There is no external file inclusion mechanism - all configuration must be in the single contract file.
 
-| Conceptual Category | Purpose | Implementation Status |
-|---------------------|---------|----------------------|
-| FSM subcontract | FSM state machine definitions | **Inline only** - `state_machine:` section |
-| Event subcontract | Event type definitions and routing | **Inline only** - `consumed_events:`/`published_events:` sections |
-| Aggregation subcontract | Aggregation/projection rules | **Inline only** - within `step_config:` |
-| State subcontract | State management configuration | **Inline only** - `coordination_rules:` section |
-| Routing subcontract | Message routing rules | **Implemented** - `ModelRoutingSubcontract` with loader |
-| Caching subcontract | Caching strategy definitions | **Inline only** - not yet typed |
+| Section | Purpose | Runtime Support |
+|---------|---------|-----------------|
+| `handler_routing:` | Handler dispatch configuration | **Typed** - `ModelRoutingSubcontract` with `load_handler_routing_subcontract()` |
+| `state_machine:` | FSM state definitions | Inline YAML only - no dedicated model |
+| `consumed_events:` / `published_events:` | Event routing | Inline YAML only - no dedicated model |
+| `coordination_rules:` | Workflow coordination | Inline YAML only - no dedicated model |
+| `io_operations:` | Effect node I/O definitions | Inline YAML only - no dedicated model |
 
-**Currently Implemented**: Only `handler_routing` has a fully typed Pydantic model (`ModelRoutingSubcontract`) with a dedicated loader function (`load_handler_routing_subcontract()`). Other sections exist as inline YAML without separate typed models.
+**Key Point**: Only `handler_routing` has a fully typed Pydantic model (`ModelRoutingSubcontract`) with a dedicated loader. Other sections are read as raw YAML dictionaries by the runtime.
 
-### When to Use Subcontracts (vs. Single Contract)
+### Conceptual Categories (Future Architecture)
 
-**Default: Use a single `contract.yaml`** for most nodes. A single contract is simpler, easier to understand, and sufficient for the majority of use cases.
+Some contract.yaml files contain comments referencing 6 "subcontract types" (fsm_subcontract, event_subcontract, etc.). These are **architectural guidance for future extraction**, not currently implemented features. The `!include` directive mentioned in these comments is **not supported** - the runtime uses `yaml.safe_load()` which does not process custom YAML tags.
 
-**Consider section extraction** only when:
-- A section exceeds ~100 lines and obscures the contract's main purpose
-- The same configuration is genuinely reusable across multiple nodes
-- The section has independent versioning needs (rare)
-- Multiple team members need to work on different sections simultaneously
+### When to Consider Refactoring
 
-**Keep everything in one contract** when:
-- The contract is under 200 lines total
-- The node is self-contained without shared configurations
-- You're unsure whether to split (when in doubt, don't)
+**Default: Keep everything in one `contract.yaml`** for most nodes.
 
-**Source of Truth**: The main `contract.yaml` is always the authoritative source. Subcontracts are inline YAML sections within this file. Currently, only `handler_routing` sections are parsed into typed Pydantic models by the runtime.
+**Consider refactoring** (into multiple nodes, not external files) when:
+- The contract exceeds ~300 lines total
+- A single node handles multiple unrelated responsibilities
+- Testing becomes difficult due to complexity
 
-### Subcontract Implementation Pattern
+**Refactoring options**:
+1. **Split into multiple nodes**: Each node gets its own `contract.yaml`
+2. **Extract shared patterns**: Move common patterns to base classes or mixins
+3. **Simplify**: Remove unused sections or consolidate redundant configuration
 
-**Current Implementation**: Subcontracts are defined as **inline sections** within the main `contract.yaml` file. The `handler_routing` section is the only section with a typed Pydantic model (`ModelRoutingSubcontract`) and dedicated loader.
+**Source of Truth**: The `contract.yaml` file is always the single authoritative source for a node's configuration.
+
+### Handler Routing (The Only Typed Subcontract)
+
+The `handler_routing` section is the only contract section with full runtime support via a typed Pydantic model.
+
+**Contract Structure**:
 
 ```yaml
-# contract.yaml - handler_routing section (the only typed subcontract)
-contract_version:
-  major: 1
-  minor: 0
-  patch: 0
-name: "node_registration_orchestrator"
-node_type: "ORCHESTRATOR_GENERIC"
-
-# handler_routing is parsed into ModelRoutingSubcontract
+# contract.yaml - handler_routing section
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
@@ -113,7 +109,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected"
 ```
 
-**How Handler Routing Is Loaded**:
+**Loading Handler Routing**:
 
 ```python
 from pathlib import Path
@@ -129,19 +125,17 @@ for entry in routing.handlers:
     print(f"Route {entry.routing_key} -> {entry.handler_key}")
 ```
 
-**Directory Structure** (current pattern):
+**Directory Structure**:
 ```
 nodes/node_registration_orchestrator/
-├── contract.yaml              # Main contract with inline sections
+├── contract.yaml              # Main contract with all sections inline
 ├── node.py                    # Declarative node class
 └── handlers/                  # Handler implementations
 ```
 
-**Note on `!include` Directive**: Some contract.yaml files contain comments suggesting a future `!include` pattern (e.g., `routing_subcontract: !include subcontracts/routing.yaml`). This is **aspirational documentation only** - the runtime uses `yaml.safe_load()` which does not support custom YAML tags. All sections must be inline in the current implementation.
-
 ### Type Safety Requirements
 
-All contracts (and subcontracts) must adhere to ONEX type safety standards:
+All contracts must adhere to ONEX type safety standards:
 
 | Requirement | Description |
 |-------------|-------------|
@@ -150,22 +144,12 @@ All contracts (and subcontracts) must adhere to ONEX type safety standards:
 | **Module paths** | All `module` fields must resolve to valid Python modules |
 | **Semantic versioning** | `contract_version` uses semver (major.minor.patch) |
 
-### Subcontracts vs External References
+### Linked Documentation (Separate from Subcontracts)
 
-**Key Distinction**: ONEX contracts use a **self-contained model** where all configuration lives within the contract file itself.
-
-| Concept | Definition | Status |
-|---------|------------|--------|
-| **Subcontract (inline)** | An inline YAML section within `contract.yaml`. Only `handler_routing` has a typed Pydantic model (`ModelRoutingSubcontract`). | Partially implemented |
-| **Linked-doc** | External Markdown documentation referenced for human consumption (e.g., ADRs, design docs). Not parsed by runtime. | Documentation pattern |
-| **`!include` directive** | YAML tag for external file inclusion (mentioned in contract comments as future pattern) | **Not implemented** |
-
-**Linked-Doc Pattern**:
-
-Contracts may reference external documentation for human readers without affecting runtime behavior:
+**Linked-docs are NOT subcontracts** - they are external Markdown files referenced for human readers. The runtime does not parse or validate linked documentation.
 
 ```yaml
-# contract.yaml
+# contract.yaml - metadata section with linked docs
 metadata:
   documentation:
     - title: "Registration FSM Design"
@@ -174,18 +158,20 @@ metadata:
       path: "docs/patterns/handler_plugin_loader.md"
 ```
 
-These references are **not parsed or validated** by the runtime - they serve as navigation aids for developers reading the contract.
+**Key Differences**:
+
+| Aspect | Subcontract (inline section) | Linked Documentation |
+|--------|------------------------------|---------------------|
+| **Location** | Inline within `contract.yaml` | External `.md` files |
+| **Runtime Use** | Parsed and used by runtime | Not parsed by runtime |
+| **Purpose** | Configuration | Human reference |
+| **Validation** | Type-checked (for `handler_routing`) | Not validated |
 
 **Why Self-Contained Contracts**:
 - **Single source of truth**: All configuration in one file prevents configuration drift
 - **Validation**: The runtime validates the entire contract atomically
 - **Simplicity**: No dependency resolution or include ordering issues
 - **Security**: No risk of malicious include paths (see `CLAUDE.md` Handler Plugin Loader security)
-
-**If a section becomes too large** (>100 lines), consider:
-1. Refactoring to reduce complexity
-2. Splitting into multiple nodes (each with its own contract)
-3. Using capabilities and dependencies to compose behavior
 
 **Relationship to CLAUDE.md**: The contract patterns documented here are consistent with `CLAUDE.md` contract standards. When in doubt, `CLAUDE.md` is authoritative for coding standards.
 

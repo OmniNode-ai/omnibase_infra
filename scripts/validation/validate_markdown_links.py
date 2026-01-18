@@ -380,8 +380,51 @@ def _heading_to_anchor(heading: str) -> str:
 
 
 def is_external_link(url: str) -> bool:
-    """Check if a URL is an external link."""
-    return url.startswith(("http://", "https://", "mailto:", "ftp://", "//"))
+    """Check if a URL is an external link.
+
+    Recognizes:
+    - HTTP/HTTPS links (http://, https://)
+    - Protocol-relative URLs (//)
+    - Non-HTTP schemes (mailto:, tel:, ftp:, javascript:, data:, file:)
+    """
+    return url.startswith(
+        (
+            "http://",
+            "https://",
+            "//",
+            "mailto:",
+            "tel:",
+            "ftp://",
+            "javascript:",
+            "data:",
+            "file://",
+        )
+    )
+
+
+def is_http_link(url: str) -> bool:
+    """Check if a URL is an HTTP/HTTPS link (can be validated via network).
+
+    Returns True for:
+    - http:// and https:// links
+    - Protocol-relative URLs (//) which are treated as https://
+
+    Returns False for:
+    - mailto:, tel:, javascript:, ftp:, data:, file:, etc.
+    - Internal/relative links
+    """
+    return url.startswith(("http://", "https://", "//"))
+
+
+def normalize_url_for_validation(url: str) -> str:
+    """Normalize a URL for external validation.
+
+    - Protocol-relative URLs (//example.com) are normalized to https://example.com
+    - Other URLs are returned unchanged
+    """
+    if url.startswith("//"):
+        return "https:" + url
+    return url
 
 
 def is_ignored(url: str, config: MarkdownLinkConfig) -> bool:
@@ -616,11 +659,33 @@ def validate_markdown_links(
 
             if is_external_link(link.url):
                 if config.check_external:
-                    error = validate_external_link(link, config.external_timeout)
-                    if error:
-                        result.broken_links.append(BrokenLink(link=link, reason=error))
+                    # Only validate HTTP/HTTPS links; skip other schemes (mailto, tel, etc.)
+                    if is_http_link(link.url):
+                        # Normalize protocol-relative URLs (//example.com -> https://example.com)
+                        normalized_url = normalize_url_for_validation(link.url)
+                        # Create a copy of link with normalized URL for validation
+                        validation_link = LinkInfo(
+                            url=normalized_url,
+                            text=link.text,
+                            line_number=link.line_number,
+                            source_file=link.source_file,
+                        )
+                        error = validate_external_link(
+                            validation_link, config.external_timeout
+                        )
+                        if error:
+                            result.broken_links.append(
+                                BrokenLink(link=link, reason=error)
+                            )
+                            if verbose:
+                                print(f"  BROKEN (external): {link.url} - {error}")
+                        elif verbose:
+                            print(f"  OK (external): {link.url}")
+                    else:
+                        # Non-HTTP scheme (mailto:, tel:, ftp:, etc.) - skip silently
+                        result.links_skipped += 1
                         if verbose:
-                            print(f"  BROKEN (external): {link.url} - {error}")
+                            print(f"  Skipped (non-HTTP scheme): {link.url}")
                 else:
                     result.links_skipped += 1
                     if verbose:

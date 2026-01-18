@@ -17,6 +17,10 @@ The Node Registration Orchestrator is an ONEX **ORCHESTRATOR_GENERIC** node that
 
 ## Architectural Position
 
+### ASCII Diagram
+
+**Diagram Description**: This diagram shows the ONEX 4-Node Architecture with data flow between node types. EFFECT nodes (Adapters) emit Events that flow to REDUCER nodes (State). REDUCER nodes emit Intents that flow to ORCHESTRATOR nodes (Workflow). ORCHESTRATOR nodes coordinate Workflow by delegating to COMPUTE nodes (Pure) for transformations and back to EFFECT nodes for external I/O. Arrows indicate data flow direction, not control flow. The Registration Orchestrator is an ORCHESTRATOR_GENERIC node that receives introspection events, delegates to the reducer to compute intents, executes intents via effect nodes, and publishes outcome events.
+
 ```
                            ONEX 4-Node Architecture
 
@@ -47,6 +51,26 @@ The Node Registration Orchestrator is an ONEX **ORCHESTRATOR_GENERIC** node that
     4. Publishes outcome events
 ```
 
+### Mermaid Diagram
+
+```mermaid
+flowchart LR
+    accTitle: ONEX 4-Node Architecture - Registration Orchestrator Context
+    accDescr: Data flow diagram showing the ONEX 4-Node Architecture. EFFECT nodes (Adapters) emit Events to REDUCER nodes (State). REDUCER nodes emit Intents to ORCHESTRATOR nodes (Workflow). ORCHESTRATOR coordinates by delegating to COMPUTE nodes (Pure) and back to EFFECT nodes. Arrows show data flow direction. The Registration Orchestrator receives introspection events, delegates intent computation to reducers, executes intents via effect nodes, and publishes outcome events.
+
+    subgraph Architecture["ONEX 4-Node Architecture"]
+        EFFECT["EFFECT<br/>(Adapters)"] -->|"Events<br/>(data flow)"| REDUCER["REDUCER<br/>(State)"]
+        REDUCER -->|"Intents<br/>(data flow)"| ORCH["ORCHESTRATOR<br/>(Workflow)"]
+        ORCH -->|"Workflow<br/>coordination"| COMPUTE["COMPUTE<br/>(Pure)"]
+        ORCH -->|"Execute<br/>intents"| EFFECT
+    end
+
+    style ORCH fill:#e3f2fd,stroke:#1976d2
+    style REDUCER fill:#fff3e0,stroke:#f57c00
+    style EFFECT fill:#fce4ec,stroke:#c2185b
+    style COMPUTE fill:#e8f5e9,stroke:#388e3c
+```
+
 ## 4-Node Architecture Integration
 
 The Registration Orchestrator implements the ONEX 4-node pattern by coordinating between different node types:
@@ -65,6 +89,10 @@ The orchestrator implements a functional architecture that cleanly separates:
 - **Pure computation** (reducer): Deterministic intent generation from events
 - **Side effects** (effect): Infrastructure operations (Consul, PostgreSQL)
 
+#### ASCII Diagram
+
+**Diagram Description**: This diagram shows the internal architecture of the NodeRegistrationOrchestrator with clear separation between data flow and processing logic. An Introspection Event enters the orchestrator where it flows to the Reducer (Pure) component. The Reducer processes the event deterministically with no I/O, producing a new state and intents. Intents (data flow) then pass to the Effect (I/O) component which executes side effects like Consul registration and PostgreSQL upsert, potentially with internal retries. The final output is a NodeRegistrationResultEvent. Arrows indicate data flow direction, not control flow.
+
 ```
                      Registration Workflow Internal Architecture
 
@@ -81,7 +109,7 @@ The orchestrator implements a functional architecture that cleanly separates:
                      │  │  - Idempotent                             │    │
                      │  └──────────────┬───────────────────────────┘    │
                      │                 │                                 │
-                     │                 │ intents                         │
+                     │                 │ intents (data flow)             │
                      │                 ▼                                 │
                      │  ┌──────────────────────────────────────────┐    │
                      │  │           Effect (I/O)                    │    │
@@ -97,6 +125,38 @@ The orchestrator implements a functional architecture that cleanly separates:
                                            │
                                            ▼
                                   NodeRegistrationResultEvent
+```
+
+#### Mermaid Diagram
+
+```mermaid
+flowchart TB
+    accTitle: Registration Workflow Internal Architecture - Reducer-Effect Separation
+    accDescr: Data flow diagram showing the internal architecture of NodeRegistrationOrchestrator. An Introspection Event enters and flows to the Reducer (Pure) component, which deterministically processes the event with no I/O. The Reducer outputs a new state and intents that flow to the Effect (I/O) component. The Effect executes side effects like Consul registration and PostgreSQL upsert, producing a NodeRegistrationResultEvent. Arrows indicate data flow direction.
+
+    subgraph ORCH["NodeRegistrationOrchestrator"]
+        subgraph REDUCER["Reducer (Pure)"]
+            R_IN["State + Event"]
+            R_PROC["Deterministic<br/>No I/O<br/>Idempotent"]
+            R_OUT["(NewState, Intents)"]
+            R_IN --> R_PROC --> R_OUT
+        end
+
+        subgraph EFFECT["Effect (I/O)"]
+            E_IN["Intent"]
+            E_PROC["Side Effect<br/>• Consul registration<br/>• PostgreSQL upsert<br/>• May retry"]
+            E_OUT["Result"]
+            E_IN --> E_PROC --> E_OUT
+        end
+
+        R_OUT -->|"intents<br/>(data flow)"| E_IN
+    end
+
+    EVENT["Introspection Event"] -->|"data flow"| R_IN
+    E_OUT -->|"data flow"| RESULT["NodeRegistrationResultEvent"]
+
+    style REDUCER fill:#e8f5e9,stroke:#388e3c
+    style EFFECT fill:#fce4ec,stroke:#c2185b
 ```
 
 ## Design Decisions
@@ -435,6 +495,8 @@ Enables the orchestrator to:
 
 ## Related Documentation
 
+- [2-Way Registration Walkthrough](../guides/registration-example.md) - **Complete 4-phase flow with code examples** (Phase 1: Introspection, Phase 2: Reducer Processing, Phase 3: Effect Execution, Phase 4: Ack Flow)
+- [Architecture Overview - Runtime Phases](overview.md#runtime-processing-phases) - Phase diagrams and error handling tables
 - [Protocol Architecture](NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md) - Detailed protocol design
 - [Current Node Architecture](CURRENT_NODE_ARCHITECTURE.md) - General ONEX node patterns
 - [Error Handling Patterns](../patterns/error_handling_patterns.md) - Error hierarchy

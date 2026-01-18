@@ -37,6 +37,7 @@ Start here to understand the ONEX architecture:
 |----------|-------------|
 | [Registration Orchestrator Architecture](REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md) | Node registration orchestrator |
 | [Node Registration Orchestrator Protocols](NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md) | Registration protocol definitions |
+| [2-Way Registration Walkthrough](../guides/registration-example.md) | Complete 4-phase flow with code examples (Phase 1: Introspection, Phase 2: Reducer, Phase 3: Effect Execution, Phase 4: Ack Flow) |
 
 ## Implementation Plans
 
