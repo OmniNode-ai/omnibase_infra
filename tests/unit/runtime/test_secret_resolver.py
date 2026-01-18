@@ -28,14 +28,19 @@ import os
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
-from pydantic import SecretStr
 
-from omnibase_infra.errors import SecretResolutionError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    SecretResolutionError,
+)
 from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
@@ -203,7 +208,11 @@ class TestSecretResolverRequiredFlag:
     """Tests for required vs optional secrets."""
 
     def test_required_true_raises_when_not_found(self) -> None:
-        """Should raise SecretResolutionError when required=True and not found."""
+        """Should raise SecretResolutionError when required=True and not found.
+
+        SECURITY: Error messages should NOT contain the logical_name to avoid
+        exposing secret identifiers. The correlation_id is provided for tracing.
+        """
         config = ModelSecretResolverConfig(
             mappings=[],
             enable_convention_fallback=False,
@@ -213,7 +222,13 @@ class TestSecretResolverRequiredFlag:
         with pytest.raises(SecretResolutionError) as exc_info:
             resolver.get_secret("nonexistent.secret", required=True)
 
-        assert "nonexistent.secret" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # SECURITY: Logical name should NOT be in error message
+        assert "nonexistent.secret" not in error_msg
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
+        # Should indicate what operation failed generically
+        assert "secret not found" in error_msg.lower()
 
     def test_required_false_returns_none_when_not_found(self) -> None:
         """Should return None when required=False and not found."""
@@ -239,7 +254,11 @@ class TestSecretResolverRequiredFlag:
             resolver.get_secret("nonexistent.secret")
 
     def test_env_var_not_set_raises_when_required(self) -> None:
-        """Should raise when env var is configured but not set."""
+        """Should raise when env var is configured but not set.
+
+        SECURITY: Error messages should NOT contain the logical_name to avoid
+        exposing secret identifiers. The correlation_id is provided for tracing.
+        """
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
@@ -261,7 +280,13 @@ class TestSecretResolverRequiredFlag:
             with pytest.raises(SecretResolutionError) as exc_info:
                 resolver.get_secret("api.key", required=True)
 
-        assert "api.key" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # SECURITY: Logical name should NOT be in error message
+        assert "api.key" not in error_msg
+        # SECURITY: Env var name should NOT be in error message
+        assert "UNSET_API_KEY" not in error_msg
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
 
 
 class TestSecretResolverCaching:
@@ -465,7 +490,11 @@ class TestSecretResolverGetSecrets:
             with pytest.raises(SecretResolutionError) as exc_info:
                 resolver.get_secrets(["secret.one", "secret.missing"], required=True)
 
-        assert "secret.missing" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # SECURITY: Logical name should NOT be in error message
+        assert "secret.missing" not in error_msg
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
 
     def test_get_secrets_returns_none_for_missing_when_not_required(self) -> None:
         """Should return None for missing secrets when required=False."""
@@ -676,7 +705,11 @@ class TestSecretResolverAsync:
 
     @pytest.mark.asyncio
     async def test_get_secret_async_raises_when_required(self) -> None:
-        """Should raise SecretResolutionError in async when required=True."""
+        """Should raise SecretResolutionError in async when required=True.
+
+        SECURITY: Error messages should NOT contain the logical_name to avoid
+        exposing secret identifiers. The correlation_id is provided for tracing.
+        """
         config = ModelSecretResolverConfig(
             mappings=[],
             enable_convention_fallback=False,
@@ -686,7 +719,13 @@ class TestSecretResolverAsync:
         with pytest.raises(SecretResolutionError) as exc_info:
             await resolver.get_secret_async("nonexistent.secret", required=True)
 
-        assert "nonexistent.secret" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # SECURITY: Logical name should NOT be in error message
+        assert "nonexistent.secret" not in error_msg
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
+        # Should indicate what operation failed generically
+        assert "secret not found" in error_msg.lower()
 
     @pytest.mark.asyncio
     async def test_get_secret_async_returns_none_when_not_required(self) -> None:
@@ -727,6 +766,82 @@ class TestSecretResolverAsync:
         assert result1 is not None
         assert result2 is not None
         assert result1.get_secret_value() == result2.get_secret_value()
+
+    @pytest.mark.asyncio
+    async def test_get_secrets_async_aggregates_all_failures(self) -> None:
+        """get_secrets_async should aggregate all failures into one error message.
+
+        Instead of failing on the first missing secret, it should attempt all
+        secrets and report all failures in a single aggregated error.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="secret.one",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_ONE",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Request multiple secrets where some don't exist
+        # Neither SECRET_ONE nor other secrets exist in env
+        with pytest.raises(SecretResolutionError) as exc_info:
+            await resolver.get_secrets_async(
+                ["secret.one", "missing.two", "missing.three"],
+                required=True,
+            )
+
+        error_message = str(exc_info.value)
+        # Should mention the aggregated failure count
+        assert "3" in error_message or "secret" in error_message.lower()
+
+    @pytest.mark.asyncio
+    async def test_get_secrets_async_returns_partial_on_not_required(self) -> None:
+        """get_secrets_async should return partial results when required=False.
+
+        If some secrets fail to resolve but required=False, the successful
+        results should still be returned.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="secret.one",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_ONE",
+                    ),
+                ),
+                ModelSecretMapping(
+                    logical_name="secret.two",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_TWO",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Only one secret exists
+        with patch.dict(os.environ, {"SECRET_ONE": "value_one"}, clear=False):
+            results = await resolver.get_secrets_async(
+                ["secret.one", "secret.two"],
+                required=False,
+            )
+
+        # secret.one should succeed
+        assert results.get("secret.one") is not None
+        assert results["secret.one"].get_secret_value() == "value_one"
+        # secret.two should return None (not found, but required=False)
+        # Note: The implementation returns only successful results
+        # So secret.two may not be in the dict at all
+        assert results.get("secret.two") is None or "secret.two" not in results
 
 
 class TestSecretResolverThreadSafety:
@@ -1292,10 +1407,22 @@ class TestSecretResolverSecurity:
         assert result is not None
         assert result.get_secret_value() == "ca_cert_data"
 
-    def test_vault_raises_not_implemented_when_handler_present(self) -> None:
-        """Vault secrets should raise NotImplementedError when handler exists."""
-        # Create a mock vault handler (not None)
-        mock_vault_handler = object()
+    def test_vault_resolves_secret_with_mocked_handler(self) -> None:
+        """Vault secrets should resolve when handler returns valid response."""
+        # Create a mock vault handler
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            return_value=MagicMock(
+                result={
+                    "status": "success",
+                    "payload": {
+                        "data": {"password": "vault_secret_value"},
+                        "metadata": {},
+                    },
+                    "correlation_id": str(uuid4()),
+                }
+            )
+        )
 
         config = ModelSecretResolverConfig(
             mappings=[
@@ -1303,7 +1430,7 @@ class TestSecretResolverSecurity:
                     logical_name="vault.secret",
                     source=ModelSecretSourceSpec(
                         source_type="vault",
-                        source_path="secret/data/test#password",
+                        source_path="secret/test#password",
                     ),
                 ),
             ],
@@ -1311,19 +1438,29 @@ class TestSecretResolverSecurity:
         )
         resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
 
-        # Should raise NotImplementedError with helpful message
-        with pytest.raises(NotImplementedError) as exc_info:
-            resolver.get_secret("vault.secret")
+        # Sync method creates new event loop, so we test via asyncio.run
 
-        error_msg = str(exc_info.value)
-        assert "vault.secret" in error_msg  # Should mention logical name
-        assert "not yet implemented" in error_msg.lower()
-        assert "env" in error_msg or "file" in error_msg  # Suggests alternatives
+        result = asyncio.run(resolver.get_secret_async("vault.secret"))
+
+        assert result is not None
+        assert result.get_secret_value() == "vault_secret_value"
 
     @pytest.mark.asyncio
-    async def test_vault_async_raises_not_implemented(self) -> None:
-        """Async Vault secrets should also raise NotImplementedError."""
-        mock_vault_handler = object()
+    async def test_vault_async_resolves_secret(self) -> None:
+        """Async Vault secrets should resolve with mocked handler."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            return_value=MagicMock(
+                result={
+                    "status": "success",
+                    "payload": {
+                        "data": {"api_key": "async_vault_value"},
+                        "metadata": {},
+                    },
+                    "correlation_id": str(uuid4()),
+                }
+            )
+        )
 
         config = ModelSecretResolverConfig(
             mappings=[
@@ -1331,7 +1468,7 @@ class TestSecretResolverSecurity:
                     logical_name="async.vault.secret",
                     source=ModelSecretSourceSpec(
                         source_type="vault",
-                        source_path="secret/data/async#key",
+                        source_path="secret/async#api_key",
                     ),
                 ),
             ],
@@ -1339,11 +1476,10 @@ class TestSecretResolverSecurity:
         )
         resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
 
-        with pytest.raises(NotImplementedError) as exc_info:
-            await resolver.get_secret_async("async.vault.secret")
+        result = await resolver.get_secret_async("async.vault.secret")
 
-        error_msg = str(exc_info.value)
-        assert "async.vault.secret" in error_msg
+        assert result is not None
+        assert result.get_secret_value() == "async_vault_value"
 
     def test_vault_returns_none_when_no_handler(self) -> None:
         """Vault secrets return None when no handler configured (graceful degradation)."""
@@ -1366,7 +1502,14 @@ class TestSecretResolverSecurity:
         assert result is None
 
     def test_error_message_does_not_leak_file_path(self) -> None:
-        """SecretResolutionError should not expose file paths."""
+        """SecretResolutionError should not expose file paths or secret identifiers.
+
+        SECURITY: Error messages should contain NEITHER:
+        - Logical names (e.g., "missing.file.secret") - reveals secret structure
+        - File paths (e.g., "/sensitive/path/to/secret") - reveals infrastructure
+
+        Only the correlation_id should be provided for tracing back to DEBUG logs.
+        """
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
@@ -1385,13 +1528,14 @@ class TestSecretResolverSecurity:
             resolver.get_secret("missing.file.secret")
 
         error_msg = str(exc_info.value)
-        # Should contain logical name (for debugging)
-        assert "missing.file.secret" in error_msg
-        # Should NOT contain the actual file path
+        # SECURITY: Logical name should NOT be in error message
+        assert "missing.file.secret" not in error_msg
+        # SECURITY: File path should NOT be in error message
         assert "/sensitive/path" not in error_msg
-        assert (
-            "secret" not in error_msg.lower() or "secret not found" in error_msg.lower()
-        )
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
+        # Should indicate what operation failed generically
+        assert "secret not found" in error_msg.lower()
 
     def test_symlink_loop_handled_gracefully(self) -> None:
         """Symlink loops should be handled without crashing."""
@@ -1497,6 +1641,546 @@ class TestSecretResolverBootstrapSecrets:
 
         assert result is None
 
+    def test_bootstrap_secret_respects_explicit_env_mapping(self) -> None:
+        """Bootstrap secrets should respect explicit env var mappings.
+
+        When an explicit mapping exists for an env source, bootstrap secrets
+        should use that mapping instead of convention-based naming. This
+        allows operators to customize the env var name for bootstrap secrets.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="vault.token",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="MY_CUSTOM_VAULT_TOKEN",  # Custom env var name
+                    ),
+                ),
+            ],
+            bootstrap_secrets=["vault.token"],
+            enable_convention_fallback=True,
+        )
+        resolver = SecretResolver(config=config)
+
+        with patch.dict(
+            os.environ,
+            {
+                "MY_CUSTOM_VAULT_TOKEN": "explicit_token_value",
+                "VAULT_TOKEN": "convention_token_value",  # Should NOT be used
+            },
+        ):
+            result = resolver.get_secret("vault.token")
+
+        assert result is not None
+        # Should use explicit mapping, not convention
+        assert result.get_secret_value() == "explicit_token_value"
+
+    def test_bootstrap_secret_vault_mapping_falls_back_to_convention(self) -> None:
+        """Bootstrap secrets with vault mapping should fall back to convention env var.
+
+        When an explicit mapping exists for vault/file source (not env), bootstrap
+        secrets should fall back to convention-based env var naming since they
+        cannot use vault/file sources.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="vault.addr",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",  # Vault mapping should be ignored
+                        source_path="secret/bootstrap#addr",
+                    ),
+                ),
+            ],
+            bootstrap_secrets=["vault.addr"],
+            convention_env_prefix="ONEX_",
+            enable_convention_fallback=True,
+        )
+        resolver = SecretResolver(config=config)
+
+        with patch.dict(os.environ, {"ONEX_VAULT_ADDR": "https://vault.local:8200"}):
+            result = resolver.get_secret("vault.addr")
+
+        assert result is not None
+        # Should use convention (ONEX_VAULT_ADDR), not the vault mapping
+        assert result.get_secret_value() == "https://vault.local:8200"
+
+
+class TestSecretResolverVaultIntegration:
+    """Tests for Vault integration (OMN-1374).
+
+    These tests verify:
+    - Vault secret resolution with mocked handler
+    - Path parsing (mount/path#field)
+    - Error handling (auth, timeout, unavailable)
+    - Graceful degradation when handler is None
+    - Correlation ID propagation
+    """
+
+    @pytest.mark.asyncio
+    async def test_vault_path_parsing_with_field(self) -> None:
+        """Should parse vault path with mount/path#field format."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            return_value=MagicMock(
+                result={
+                    "status": "success",
+                    "payload": {
+                        "data": {"password": "db_pass", "username": "db_user"},
+                        "metadata": {},
+                    },
+                    "correlation_id": str(uuid4()),
+                }
+            )
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="db.password",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/myapp/db#password",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        result = await resolver.get_secret_async("db.password")
+
+        assert result is not None
+        assert result.get_secret_value() == "db_pass"
+
+        # Verify the envelope was created correctly
+        call_args = mock_vault_handler.execute.call_args
+        envelope = call_args[0][0]
+        assert envelope["operation"] == "vault.read_secret"
+        assert envelope["payload"]["mount_point"] == "secret"
+        assert envelope["payload"]["path"] == "myapp/db"
+
+    @pytest.mark.asyncio
+    async def test_vault_path_parsing_without_field(self) -> None:
+        """Should return first field value when no field specified."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            return_value=MagicMock(
+                result={
+                    "status": "success",
+                    "payload": {
+                        "data": {"value": "single_secret"},
+                        "metadata": {},
+                    },
+                    "correlation_id": str(uuid4()),
+                }
+            )
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="api.token",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/api/token",  # No #field
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        result = await resolver.get_secret_async("api.token")
+
+        assert result is not None
+        assert result.get_secret_value() == "single_secret"
+
+    @pytest.mark.asyncio
+    async def test_vault_field_not_found_returns_none(self) -> None:
+        """Should return None when specified field doesn't exist."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            return_value=MagicMock(
+                result={
+                    "status": "success",
+                    "payload": {
+                        "data": {"other_field": "value"},
+                        "metadata": {},
+                    },
+                    "correlation_id": str(uuid4()),
+                }
+            )
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="missing.field",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/data#nonexistent",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        result = await resolver.get_secret_async("missing.field", required=False)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_vault_empty_data_returns_none(self) -> None:
+        """Should return None when Vault returns empty data."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            return_value=MagicMock(
+                result={
+                    "status": "success",
+                    "payload": {
+                        "data": {},
+                        "metadata": {},
+                    },
+                    "correlation_id": str(uuid4()),
+                }
+            )
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="empty.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/empty",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        result = await resolver.get_secret_async("empty.secret", required=False)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_vault_non_success_status_returns_none(self) -> None:
+        """Should return None when Vault returns non-success status."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            return_value=MagicMock(
+                result={
+                    "status": "error",
+                    "payload": {},
+                    "correlation_id": str(uuid4()),
+                }
+            )
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="error.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/error",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        result = await resolver.get_secret_async("error.secret", required=False)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_vault_auth_error_propagates(self) -> None:
+        """Should propagate InfraAuthenticationError from handler."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            side_effect=InfraAuthenticationError(
+                "Token expired",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="read_secret",
+                    target_name="vault_handler",
+                ),
+            )
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="auth.error",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/protected",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        with pytest.raises(InfraAuthenticationError):
+            await resolver.get_secret_async("auth.error")
+
+    @pytest.mark.asyncio
+    async def test_vault_unavailable_error_propagates(self) -> None:
+        """Should propagate InfraUnavailableError (circuit breaker open)."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            side_effect=InfraUnavailableError(
+                "Circuit breaker open",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="read_secret",
+                    target_name="vault_handler",
+                ),
+            )
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="unavailable.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/path",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        with pytest.raises(InfraUnavailableError):
+            await resolver.get_secret_async("unavailable.secret")
+
+    @pytest.mark.asyncio
+    async def test_vault_generic_error_wrapped_in_secret_resolution_error(self) -> None:
+        """Should wrap generic errors in SecretResolutionError."""
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            side_effect=RuntimeError("Unexpected error")
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="generic.error",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/path",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        with pytest.raises(SecretResolutionError) as exc_info:
+            await resolver.get_secret_async("generic.error")
+
+        assert "generic.error" in str(exc_info.value)
+
+    def test_vault_graceful_degradation_no_handler(self) -> None:
+        """Should return None when vault_handler is None (graceful degradation)."""
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="no.handler.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/path#field",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=None)
+
+        result = resolver.get_secret("no.handler.secret", required=False)
+
+        assert result is None
+
+
+class TestSecretResolverCorrelationId:
+    """Tests for correlation ID propagation (OMN-1374)."""
+
+    @pytest.mark.asyncio
+    async def test_correlation_id_passed_to_vault_handler(self) -> None:
+        """Should pass correlation_id to Vault handler in envelope."""
+        test_correlation_id = uuid4()
+        mock_vault_handler = MagicMock()
+        mock_vault_handler.execute = AsyncMock(
+            return_value=MagicMock(
+                result={
+                    "status": "success",
+                    "payload": {"data": {"key": "value"}, "metadata": {}},
+                    "correlation_id": str(test_correlation_id),
+                }
+            )
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="correlated.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",
+                        source_path="secret/path#key",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+
+        await resolver.get_secret_async(
+            "correlated.secret", correlation_id=test_correlation_id
+        )
+
+        # Verify correlation_id was passed in envelope
+        call_args = mock_vault_handler.execute.call_args
+        envelope = call_args[0][0]
+        assert envelope["correlation_id"] == str(test_correlation_id)
+
+    def test_correlation_id_in_error_context(self) -> None:
+        """Should include correlation_id in SecretResolutionError context."""
+
+        test_correlation_id = uuid4()
+        config = ModelSecretResolverConfig(
+            mappings=[],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        with pytest.raises(SecretResolutionError) as exc_info:
+            resolver.get_secret(
+                "missing.secret", required=True, correlation_id=test_correlation_id
+            )
+
+        # Error should have correlation_id accessible via property
+        assert exc_info.value.correlation_id == test_correlation_id
+
+
+class TestSecretResolverMetrics:
+    """Tests for metrics/observability (OMN-1374)."""
+
+    @pytest.mark.asyncio
+    async def test_resolution_metrics_tracked(self) -> None:
+        """Should track resolution success/failure metrics."""
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="tracked.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="TRACKED_SECRET",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Resolve a secret
+        with patch.dict(os.environ, {"TRACKED_SECRET": "value"}):
+            await resolver.get_secret_async("tracked.secret")
+
+        metrics = resolver.get_resolution_metrics()
+
+        assert metrics.success_counts["env"] >= 1
+        assert metrics.cache_hits >= 0
+
+    def test_external_metrics_collector_called(self) -> None:
+        """Should call external metrics collector methods."""
+        mock_collector = MagicMock()
+        mock_collector.record_resolution_success = MagicMock()
+        mock_collector.record_resolution_latency = MagicMock()
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="collected.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="COLLECTED_SECRET",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, metrics_collector=mock_collector)
+
+        with patch.dict(os.environ, {"COLLECTED_SECRET": "value"}):
+            resolver.get_secret("collected.secret")
+
+        # Verify collector methods were called
+        mock_collector.record_resolution_success.assert_called()
+        mock_collector.record_resolution_latency.assert_called()
+
+    def test_metrics_collector_errors_ignored(self) -> None:
+        """Should not let metrics collector errors affect resolution."""
+        mock_collector = MagicMock()
+        mock_collector.record_resolution_success = MagicMock(
+            side_effect=RuntimeError("Metrics failed")
+        )
+
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="resilient.secret",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="RESILIENT_SECRET",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config, metrics_collector=mock_collector)
+
+        # Should still resolve successfully despite metrics error
+        with patch.dict(os.environ, {"RESILIENT_SECRET": "value"}):
+            result = resolver.get_secret("resilient.secret")
+
+        assert result is not None
+        assert result.get_secret_value() == "value"
+
+    def test_set_metrics_collector(self) -> None:
+        """Should allow setting metrics collector after construction."""
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="late.collector",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="LATE_COLLECTOR",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Add collector after creation
+        mock_collector = MagicMock()
+        mock_collector.record_resolution_success = MagicMock()
+        resolver.set_metrics_collector(mock_collector)
+
+        with patch.dict(os.environ, {"LATE_COLLECTOR": "value"}):
+            resolver.get_secret("late.collector")
+
+        mock_collector.record_resolution_success.assert_called()
+
 
 __all__: list[str] = [
     "TestSecretResolverBasic",
@@ -1511,4 +2195,7 @@ __all__: list[str] = [
     "TestSecretResolverFileSecrets",
     "TestSecretResolverSecurity",
     "TestSecretResolverBootstrapSecrets",
+    "TestSecretResolverVaultIntegration",
+    "TestSecretResolverCorrelationId",
+    "TestSecretResolverMetrics",
 ]

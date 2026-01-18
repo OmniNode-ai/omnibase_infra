@@ -30,6 +30,7 @@ This directory contains detailed implementation guides and best practices for ON
 ### Security
 - **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
 - **[Secret Resolver](./secret_resolver.md)** - Centralized secret resolution with caching, multiple sources (env, file, Vault), convention fallback, and migration guide
+- **[Handler Config Resolver](./binding_config_resolver.md)** - Multi-source handler configuration resolution with environment overrides, caching, and Vault integration
 - **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
 - **[Handler Plugin Loader](./handler_plugin_loader.md)** - Contract-driven handler discovery with comprehensive security documentation for dynamic imports, threat model, and deployment checklist
 
@@ -85,6 +86,9 @@ This directory contains detailed implementation guides and best practices for ON
 | Centralized secret resolution | [Secret Resolver](./secret_resolver.md) | Quick Start |
 | Migrate from os.getenv | [Secret Resolver](./secret_resolver.md) | Migration Guide |
 | Configure secret caching | [Secret Resolver](./secret_resolver.md) | Caching |
+| Resolve handler configs | [Handler Config Resolver](./binding_config_resolver.md) | Quick Start |
+| Environment config overrides | [Handler Config Resolver](./binding_config_resolver.md) | Environment Variable Overrides |
+| Configure handler caching | [Handler Config Resolver](./binding_config_resolver.md) | Caching |
 | Connect to Consul | [Consul Integration](./consul_integration.md) | Connection Patterns |
 | Register service with Consul | [Consul Integration](./consul_integration.md) | Service Registration |
 | Consul health checks | [Consul Integration](./consul_integration.md) | Health Checks |
@@ -195,6 +199,12 @@ Secret Resolver
     ├── Sources: Environment variables, file-based, Vault
     ├── Depends on: Security Patterns, Error Handling
     └── References: SecretResolver, ModelSecretResolverConfig, HandlerVault
+
+Handler Config Resolver
+    ├── Multi-source handler configuration resolution
+    ├── Sources: Inline config, files, environment overrides, Vault
+    ├── Depends on: Secret Resolver, Security Patterns, Error Handling
+    └── References: BindingConfigResolver, ModelHandlerBindingConfig
 
 Handler Plugin Loader
     ├── Contract-driven handler discovery with dynamic imports

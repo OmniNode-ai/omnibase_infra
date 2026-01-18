@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "omnibase_infra"
-version = "0.1.0"
+version = "0.2.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = ["OmniNode Team <team@omninode.ai>"]
 license = "MIT"
@@ -253,6 +253,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI
+# All omnibase packages are first-party to avoid blank lines between them
 known-first-party = ["omnibase_infra", "omnibase_core", "omnibase_spi", "tests"]
 # Force combine as imports for consistency
 force-single-line = false
