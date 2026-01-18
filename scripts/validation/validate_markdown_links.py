@@ -51,6 +51,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import unquote
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -454,9 +455,11 @@ def validate_internal_link(
     # Handle anchor-only links (#section)
     if url.startswith("#"):
         anchor = url[1:]
+        # URL-decode the anchor (e.g., %20 -> space)
+        anchor = unquote(anchor)
         if link.source_file not in file_anchors_cache:
             try:
-                content = link.source_file.read_text(encoding="utf-8")
+                content = link.source_file.read_text(encoding="utf-8", errors="replace")
                 file_anchors_cache[link.source_file] = extract_headings_as_anchors(
                     content
                 )
@@ -478,35 +481,55 @@ def validate_internal_link(
     if not path_part:
         return None  # Already handled above
 
+    # URL-decode the anchor part if present (e.g., %20 -> space)
+    if anchor_part:
+        anchor_part = unquote(anchor_part)
+
     # Resolve the target file path
     # Handle repo-root relative links (starting with /)
-    if path_part.startswith("/"):
-        # Resolve relative to repository root, not source directory
-        target_path = (repo_root / path_part.lstrip("/")).resolve()
-    else:
-        # Resolve relative to source file directory
-        source_dir = link.source_file.parent
-        target_path = (source_dir / path_part).resolve()
+    try:
+        if path_part.startswith("/"):
+            # Resolve relative to repository root, not source directory
+            target_path = (repo_root / path_part.lstrip("/")).resolve()
+        else:
+            # Resolve relative to source file directory
+            source_dir = link.source_file.parent
+            target_path = (source_dir / path_part).resolve()
+    except OSError as e:
+        # Circular symlinks or other path resolution errors
+        return f"Cannot resolve path (possible circular symlink): {e}"
 
     # Ensure target is within repo (security check)
     try:
         target_path.relative_to(repo_root)
     except ValueError:
         return f"Link points outside repository: {target_path}"
+    except OSError as e:
+        return f"Cannot verify path is within repository: {e}"
 
     # Check if target exists
-    if not target_path.exists():
+    try:
+        target_exists = target_path.exists()
+    except OSError as e:
+        # Permission errors or other filesystem issues
+        return f"Cannot check if target exists (permission error?): {e}"
+
+    if not target_exists:
         # Check if it's a directory with implicit index
-        if (target_path.parent / (target_path.name + ".md")).exists():
-            target_path = target_path.parent / (target_path.name + ".md")
-        else:
+        try:
+            implicit_md = target_path.parent / (target_path.name + ".md")
+            if implicit_md.exists():
+                target_path = implicit_md
+            else:
+                return f"Target file not found: {path_part}"
+        except OSError:
             return f"Target file not found: {path_part}"
 
     # Validate anchor if present
     if anchor_part and target_path.suffix.lower() == ".md":
         if target_path not in file_anchors_cache:
             try:
-                content = target_path.read_text(encoding="utf-8")
+                content = target_path.read_text(encoding="utf-8", errors="replace")
                 file_anchors_cache[target_path] = extract_headings_as_anchors(content)
             except OSError:
                 file_anchors_cache[target_path] = set()
@@ -578,12 +601,36 @@ def validate_external_link(link: LinkInfo, timeout_ms: int) -> str | None:
 def find_markdown_files(
     root_path: Path,
     exclude_patterns: list[str],
+    verbose: bool = False,
 ) -> Iterator[Path]:
-    """Find all markdown files, respecting exclusion patterns."""
+    """Find all markdown files, respecting exclusion patterns.
+
+    Handles edge cases:
+    - Circular symlinks (logs warning and skips)
+    - Permission errors (logs warning and skips)
+    - Unicode filenames (handled gracefully)
+    """
     import fnmatch
 
-    for md_file in root_path.rglob("*.md"):
-        relative_path = str(md_file.relative_to(root_path))
+    try:
+        md_files_iter = root_path.rglob("*.md")
+    except OSError as e:
+        if verbose:
+            print(f"Warning: Could not scan directory {root_path}: {e}")
+        return
+
+    for md_file in md_files_iter:
+        # Handle potential OSError during iteration (e.g., broken symlinks)
+        try:
+            # Attempt to get relative path - may fail for circular symlinks
+            relative_path = str(md_file.relative_to(root_path))
+        except (ValueError, OSError) as e:
+            # Skip files that can't be made relative (symlinks pointing outside, etc.)
+            if verbose:
+                print(
+                    f"Warning: Skipping file with path resolution issue: {md_file}: {e}"
+                )
+            continue
 
         # Check if file matches any exclusion pattern
         excluded = False
@@ -597,7 +644,14 @@ def find_markdown_files(
                 break
 
         if not excluded:
-            yield md_file
+            # Verify file is accessible before yielding
+            try:
+                # Check if file exists and is readable (catches circular symlinks)
+                if md_file.is_file():
+                    yield md_file
+            except OSError as e:
+                if verbose:
+                    print(f"Warning: Skipping inaccessible file {md_file}: {e}")
 
 
 # =============================================================================
@@ -630,9 +684,11 @@ def validate_markdown_links(
         if target_path.is_file():
             md_files = [target_path]
         else:
-            md_files = list(find_markdown_files(target_path, config.exclude_files))
+            md_files = list(
+                find_markdown_files(target_path, config.exclude_files, verbose)
+            )
     else:
-        md_files = list(find_markdown_files(repo_root, config.exclude_files))
+        md_files = list(find_markdown_files(repo_root, config.exclude_files, verbose))
 
     for md_file in md_files:
         result.files_checked += 1
@@ -641,7 +697,7 @@ def validate_markdown_links(
             print(f"Checking: {md_file.relative_to(repo_root)}")
 
         try:
-            content = md_file.read_text(encoding="utf-8")
+            content = md_file.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
             if verbose:
                 print(f"  Warning: Could not read file: {e}")

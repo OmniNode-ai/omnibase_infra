@@ -17,6 +17,7 @@ Usage:
     python scripts/validate.py localhandler
     python scripts/validate.py imports
     python scripts/validate.py markdown_links
+    python scripts/validate.py markdown_links file1.md file2.md  # validate specific files
     python scripts/validate.py all
 """
 
@@ -556,13 +557,19 @@ def run_imports(verbose: bool = False) -> bool:
         return False
 
 
-def run_markdown_links(verbose: bool = False) -> bool:
+def run_markdown_links(verbose: bool = False, files: list[str] | None = None) -> bool:
     """Run markdown link validation.
 
     Validates that all internal links in markdown files point to existing
     files and anchors. External links (http/https) are skipped by default.
 
     Configuration is loaded from .markdown-link-check.json in the repository root.
+
+    Args:
+        verbose: Enable verbose output
+        files: Optional list of specific files to validate (for pre-commit).
+               If provided, only these files are validated.
+               If None, validates the entire repository.
     """
     import importlib.util
 
@@ -591,23 +598,79 @@ def run_markdown_links(verbose: bool = False) -> bool:
         config_path = repo_path / ".markdown-link-check.json"
         config = module.MarkdownLinkConfig.from_file(config_path)
 
-        result = module.validate_markdown_links(
-            repo_root=repo_path,
-            config=config,
-            verbose=verbose,
-        )
+        # If specific files are provided, validate only those
+        if files:
+            # Filter to only markdown files
+            md_files = [f for f in files if f.endswith(".md")]
+            if not md_files:
+                if verbose:
+                    print("Markdown Links: SKIP (no markdown files in input)")
+                return True
 
-        if verbose or not result.is_valid:
-            report = module.generate_report(result, repo_path)
-            print(report)
-        else:
-            print(
-                f"Markdown Links: PASS "
-                f"({result.files_checked} files, "
-                f"{result.links_checked} links checked)"
+            # Aggregate results from all files
+            total_broken_links: list[object] = []
+            total_files_checked = 0
+            total_links_checked = 0
+            total_links_skipped = 0
+
+            for file_path in md_files:
+                target_path = Path(file_path).resolve()
+                if not target_path.exists():
+                    if verbose:
+                        print(f"  Warning: File not found: {file_path}")
+                    continue
+
+                result = module.validate_markdown_links(
+                    repo_root=repo_path,
+                    config=config,
+                    verbose=verbose,
+                    target_path=target_path,
+                )
+
+                total_broken_links.extend(result.broken_links)
+                total_files_checked += result.files_checked
+                total_links_checked += result.links_checked
+                total_links_skipped += result.links_skipped
+
+            # Create aggregated result
+            aggregated_result = module.ValidationResult(
+                broken_links=total_broken_links,
+                files_checked=total_files_checked,
+                links_checked=total_links_checked,
+                links_skipped=total_links_skipped,
             )
 
-        return result.is_valid
+            if verbose or not aggregated_result.is_valid:
+                report = module.generate_report(aggregated_result, repo_path)
+                print(report)
+            else:
+                print(
+                    f"Markdown Links: PASS "
+                    f"({aggregated_result.files_checked} files, "
+                    f"{aggregated_result.links_checked} links checked)"
+                )
+
+            return aggregated_result.is_valid
+
+        else:
+            # Validate entire repository (original behavior)
+            result = module.validate_markdown_links(
+                repo_root=repo_path,
+                config=config,
+                verbose=verbose,
+            )
+
+            if verbose or not result.is_valid:
+                report = module.generate_report(result, repo_path)
+                print(report)
+            else:
+                print(
+                    f"Markdown Links: PASS "
+                    f"({result.files_checked} files, "
+                    f"{result.links_checked} links checked)"
+                )
+
+            return result.is_valid
 
     except Exception as e:
         print(f"Markdown Links: ERROR ({type(e).__name__}: {e})")
@@ -695,6 +758,11 @@ def main() -> int:
         ],
         help="Which validator to run (default: all)",
     )
+    parser.add_argument(
+        "files",
+        nargs="*",
+        help="Optional list of files to validate (for markdown_links validator)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument(
         "--quick", "-q", action="store_true", help="Quick mode (skip medium priority)"
@@ -717,6 +785,10 @@ def main() -> int:
 
     if args.validator == "all":
         success = run_all(args.verbose, args.quick)
+    elif args.validator == "markdown_links":
+        # Pass files to markdown_links validator if provided
+        files = args.files if args.files else None
+        success = run_markdown_links(args.verbose, files=files)
     else:
         success = validator_map[args.validator](args.verbose)
 

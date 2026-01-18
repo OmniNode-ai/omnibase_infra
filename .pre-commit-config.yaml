@@ -188,7 +188,7 @@ repos:
         entry: poetry run python scripts/validate.py markdown_links
         language: system
         types: [markdown]
-        pass_filenames: false
+        pass_filenames: true
         stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
