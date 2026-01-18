@@ -1,5 +1,7 @@
 # Container-Based Dependency Injection
 
+> **Navigation**: [Docs Index](../index.md) > [Patterns](README.md) > Container-Based Dependency Injection
+
 ## Overview
 
 ONEX infrastructure uses container-based dependency injection through `ModelONEXContainer` for type-safe service resolution. This pattern eliminates global singletons and enables testability.

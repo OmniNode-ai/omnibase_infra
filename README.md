@@ -27,6 +27,12 @@ src/omnibase_infra/
 └── utils/             # General utilities
 ```
 
+## Prerequisites
+
+- Python 3.12+
+- Poetry
+- Docker (optional, for infrastructure services)
+
 ## Getting Started
 
 ```bash

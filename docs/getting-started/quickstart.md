@@ -410,6 +410,6 @@ Use `TYPE_CHECKING` blocks to avoid circular imports. The `from __future__ impor
 
 ## Getting Help
 
-- **Code standards**: See [CLAUDE.md](../../CLAUDE.md) for comprehensive rules
+- **Code standards**: See [CLAUDE.md](../../CLAUDE.md) - the **authoritative source** for all coding rules and standards. Documentation in `docs/` provides explanations and examples, but CLAUDE.md defines the rules.
 - **Patterns**: See [docs/patterns/](../patterns/README.md) for implementation guides
 - **Issues**: Open an issue on GitHub

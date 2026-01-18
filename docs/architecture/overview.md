@@ -513,9 +513,12 @@ flowchart TB
 
 | Topic | Document |
 |-------|----------|
+| **Coding standards** | [CLAUDE.md](../../CLAUDE.md) - **authoritative source** for all rules |
 | Quick start | [Getting Started](../getting-started/quickstart.md) |
 | Node archetypes | [Node Archetypes Reference](../reference/node-archetypes.md) |
 | Contract format | [Contract.yaml Reference](../reference/contracts.md) |
 | Registration example | [2-Way Registration Walkthrough](../guides/registration-example.md) |
 | Implementation patterns | [Pattern Documentation](../patterns/README.md) |
 | Handler protocol | [Handler Plugin Loader](../patterns/handler_plugin_loader.md) |
+
+> **Note**: Documentation in `docs/` provides explanations, examples, and tutorials. For authoritative coding rules and standards, always refer to [CLAUDE.md](../../CLAUDE.md).

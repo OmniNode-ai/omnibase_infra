@@ -1,5 +1,7 @@
 # Protocol Patterns
 
+> **Navigation**: [Docs Index](../index.md) > [Patterns](README.md) > Protocol Patterns
+
 ## Overview
 
 Protocols in this codebase use `typing.Protocol` (PEP 544) to enable structural typing with full type checker support. Unlike abstract base classes (ABCs) that require explicit inheritance, protocols use structural subtyping - any class with matching method signatures automatically satisfies the protocol.

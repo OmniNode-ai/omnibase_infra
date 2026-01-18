@@ -52,6 +52,8 @@ Use `_GENERIC` suffix in contracts:
 
 ## Subcontracts
 
+> **Note**: Subcontracts are an **optional** modularity pattern. Most nodes work perfectly fine with a single `contract.yaml` file. Only consider extracting subcontracts when contract files become unwieldy (>100 lines in a section) or when sharing configurations across multiple nodes.
+
 As contracts grow complex, sections can be extracted into **subcontracts** for modularity. ONEX supports 6 subcontract types defined in `ModelContract`:
 
 | Subcontract Type | Purpose | Example Use Case |
@@ -63,13 +65,22 @@ As contracts grow complex, sections can be extracted into **subcontracts** for m
 | `routing_subcontract` | Message routing rules | Handler routing tables |
 | `caching_subcontract` | Caching strategy definitions | Cache TTL and invalidation rules |
 
-### When to Extract Subcontracts
+### When to Use Subcontracts (vs. Single Contract)
 
-Extract a section into a subcontract when:
-- A section exceeds ~100 lines
-- The section is reusable across multiple nodes
-- The section has independent versioning needs
-- The main contract becomes difficult to read
+**Default: Use a single `contract.yaml`** for most nodes. A single contract is simpler, easier to understand, and sufficient for the majority of use cases.
+
+**Consider extracting subcontracts** only when:
+- A section exceeds ~100 lines and obscures the contract's main purpose
+- The same configuration is genuinely reusable across multiple nodes
+- The section has independent versioning needs (rare)
+- Multiple team members need to work on different sections simultaneously
+
+**Keep everything in one contract** when:
+- The contract is under 200 lines total
+- The node is self-contained without shared configurations
+- You're unsure whether to split (when in doubt, don't)
+
+**Source of Truth**: When using subcontracts, the main `contract.yaml` remains the authoritative source. Subcontracts are included via `!include` directives and are logically part of the main contract.
 
 ### Subcontract Reference Pattern
 
@@ -98,7 +109,7 @@ nodes/node_registration_orchestrator/
 └── handlers/                  # Handler implementations
 ```
 
-**Note**: Subcontract extraction is optional. Simple nodes should keep everything in a single `contract.yaml`. Extract only when complexity warrants it.
+**Reminder**: The main `contract.yaml` is always the entry point. Subcontracts are loaded and merged at contract parse time.
 
 ### Type Safety Requirements
 

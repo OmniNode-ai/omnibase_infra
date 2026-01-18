@@ -1,5 +1,7 @@
 # Error Handling Patterns
 
+> **Navigation**: [Docs Index](../index.md) > [Patterns](README.md) > Error Handling Patterns
+
 ## Overview
 
 This document provides comprehensive error handling patterns for ONEX infrastructure services. All error handling follows the transport-aware, context-rich pattern based on `ModelOnexError` hierarchy.

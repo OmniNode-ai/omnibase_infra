@@ -1,5 +1,7 @@
 # Circuit Breaker Implementation Guide
 
+> **Navigation**: [Docs Index](../index.md) > [Patterns](README.md) > Circuit Breaker Implementation
+
 ## Overview
 
 Circuit breakers prevent cascading failures in distributed systems by detecting failures and stopping requests to unhealthy services. This guide provides a complete, production-ready implementation for ONEX infrastructure.
