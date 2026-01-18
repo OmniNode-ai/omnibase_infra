@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > Guides > 2-Way Registration
+> **Navigation**: [Home](../index.md) > [Guides](README.md) > 2-Way Registration
 
 # 2-Way Registration: A Complete ONEX Example
 
@@ -24,6 +24,8 @@ The "2-way" refers to **dual-backend registration** - nodes register simultaneou
 ### ASCII Diagram
 
 The following diagram shows the complete 2-way registration flow through all four phases:
+
+**Diagram Description**: This ASCII diagram illustrates the complete 2-way registration flow across four phases. Phase 1 (Node Introspection): An ONEX node starting up publishes to the node-introspection Kafka topic, the Registration Orchestrator receives it, routes to HandlerNodeIntrospected, which emits a NodeRegistrationInitiated event. Phase 2 (Reducer Processing): The Registration Reducer receives the event, transitions from idle to pending state, and emits intents for consul.register and postgres.upsert_registration. Phase 3 (Effect Execution): Consul and Postgres Effects execute in parallel, calling external services. Phase 4 (ACK Flow): The running node sends an ack command to the orchestrator, which publishes a NodeBecameActive event.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -361,6 +363,8 @@ Phase 3 is where the actual work happens - EFFECT nodes interact with external s
 
 ### ASCII Diagram: Effect Execution Detail
 
+**Diagram Description**: This ASCII diagram provides a detailed view of Phase 3 Effect Execution. The Orchestrator receives intents from the reducer and dispatches them in parallel to Consul Effect and Postgres Effect handlers. Each handler checks its circuit breaker state, executes with retry logic, and tracks correlation IDs. The Consul handler calls the Consul API (PUT /v1/agent/service/register), while the Postgres handler performs an INSERT with ON CONFLICT UPDATE. Upon success, each returns confirmation events. The Orchestrator aggregates results: both succeeded means publish acceptance event; one failed means partial state with retry or compensate; both failed means failure state with DLQ routing.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                    PHASE 3: EFFECT EXECUTION (DETAILED)                      │
@@ -602,6 +606,8 @@ Phase 4 completes the 2-way handshake. The registering node acknowledges that it
 
 ### ASCII Diagram: ACK Flow Detail
 
+**Diagram Description**: This ASCII diagram provides a detailed view of Phase 4 ACK Flow. Step 1: The ONEX node receives the acceptance event from Kafka. Step 2: The node sends an ACK command to the node-registration-acked topic. Step 3: The Registration Orchestrator consumes the ACK and routes to HandlerNodeRegistrationAcked. Step 4: The handler queries the projection to verify the current_state is ACCEPTED or AWAITING_ACK. Step 5: The handler calculates the liveness_deadline (envelope_timestamp + 30 seconds). Step 6: The Orchestrator publishes ModelNodeRegistrationAckReceived and ModelNodeBecameActive events. Step 7: The node is now ACTIVE, can receive work, must send heartbeats, is visible in Consul, and persisted in PostgreSQL.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      PHASE 4: ACK FLOW (DETAILED)                            │
@@ -786,6 +792,8 @@ If the node fails to send an ACK within the expected window, the system handles 
 
 Once a node is ACTIVE, it must maintain liveness through heartbeats:
 
+**Diagram Description**: This ASCII diagram shows the liveness tracking timeline after ACK. Starting at T+0 (ACK received), the node must send heartbeats (HB) within the 30-second liveness window. The timeline shows heartbeats expected at T+10s, T+20s, T+30s, and T+40s intervals. The liveness_deadline is at T+30s from the ACK. If no heartbeat is received by T+30s, the node transitions to LIVENESS_EXPIRED terminal state.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    LIVENESS TRACKING                             │
@@ -828,6 +836,8 @@ The registration flow involves two cooperating finite state machines:
 Manages the backend registration state tracking whether Consul and PostgreSQL have confirmed.
 
 #### ASCII Version
+
+**Diagram Description**: This ASCII diagram shows the Registration Reducer FSM state machine. States include IDLE (waiting for introspection), PENDING (awaiting backend confirmations), PARTIAL (one backend confirmed), COMPLETE (both backends confirmed), and FAILED (error occurred, retriable). Transitions: IDLE to PENDING on introspection_received, PENDING to PARTIAL on first backend confirmation, PARTIAL to COMPLETE on second backend confirmation. Any state can transition to FAILED on error. Both COMPLETE and FAILED can reset back to IDLE.
 
 ```
                     REGISTRATION FSM
@@ -894,6 +904,8 @@ stateDiagram-v2
 Manages the overall registration workflow state including the ACK handshake.
 
 #### ASCII Version
+
+**Diagram Description**: This ASCII diagram shows the Orchestrator FSM state machine for the registration workflow. States include PENDING_REGISTRATION (awaiting backend results), ACCEPTED (ready for ACK handshake), REJECTED (terminal, registration denied), AWAITING_ACK (waiting for node acknowledgment), ACK_RECEIVED (acknowledgment confirmed), ACK_TIMED_OUT (timeout waiting for ACK), ACTIVE (node ready for work), and LIVENESS_EXPIRED (terminal, must re-register). Key transitions: PENDING_REGISTRATION to ACCEPTED or REJECTED, ACCEPTED to AWAITING_ACK, AWAITING_ACK to ACK_RECEIVED or ACK_TIMED_OUT, then to ACTIVE, and finally ACTIVE to LIVENESS_EXPIRED if heartbeats are missed.
 
 ```
                     ORCHESTRATOR FSM

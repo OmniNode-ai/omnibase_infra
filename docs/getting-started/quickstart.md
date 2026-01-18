@@ -1,8 +1,38 @@
-> **Navigation**: [Home](../index.md) > Getting Started > Quick Start
+> **Navigation**: [Home](../index.md) > [Getting Started](README.md) > Quick Start
 
 # Quick Start Guide
 
 Get ONEX Infrastructure running in 5 minutes.
+
+## 30-Second Quick Win
+
+After installation (`poetry install`), verify ONEX works with this one-liner:
+
+```bash
+poetry run python -c "
+from omnibase_core.nodes import NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator
+print('ONEX node archetypes available:')
+print('  - NodeEffect (external I/O)')
+print('  - NodeCompute (pure transforms)')
+print('  - NodeReducer (state/FSM)')
+print('  - NodeOrchestrator (workflows)')
+print('Ready to build contract-driven nodes!')
+"
+```
+
+**Expected output:**
+```
+ONEX node archetypes available:
+  - NodeEffect (external I/O)
+  - NodeCompute (pure transforms)
+  - NodeReducer (state/FSM)
+  - NodeOrchestrator (workflows)
+Ready to build contract-driven nodes!
+```
+
+ONEX is installed. Now see the 2-minute example below, or jump to [Understanding ONEX in 60 Seconds](#understanding-onex-in-60-seconds).
+
+---
 
 ## TL;DR - Minimal Working Example
 
@@ -10,7 +40,7 @@ Copy-paste this to create your first ONEX node in under 2 minutes:
 
 ```bash
 # 1. Setup (one-time)
-git clone <repo-url> omnibase_infra3 && cd omnibase_infra3
+git clone <repo-url> omnibase_infra && cd omnibase_infra
 poetry install
 
 # 2. Create a minimal node
@@ -67,8 +97,8 @@ poetry run python -c "from omnibase_infra.nodes.node_hello_effect.node import No
 
 ```bash
 # Clone and install
-git clone <repo-url> omnibase_infra3
-cd omnibase_infra3
+git clone <repo-url> omnibase_infra
+cd omnibase_infra
 poetry install
 
 # Verify installation
@@ -80,6 +110,8 @@ poetry run python -c "import omnibase_infra; print('Ready!')"
 ONEX uses **contract-driven nodes** organized into four archetypes:
 
 ### ASCII Diagram
+
+**Diagram Description**: The following ASCII diagram shows the four ONEX node archetypes and their relationships. The ORCHESTRATOR coordinates workflows and sends events to the REDUCER, which manages state via FSM. The ORCHESTRATOR also routes work to COMPUTE nodes for pure transformations. The REDUCER emits intents that are executed by EFFECT nodes, which handle external I/O like databases and APIs.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -129,19 +161,37 @@ flowchart LR
 
 ## Your First Node
 
-Every ONEX node has two parts:
+Every ONEX node has three parts:
 
-1. **`contract.yaml`** - Declares what the node does (the "what")
-2. **`node.py`** - Extends base class, contains no logic (declarative)
+1. **`models/`** - Pydantic models for typed input/output
+2. **`contract.yaml`** - Declares what the node does (the "what")
+3. **`node.py`** - Extends base class, contains no logic (declarative)
 
 ### Example: A Minimal Effect Node
 
 ```bash
-# Create node directory
-mkdir -p src/omnibase_infra/nodes/node_hello_effect
+# Create node directory with models
+mkdir -p src/omnibase_infra/nodes/node_hello_effect/models
 ```
 
-**`contract.yaml`**:
+**`models/__init__.py`** - Define typed input/output models:
+```python
+from pydantic import BaseModel
+
+
+class ModelHelloRequest(BaseModel):
+    """Input model for hello effect."""
+
+    name: str
+
+
+class ModelHelloResponse(BaseModel):
+    """Output model for hello effect."""
+
+    greeting: str
+```
+
+**`contract.yaml`** - Declare node behavior:
 ```yaml
 contract_version:
   major: 1
@@ -177,6 +227,18 @@ class NodeHelloEffect(NodeEffect):
         super().__init__(container)
 
 __all__ = ["NodeHelloEffect"]
+```
+
+**Verify it works:**
+```bash
+poetry run python -c "
+from omnibase_infra.nodes.node_hello_effect.node import NodeHelloEffect
+from omnibase_infra.nodes.node_hello_effect.models import ModelHelloRequest, ModelHelloResponse
+print('Node class:', NodeHelloEffect.__name__)
+print('Input model:', ModelHelloRequest.__name__)
+print('Output model:', ModelHelloResponse.__name__)
+print('Node loads successfully!')
+"
 ```
 
 **Key principle**: The node class is empty! All behavior is driven by the contract.
@@ -444,6 +506,134 @@ class MyNode(NodeEffect):
 ```
 
 Use `TYPE_CHECKING` blocks to avoid circular imports. The `from __future__ import annotations` enables forward references.
+
+### 7. Incorrect File Naming
+
+**Wrong:**
+```
+myModel.py           # camelCase
+HelloAdapter.py      # PascalCase
+my-model.py          # kebab-case
+modelHello.py        # Wrong prefix position
+```
+
+**Right:**
+```
+model_hello.py       # model_<name>.py
+adapter_hello.py     # adapter_<name>.py
+handler_hello.py     # handler_<name>.py
+enum_status.py       # enum_<name>.py
+```
+
+ONEX uses strict naming conventions: `<type>_<name>.py` with snake_case. See CLAUDE.md for the complete list.
+
+### 8. Wrong Class Naming
+
+**Wrong:**
+```python
+class HelloModel(BaseModel): ...     # Suffix instead of prefix
+class model_hello(BaseModel): ...    # snake_case class name
+class Hello(BaseModel): ...          # Missing type prefix
+```
+
+**Right:**
+```python
+class ModelHello(BaseModel): ...     # Model<Name>
+class AdapterConsul: ...             # Adapter<Name>
+class HandlerAuth: ...               # Handler<Name>
+class EnumStatus(Enum): ...          # Enum<Name>
+```
+
+Class names use PascalCase with type prefix: `Model<Name>`, `Adapter<Name>`, `Handler<Name>`, etc.
+
+### 9. Using Optional Instead of Union Syntax
+
+**Wrong:**
+```python
+from typing import Optional
+
+def get_user(id: str) -> Optional[User]:  # Old syntax
+    ...
+```
+
+**Right:**
+```python
+def get_user(id: str) -> User | None:  # PEP 604 union syntax
+    ...
+```
+
+ONEX uses PEP 604 union syntax (`X | None`) instead of `Optional[X]`.
+
+### 10. Not Extending the Correct Base Class
+
+**Wrong:**
+```python
+class NodeHelloEffect:  # No base class
+    pass
+
+class NodeHelloEffect(BaseModel):  # Wrong base class
+    pass
+```
+
+**Right:**
+```python
+from omnibase_core.nodes.node_effect import NodeEffect
+
+class NodeHelloEffect(NodeEffect):  # Correct base class
+    pass
+```
+
+Each node archetype has a specific base class in `omnibase_core.nodes`: `NodeEffect`, `NodeCompute`, `NodeReducer`, `NodeOrchestrator`.
+
+### 11. Creating Versioned Directories
+
+**Wrong:**
+```
+nodes/
+├── v1/
+│   └── node_hello/
+├── v2/
+│   └── node_hello/
+```
+
+**Right:**
+```
+nodes/
+└── node_hello/
+    └── contract.yaml  # Version declared here
+```
+
+```yaml
+# contract.yaml
+contract_version:
+  major: 2
+  minor: 0
+  patch: 0
+node_version: "2.0.0"
+```
+
+Never create `v1/`, `v2/`, or `v1_0_0/` directories. Version through `contract.yaml` fields only.
+
+### 12. Hardcoding Service Configuration
+
+**Wrong:**
+```python
+class MyAdapter:
+    def __init__(self):
+        self.host = "192.168.86.200"  # Hardcoded
+        self.port = 5436              # Hardcoded
+```
+
+**Right:**
+```python
+class MyAdapter:
+    def __init__(self, container: ModelONEXContainer) -> None:
+        config = container.config
+        self.host = config.postgres_host
+        self.port = config.postgres_port
+```
+
+All configuration comes from the container. Never hardcode hosts, ports, or credentials.
 
 ---
 

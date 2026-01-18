@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Snapshot Publishing
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Snapshot Publishing
 
 # Snapshot Publishing Architecture
 

@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > Architecture > Overview
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Overview
 
 # ONEX Architecture Overview
 
@@ -17,6 +17,8 @@ ONEX is built on three core principles:
 ### ASCII Diagram
 
 The following diagram shows the complete ONEX runtime architecture:
+
+**Diagram Description**: This ASCII diagram illustrates the complete ONEX runtime system. At the top, the Event Bus (Kafka) receives events on topics like introspection, registration, heartbeat, and commands. Events flow down to the Message Dispatch Engine, which routes them to orchestrators based on topic patterns. The Orchestrator Layer contains Registration, Workflow, and Custom orchestrators. Orchestrators route to the Handler Layer (containing HandlerNodeIntrospected and HandlerNodeAcked) and emit intents to the Reducer Layer (containing the Registration Reducer with FSM). The Reducer emits ModelIntents to the Effect Layer (Consul Effect and Postgres Effect), which interacts with external services: Consul, PostgreSQL, Vault, and Kafka.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -245,11 +247,280 @@ io_operations:
   - operation: "upsert_record"
 ```
 
+## Runtime Processing Phases
+
+ONEX processes events through four distinct phases. Understanding these phases is essential for implementing and debugging ONEX workflows.
+
+### Phase Overview
+
+| Phase | Name | Responsibility | Node Types Involved |
+|-------|------|----------------|---------------------|
+| **Phase 1** | Message Dispatch | Route incoming events to appropriate orchestrators | Message Dispatch Engine, Orchestrator |
+| **Phase 2** | Handler/Reducer Processing | Process events, compute state transitions, emit intents | Orchestrator, Handler, Reducer |
+| **Phase 3** | Effect Execution | Execute external I/O operations in parallel | Effect, External Services |
+| **Phase 4** | Ack Flow | Complete handshake, establish liveness tracking | Orchestrator, Handler |
+
+### Phase 1: Message Dispatch
+
+Events enter the system through the Event Bus (Kafka) and are routed to the appropriate orchestrator by the Message Dispatch Engine.
+
+**Diagram Description**: This ASCII diagram shows Phase 1 Message Dispatch. An event arrives on a Kafka topic (e.g., node-introspection.v1). The Message Dispatch Engine parses the topic to determine the message category, validates the envelope, and matches the topic pattern to registered dispatchers. The matched Orchestrator receives the event and routes it to the appropriate handler based on payload type.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PHASE 1: MESSAGE DISPATCH                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────┐    event    ┌─────────────────────────┐   │
+│  │   Event Bus     │ ──────────► │  Message Dispatch       │   │
+│  │   (Kafka)       │             │  Engine                 │   │
+│  └─────────────────┘             └─────────────────────────┘   │
+│                                            │                     │
+│                                  1. Parse topic category         │
+│                                  2. Validate envelope            │
+│                                  3. Match dispatchers            │
+│                                            │                     │
+│                                            ▼                     │
+│                                  ┌─────────────────────────┐    │
+│                                  │   Orchestrator          │    │
+│                                  │   (coordinator)         │    │
+│                                  └─────────────────────────┘    │
+│                                            │                     │
+│                                  4. Route to handler             │
+│                                     based on payload type        │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Points**:
+- Topics follow the pattern: `{env}.{namespace}.onex.{category}.{event-type}.v{version}`
+- The dispatch engine uses topic patterns to match registered dispatchers
+- Category is one of: `evt` (event), `cmd` (command), `intent`
+- Multiple dispatchers can receive the same event (fan-out pattern)
+
+### Phase 2: Handler/Reducer Processing
+
+The orchestrator routes events to handlers for business logic processing. Handlers return events and intents, while reducers manage state transitions.
+
+**Diagram Description**: This ASCII diagram shows Phase 2 Handler/Reducer Processing. The Orchestrator receives an event and routes it to a Handler based on contract-defined routing rules. The Handler processes the event, may query projections for current state, and returns a ModelHandlerOutput containing events and intents. If state transitions are needed, events flow to the Reducer which applies FSM logic and emits intents for the Effect layer.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│               PHASE 2: HANDLER/REDUCER PROCESSING                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────┐                                        │
+│  │   Orchestrator      │ ◄─── receives event from Phase 1       │
+│  │   (coordinator)     │                                        │
+│  └─────────────────────┘                                        │
+│           │                                                      │
+│           │ routes to handler (contract.yaml handler_routing)   │
+│           ▼                                                      │
+│  ┌─────────────────────┐                                        │
+│  │   Handler           │  1. Process event                      │
+│  │   (business logic)  │  2. Query projections for state        │
+│  └─────────────────────┘  3. Return ModelHandlerOutput          │
+│           │                                                      │
+│           │ events + intents                                    │
+│           ▼                                                      │
+│  ┌─────────────────────┐                                        │
+│  │   Reducer           │  4. Receive events                     │
+│  │   (FSM-driven)      │  5. Transition state (pure function)   │
+│  └─────────────────────┘  6. Emit intents for Effect layer      │
+│           │                                                      │
+│           │ ModelIntent(intent_type="extension",                │
+│           │             payload.intent_type="...")               │
+│           ▼                                                      │
+│       [To Phase 3: Effect Execution]                            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Points**:
+- Handlers cannot publish events directly - they return `ModelHandlerOutput`
+- Reducers are pure functions: `reduce(state, event) → (new_state, intents)`
+- State models are immutable (use `with_*` methods for transitions)
+- Intents use a two-layer structure: outer `intent_type="extension"`, inner `payload.intent_type` for routing
+
+### Phase 3: Effect Execution
+
+Effect nodes execute intents by performing external I/O operations. Multiple effects can execute in parallel, with resilience patterns protecting against failures.
+
+**Diagram Description**: This ASCII diagram shows Phase 3 Effect Execution in detail. The Orchestrator receives intents from Phase 2 and dispatches them in parallel to Effect handlers. Each Effect handler checks its circuit breaker state, executes with retry logic, and performs the actual I/O operation against external services. On success, each handler returns a confirmation event. The Orchestrator aggregates all results to determine the next state: both succeeded leads to acceptance, partial failure leads to retry or compensation, and both failed leads to DLQ routing.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│               PHASE 3: EFFECT EXECUTION (PARALLEL)               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ORCHESTRATOR receives intents from Phase 2:                    │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ intents = (consul_intent, postgres_intent, ...)          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                           │                                      │
+│                           │ parallel dispatch                    │
+│           ┌───────────────┴───────────────┐                     │
+│           ▼                               ▼                      │
+│  ┌──────────────────┐          ┌──────────────────┐             │
+│  │ Effect Handler 1 │          │ Effect Handler 2 │             │
+│  │ (e.g., Consul)   │          │ (e.g., Postgres) │             │
+│  └──────────────────┘          └──────────────────┘             │
+│           │                               │                      │
+│  ┌────────┴────────┐          ┌───────────┴────────┐            │
+│  │ 1. Check circuit│          │ 1. Check circuit   │            │
+│  │    breaker      │          │    breaker         │            │
+│  │ 2. Execute with │          │ 2. Execute with    │            │
+│  │    retry logic  │          │    retry logic     │            │
+│  │ 3. Track        │          │ 3. Track           │            │
+│  │    correlation  │          │    correlation     │            │
+│  └────────┬────────┘          └───────────┬────────┘            │
+│           │                               │                      │
+│           ▼                               ▼                      │
+│  ┌──────────────────┐          ┌──────────────────┐             │
+│  │ External Service │          │ External Service │             │
+│  │ (Consul API)     │          │ (PostgreSQL)     │             │
+│  └──────────────────┘          └──────────────────┘             │
+│           │                               │                      │
+│           │ success                       │ success              │
+│           ▼                               ▼                      │
+│  ┌──────────────────┐          ┌──────────────────┐             │
+│  │ Confirmation     │          │ Confirmation     │             │
+│  │ Event            │          │ Event            │             │
+│  └──────────────────┘          └──────────────────┘             │
+│           │                               │                      │
+│           └───────────────┬───────────────┘                     │
+│                           │                                      │
+│                           ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ ORCHESTRATOR aggregates results:                         │   │
+│  │ • Both succeeded → publish acceptance, proceed to Ack    │   │
+│  │ • Partial failure → partial state (retry or compensate)  │   │
+│  │ • Both failed → failure state (DLQ routing)              │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Resilience Patterns**:
+
+| Pattern | Purpose | Implementation |
+|---------|---------|----------------|
+| **Circuit Breaker** | Prevent cascading failures | `MixinAsyncCircuitBreaker` with configurable threshold |
+| **Retry with Backoff** | Handle transient failures | Exponential backoff (2^n seconds, max 3 retries) |
+| **Correlation Tracking** | Trace requests across services | `correlation_id` propagated through all operations |
+| **Partial Failure Handling** | Continue when one backend fails | Aggregate results, track partial state |
+| **DLQ Routing** | Handle persistent failures | Route failed intents to dead letter queue |
+
+**Error Scenarios**:
+
+| Backend 1 | Backend 2 | Result State | Next Action |
+|-----------|-----------|--------------|-------------|
+| OK | OK | `complete` | Publish acceptance, proceed to ACK |
+| FAIL | OK | `partial` | Retry or compensate |
+| OK | FAIL | `partial` | Retry or compensate |
+| FAIL | FAIL | `failed` | Route to DLQ, alert operators |
+| SKIP (circuit open) | SKIP | `pending` | Wait for circuit reset |
+
+### Phase 4: Ack Flow
+
+The ACK flow completes the handshake between the registering node and the infrastructure. This phase establishes liveness tracking to ensure nodes remain healthy.
+
+**Diagram Description**: This ASCII diagram shows Phase 4 ACK Flow in detail. Step 1: The node receives the acceptance event from Phase 3. Step 2: The node sends an ACK command to the orchestrator. Step 3: The orchestrator routes to the ACK handler. Step 4: The handler verifies the current state is valid for ACK. Step 5: The handler calculates the liveness deadline. Step 6: The orchestrator publishes activation events. Step 7: The node is now ACTIVE and must send periodic heartbeats before the liveness deadline.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│               PHASE 4: ACK FLOW (2-WAY HANDSHAKE)                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  STEP 1: Node receives acceptance event from Phase 3            │
+│  ┌──────────────────┐         ┌────────────────────────┐       │
+│  │   ONEX Node      │ ◄────── │ Kafka: registration-   │       │
+│  │   (awaiting ack) │         │        accepted.v1     │       │
+│  └──────────────────┘         └────────────────────────┘       │
+│                                                                  │
+│  STEP 2: Node sends ACK command                                 │
+│  ┌──────────────────┐         ┌────────────────────────┐       │
+│  │   ONEX Node      │ ──────► │ Kafka: registration-   │       │
+│  │   (sending ack)  │         │        acked.v1        │       │
+│  └──────────────────┘         └────────────────────────┘       │
+│                                           │                     │
+│  STEP 3: Orchestrator processes ACK       │                     │
+│                                           ▼                     │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Orchestrator → Handler (HandlerNodeRegistrationAcked)   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                           │                                      │
+│  STEP 4: State verification                                     │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Query projection: current_state in (ACCEPTED,          │   │
+│  │                                       AWAITING_ACK)?     │   │
+│  │  YES → Continue to Step 5                                │   │
+│  │  NO  → Return empty (no-op)                              │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                           │                                      │
+│  STEP 5: Calculate liveness deadline                            │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  liveness_deadline = timestamp + LIVENESS_WINDOW (30s)   │   │
+│  │  Node must send heartbeat before deadline                │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                           │                                      │
+│  STEP 6: Publish activation events                              │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Orchestrator publishes:                                 │   │
+│  │  • ModelNodeRegistrationAckReceived                      │   │
+│  │  • ModelNodeBecameActive (with liveness_deadline)        │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                           │                                      │
+│  STEP 7: Node is ACTIVE                                         │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Node can receive work                                   │   │
+│  │  Node must send heartbeats before liveness_deadline      │   │
+│  │  Missing deadline → LIVENESS_EXPIRED (terminal)          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Liveness Tracking Timeline**:
+
+```
+T+0s         T+10s        T+20s        T+30s        T+40s
+  │            │            │            │            │
+  ▼            ▼            ▼            ▼            ▼
+┌───┐       ┌───┐       ┌───┐       ┌───┐       ┌───┐
+│ACK│       │ HB│       │ HB│       │ HB│       │ HB│
+└───┘       └───┘       └───┘       └───┘       └───┘
+  │                                   │
+  │◄──────────────────────────────────┤ liveness_deadline
+          30 second window
+
+If no heartbeat by T+30s → LIVENESS_EXPIRED (terminal state)
+```
+
+**ACK Timeout Handling**:
+
+| Scenario | Timeout | Next Action |
+|----------|---------|-------------|
+| ACK received on time | N/A | Node becomes ACTIVE |
+| ACK not received within 30s | ACK_TIMED_OUT | Retry ACK request or re-register |
+| Multiple ACK timeouts | After 3 retries | Mark as FAILED, alert operators |
+
+**Error Handling in ACK Flow**:
+
+| Error Condition | Handler Response | System Recovery |
+|-----------------|------------------|-----------------|
+| Invalid state for ACK | Return empty `ModelHandlerOutput` | No state change, log warning |
+| Projection query fails | Raise error, retry | Automatic retry with backoff |
+| Duplicate ACK | Idempotent no-op | Return existing active state |
+| ACK after liveness expired | Reject ACK | Node must re-register |
+
 ## Data Flow Patterns
 
 ### Event-Driven Flow
 
 #### ASCII Version
+
+**Diagram Description**: This ASCII diagram shows the event-driven processing flow. An event arrives on a Kafka topic and is received by the Orchestrator (coordinator), which routes it to the appropriate Handler based on payload type. The Handler processes the event and returns a ModelHandlerOutput containing events and intents. The Orchestrator (publisher) then publishes the returned events and routes intents to Effect nodes.
 
 ```
 Event arrives on Kafka topic
@@ -293,6 +564,8 @@ flowchart TB
 ### Intent Flow (Reducer -> Effect)
 
 #### ASCII Version
+
+**Diagram Description**: This ASCII diagram shows how intents flow from Reducers to Effect nodes. The Reducer receives an event, transitions its FSM state, and emits intents. Each intent is wrapped in a ModelIntent with intent_type="extension" and contains a payload with a specific routing key like "consul.register". The Effect Node receives the intent, executes via its handler, and returns a result. Finally, the External Service (Consul or PostgreSQL) performs the actual I/O operation.
 
 ```
 ┌─────────────────────┐
@@ -366,6 +639,8 @@ All logic is driven by the contract. The runtime reads the contract and wires ev
 Handlers implement business logic and are wired via contracts.
 
 ### ASCII Version
+
+**Diagram Description**: This ASCII diagram shows the Handler Plugin System architecture. A contract.yaml file declares handler routing rules that map event models to handler classes. The HandlerPluginLoader reads the contract, validates that handlers implement the required 5-method protocol (handler_type property, initialize, shutdown, handle, and describe), and registers them in a registry. The Handler Instance then provides these five required methods for runtime use.
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -447,6 +722,8 @@ flowchart TB
 
 ### ASCII Version
 
+**Diagram Description**: This ASCII diagram shows the three-layer package dependency structure. At the top, omnibase_infra contains infrastructure implementations including handlers (Consul, DB, Vault, HTTP), nodes (Registration, Effects), and runtime (Dispatchers, Loaders). It depends on omnibase_spi (middle layer), which provides Service Provider Interface protocols like ProtocolHandler, ProtocolDispatcher, and ProtocolProjectionReader. Both depend on omnibase_core (bottom layer), which provides core models and base classes including NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator, ModelONEXContainer, and core enums.
+
 ```
 ┌─────────────────────────────────────────────────┐
 │              omnibase_infra                      │
@@ -519,7 +796,9 @@ flowchart TB
 | Quick start | [Getting Started](../getting-started/quickstart.md) |
 | Node archetypes | [Node Archetypes Reference](../reference/node-archetypes.md) |
 | Contract format | [Contract.yaml Reference](../reference/contracts.md) |
-| Registration example | [2-Way Registration Walkthrough](../guides/registration-example.md) |
+| **Runtime phases (detailed)** | [2-Way Registration Walkthrough](../guides/registration-example.md) - complete code examples for all 4 phases |
+| Message dispatch | [Message Dispatch Engine](MESSAGE_DISPATCH_ENGINE.md) |
+| Registration orchestrator | [Registration Orchestrator Architecture](REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md) |
 | Implementation patterns | [Pattern Documentation](../patterns/README.md) |
 | Handler protocol | [Handler Plugin Loader](../patterns/handler_plugin_loader.md) |
 

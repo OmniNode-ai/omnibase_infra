@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Event Streaming Topics
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Event Streaming Topics
 
 # ONEX Event Streaming Topics - Specification (v1)
 

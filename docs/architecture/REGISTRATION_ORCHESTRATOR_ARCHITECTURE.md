@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Registration Orchestrator Architecture
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Registration Orchestrator Architecture
 
 # Registration Orchestrator Architecture
 

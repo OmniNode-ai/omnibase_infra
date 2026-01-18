@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Declarative Effect Nodes Plan
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Declarative Effect Nodes Plan
 
 # Effect Nodes Plan for omnibase_infra
 

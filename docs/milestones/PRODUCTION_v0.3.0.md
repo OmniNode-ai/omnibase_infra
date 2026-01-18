@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > [Milestones](../MVP_PLAN.md) > Production v0.3.0
+> **Navigation**: [Home](../index.md) > [Milestones](README.md) > Production v0.3.0
 >
 > **Related**: [Previous: Beta Hardening](./BETA_v0.2.0_HARDENING.md)
 

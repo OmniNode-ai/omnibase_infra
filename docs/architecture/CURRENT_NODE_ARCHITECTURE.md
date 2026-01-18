@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Current Node Architecture
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Current Node Architecture
 
 # ONEX Current Node Architecture (Pre-Runtime Host Migration)
 

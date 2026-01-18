@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > Reference > Contract.yaml
+> **Navigation**: [Home](../index.md) > [Reference](README.md) > Contract.yaml
 
 # Contract.yaml Reference
 
@@ -56,22 +56,26 @@ Use `_GENERIC` suffix in contracts:
 
 > **Note**: Subcontracts are an **optional** modularity pattern. Most nodes work perfectly fine with a single `contract.yaml` file. Only consider extracting subcontracts when contract files become unwieldy (>100 lines in a section) or when sharing configurations across multiple nodes.
 
-As contracts grow complex, sections can be extracted into **subcontracts** for modularity. ONEX supports 6 subcontract types defined in `ModelContract`:
+### Subcontract Concepts vs Implementation
 
-| Subcontract Type | Purpose | Example Use Case |
-|------------------|---------|------------------|
-| `fsm_subcontract` | FSM state machine definitions | Complex state transitions for reducers |
-| `event_subcontract` | Event type definitions and routing | Event schemas and topic mappings |
-| `aggregation_subcontract` | Aggregation/projection rules | Result aggregation strategies |
-| `state_subcontract` | State management configuration | Checkpoint and persistence settings |
-| `routing_subcontract` | Message routing rules | Handler routing tables |
-| `caching_subcontract` | Caching strategy definitions | Cache TTL and invalidation rules |
+ONEX contracts reference 6 conceptual subcontract categories that appear in contract.yaml comments as **architectural guidance for future extraction**:
+
+| Conceptual Category | Purpose | Implementation Status |
+|---------------------|---------|----------------------|
+| FSM subcontract | FSM state machine definitions | **Inline only** - `state_machine:` section |
+| Event subcontract | Event type definitions and routing | **Inline only** - `consumed_events:`/`published_events:` sections |
+| Aggregation subcontract | Aggregation/projection rules | **Inline only** - within `step_config:` |
+| State subcontract | State management configuration | **Inline only** - `coordination_rules:` section |
+| Routing subcontract | Message routing rules | **Implemented** - `ModelRoutingSubcontract` with loader |
+| Caching subcontract | Caching strategy definitions | **Inline only** - not yet typed |
+
+**Currently Implemented**: Only `handler_routing` has a fully typed Pydantic model (`ModelRoutingSubcontract`) with a dedicated loader function (`load_handler_routing_subcontract()`). Other sections exist as inline YAML without separate typed models.
 
 ### When to Use Subcontracts (vs. Single Contract)
 
 **Default: Use a single `contract.yaml`** for most nodes. A single contract is simpler, easier to understand, and sufficient for the majority of use cases.
 
-**Consider extracting subcontracts** only when:
+**Consider section extraction** only when:
 - A section exceeds ~100 lines and obscures the contract's main purpose
 - The same configuration is genuinely reusable across multiple nodes
 - The section has independent versioning needs (rare)
@@ -82,14 +86,14 @@ As contracts grow complex, sections can be extracted into **subcontracts** for m
 - The node is self-contained without shared configurations
 - You're unsure whether to split (when in doubt, don't)
 
-**Source of Truth**: The main `contract.yaml` is always the authoritative source. Subcontracts are inline YAML sections within this file that get parsed into typed Pydantic models by the runtime.
+**Source of Truth**: The main `contract.yaml` is always the authoritative source. Subcontracts are inline YAML sections within this file. Currently, only `handler_routing` sections are parsed into typed Pydantic models by the runtime.
 
 ### Subcontract Implementation Pattern
 
-**Current Implementation**: Subcontracts are defined as **inline sections** within the main `contract.yaml` file. The runtime parses these sections into typed Pydantic models (e.g., `ModelRoutingSubcontract`) using `load_handler_routing_subcontract()`.
+**Current Implementation**: Subcontracts are defined as **inline sections** within the main `contract.yaml` file. The `handler_routing` section is the only section with a typed Pydantic model (`ModelRoutingSubcontract`) and dedicated loader.
 
 ```yaml
-# contract.yaml - subcontracts are inline sections
+# contract.yaml - handler_routing section (the only typed subcontract)
 contract_version:
   major: 1
   minor: 0
@@ -97,37 +101,43 @@ contract_version:
 name: "node_registration_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
 
-# Handler routing is parsed as ModelRoutingSubcontract
-handler_routing:                       # <- This IS the routing_subcontract
+# handler_routing is parsed into ModelRoutingSubcontract
+handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
     - event_model:
         name: "ModelNodeIntrospectionEvent"
-        module: "omnibase_infra.models.registration"
+        module: "omnibase_infra.models.registration.model_node_introspection_event"
       handler:
         name: "HandlerNodeIntrospected"
-        module: "omnibase_infra.nodes.handlers"
+        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected"
 ```
 
-**How Subcontracts Are Loaded**:
+**How Handler Routing Is Loaded**:
 
 ```python
+from pathlib import Path
 from omnibase_infra.runtime.contract_loaders import load_handler_routing_subcontract
 
-# The loader extracts the handler_routing section from contract.yaml
-# and converts it to a typed ModelRoutingSubcontract
-routing = load_handler_routing_subcontract(Path("contract.yaml"))
+# Load handler_routing section from contract.yaml
+# Returns a typed ModelRoutingSubcontract with ModelRoutingEntry list
+contract_path = Path(__file__).parent / "contract.yaml"
+routing = load_handler_routing_subcontract(contract_path)
+
+# Access routing entries
+for entry in routing.handlers:
+    print(f"Route {entry.routing_key} -> {entry.handler_key}")
 ```
 
 **Directory Structure** (current pattern):
 ```
 nodes/node_registration_orchestrator/
-├── contract.yaml              # Main contract with inline subcontracts
+├── contract.yaml              # Main contract with inline sections
 ├── node.py                    # Declarative node class
 └── handlers/                  # Handler implementations
 ```
 
-**Note**: The `!include` directive pattern (e.g., `routing_subcontract: !include subcontracts/routing.yaml`) is mentioned in some contract comments as a potential future enhancement. However, this is **not currently implemented** - the runtime uses `yaml.safe_load()` which does not support custom YAML tags. All subcontracts must currently be inline.
+**Note on `!include` Directive**: Some contract.yaml files contain comments suggesting a future `!include` pattern (e.g., `routing_subcontract: !include subcontracts/routing.yaml`). This is **aspirational documentation only** - the runtime uses `yaml.safe_load()` which does not support custom YAML tags. All sections must be inline in the current implementation.
 
 ### Type Safety Requirements
 
@@ -146,9 +156,25 @@ All contracts (and subcontracts) must adhere to ONEX type safety standards:
 
 | Concept | Definition | Status |
 |---------|------------|--------|
-| **Subcontract** | An inline YAML section within `contract.yaml` that gets parsed into a typed Pydantic model | Implemented |
-| **Linked-doc** | External documentation referenced for human consumption (not parsed by runtime) | Documentation only |
-| **`!include` directive** | YAML tag for external file inclusion | **Not implemented** |
+| **Subcontract (inline)** | An inline YAML section within `contract.yaml`. Only `handler_routing` has a typed Pydantic model (`ModelRoutingSubcontract`). | Partially implemented |
+| **Linked-doc** | External Markdown documentation referenced for human consumption (e.g., ADRs, design docs). Not parsed by runtime. | Documentation pattern |
+| **`!include` directive** | YAML tag for external file inclusion (mentioned in contract comments as future pattern) | **Not implemented** |
+
+**Linked-Doc Pattern**:
+
+Contracts may reference external documentation for human readers without affecting runtime behavior:
+
+```yaml
+# contract.yaml
+metadata:
+  documentation:
+    - title: "Registration FSM Design"
+      path: "docs/decisions/adr-registration-fsm.md"
+    - title: "Handler Routing Pattern"
+      path: "docs/patterns/handler_plugin_loader.md"
+```
+
+These references are **not parsed or validated** by the runtime - they serve as navigation aids for developers reading the contract.
 
 **Why Self-Contained Contracts**:
 - **Single source of truth**: All configuration in one file prevents configuration drift
@@ -295,6 +321,172 @@ capabilities:
 | Technology-agnostic | `registration.storage.upsert` | `postgres.insert` | Allows backend swaps |
 
 **Why This Matters**: Capability names are used for service discovery, routing, and dependency resolution. Technology-agnostic names allow backend swaps without contract changes.
+
+#### Capability Naming Examples: Good vs Bad
+
+This section provides detailed side-by-side comparisons to help you choose appropriate capability names.
+
+**Example 1: Service Discovery**
+
+| Aspect | Good | Bad |
+|--------|------|-----|
+| **Name** | `service.discovery.register` | `consul` |
+| **Why good/bad** | Describes the action (register for discovery) | Names the technology, not the capability |
+| **What happens if you change backends** | No change needed - swap Consul for Kubernetes service discovery | Must rename capability and update all consumers |
+| **Self-documenting?** | Yes - you know it registers something for discovery | No - what does "consul" do? Register? Query? Health check? |
+
+```yaml
+# GOOD: Describes the capability
+capabilities:
+  - name: "service.discovery.register"
+    description: "Register a service instance for discovery by other services"
+  - name: "service.discovery.lookup"
+    description: "Find services by name, tags, or health status"
+  - name: "service.discovery.health"
+    description: "Report and query service health status"
+
+# BAD: Names the technology
+capabilities:
+  - name: "consul"              # Vague - what operation?
+  - name: "consul.agent"        # Still technology-coupled
+  - name: "k8s.service"         # What if you're not on Kubernetes?
+```
+
+**Example 2: Data Storage**
+
+| Aspect | Good | Bad |
+|--------|------|-----|
+| **Name** | `registration.storage.upsert` | `postgres.insert` |
+| **Why good/bad** | Describes domain (registration) and action (upsert) | Exposes database technology in the interface |
+| **Reusability** | Works with any backend: Postgres, MySQL, DynamoDB | Tied to PostgreSQL specifically |
+| **API stability** | Stable - backend changes don't affect consumers | Breaks if you migrate databases |
+
+```yaml
+# GOOD: Domain + action pattern
+capabilities:
+  - name: "registration.storage.upsert"
+    description: "Insert or update a registration record"
+  - name: "registration.storage.query"
+    description: "Query registrations by criteria"
+  - name: "registration.storage.delete"
+    description: "Remove a registration record"
+
+# BAD: Technology-specific names
+capabilities:
+  - name: "postgres.insert"     # Database engine in name
+  - name: "sql.execute"         # Exposes query language
+  - name: "dynamodb.putItem"    # AWS-specific naming
+```
+
+**Example 3: Event Processing**
+
+| Aspect | Good | Bad |
+|--------|------|-----|
+| **Name** | `event.process.validate` | `kafka.consume` |
+| **Why good/bad** | Describes the logical action | Exposes transport mechanism |
+| **Flexibility** | Works with Kafka, RabbitMQ, or in-memory queues | Only makes sense for Kafka |
+| **Clarity** | Clear what the capability does | What does "consume" mean? Validate? Transform? Route? |
+
+```yaml
+# GOOD: Logical capability names
+capabilities:
+  - name: "event.process.validate"
+    description: "Validate incoming events against schema"
+  - name: "event.process.transform"
+    description: "Transform events between formats"
+  - name: "event.process.route"
+    description: "Route events to appropriate handlers"
+
+# BAD: Transport-specific names
+capabilities:
+  - name: "kafka.consume"       # Transport detail, not capability
+  - name: "kafka.publish"       # What is being published?
+  - name: "rabbitmq.queue"      # Technology in name
+```
+
+**Example 4: Generic vs Specific**
+
+| Aspect | Good | Bad |
+|--------|------|-----|
+| **Name** | `node.lifecycle.introspection` | `doStuff` |
+| **Why good/bad** | Hierarchical, specific, self-documenting | Meaningless - provides no information |
+| **Discoverability** | Easy to find via `node.*` prefix | Impossible to categorize or discover |
+| **Maintenance** | Clear scope and purpose | What is "stuff"? Who maintains this? |
+
+```yaml
+# GOOD: Specific, hierarchical names
+capabilities:
+  - name: "node.lifecycle.introspection"
+    description: "Query node capabilities and configuration"
+  - name: "node.lifecycle.healthcheck"
+    description: "Verify node operational status"
+  - name: "workflow.state.checkpoint"
+    description: "Create workflow recovery checkpoint"
+
+# BAD: Vague or meaningless names
+capabilities:
+  - name: "doStuff"             # What stuff?
+  - name: "handler1"            # Numbered handlers = poor design
+  - name: "process"             # Process what? How?
+  - name: "run"                 # Run what?
+  - name: "execute"             # Execute what operation?
+  - name: "data"                # What data? For what purpose?
+  - name: "util"                # Utility for what?
+```
+
+#### Capability Naming Checklist
+
+Before finalizing a capability name, verify it passes these checks:
+
+| Check | Question | If No... |
+|-------|----------|----------|
+| **Domain-scoped** | Does it start with a domain prefix? | Add domain: `storage` -> `registration.storage` |
+| **Action-oriented** | Does it describe an action? | Add verb: `registration` -> `registration.query` |
+| **Technology-agnostic** | Could a different backend implement it? | Remove tech: `postgres.insert` -> `storage.upsert` |
+| **Self-documenting** | Can someone understand it without reading docs? | Be specific: `process` -> `event.process.validate` |
+| **Hierarchical** | Does it fit into a logical hierarchy? | Add structure: `query` -> `node.registration.query` |
+
+#### Naming Decision Tree
+
+##### ASCII Version
+
+**Diagram Description**: This ASCII decision tree guides capability naming choices. First, check if the name is technology-specific (like Postgres or Consul) - if yes, replace it with a capability name. If not, check if it's a single vague word - if yes, add domain and action context. Finally, verify the name is self-documenting; if not, add descriptive context.
+
+```
+Is the name specific to a technology (Postgres, Consul, Kafka)?
+├── YES → Replace with capability name
+│         "postgres.insert" → "registration.storage.upsert"
+│
+└── NO → Is the name a single vague word?
+         ├── YES → Add domain and action
+         │         "query" → "node.registration.query"
+         │
+         └── NO → Is it self-documenting?
+                  ├── YES → Good name!
+                  └── NO → Add descriptive context
+                           "handler" → "event.introspection.handler"
+```
+
+##### Mermaid Version
+
+```mermaid
+flowchart TD
+    accTitle: Capability Naming Decision Tree
+    accDescr: Decision tree for choosing capability names. Start by checking if the name is technology-specific like Postgres or Consul. If yes, replace with a capability name. If no, check if it is a single vague word. If yes, add domain and action context. If no, check if the name is self-documenting. If yes, the name is good. If no, add descriptive context.
+
+    START[Capability Name] --> Q1{Is the name<br/>technology-specific?<br/>Postgres, Consul, Kafka}
+    Q1 -->|YES| A1[Replace with capability name<br/>postgres.insert → registration.storage.upsert]
+    Q1 -->|NO| Q2{Is the name a<br/>single vague word?}
+    Q2 -->|YES| A2[Add domain and action<br/>query → node.registration.query]
+    Q2 -->|NO| Q3{Is it<br/>self-documenting?}
+    Q3 -->|YES| A3[Good name!]
+    Q3 -->|NO| A4[Add descriptive context<br/>handler → event.introspection.handler]
+
+    style A3 fill:#e8f5e9
+    style A1 fill:#fff3e0
+    style A2 fill:#fff3e0
+    style A4 fill:#fff3e0
+```
 
 ### Dependencies
 

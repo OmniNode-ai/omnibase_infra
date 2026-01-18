@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > Handoff > Handler Routing
+> **Navigation**: [Home](../index.md) > [Handoff](README.md) > Handler Routing
 
 # Handoff Document: Contract-Driven Handler Routing
 

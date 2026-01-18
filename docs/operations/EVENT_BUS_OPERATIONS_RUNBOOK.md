@@ -2,11 +2,11 @@
 
 # Event Bus Operations Runbook
 
-Operational guide for deploying, configuring, monitoring, and troubleshooting the KafkaEventBus in production environments.
+Operational guide for deploying, configuring, monitoring, and troubleshooting the EventBusKafka in production environments.
 
 ## Overview
 
-The KafkaEventBus provides production-grade message streaming using Apache Kafka with built-in resilience patterns:
+The EventBusKafka provides production-grade message streaming using Apache Kafka with built-in resilience patterns:
 
 - **Topic-based routing** with Kafka partitioning
 - **Circuit breaker** for connection failure protection
@@ -136,9 +136,9 @@ dead_letter_topic: "dlq-events"
 
 ```python
 from pathlib import Path
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
-bus = KafkaEventBus.from_yaml(Path("/etc/kafka/config.yaml"))
+bus = EventBusKafka.from_yaml(Path("/etc/kafka/config.yaml"))
 ```
 
 ## Health Check Endpoints
@@ -176,10 +176,10 @@ health = await bus.health_check()
 
 ```python
 from fastapi import FastAPI
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
 app = FastAPI()
-bus = KafkaEventBus.default()
+bus = EventBusKafka.default()
 
 @app.get("/health/event-bus")
 async def event_bus_health():
@@ -234,7 +234,7 @@ kafka_requests_total = Counter(
     ["environment", "topic", "result"]  # result: success, failure, rejected
 )
 
-async def collect_circuit_metrics(bus: KafkaEventBus):
+async def collect_circuit_metrics(bus: EventBusKafka):
     """Collect circuit breaker metrics."""
     health = await bus.health_check()
     state_value = {"closed": 0, "half_open": 1, "open": 2}
@@ -298,9 +298,9 @@ Failed messages are published to the DLQ with comprehensive metadata:
 ### DLQ Processing Strategy
 
 ```python
-from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
-bus = KafkaEventBus.default()
+bus = EventBusKafka.default()
 
 async def process_dlq_message(msg):
     """Process dead letter queue messages."""
@@ -588,7 +588,7 @@ echo '{"test": "message"}' | kafka-console-producer.sh \
 import signal
 import asyncio
 
-bus = KafkaEventBus.default()
+bus = EventBusKafka.default()
 
 async def graceful_shutdown():
     """Gracefully shutdown event bus."""
@@ -784,5 +784,5 @@ Exponential backoff formula: `delay = base * (2^attempt) * jitter`
 - [Thread Pool Tuning Runbook](./THREAD_POOL_TUNING_RUNBOOK.md)
 - [Circuit Breaker Implementation](../patterns/circuit_breaker_implementation.md)
 - [Error Recovery Patterns](../patterns/error_recovery_patterns.md)
-- [KafkaEventBus Source](../../src/omnibase_infra/event_bus/event_bus_kafka.py)
+- [EventBusKafka Source](../../src/omnibase_infra/event_bus/event_bus_kafka.py)
 - [Configuration Model](../../src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py)

@@ -105,8 +105,28 @@ class LinkInfo:
     line_number: int
     source_file: Path
 
+    @property
+    def is_missing_reference(self) -> bool:
+        """Check if this link has a missing reference definition."""
+        return self.url.startswith(MISSING_REF_SENTINEL)
+
+    @property
+    def missing_reference_name(self) -> str | None:
+        """Extract the reference name from a missing reference sentinel URL."""
+        if not self.is_missing_reference:
+            return None
+        return self.url[len(MISSING_REF_SENTINEL) + 1 :]  # Skip sentinel and colon
+
+    @property
+    def display_link(self) -> str:
+        """Return a user-friendly display format for the link."""
+        if self.is_missing_reference:
+            ref_name = self.missing_reference_name
+            return f"[{self.text}][{ref_name}]"
+        return f"[{self.text}]({self.url})"
+
     def __str__(self) -> str:
-        return f"{self.source_file}:{self.line_number}: [{self.text}]({self.url})"
+        return f"{self.source_file}:{self.line_number}: {self.display_link}"
 
 
 @dataclass
@@ -286,6 +306,16 @@ def extract_headings_as_anchors(content: str) -> set[str]:
     - Replace spaces with hyphens
     - Remove punctuation except hyphens
     - Handle duplicates with -1, -2 suffix for disambiguation
+
+    Disambiguation handles collision between:
+    - Duplicate headings (e.g., two "## Foo" headings)
+    - Natural anchors that match disambiguated forms (e.g., "## Foo-1" colliding
+      with second "## Foo" which would normally become foo-1)
+
+    Examples:
+        ["Foo", "Foo"] -> {"foo", "foo-1"}
+        ["Foo", "Foo-1", "Foo"] -> {"foo", "foo-1", "foo-2"}
+        ["Foo", "Foo", "Foo-1"] -> {"foo", "foo-1", "foo-1-1"}
     """
     anchors: set[str] = set()
     anchor_counts: dict[str, int] = {}
@@ -297,15 +327,22 @@ def extract_headings_as_anchors(content: str) -> set[str]:
         base_anchor = _heading_to_anchor(heading_text)
 
         # Handle duplicate headings with -1, -2 suffixes (GitHub style)
-        if base_anchor in anchor_counts:
-            # This is a duplicate - add suffix
-            suffix = anchor_counts[base_anchor]
+        # Check against full anchors set to handle collisions with natural anchors
+        if base_anchor in anchors:
+            # Need to disambiguate - find first available suffix
+            count = anchor_counts.get(base_anchor, 0)
+            suffix = count + 1
             unique_anchor = f"{base_anchor}-{suffix}"
-            anchor_counts[base_anchor] += 1
+            # Keep incrementing until we find an anchor not already used
+            # This handles cases like "Foo", "Foo-1", "Foo" where the second
+            # "Foo" can't use "foo-1" because it's already taken by "Foo-1"
+            while unique_anchor in anchors:
+                suffix += 1
+                unique_anchor = f"{base_anchor}-{suffix}"
+            anchor_counts[base_anchor] = suffix
         else:
-            # First occurrence - no suffix needed
             unique_anchor = base_anchor
-            anchor_counts[base_anchor] = 1
+            anchor_counts[base_anchor] = 0
 
         anchors.add(unique_anchor)
 
@@ -367,8 +404,8 @@ def validate_internal_link(
     url = link.url
 
     # Handle missing reference-style link definitions
-    if url.startswith(MISSING_REF_SENTINEL):
-        ref_name = url[len(MISSING_REF_SENTINEL) + 1 :]  # Skip sentinel and colon
+    if link.is_missing_reference:
+        ref_name = link.missing_reference_name
         return f"Reference-style link [{ref_name}] has no definition"
 
     # Handle anchor-only links (#section)
@@ -593,9 +630,9 @@ def validate_markdown_links(
                 if error:
                     result.broken_links.append(BrokenLink(link=link, reason=error))
                     if verbose:
-                        print(f"  BROKEN: {link.url} - {error}")
+                        print(f"  BROKEN: {link.display_link} - {error}")
                 elif verbose:
-                    print(f"  OK: {link.url}")
+                    print(f"  OK: {link.display_link}")
 
     return result
 
@@ -621,7 +658,7 @@ def generate_report(result: ValidationResult, repo_root: Path) -> str:
     for broken in result.broken_links:
         rel_path = broken.link.source_file.relative_to(repo_root)
         lines.append(f"  {rel_path}:{broken.link.line_number}")
-        lines.append(f"    Link: [{broken.link.text}]({broken.link.url})")
+        lines.append(f"    Link: {broken.link.display_link}")
         lines.append(f"    Reason: {broken.reason}")
         lines.append("")
 

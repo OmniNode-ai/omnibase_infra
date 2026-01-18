@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > Planning > Parallel Execution Plan
+> **Navigation**: [Home](../index.md) > [Planning](README.md) > Parallel Execution Plan
 
 # Parallelizable Execution Plan for ONEX Runtime & Registration Tickets
 

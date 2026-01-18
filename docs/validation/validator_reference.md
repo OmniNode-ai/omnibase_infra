@@ -6,14 +6,130 @@ Comprehensive reference documentation for all ONEX infrastructure validators.
 
 ## Table of Contents
 
-1. [validate_infra_architecture](#validate_infra_architecture)
-2. [validate_infra_contracts](#validate_infra_contracts)
-3. [validate_infra_patterns](#validate_infra_patterns)
-4. [validate_infra_contract_deep](#validate_infra_contract_deep)
-5. [validate_infra_union_usage](#validate_infra_union_usage)
-6. [validate_infra_circular_imports](#validate_infra_circular_imports)
-7. [validate_infra_all](#validate_infra_all)
-8. [get_validation_summary](#get_validation_summary)
+1. [architecture_layers](#architecture_layers) - Core/Infra layer separation
+2. [validate_infra_architecture](#validate_infra_architecture) - One-model-per-file
+3. [validate_infra_contracts](#validate_infra_contracts)
+4. [validate_infra_patterns](#validate_infra_patterns)
+5. [validate_infra_contract_deep](#validate_infra_contract_deep)
+6. [validate_infra_union_usage](#validate_infra_union_usage)
+7. [validate_infra_circular_imports](#validate_infra_circular_imports)
+8. [validate_infra_all](#validate_infra_all)
+9. [get_validation_summary](#get_validation_summary)
+
+---
+
+## architecture_layers
+
+Verify that `omnibase_core` does not contain infrastructure dependencies (layer separation).
+
+### Purpose
+
+This validator enforces the ONEX architecture principle that the core layer (`omnibase_core`) should not depend on infrastructure-specific packages. Infrastructure dependencies belong in `omnibase_infra`.
+
+**Ticket Reference**: OMN-255
+
+### Implementation
+
+The validation is performed by `scripts/check_architecture.sh`, a bash script that uses grep-based pattern matching to detect forbidden imports.
+
+### Command Line Usage
+
+```bash
+# Via validate.py (recommended)
+poetry run python scripts/validate.py architecture_layers --verbose
+
+# Direct script execution
+./scripts/check_architecture.sh [OPTIONS]
+
+# Available options
+./scripts/check_architecture.sh --help        # Show help
+./scripts/check_architecture.sh --verbose     # Detailed output
+./scripts/check_architecture.sh --json        # JSON output for CI
+./scripts/check_architecture.sh --verify-sync # Verify sync with Python tests
+./scripts/check_architecture.sh --path PATH   # Custom omnibase_core path
+./scripts/check_architecture.sh --no-color    # Disable colored output
+```
+
+### Forbidden Imports
+
+The following infrastructure packages are forbidden in `omnibase_core`:
+
+| Package | Description | Ticket |
+|---------|-------------|--------|
+| `kafka` | Event streaming client | - |
+| `httpx` | HTTP client library | - |
+| `asyncpg` | PostgreSQL async driver | - |
+| `aiohttp` | Async HTTP client | OMN-1015 |
+| `redis` | Redis client library | OMN-1295 |
+| `psycopg` / `psycopg2` | PostgreSQL drivers | - |
+| `consul` | Consul client | OMN-1015 |
+| `hvac` | Vault client library | - |
+| `aiokafka` | Async Kafka client | - |
+| `confluent_kafka` | Confluent Kafka client | - |
+
+### Known Issues
+
+Some imports have known violations tracked in Linear. When **only** known issues are detected, the validator passes (exit code 0) to avoid blocking CI:
+
+- `aiohttp`: OMN-1015 - async HTTP client needs migration to infra
+- `redis`: OMN-1295 - Redis client needs migration to infra
+- `consul`: OMN-1015 - Consul TYPE_CHECKING import
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | All checks passed, OR only known issues found |
+| 1 | Unknown architecture violation detected |
+| 2 | Script error (path not found, invalid arguments) |
+
+### JSON Output
+
+For CI integration, use `--json` for structured output:
+
+```json
+{
+  "success": true,
+  "exit_code": 0,
+  "target": "/path/to/omnibase_core",
+  "files_scanned": 2842,
+  "violations": [],
+  "passed": ["kafka", "httpx", "asyncpg"],
+  "forbidden_imports_checked": 11,
+  "excluded_file_patterns": ["*.md", "*.yaml"],
+  "excluded_directories": [".git", "__pycache__"]
+}
+```
+
+### Limitations
+
+This grep-based validator has limitations:
+
+**Not Detected**:
+- Inline imports inside functions/methods
+- Dynamically constructed imports (`__import__()`, `importlib`)
+- Imports in conditional blocks
+- Multiline import statements
+
+**For Comprehensive Analysis**:
+```bash
+pytest tests/ci/test_architecture_compliance.py
+```
+
+The Python tests provide AST-based analysis with:
+- Inline import detection (all imports detected)
+- Multiline docstring handling
+- `TYPE_CHECKING` block awareness
+- `xfail` markers for known issues
+
+### Sync Verification
+
+The forbidden imports list must match between the bash script and Python tests:
+
+```bash
+# Verify lists are in sync
+./scripts/check_architecture.sh --verify-sync
+```
 
 ---
 

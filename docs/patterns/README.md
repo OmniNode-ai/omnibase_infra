@@ -121,6 +121,8 @@ This directory contains detailed implementation guides and best practices for ON
 
 ### ASCII Diagram
 
+**Diagram Description**: This ASCII diagram shows how ONEX infrastructure patterns relate to each other through dependencies. Error Handling Patterns is foundational, defining error classes and context used by all other patterns. Error Sanitization depends on Error Handling. Error Recovery depends on both Error Handling and Error Sanitization. Retry/Backoff/Compensation and Circuit Breaker Implementation depend on Error Handling and Error Recovery. Dispatcher Resilience depends on Circuit Breaker. Correlation ID Tracking is used by all patterns. Container DI is used by all infrastructure services. Protocol Patterns is foundational for structural typing. Security Patterns depends on error patterns and Correlation ID Tracking. Secret Resolver, Handler Plugin Loader, and Consul Integration depend on Security Patterns. Testing Patterns and Registry clear() Policy support test isolation. Mixin Dependencies documents composition patterns for all mixin classes.
+
 ```
 Error Handling Patterns
     ├── Defines error classes and context

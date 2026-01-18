@@ -164,6 +164,8 @@ Development planning and milestones.
 
 #### ASCII Diagram
 
+**Diagram Description**: This ASCII diagram shows the four ONEX node archetypes and their interactions. ORCHESTRATOR (workflow coordinator) sends events to REDUCER (state/FSM manager) and routes work to COMPUTE (pure transformations). REDUCER emits intents that are executed by EFFECT (external I/O operations like databases and APIs).
+
 ```
 ┌──────────────┐    events     ┌──────────────┐
 │ ORCHESTRATOR │ ────────────► │   REDUCER    │

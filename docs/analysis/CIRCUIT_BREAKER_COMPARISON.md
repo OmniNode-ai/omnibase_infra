@@ -1,4 +1,4 @@
-> **Navigation**: [Home](../index.md) > Analysis > Circuit Breaker Comparison
+> **Navigation**: [Home](../index.md) > [Analysis](README.md) > Circuit Breaker Comparison
 
 # Circuit Breaker Implementation Comparison: omnibase_core vs omnibase_infra
 
