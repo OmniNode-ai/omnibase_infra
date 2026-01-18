@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.types import JsonType
 from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
 
 
@@ -100,7 +101,7 @@ class ModelBindingConfig(BaseModel):
         "Supported schemes: file: (including file://), env:, vault:",
     )
 
-    config: dict[str, object] | None = Field(
+    config: dict[str, JsonType] | None = Field(
         default=None,
         description="Inline configuration dictionary. "
         "Takes precedence over config_ref for overlapping keys.",

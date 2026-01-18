@@ -46,7 +46,7 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.errors import ProtocolConfigurationError, SecretResolutionError
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
 from omnibase_infra.runtime.models.model_binding_config import (
     ModelBindingConfig,
@@ -341,7 +341,12 @@ class TestBindingConfigResolverFileSource:
             assert "size limit" in str(exc_info.value).lower()
 
     def test_path_traversal_blocked(self) -> None:
-        """Path traversal attempts are blocked."""
+        """Path traversal attempts are blocked at resolution layer.
+
+        Single parent directory references (../) are allowed at the parsing layer
+        as legitimate use cases. Security enforcement happens at the resolution layer
+        where resolved paths are validated against the config_dir boundary.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir) / "configs"
             config_dir.mkdir()
@@ -356,22 +361,20 @@ class TestBindingConfigResolverFileSource:
             container = create_mock_container(config)
             resolver = BindingConfigResolver(container)
 
-            # Attempt path traversal
+            # Attempt path traversal - parsing succeeds but resolution blocks
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
                     handler_type="db",
                     config_ref="file:../secret.yaml",
                 )
 
-            # Should raise a generic error that doesn't expose the path traversal details
-            # Security: detailed parse errors are logged at DEBUG level, not in exception
+            # Resolution layer catches path traversal with a safe error message
             error_msg = str(exc_info.value).lower()
-            assert "invalid config reference format" in error_msg
-            # Ensure the actual path is NOT exposed in the error message
+            assert "path traversal not allowed" in error_msg
+            # Ensure the actual file path is NOT exposed in the error message
             assert "../secret.yaml" not in error_msg
-            assert (
-                "traversal" not in error_msg
-            )  # Details logged at DEBUG, not in exception
+            # The resolved path should not be exposed either
+            assert tmpdir not in error_msg
 
     def test_relative_path_resolution(self) -> None:
         """Relative paths resolved against config_dir."""
@@ -1070,7 +1073,10 @@ class TestBindingConfigResolverVaultSource:
         """Handle exception from SecretResolver."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_resolver.get_secret.side_effect = Exception("Vault connection failed")
+            # Use SecretResolutionError (specific exception) instead of generic Exception
+            mock_resolver.get_secret.side_effect = SecretResolutionError(
+                "Vault connection failed"
+            )
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -2023,12 +2029,36 @@ class TestModelConfigRef:
         assert "unknown" in result.error_message.lower()
 
     def test_parse_path_traversal(self) -> None:
-        """Path traversal returns error."""
+        """Multiple consecutive path traversal returns error."""
         result = ModelConfigRef.parse("file:../../../etc/passwd")
 
         assert not result.success
         assert result.config_ref is None
         assert "traversal" in result.error_message.lower()
+
+    def test_parse_parent_directory_single(self) -> None:
+        """Single parent directory reference is allowed."""
+        result = ModelConfigRef.parse("file:../config.yaml")
+
+        assert result.success
+        assert result.config_ref is not None
+        assert result.config_ref.path == "../config.yaml"
+
+    def test_parse_parent_directory_in_path(self) -> None:
+        """Parent directory in middle of path is allowed."""
+        result = ModelConfigRef.parse("file:a/b/../c/config.yaml")
+
+        assert result.success
+        assert result.config_ref is not None
+        assert result.config_ref.path == "a/b/../c/config.yaml"
+
+    def test_parse_explicit_relative(self) -> None:
+        """Explicit relative path (./path) is allowed."""
+        result = ModelConfigRef.parse("file:./config.yaml")
+
+        assert result.success
+        assert result.config_ref is not None
+        assert result.config_ref.path == "./config.yaml"
 
     def test_parse_missing_path(self) -> None:
         """Missing path after scheme returns error."""
@@ -2925,6 +2955,212 @@ class TestAsyncKeyLockCleanup:
             assert stats.async_key_lock_count == 1
 
 
+class TestAsyncKeyLockCleanupOnEviction:
+    """Tests for async key lock cleanup during cache eviction.
+
+    These tests verify that async key locks are properly cleaned up when their
+    corresponding cache entries are evicted, either via LRU eviction or TTL
+    expiration. This prevents memory leaks in long-running processes.
+
+    Related:
+    - OMN-765: BindingConfigResolver implementation
+    - PR #168 review feedback: async lock memory leak on eviction
+    """
+
+    def test_lru_eviction_cleans_up_async_lock(self) -> None:
+        """Test that LRU eviction also removes the associated async lock."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Configure with max_cache_entries=2 to trigger LRU eviction
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                max_cache_entries=2,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create async locks manually for testing
+            with resolver._lock:
+                resolver._async_key_locks["handler_a"] = asyncio.Lock()
+                resolver._async_key_lock_timestamps["handler_a"] = time.monotonic()
+                resolver._async_key_locks["handler_b"] = asyncio.Lock()
+                resolver._async_key_lock_timestamps["handler_b"] = time.monotonic()
+
+            # Resolve first two handlers (fills cache to capacity)
+            resolver.resolve(
+                handler_type="handler_a",
+                inline_config={"timeout_ms": 5000},
+            )
+            resolver.resolve(
+                handler_type="handler_b",
+                inline_config={"timeout_ms": 5000},
+            )
+
+            # Verify cache has 2 entries and locks exist
+            assert len(resolver._cache) == 2
+            assert "handler_a" in resolver._async_key_locks
+            assert "handler_b" in resolver._async_key_locks
+
+            # Resolve a third handler - should evict handler_a (LRU)
+            with resolver._lock:
+                resolver._async_key_locks["handler_c"] = asyncio.Lock()
+                resolver._async_key_lock_timestamps["handler_c"] = time.monotonic()
+
+            resolver.resolve(
+                handler_type="handler_c",
+                inline_config={"timeout_ms": 5000},
+            )
+
+            # Verify handler_a was evicted and its lock was cleaned up
+            assert "handler_a" not in resolver._cache
+            assert "handler_a" not in resolver._async_key_locks
+            assert "handler_a" not in resolver._async_key_lock_timestamps
+
+            # Verify handler_b and handler_c remain
+            assert "handler_b" in resolver._cache
+            assert "handler_c" in resolver._cache
+
+            # Verify LRU eviction count
+            stats = resolver.get_cache_stats()
+            assert stats.lru_evictions == 1
+
+    def test_ttl_expiration_cleans_up_async_lock(self) -> None:
+        """Test that TTL expiration also removes the associated async lock."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                cache_ttl_seconds=1.0,  # Very short TTL
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create an async lock for testing
+            with resolver._lock:
+                resolver._async_key_locks["handler_expire"] = asyncio.Lock()
+                resolver._async_key_lock_timestamps["handler_expire"] = time.monotonic()
+
+            # Resolve a handler to cache it
+            resolver.resolve(
+                handler_type="handler_expire",
+                inline_config={"timeout_ms": 5000},
+            )
+
+            # Verify cache entry and lock exist
+            assert "handler_expire" in resolver._cache
+            assert "handler_expire" in resolver._async_key_locks
+
+            # Manually expire the cache entry by manipulating expires_at
+            from datetime import UTC, datetime, timedelta
+
+            with resolver._lock:
+                cached = resolver._cache["handler_expire"]
+                # Create an expired entry (expired 10 seconds ago)
+                expired_entry = cached.__class__(
+                    config=cached.config,
+                    expires_at=datetime.now(UTC) - timedelta(seconds=10),
+                    source=cached.source,
+                )
+                resolver._cache["handler_expire"] = expired_entry
+
+            # Access the cache - this should trigger expiration cleanup
+            result = resolver._get_from_cache("handler_expire")
+
+            # Verify entry was evicted and lock was cleaned up
+            assert result is None
+            assert "handler_expire" not in resolver._cache
+            assert "handler_expire" not in resolver._async_key_locks
+            assert "handler_expire" not in resolver._async_key_lock_timestamps
+
+            # Verify expiration eviction count
+            stats = resolver.get_cache_stats()
+            assert stats.expired_evictions == 1
+
+    @pytest.mark.asyncio
+    async def test_lru_eviction_preserves_held_lock(self) -> None:
+        """Test that LRU eviction does not remove a lock that is currently held."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                max_cache_entries=1,  # Small cache to force eviction
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create and hold a lock
+            with resolver._lock:
+                resolver._async_key_locks["held_handler"] = asyncio.Lock()
+                resolver._async_key_lock_timestamps["held_handler"] = time.monotonic()
+
+            lock = resolver._async_key_locks["held_handler"]
+
+            # Acquire the lock
+            async with lock:
+                # Resolve to cache the handler
+                resolver.resolve(
+                    handler_type="held_handler",
+                    inline_config={"timeout_ms": 5000},
+                )
+
+                # Resolve another handler to trigger LRU eviction of held_handler
+                with resolver._lock:
+                    resolver._async_key_locks["new_handler"] = asyncio.Lock()
+                    resolver._async_key_lock_timestamps["new_handler"] = (
+                        time.monotonic()
+                    )
+
+                resolver.resolve(
+                    handler_type="new_handler",
+                    inline_config={"timeout_ms": 5000},
+                )
+
+                # Verify cache entry was evicted
+                assert "held_handler" not in resolver._cache
+
+                # But the lock should be preserved because it's held
+                assert "held_handler" in resolver._async_key_locks
+                assert "held_handler" in resolver._async_key_lock_timestamps
+
+    def test_multiple_lru_evictions_clean_up_locks(self) -> None:
+        """Test that multiple consecutive LRU evictions clean up locks correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                max_cache_entries=2,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create locks for multiple handlers
+            handlers = ["handler_1", "handler_2", "handler_3", "handler_4"]
+            for handler in handlers:
+                with resolver._lock:
+                    resolver._async_key_locks[handler] = asyncio.Lock()
+                    resolver._async_key_lock_timestamps[handler] = time.monotonic()
+
+            # Resolve handlers one by one - first 2 fill cache, then evictions begin
+            for handler in handlers:
+                resolver.resolve(
+                    handler_type=handler,
+                    inline_config={"timeout_ms": 5000},
+                )
+
+            # Only the last 2 handlers should remain in cache
+            assert len(resolver._cache) == 2
+            assert "handler_3" in resolver._cache
+            assert "handler_4" in resolver._cache
+
+            # Evicted handlers should have their locks cleaned up
+            assert "handler_1" not in resolver._async_key_locks
+            assert "handler_2" not in resolver._async_key_locks
+
+            # Remaining handlers should keep their locks
+            assert "handler_3" in resolver._async_key_locks
+            assert "handler_4" in resolver._async_key_locks
+
+            # Verify LRU eviction count
+            stats = resolver.get_cache_stats()
+            assert stats.lru_evictions == 2
+
+
 class TestVaultReferencesInLists:
     """Tests for vault reference resolution inside list values.
 
@@ -3101,7 +3337,8 @@ class TestVaultReferencesInLists:
         """Test vault reference resolution failure in list with fail_on_vault_error."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_resolver.get_secret.side_effect = Exception("Vault error")
+            # Use SecretResolutionError (specific exception) instead of generic Exception
+            mock_resolver.get_secret.side_effect = SecretResolutionError("Vault error")
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -3150,6 +3387,244 @@ class TestVaultReferencesInLists:
                 assert "nesting exceeds maximum depth" in str(exc_info.value).lower()
 
 
+class TestDeferredConfigDirValidation:
+    """Test deferred config_dir validation (at use-time, not construction-time).
+
+    Related:
+    - OMN-765: BindingConfigResolver implementation
+    - PR #168 review feedback: config_dir validation timing
+    """
+
+    def test_config_dir_nonexistent_at_construction_succeeds(self) -> None:
+        """Config can be created with nonexistent config_dir (deferred validation)."""
+        # This should succeed even though path doesn't exist
+        nonexistent_path = Path("/nonexistent/path/that/does/not/exist")
+        config = ModelBindingConfigResolverConfig(config_dir=nonexistent_path)
+
+        # Config is created successfully
+        assert config.config_dir == nonexistent_path
+
+    def test_config_dir_nonexistent_at_use_time_raises(self) -> None:
+        """Error raised at use-time when config_dir doesn't exist."""
+        nonexistent_path = Path("/nonexistent/path/that/does/not/exist")
+        config = ModelBindingConfigResolverConfig(config_dir=nonexistent_path)
+        container = create_mock_container(config)
+        resolver = BindingConfigResolver(container)
+
+        # Attempting to load a relative path should fail at use-time
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            resolver.resolve(
+                handler_type="test",
+                config_ref="file:config.yaml",
+            )
+
+        assert "config_dir does not exist" in str(exc_info.value)
+
+    def test_config_dir_file_not_directory_at_use_time_raises(self) -> None:
+        """Error raised at use-time when config_dir is a file, not directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a file instead of directory
+            config_file = Path(tmpdir) / "not_a_dir.txt"
+            config_file.write_text("I am a file")
+
+            config = ModelBindingConfigResolverConfig(config_dir=config_file)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                resolver.resolve(
+                    handler_type="test",
+                    config_ref="file:config.yaml",
+                )
+
+            assert "config_dir is not a directory" in str(exc_info.value)
+
+    def test_config_dir_created_after_config_construction(self) -> None:
+        """Config works when directory is created after config object construction."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Path that doesn't exist yet
+            config_dir = Path(tmpdir) / "will_be_created"
+
+            # Create config with nonexistent path (this should succeed)
+            config = ModelBindingConfigResolverConfig(config_dir=config_dir)
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Now create the directory and config file
+            config_dir.mkdir()
+            (config_dir / "test.yaml").write_text(
+                "handler_type: db\ntimeout_ms: 5000\n"
+            )
+
+            # Should work now
+            result = resolver.resolve(
+                handler_type="db",
+                config_ref="file:test.yaml",
+            )
+
+            assert result.handler_type == "db"
+            assert result.timeout_ms == 5000
+
+    def test_config_dir_null_byte_rejected_at_construction(self) -> None:
+        """Null bytes in config_dir are rejected at construction time (security)."""
+        with pytest.raises(ValueError) as exc_info:
+            ModelBindingConfigResolverConfig(config_dir=Path("/path\x00with/null"))
+
+        assert "null byte" in str(exc_info.value).lower()
+
+
+class TestSymlinkValidation:
+    """Test symlink handling in file loader.
+
+    Related:
+    - OMN-765: BindingConfigResolver implementation
+    - PR #168 review feedback: symlink validation in file loader
+    """
+
+    def test_symlink_allowed_by_default(self) -> None:
+        """Symlinks are allowed by default (within config_dir)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+
+            # Create actual config file inside config_dir
+            real_config = config_dir / "real_config.yaml"
+            real_config.write_text("handler_type: db\ntimeout_ms: 3000\n")
+
+            # Create symlink to it (both inside config_dir, so path traversal is OK)
+            symlink_config = config_dir / "config.yaml"
+            symlink_config.symlink_to(real_config)
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=config_dir,
+                allow_symlinks=True,  # Explicit default
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Should work with symlinks allowed (target within config_dir)
+            result = resolver.resolve(
+                handler_type="db",
+                config_ref="file:config.yaml",
+            )
+
+            assert result.handler_type == "db"
+            assert result.timeout_ms == 3000
+
+    def test_symlink_rejected_when_disabled(self) -> None:
+        """Symlinks are rejected when allow_symlinks=False (within config_dir)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+
+            # Create actual config file inside config_dir
+            real_config = config_dir / "real_config.yaml"
+            real_config.write_text("handler_type: db\ntimeout_ms: 3000\n")
+
+            # Create symlink to it (both inside config_dir to isolate symlink test)
+            symlink_config = config_dir / "config.yaml"
+            symlink_config.symlink_to(real_config)
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=config_dir,
+                allow_symlinks=False,  # Disable symlinks
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                resolver.resolve(
+                    handler_type="db",
+                    config_ref="file:config.yaml",
+                )
+
+            assert "symlink" in str(exc_info.value).lower()
+
+    def test_regular_file_works_when_symlinks_disabled(self) -> None:
+        """Regular (non-symlink) files work when allow_symlinks=False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+
+            # Create regular config file (no symlink)
+            config_file = config_dir / "config.yaml"
+            config_file.write_text("handler_type: api\ntimeout_ms: 1000\n")
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=config_dir,
+                allow_symlinks=False,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Should work with regular file
+            result = resolver.resolve(
+                handler_type="api",
+                config_ref="file:config.yaml",
+            )
+
+            assert result.handler_type == "api"
+            assert result.timeout_ms == 1000
+
+    def test_symlink_in_parent_path_rejected_when_disabled(self) -> None:
+        """Symlinks in parent directories are rejected when allow_symlinks=False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+
+            # Create real directory with config
+            real_configs = base_dir / "real_configs"
+            real_configs.mkdir()
+            config_file = real_configs / "db.yaml"
+            config_file.write_text("handler_type: db\ntimeout_ms: 5000\n")
+
+            # Create symlink directory pointing to real_configs
+            symlink_dir = base_dir / "configs_symlink"
+            symlink_dir.symlink_to(real_configs)
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=symlink_dir,  # symlink as config_dir
+                allow_symlinks=False,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                resolver.resolve(
+                    handler_type="db",
+                    config_ref="file:db.yaml",
+                )
+
+            assert "symlink" in str(exc_info.value).lower()
+
+    def test_symlink_outside_config_dir_blocked_even_when_allowed(self) -> None:
+        """Symlinks pointing outside config_dir are blocked (path traversal protection)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+            config_dir = base_dir / "configs"
+            config_dir.mkdir()
+
+            # Create config outside config_dir
+            outside_config = base_dir / "outside_config.yaml"
+            outside_config.write_text("handler_type: evil\n")
+
+            # Create symlink inside config_dir pointing outside
+            evil_symlink = config_dir / "evil.yaml"
+            evil_symlink.symlink_to(outside_config)
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=config_dir,
+                allow_symlinks=True,  # Even with symlinks allowed
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Should be blocked by path traversal protection
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                resolver.resolve(
+                    handler_type="evil",
+                    config_ref="file:evil.yaml",
+                )
+
+            assert "traversal" in str(exc_info.value).lower()
+
+
 __all__: list[str] = [
     "TestBindingConfigResolverBasic",
     "TestBindingConfigResolverFileSource",
@@ -3168,4 +3643,6 @@ __all__: list[str] = [
     "TestBindingConfigResolverRecursionDepth",
     "TestAsyncKeyLockCleanup",
     "TestVaultReferencesInLists",
+    "TestDeferredConfigDirValidation",
+    "TestSymlinkValidation",
 ]

@@ -9,13 +9,21 @@ This module provides the Pydantic configuration model for the BindingConfigResol
 which resolves handler-specific configuration from multiple sources (file, env, vault).
 
 Example:
-    >>> from pathlib import Path
-    >>> from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
-    >>> config = ModelBindingConfigResolverConfig(
-    ...     config_dir=Path("/workspace/configs"),
-    ...     cache_ttl_seconds=600.0,
-    ...     env_prefix="HANDLER",
-    ... )
+    Basic configuration with defaults::
+
+        from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
+
+        # Minimal config - uses sensible defaults
+        config = ModelBindingConfigResolverConfig()
+
+        # Production config with stricter settings
+        config = ModelBindingConfigResolverConfig(
+            cache_ttl_seconds=600.0,
+            env_prefix="ONEX_HANDLER",
+            strict_validation=True,
+            fail_on_vault_error=True,  # Fail on vault: resolution errors
+            max_cache_entries=100,  # LRU eviction after 100 entries
+        )
 """
 
 from __future__ import annotations
@@ -47,15 +55,24 @@ class ModelBindingConfigResolverConfig(BaseModel):
 
     Attributes:
         config_dir: Base directory for relative file: paths.
-            If None, file: paths must be absolute.
+            If None, file: paths must be absolute. Existence is validated at
+            use-time (when loading files), not at config construction time.
         enable_caching: Whether to cache resolved configurations.
         cache_ttl_seconds: Time-to-live for cached configurations (0-86400).
         env_prefix: Prefix for environment variable overrides.
             Pattern: {env_prefix}_{HANDLER_TYPE}_{FIELD}
         strict_validation: If True, fail on unknown fields in resolved config.
             If False, ignore unknown fields.
+        strict_env_coercion: If True, fail on type conversion errors for env overrides.
+            If False, log warning and skip. Default is False.
         allowed_schemes: Set of allowed config_ref URI schemes for security.
             Only these schemes can be used in config_ref values.
+        fail_on_vault_error: If True, fail when vault: references cannot be resolved.
+            If False, keep placeholder (may be insecure). Default is False.
+        max_cache_entries: Maximum cache entries before LRU eviction.
+            None means unlimited. Default is None.
+        allow_symlinks: If True, allow configuration files that are symlinks.
+            If False, reject symlinked config files for security. Default is True.
 
     Note:
         SecretResolver is resolved from the container via dependency injection
@@ -63,12 +80,28 @@ class ModelBindingConfigResolverConfig(BaseModel):
         injection pattern per CLAUDE.md.
 
     Example:
-        >>> config = ModelBindingConfigResolverConfig(
-        ...     config_dir=Path("/etc/onex/handlers"),
-        ...     cache_ttl_seconds=300.0,
-        ...     env_prefix="ONEX_HANDLER",
-        ...     strict_validation=True,
-        ... )
+        Minimal configuration with defaults::
+
+            config = ModelBindingConfigResolverConfig()
+
+        Production configuration with explicit settings::
+
+            from pathlib import Path
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path("/etc/onex/handlers"),  # Validated at use-time
+                cache_ttl_seconds=300.0,
+                env_prefix="ONEX_HANDLER",
+                strict_validation=True,
+                fail_on_vault_error=True,  # Fail on vault: resolution errors
+                max_cache_entries=100,  # LRU eviction after 100 entries
+                allow_symlinks=False,  # Reject symlinks for security
+            )
+
+        Note: config_dir is optional; if provided, existence is validated at use-time
+        (when loading files), not at config construction. This supports dynamic
+        directory creation and early config object instantiation.
+        When config_dir is None (default), all file: paths must be absolute.
     """
 
     model_config = ConfigDict(
@@ -155,6 +188,16 @@ class ModelBindingConfigResolverConfig(BaseModel):
         "Set a limit for environments with many dynamic handler types.",
     )
 
+    # Symlink security control
+    allow_symlinks: bool = Field(
+        default=True,
+        description="Whether to allow configuration files that are symlinks. "
+        "When False, symlinked config files are rejected for security. "
+        "When True, symlinks are followed but still validated against config_dir "
+        "to prevent path traversal attacks. "
+        "Set to False in high-security environments to prevent symlink attacks.",
+    )
+
     @field_validator("env_prefix")
     @classmethod
     def validate_env_prefix(cls, value: str) -> str:
@@ -193,7 +236,14 @@ class ModelBindingConfigResolverConfig(BaseModel):
     @field_validator("config_dir")
     @classmethod
     def validate_config_dir(cls, value: Path | None) -> Path | None:
-        """Validate config_dir exists if provided.
+        """Validate config_dir is a valid path format.
+
+        Note:
+            Existence and directory validation is deferred to use-time in
+            BindingConfigResolver._load_from_file() to support:
+            - Dynamic directory creation after config construction
+            - Early config object creation (e.g., at import time)
+            - Test scenarios with mock/temporary directories
 
         Args:
             value: The configuration directory path, or None.
@@ -202,17 +252,15 @@ class ModelBindingConfigResolverConfig(BaseModel):
             The validated path, or None.
 
         Raises:
-            ValueError: If path is provided but does not exist or is not a directory.
+            ValueError: If path contains null bytes or other invalid characters.
         """
         if value is None:
             return None
 
-        if not value.exists():
-            msg = f"config_dir does not exist: {value}"
-            raise ValueError(msg)
-
-        if not value.is_dir():
-            msg = f"config_dir is not a directory: {value}"
+        # Validate path doesn't contain null bytes (security concern)
+        path_str = str(value)
+        if "\x00" in path_str:
+            msg = "config_dir contains null byte"
             raise ValueError(msg)
 
         return value

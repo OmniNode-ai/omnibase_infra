@@ -24,7 +24,10 @@ Supported Reference Formats:
         vault:secret/data/handlers/db          # Whole secret as JSON/YAML
 
 Security:
-    File paths are validated to prevent path traversal attacks (../).
+    File paths are validated to block dangerous path traversal patterns (multiple
+    consecutive ../ sequences). Single parent directory references (../) are allowed
+    as legitimate use cases. Full security enforcement happens at the resolution layer
+    where resolved paths are validated against the config_dir boundary.
     All schemes are validated against the allowed set.
 
 Design Pattern:
@@ -70,8 +73,11 @@ from omnibase_infra.runtime.models.model_config_ref_parse_result import (
     ModelConfigRefParseResult,
 )
 
-# Pattern to detect path traversal attempts
-_PATH_TRAVERSAL_PATTERN = re.compile(r"(^|[/\\])\.\.([/\\]|$)")
+# Pattern to detect dangerous path traversal attempts (multiple consecutive ../)
+# Single parent directory references like ../config.yaml are allowed as legitimate use cases.
+# Security enforcement happens at the resolution layer where resolved paths are validated
+# against the config_dir boundary.
+_DANGEROUS_TRAVERSAL_PATTERN = re.compile(r"(\.\.([/\\])\.\.)|(\.\.[/\\]){3,}")
 
 
 class ModelConfigRef(BaseModel):
@@ -127,8 +133,8 @@ class ModelConfigRef(BaseModel):
 
     @field_validator("path")
     @classmethod
-    def validate_path_no_traversal(cls, v: str) -> str:
-        """Validate that file paths do not contain path traversal sequences.
+    def validate_path_no_dangerous_traversal(cls, v: str) -> str:
+        """Validate that file paths do not contain dangerous path traversal sequences.
 
         Args:
             v: The path value to validate.
@@ -137,16 +143,20 @@ class ModelConfigRef(BaseModel):
             The validated path.
 
         Raises:
-            ValueError: If the path contains path traversal sequences.
+            ValueError: If the path contains dangerous path traversal patterns.
 
         Note:
-            This validation applies to all schemes, but is most critical for
-            file:// references. For env: and vault: the path has different
-            semantics but we still block traversal patterns for defense in depth.
+            Single parent directory references (../) are allowed as legitimate use cases
+            for referencing config files in parent directories (e.g., file:../config.yaml).
+            Only patterns that could indicate directory escape attacks are blocked
+            (e.g., multiple consecutive ../ sequences).
+
+            Full security enforcement happens at the resolution layer where resolved
+            paths are validated against the config_dir boundary.
         """
-        if _PATH_TRAVERSAL_PATTERN.search(v):
+        if _DANGEROUS_TRAVERSAL_PATTERN.search(v):
             raise ValueError(
-                f"Path traversal sequences ('..') are not allowed in config paths: {v}"
+                f"Dangerous path traversal patterns are not allowed in config paths: {v}"
             )
         return v
 
@@ -259,11 +269,11 @@ class ModelConfigRef(BaseModel):
                     error_message="Missing vault path before '#' fragment",
                 )
 
-        # Validate path for traversal
-        if _PATH_TRAVERSAL_PATTERN.search(path_part):
+        # Validate path for dangerous traversal patterns
+        if _DANGEROUS_TRAVERSAL_PATTERN.search(path_part):
             return ModelConfigRefParseResult(
                 success=False,
-                error_message=f"Path traversal sequences ('..') are not allowed: {path_part}",
+                error_message=f"Dangerous path traversal patterns are not allowed: {path_part}",
             )
 
         # Create the config ref
