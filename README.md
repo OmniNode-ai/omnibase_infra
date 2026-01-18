@@ -67,15 +67,15 @@ docker compose -f docker-compose.runtime.yml --profile all up -d
 
 The runtime connects to external services (not included in compose):
 
-| Service | Purpose | Default Host |
-|---------|---------|--------------|
-| **PostgreSQL** | Persistence | `omninode-bridge-postgres:5432` |
-| **Kafka/Redpanda** | Event bus | `omninode-bridge-redpanda:9092` |
-| **Consul** | Service discovery | `omninode-bridge-consul:8500` |
-| **Vault** | Secrets management | `omninode-bridge-vault:8200` |
-| **Redis/Valkey** | Caching | `omninode-bridge-redis:6379` |
+| Service | Purpose | Default Host | Environment Variable |
+|---------|---------|--------------|---------------------|
+| **PostgreSQL** | Persistence | `localhost:5432` | `POSTGRES_HOST`, `POSTGRES_PORT` |
+| **Kafka/Redpanda** | Event bus | `localhost:9092` | `KAFKA_BOOTSTRAP_SERVERS` |
+| **Consul** | Service discovery | `localhost:8500` | `CONSUL_HOST`, `CONSUL_PORT` |
+| **Vault** | Secrets management | `localhost:8200` | `VAULT_ADDR` |
+| **Redis/Valkey** | Caching | `localhost:6379` | `REDIS_HOST`, `REDIS_PORT` |
 
-See [docker/README.md](docker/README.md) for configuration details.
+Configure via `.env` file - see [docker/README.md](docker/README.md) for details.
 
 ## Documentation
 

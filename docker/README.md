@@ -492,20 +492,20 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | **Network Configuration**    |                                    |                                        |
 | `REMOTE_HOST`                | `host-gateway`                     | Override for extra_hosts mapping       |
 | **Kafka/Redpanda**           |                                    |                                        |
-| `KAFKA_BOOTSTRAP_SERVERS`    | `omninode-bridge-redpanda:9092`    | Kafka/Redpanda broker addresses        |
+| `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:9092`                   | Kafka/Redpanda broker addresses        |
 | **PostgreSQL**               |                                    |                                        |
-| `POSTGRES_HOST`              | `omninode-bridge-postgres`         | PostgreSQL hostname                    |
+| `POSTGRES_HOST`              | `localhost`                        | PostgreSQL hostname                    |
 | `POSTGRES_PORT`              | `5432`                             | PostgreSQL port                        |
 | `POSTGRES_DATABASE`          | `omninode_bridge`                  | Database name                          |
 | `POSTGRES_USER`              | `postgres`                         | Database user                          |
 | **Consul**                   |                                    |                                        |
-| `CONSUL_HOST`                | `omninode-bridge-consul`           | Consul agent hostname                  |
+| `CONSUL_HOST`                | `localhost`                        | Consul agent hostname                  |
 | `CONSUL_PORT`                | `8500`                             | Consul HTTP port                       |
 | `CONSUL_SCHEME`              | `http`                             | Consul connection scheme               |
 | **Vault**                    |                                    |                                        |
-| `VAULT_ADDR`                 | `http://omninode-bridge-vault:8200`| Vault server address                   |
+| `VAULT_ADDR`                 | `http://localhost:8200`            | Vault server address                   |
 | **Redis**                    |                                    |                                        |
-| `REDIS_HOST`                 | `omninode-bridge-redis`            | Redis hostname                         |
+| `REDIS_HOST`                 | `localhost`                        | Redis hostname                         |
 | `REDIS_PORT`                 | `6379`                             | Redis port                             |
 | **ONEX Runtime**             |                                    |                                        |
 | `ONEX_LOG_LEVEL`             | `INFO`                             | Logging level (DEBUG, INFO, etc.)      |
@@ -580,7 +580,7 @@ docker compose -f docker-compose.runtime.yml logs -f runtime-main
 |-------------------------------------|-----------------------------------------------|-----------------------------------------------|
 | "Password authentication failed"   | Missing/wrong `POSTGRES_PASSWORD`             | Check .env file, verify password              |
 | "Address already in use"           | Port 8085 already bound                       | Change `RUNTIME_MAIN_PORT` or free port       |
-| "Connection refused"               | Infrastructure services not running           | Start omninode-bridge services first          |
+| "Connection refused"               | Infrastructure services not running           | Start required infrastructure services first  |
 | "No such file or directory"        | Missing contracts directory                   | Create `contracts/` or adjust `ONEX_CONTRACTS_DIR` |
 | "Permission denied"                | Volume permission issues                      | Check UID 1000 has write access               |
 | "No handlers registered"           | Handler contracts not found or invalid        | See "No Handlers Registered" section below    |
@@ -652,18 +652,20 @@ GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.runtime.yml
 
 ### Connectivity Issues
 
+Test connectivity from within the runtime container. Replace hostnames with your configured values (defaults shown use localhost, but in Docker networks you may use service names like `postgres`, `redpanda`, etc.):
+
 ```bash
-# Test connectivity to PostgreSQL
+# Test connectivity to PostgreSQL (replace hostname with your POSTGRES_HOST value)
 docker exec omnibase-infra-runtime-main \
-  curl -v telnet://omninode-bridge-postgres:5432
+  curl -v telnet://localhost:5432
 
-# Test connectivity to Kafka
+# Test connectivity to Kafka (replace hostname with your KAFKA_BOOTSTRAP_SERVERS value)
 docker exec omnibase-infra-runtime-main \
-  curl -v telnet://omninode-bridge-redpanda:9092
+  curl -v telnet://localhost:9092
 
-# Check DNS resolution
+# Check DNS resolution (replace hostname with your configured service name)
 docker exec omnibase-infra-runtime-main \
-  getent hosts omninode-bridge-postgres
+  getent hosts localhost
 
 # Check network configuration
 docker network inspect omnibase-infra-network
