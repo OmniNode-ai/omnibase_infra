@@ -114,6 +114,14 @@ class SinkLoggingStructured:
         This implementation is THREAD-SAFE. Multiple threads may call emit()
         and flush() concurrently. The lock is held briefly during emit() and
         released before I/O during flush().
+
+    Global State:
+        This implementation intentionally avoids calling structlog.configure(),
+        which modifies global state. Instead, each instance uses structlog.wrap_logger()
+        to create an instance-specific logger with its own processor chain. This design:
+        - Allows multiple instances with different output formats (json vs console)
+        - Prevents configuration conflicts in multi-tenant or test environments
+        - Follows library best practices for not modifying global logging config
     """
 
     def __init__(
@@ -131,11 +139,19 @@ class SinkLoggingStructured:
                 - "json": JSON format (default, machine-readable)
                 - "console": Colored console output (human-readable)
             drop_policy: Policy for handling buffer overflow. Currently only
-                "drop_oldest" is supported. Default: "drop_oldest".
+                "drop_oldest" is supported, which drops the oldest entries
+                when the buffer is full. Default: "drop_oldest".
 
         Raises:
             ValueError: If max_buffer_size is less than 1 or output_format
                 is not recognized.
+
+        Note:
+            The drop_oldest policy is implemented using a collections.deque with
+            maxlen set to max_buffer_size. When the buffer is full and a new entry
+            is added, the deque automatically discards the oldest entry from the
+            left side. This provides O(1) performance for both append and drop
+            operations.
         """
         if max_buffer_size < 1:
             msg = f"max_buffer_size must be >= 1, got {max_buffer_size}"

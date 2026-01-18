@@ -220,6 +220,9 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
             )
 
         # Validate and parse configuration
+        # NOTE: Broad Exception catch is intentional here because Pydantic can raise
+        # various exception types (ValidationError, TypeError, ValueError) depending
+        # on the validation failure. We wrap all in ProtocolConfigurationError.
         try:
             self._config = ModelLoggingHandlerConfig.model_validate(config)
         except Exception as e:
@@ -297,18 +300,21 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 pass
             self._flush_task = None
 
-        # Final flush
+        # Final flush - best effort, never fails shutdown
+        # NOTE: Broad Exception catch is intentional here to ensure shutdown
+        # always completes regardless of I/O errors. Any flush error during
+        # shutdown is logged but does not prevent cleanup from completing.
         if self._sink is not None:
             try:
                 self._sink.flush()
             except Exception as e:
-                # Log but don't raise on shutdown - best effort flush
                 logger.warning(
                     "Error during final flush on shutdown: %s",
                     e,
                     extra={
                         "handler": self.__class__.__name__,
                         "correlation_id": str(shutdown_correlation_id),
+                        "error_type": type(e).__name__,
                     },
                 )
 
@@ -563,6 +569,9 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
             current_dict.update(payload)
 
             # Validate new configuration
+            # NOTE: Broad Exception catch is intentional here because Pydantic can raise
+            # various exception types (ValidationError, TypeError, ValueError) depending
+            # on the validation failure. We wrap all in ProtocolConfigurationError.
             try:
                 new_config = ModelLoggingHandlerConfig.model_validate(current_dict)
             except Exception as e:
@@ -700,7 +709,10 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 # Task cancelled - exit gracefully
                 break
             except Exception as e:
-                # Log error but continue loop
+                # NOTE: Broad Exception catch is intentional here to keep the
+                # background flush loop running despite transient I/O errors.
+                # This ensures the handler remains operational even if individual
+                # flush operations fail temporarily. The sleep prevents tight loops.
                 logger.warning(
                     "Error in periodic flush loop: %s",
                     e,
@@ -709,7 +721,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                         "error_type": type(e).__name__,
                     },
                 )
-                # Brief sleep to prevent tight error loop
+                # Brief sleep to prevent tight error loop on persistent failures
                 await asyncio.sleep(1.0)
 
     def describe(self) -> dict[str, object]:

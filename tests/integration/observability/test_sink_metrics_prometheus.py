@@ -30,9 +30,9 @@ from unittest.mock import patch
 
 import pytest
 
-from omnibase_infra.observability.sinks import (
+from omnibase_infra.observability.sinks import SinkMetricsPrometheus
+from omnibase_infra.observability.sinks.sink_metrics_prometheus import (
     DEFAULT_HISTOGRAM_BUCKETS,
-    SinkMetricsPrometheus,
 )
 
 if TYPE_CHECKING:

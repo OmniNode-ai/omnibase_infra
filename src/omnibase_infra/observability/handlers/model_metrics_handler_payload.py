@@ -26,9 +26,9 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelMetricsHandlerPayload(BaseModel):
@@ -93,6 +93,41 @@ class ModelMetricsHandlerPayload(BaseModel):
     )
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_required_fields_by_operation(self) -> Self:
+        """Validate that required fields are present based on operation_type.
+
+        For metrics.scrape operations, metrics_text and content_type are required.
+        For metrics.push operations, pushed_at, push_gateway_url, and job_name
+        are required.
+
+        Raises:
+            ValueError: If required fields for the operation type are missing.
+        """
+        if self.operation_type == "metrics.scrape":
+            missing = []
+            if self.metrics_text is None:
+                missing.append("metrics_text")
+            if self.content_type is None:
+                missing.append("content_type")
+            if missing:
+                raise ValueError(
+                    f"metrics.scrape operation requires: {', '.join(missing)}"
+                )
+        elif self.operation_type == "metrics.push":
+            missing = []
+            if self.pushed_at is None:
+                missing.append("pushed_at")
+            if self.push_gateway_url is None:
+                missing.append("push_gateway_url")
+            if self.job_name is None:
+                missing.append("job_name")
+            if missing:
+                raise ValueError(
+                    f"metrics.push operation requires: {', '.join(missing)}"
+                )
+        return self
 
 
 __all__: list[str] = [

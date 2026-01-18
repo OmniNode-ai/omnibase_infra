@@ -59,15 +59,17 @@ def cleanup_default_registry() -> Generator[None, None, None]:
         None. Cleanup runs on test teardown.
 
     Warning:
-        This fixture attempts best-effort cleanup by removing collectors
-        that may have been added during the test. Some metrics may persist
-        if they were created before the test started.
+        INTERNAL API USAGE: This fixture uses ``REGISTRY._names_to_collectors``
+        which is a private/internal prometheus_client API. This is necessary
+        because there is no public API to list registered collectors by name.
 
-    Note:
-        This implementation uses prometheus_client internal API
-        (`_names_to_collectors`) because there is no public API to list
-        registered collectors by name. This is a known limitation:
-        https://github.com/prometheus/client_python/issues/546
+        This approach was chosen over alternatives because:
+        - CollectorRegistry has no public clear() or list_collectors() method
+        - The only public cleanup method is unregister(collector), which
+          requires knowing the collector object, not just its name
+        - Tracking collectors manually would require modifying test code
+
+        Known limitation: https://github.com/prometheus/client_python/issues/546
 
         Tested with prometheus_client versions: 0.17.x - 0.21.x
         If this breaks after a prometheus_client upgrade, consider:
@@ -75,7 +77,7 @@ def cleanup_default_registry() -> Generator[None, None, None]:
         2. Tracking registered collectors manually in a set
         3. Checking prometheus_client release notes for API changes
     """
-    # NOTE: _names_to_collectors is internal API - see docstring for rationale
+    # INTERNAL API: _names_to_collectors - see docstring for rationale and risk
     # Track collectors before test
     collectors_before = set(REGISTRY._names_to_collectors.keys())
 

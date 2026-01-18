@@ -25,6 +25,7 @@ from __future__ import annotations
 import io
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
@@ -276,8 +277,6 @@ class TestBufferManagement:
     def test_emit_does_not_block(self) -> None:
         """Verify emit completes without blocking even when buffer is full."""
         sink = SinkLoggingStructured(max_buffer_size=10)
-        import time
-
         from omnibase_core.enums import EnumLogLevel
 
         start = time.perf_counter()
@@ -541,8 +540,6 @@ class TestThreadSafety:
         flush_thread.start()
 
         # Let them run for a short time
-        import time
-
         time.sleep(0.5)
 
         # Signal stop and wait for threads

@@ -115,7 +115,6 @@ from omnibase_infra.observability.models import (
     ModelMetricsSinkConfig,
 )
 from omnibase_infra.observability.sinks import (
-    DEFAULT_HISTOGRAM_BUCKETS,
     SinkLoggingStructured,
     SinkMetricsPrometheus,
 )
@@ -137,7 +136,8 @@ __all__: list[str] = [
     # Sinks
     "SinkLoggingStructured",
     "SinkMetricsPrometheus",
-    "DEFAULT_HISTOGRAM_BUCKETS",
+    # Note: DEFAULT_HISTOGRAM_BUCKETS should be imported directly from
+    # omnibase_infra.observability.sinks.sink_metrics_prometheus
     # Hooks
     "HookObservability",
 ]

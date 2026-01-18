@@ -545,9 +545,14 @@ class HookObservability:
         Convenience method for setting gauge values through the hook.
         Useful for tracking current state like queue depths or active connections.
 
+        Note:
+            Gauges can legitimately be negative (e.g., temperature, delta values).
+            For buffer/queue metrics that should never be negative, use
+            set_buffer_gauge() instead, which enforces non-negative values.
+
         Args:
             name: Metric name following Prometheus conventions.
-            value: Current gauge value.
+            value: Current gauge value. Can be negative for appropriate metrics.
             labels: Optional labels for the metric.
 
         Side Effects:
@@ -569,6 +574,58 @@ class HookObservability:
             name=name,
             labels=labels or {},
             value=value,
+        )
+
+    def set_buffer_gauge(
+        self,
+        name: str,
+        value: float,
+        labels: dict[str, str] | None = None,
+    ) -> None:
+        """Set a gauge metric value for buffer/queue metrics (non-negative).
+
+        Similar to set_gauge(), but enforces non-negative values. Use this for
+        metrics that represent counts, sizes, or capacities that logically
+        cannot be negative (e.g., queue depth, buffer size, connection pool size).
+
+        The value is clamped to 0.0 if negative, preventing invalid metric values
+        that could occur from race conditions or calculation errors.
+
+        Args:
+            name: Metric name following Prometheus conventions.
+            value: Current buffer/queue value. Clamped to 0.0 if negative.
+            labels: Optional labels for the metric.
+
+        Side Effects:
+            - Sets gauge metric via metrics sink with max(0.0, value)
+
+        Example:
+            ```python
+            # Queue depth can't go negative even with concurrent updates
+            hook.set_buffer_gauge(
+                "message_queue_depth",
+                value=queue.qsize(),
+                labels={"queue_name": "events"},
+            )
+
+            # Safe even if calculation error produces negative
+            hook.set_buffer_gauge(
+                "buffer_available_slots",
+                value=total_slots - used_slots,  # Clamped to 0 if oversubscribed
+                labels={"buffer": "write"},
+            )
+            ```
+        """
+        if self._metrics_sink is None:
+            return
+
+        # Enforce non-negative values for buffer/count metrics
+        safe_value = max(0.0, value)
+
+        self._metrics_sink.set_gauge(
+            name=name,
+            labels=labels or {},
+            value=safe_value,
         )
 
     # =========================================================================
@@ -622,6 +679,20 @@ class HookObservability:
     # INTERNAL HELPERS
     # =========================================================================
 
+    # High-cardinality label keys that must be excluded from metrics.
+    # These would cause metrics cardinality explosion and be dropped by
+    # ModelMetricsPolicy when on_violation is WARN_AND_DROP or DROP_SILENT.
+    _HIGH_CARDINALITY_KEYS: frozenset[str] = frozenset(
+        {
+            "correlation_id",
+            "request_id",
+            "trace_id",
+            "span_id",
+            "session_id",
+            "user_id",
+        }
+    )
+
     def _build_metric_labels(
         self,
         operation: str,
@@ -630,41 +701,39 @@ class HookObservability:
         """Build the complete label set for a metric.
 
         Combines operation name, stored operation labels, and any extra labels
-        into a single label dictionary.
+        into a single label dictionary. High-cardinality keys are automatically
+        filtered out to prevent metrics from being dropped by the policy.
 
         Note:
-            correlation_id is intentionally NOT included in metric labels.
-            It is a high-cardinality value (unique per request) and is in the
-            default forbidden_label_keys of ModelMetricsPolicy. Including it
-            would cause metrics to be dropped when the policy's on_violation
-            is set to WARN_AND_DROP or DROP_SILENT. The correlation_id is
-            still available via _correlation_id contextvar for structured
-            logging and distributed tracing purposes.
+            High-cardinality values (correlation_id, request_id, trace_id, etc.)
+            are intentionally EXCLUDED from metric labels. These are unique per
+            request and would cause metrics to be dropped when ModelMetricsPolicy's
+            on_violation is set to WARN_AND_DROP or DROP_SILENT. The correlation_id
+            remains available via _correlation_id contextvar for structured logging
+            and distributed tracing purposes.
 
         Args:
             operation: Operation name to include.
             extra_labels: Optional additional labels to merge.
 
         Returns:
-            Complete label dictionary for metric emission.
+            Complete label dictionary for metric emission, with high-cardinality
+            keys filtered out.
         """
         labels: dict[str, str] = {"operation": operation}
 
-        # Note: correlation_id is NOT added to metric labels because it's
-        # high-cardinality and would cause metrics to be dropped by the
-        # policy. It remains available in _correlation_id contextvar for
-        # logging/tracing.
-
-        # Merge stored operation labels
+        # Merge stored operation labels, filtering out high-cardinality keys
         stored_labels = _operation_labels.get()
         if stored_labels is not None:
             for key, value in stored_labels.items():
-                labels[key] = value
+                if key not in self._HIGH_CARDINALITY_KEYS:
+                    labels[key] = value
 
-        # Merge extra labels (overrides stored if same key)
+        # Merge extra labels (overrides stored if same key), filtering high-cardinality
         if extra_labels:
             for key, value in extra_labels.items():
-                labels[key] = value
+                if key not in self._HIGH_CARDINALITY_KEYS:
+                    labels[key] = value
 
         return labels
 
@@ -726,6 +795,10 @@ class OperationScope:
         self._operation_name_token = _operation_name.set(_operation_name.get())
         self._correlation_id_token = _correlation_id.set(_correlation_id.get())
         current_labels = _operation_labels.get()
+        # NOTE: Shallow copy is sufficient here because:
+        # 1. Labels dict is typed as dict[str, str] (string keys and values)
+        # 2. Strings are immutable in Python, so no aliasing issues can occur
+        # 3. We only need isolation of the dict structure, not deep cloning of values
         self._labels_token = _operation_labels.set(
             current_labels.copy() if current_labels is not None else None
         )
@@ -750,29 +823,37 @@ class OperationScope:
         Calls after_operation() and restores previous contextvar values.
         Records success or failure based on whether an exception occurred.
 
+        Concurrency Safety:
+            Uses try/finally to ensure contextvar tokens are ALWAYS restored,
+            even if record_failure/record_success/after_operation raise exceptions.
+            This prevents contextvar state leakage in error scenarios.
+
         Args:
             exc_type: Exception type if an exception was raised.
             exc_val: Exception value if an exception was raised.
             exc_tb: Traceback if an exception was raised.
         """
-        # Record success or failure before timing
-        if exc_type is not None:
-            self._hook.record_failure(exc_type.__name__)
-        else:
-            self._hook.record_success()
+        try:
+            # Record success or failure before timing
+            if exc_type is not None:
+                self._hook.record_failure(exc_type.__name__)
+            else:
+                self._hook.record_success()
 
-        # Get duration
-        self.duration_ms = self._hook.after_operation()
-
-        # Restore previous contextvar values (for nesting support)
-        if self._start_time_token is not None:
-            _start_time.reset(self._start_time_token)
-        if self._operation_name_token is not None:
-            _operation_name.reset(self._operation_name_token)
-        if self._correlation_id_token is not None:
-            _correlation_id.reset(self._correlation_id_token)
-        if self._labels_token is not None:
-            _operation_labels.reset(self._labels_token)
+            # Get duration
+            self.duration_ms = self._hook.after_operation()
+        finally:
+            # CRITICAL: Always restore previous contextvar values (for nesting support)
+            # This must happen even if the above code raises an exception to prevent
+            # contextvar state leakage.
+            if self._start_time_token is not None:
+                _start_time.reset(self._start_time_token)
+            if self._operation_name_token is not None:
+                _operation_name.reset(self._operation_name_token)
+            if self._correlation_id_token is not None:
+                _correlation_id.reset(self._correlation_id_token)
+            if self._labels_token is not None:
+                _operation_labels.reset(self._labels_token)
 
 
 __all__ = ["HookObservability"]

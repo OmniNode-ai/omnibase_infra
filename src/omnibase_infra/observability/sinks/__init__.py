@@ -56,12 +56,14 @@ from omnibase_infra.observability.sinks.sink_logging_structured import (
     SinkLoggingStructured,
 )
 from omnibase_infra.observability.sinks.sink_metrics_prometheus import (
-    DEFAULT_HISTOGRAM_BUCKETS,
     SinkMetricsPrometheus,
 )
+
+# Note: DEFAULT_HISTOGRAM_BUCKETS should be imported directly from
+# sink_metrics_prometheus, not from this package __init__.py.
+# This follows the pattern of importing constants from their source modules.
 
 __all__ = [
     "SinkLoggingStructured",
     "SinkMetricsPrometheus",
-    "DEFAULT_HISTOGRAM_BUCKETS",
 ]

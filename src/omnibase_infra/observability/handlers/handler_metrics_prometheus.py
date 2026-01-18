@@ -24,6 +24,36 @@ Thread-Safety:
     thread-safe metric caches with locking. The aiohttp server handles
     concurrent requests safely.
 
+Security Model:
+    **Production Deployment Requirements:**
+
+    This handler exposes an HTTP endpoint that should be secured in production:
+
+    1. **Reverse Proxy**: Deploy behind nginx/traefik/envoy with:
+       - TLS termination (HTTPS only)
+       - IP allowlisting for Prometheus scrapers
+       - Rate limiting to prevent DoS
+       - Authentication (mTLS or bearer tokens recommended)
+
+    2. **Network Isolation**: Bind to internal network interfaces only:
+       - Use host="127.0.0.1" for localhost-only access
+       - Use internal network CIDR for container/pod networks
+       - NEVER bind to 0.0.0.0 without reverse proxy protection
+
+    3. **Input Validation**: The handler sanitizes:
+       - X-Correlation-ID headers (validated as UUID format)
+       - Error messages (no internal exception details exposed)
+
+    4. **Metric Labels**: Ensure metric labels do not contain:
+       - PII (personally identifiable information)
+       - Secrets or credentials
+       - Internal hostnames/IPs (if sensitive)
+
+    **Threat Model:**
+    - DoS via metric scraping: Mitigate with rate limiting at proxy
+    - Information disclosure: Metrics may reveal system topology
+    - Header injection: X-Correlation-ID is validated and sanitized
+
 Usage:
     >>> from omnibase_infra.observability.handlers import HandlerMetricsPrometheus
     >>>
@@ -45,13 +75,40 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from aiohttp import web
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+# Optional dependencies with graceful degradation
+# These are checked during initialization with clear error messages
+_PROMETHEUS_AVAILABLE: bool = False
+_AIOHTTP_AVAILABLE: bool = False
+
+try:
+    from aiohttp import web
+
+    _AIOHTTP_AVAILABLE = True
+except ImportError:
+    web = None  # type: ignore[assignment, misc]
+
+try:
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    _PROMETHEUS_AVAILABLE = True
+except ImportError:
+    # Provide stubs for type checking when prometheus_client is not installed
+    CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+
+    def generate_latest() -> bytes:  # type: ignore[misc]
+        """Stub for when prometheus_client is not installed."""
+        raise ImportError("prometheus_client is required but not installed")
+
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
+
+if TYPE_CHECKING:
+    from aiohttp.web import Application, AppRunner, Request, Response, TCPSite
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -76,6 +133,18 @@ logger = logging.getLogger(__name__)
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_METRICS: str = "metrics-prometheus-handler"
+
+# Security: UUID validation regex for X-Correlation-ID header
+# Matches standard UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+_UUID_REGEX: re.Pattern[str] = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+# Maximum length for correlation ID header to prevent memory issues
+_MAX_CORRELATION_ID_LENGTH: int = 64
+
+# Timeout for metrics generation to prevent blocking (seconds)
+_METRICS_GENERATION_TIMEOUT: float = 5.0
 
 SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
     {
@@ -209,6 +278,26 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         """
         init_correlation_id = uuid4()
 
+        # Validate required dependencies before proceeding
+        missing_deps: list[str] = []
+        if not _PROMETHEUS_AVAILABLE:
+            missing_deps.append("prometheus_client")
+        if not _AIOHTTP_AVAILABLE:
+            missing_deps.append("aiohttp")
+
+        if missing_deps:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=init_correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="initialize",
+                target_name="metrics_prometheus_handler",
+            )
+            raise ProtocolConfigurationError(
+                f"Missing required dependencies: {', '.join(missing_deps)}. "
+                f"Install with: pip install {' '.join(missing_deps)}",
+                context=context,
+            )
+
         logger.info(
             "Initializing %s",
             self.__class__.__name__,
@@ -219,6 +308,9 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         )
 
         # Validate and parse configuration
+        # NOTE: Broad Exception catch is intentional here because Pydantic can raise
+        # various exception types (ValidationError, TypeError, ValueError) depending
+        # on the validation failure. We wrap all in ProtocolConfigurationError.
         try:
             self._config = ModelMetricsHandlerConfig(**config)
         except Exception as e:
@@ -314,11 +406,17 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             ) from e
 
     def _parse_correlation_id_header(self, header_value: str | None) -> UUID:
-        """Parse and validate X-Correlation-ID header value.
+        """Parse and validate X-Correlation-ID header value with security guards.
 
         Safely extracts a correlation ID from the request header. If the header
         is missing, empty, or contains an invalid UUID format, generates a new
         UUID and logs a warning for invalid values.
+
+        Security Measures:
+            - Length check: Headers exceeding 64 chars are rejected before parsing
+            - Format validation: Regex validates UUID format before UUID() parsing
+            - No reflection: Invalid values are NOT echoed back in responses
+            - Truncated logging: Invalid values logged with max 36 chars (UUID length)
 
         Args:
             header_value: The raw X-Correlation-ID header value, or None if absent.
@@ -329,20 +427,47 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         Note:
             Invalid correlation IDs are handled gracefully to avoid crashing
             the metrics endpoint. A warning is logged to help identify
-            misconfigured clients.
+            misconfigured clients, but the invalid value is NOT exposed in
+            HTTP responses to prevent header injection attacks.
         """
         if not header_value:
             return uuid4()
 
-        try:
-            return UUID(header_value)
-        except (ValueError, AttributeError):
-            # Log warning for debugging but don't crash - generate fallback UUID
+        # Security: Reject excessively long headers before any processing
+        if len(header_value) > _MAX_CORRELATION_ID_LENGTH:
+            fallback_id = uuid4()
+            logger.warning(
+                "X-Correlation-ID header exceeds maximum length, using generated UUID",
+                extra={
+                    "header_length": len(header_value),
+                    "max_length": _MAX_CORRELATION_ID_LENGTH,
+                    "generated_correlation_id": str(fallback_id),
+                },
+            )
+            return fallback_id
+
+        # Security: Validate UUID format with regex before parsing
+        # This prevents malformed input from reaching UUID() constructor
+        if not _UUID_REGEX.match(header_value):
             fallback_id = uuid4()
             logger.warning(
                 "Invalid X-Correlation-ID header format, using generated UUID",
                 extra={
-                    "invalid_correlation_id": header_value[:100],  # Truncate for safety
+                    # Truncate to UUID length (36 chars) max for safe logging
+                    "invalid_header_preview": header_value[:36],
+                    "generated_correlation_id": str(fallback_id),
+                },
+            )
+            return fallback_id
+
+        try:
+            return UUID(header_value)
+        except (ValueError, AttributeError):
+            # Fallback for any edge cases not caught by regex
+            fallback_id = uuid4()
+            logger.warning(
+                "X-Correlation-ID UUID parsing failed, using generated UUID",
+                extra={
                     "generated_correlation_id": str(fallback_id),
                 },
             )
@@ -354,11 +479,16 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         Generates Prometheus metrics in text exposition format and returns
         them with the appropriate content type.
 
+        Security:
+            - Correlation IDs are validated before use (see _parse_correlation_id_header)
+            - Error messages are sanitized - no internal exception details exposed
+            - Timeout protection prevents DoS via slow metric generation
+
         Args:
             request: aiohttp Request object.
 
         Returns:
-            aiohttp Response with metrics text.
+            aiohttp Response with metrics text, or generic error on failure.
         """
         # Get and validate correlation ID from request headers
         correlation_id = self._parse_correlation_id_header(
@@ -374,8 +504,13 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         )
 
         try:
-            # Generate metrics from default Prometheus registry
-            metrics_bytes = generate_latest()
+            # Generate metrics with timeout protection to prevent DoS
+            # generate_latest() is synchronous, so run in executor with timeout
+            loop = asyncio.get_running_loop()
+            metrics_bytes = await asyncio.wait_for(
+                loop.run_in_executor(None, generate_latest),
+                timeout=_METRICS_GENERATION_TIMEOUT,
+            )
 
             # Use headers dict for Content-Type because CONTENT_TYPE_LATEST includes
             # charset which conflicts with aiohttp's content_type parameter validation
@@ -387,13 +522,33 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
                 },
             )
 
-        except Exception as e:
+        except TimeoutError:
+            # Log timeout with full details, but return generic message
+            # Using warning level since timeout is expected behavior (DoS protection)
+            logger.warning(
+                "Metrics generation timed out",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "timeout_seconds": _METRICS_GENERATION_TIMEOUT,
+                },
+            )
+            # Security: Generic error message - no internal details exposed
+            return web.Response(
+                text="Internal server error generating metrics",
+                status=503,  # Service Unavailable for timeout
+                headers={"X-Correlation-ID": str(correlation_id)},
+            )
+
+        except Exception:
+            # Log full exception details internally for debugging
             logger.exception(
                 "Failed to generate metrics",
                 extra={"correlation_id": str(correlation_id)},
             )
+            # Security: Generic error message - no exception type or details exposed
+            # This prevents information leakage about internal implementation
             return web.Response(
-                text=f"Error generating metrics: {type(e).__name__}",
+                text="Internal server error generating metrics",
                 status=500,
                 headers={"X-Correlation-ID": str(correlation_id)},
             )
@@ -402,7 +557,13 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         """Shutdown the HTTP server and release resources.
 
         Gracefully stops the HTTP server, waiting for pending requests
-        to complete within the configured timeout.
+        to complete within the configured timeout. The shutdown process:
+
+        1. Stops accepting new connections (site.stop())
+        2. Waits for pending requests to drain (runner.cleanup())
+        3. Releases all resources
+
+        If cleanup times out, pending requests are forcibly terminated.
         """
         shutdown_correlation_id = uuid4()
 
@@ -413,26 +574,64 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
 
         timeout = self._config.shutdown_timeout_seconds if self._config else 5.0
 
-        # Stop the HTTP server gracefully
+        # Phase 1: Stop accepting new connections
+        # This allows pending requests to complete before we close
         if self._site is not None:
-            await self._site.stop()
-            self._site = None
+            try:
+                await self._site.stop()
+                logger.debug(
+                    "HTTP server stopped accepting new connections",
+                    extra={"correlation_id": str(shutdown_correlation_id)},
+                )
+            except OSError as e:
+                # OSError can occur if socket is already closed
+                logger.warning(
+                    "Error stopping HTTP site: %s",
+                    e,
+                    extra={
+                        "correlation_id": str(shutdown_correlation_id),
+                        "error_type": type(e).__name__,
+                    },
+                )
+            finally:
+                self._site = None
 
+        # Phase 2: Drain pending requests and cleanup runner
+        # This gives in-flight requests time to complete
         if self._runner is not None:
             try:
                 await asyncio.wait_for(
                     self._runner.cleanup(),
                     timeout=timeout,
                 )
+                logger.debug(
+                    "HTTP server cleanup completed successfully",
+                    extra={"correlation_id": str(shutdown_correlation_id)},
+                )
             except TimeoutError:
+                # Timeout means pending requests couldn't complete in time
+                # This is a warning because it may indicate slow consumers
                 logger.warning(
-                    "HTTP server cleanup timed out",
+                    "HTTP server cleanup timed out after %.1f seconds - "
+                    "pending requests may have been forcibly terminated",
+                    timeout,
                     extra={
                         "correlation_id": str(shutdown_correlation_id),
                         "timeout_seconds": timeout,
                     },
                 )
-            self._runner = None
+            except OSError as e:
+                # OSError can occur during cleanup if connections are in bad state
+                logger.warning(
+                    "OSError during HTTP server cleanup: %s",
+                    e,
+                    extra={
+                        "correlation_id": str(shutdown_correlation_id),
+                        "error_type": type(e).__name__,
+                    },
+                )
+            finally:
+                self._runner = None
 
         self._app = None
         self._initialized = False
@@ -625,6 +824,10 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
 
         # Use prometheus_client's push_to_gateway functionality
         # Note: This is a synchronous operation, so we run it in executor
+        # NOTE: Broad Exception catch is intentional here because push_to_gateway
+        # can raise various exceptions: URLError for network issues, HTTPError for
+        # gateway errors, and other unexpected exceptions from the prometheus_client
+        # library. We wrap all failures in RuntimeHostError for consistent handling.
         try:
             from prometheus_client import REGISTRY, push_to_gateway
 
