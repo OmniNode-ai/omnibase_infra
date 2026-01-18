@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Security Validation Architecture
+
 # Security Validation Architecture
 
 ## Overview

@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Error Recovery Patterns
+
 # Error Recovery Patterns
 
 ## Overview

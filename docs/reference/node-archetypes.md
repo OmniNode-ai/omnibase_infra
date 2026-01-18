@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > Reference > Node Archetypes
+
 # Node Archetypes Reference
 
 ONEX organizes all processing into four node archetypes. This reference provides complete documentation for each type.
@@ -163,7 +165,7 @@ __all__ = ["NodeRegistrationStorageEffect"]
 
 ### Key Characteristics
 
-1. **Capability-Oriented Naming**: Name by what it does ("registration.storage"), not technology ("postgres")
+1. **Capability-Oriented Naming**: Name by what it does ("registration.storage"), not technology ("postgres"). See [Capability Naming Convention](contracts.md#capability-naming-convention) for full guide.
 2. **Pluggable Handlers**: Multiple backend implementations selectable via `handler_type`
 3. **Idempotent Operations**: Mark operations as idempotent for safe retries
 4. **Error Handling**: Configure circuit breakers and retry policies in contract

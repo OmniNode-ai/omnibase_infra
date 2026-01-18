@@ -1,4 +1,6 @@
-# Handler Wiring → Protocol-Driven Architecture
+> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Handler Protocol-Driven Architecture
+
+# Handler Wiring -> Protocol-Driven Architecture
 
 ## Overview
 

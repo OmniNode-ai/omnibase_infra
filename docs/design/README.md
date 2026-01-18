@@ -1,6 +1,10 @@
+> **Navigation**: [Home](../index.md) > Design
+
 # Design Documents
 
 This directory contains architectural design documents for omnibase_infra.
+
+> **Note**: Design documents capture architectural decisions and implementation plans. For authoritative coding rules and standards, see [CLAUDE.md](../../CLAUDE.md).
 
 ## PolicyRegistry Dependency Injection Integration
 

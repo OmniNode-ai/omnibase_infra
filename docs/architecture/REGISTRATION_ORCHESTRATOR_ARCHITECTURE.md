@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Registration Orchestrator Architecture
+
 # Registration Orchestrator Architecture
 
 **Document Version**: 1.0.0

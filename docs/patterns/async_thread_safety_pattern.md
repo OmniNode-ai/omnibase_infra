@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Async Thread Safety Pattern
+
 # Async Thread Safety Pattern
 
 ## Overview

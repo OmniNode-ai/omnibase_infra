@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Operations](README.md) > Event Bus Operations
+
 # Event Bus Operations Runbook
 
 Operational guide for deploying, configuring, monitoring, and troubleshooting the KafkaEventBus in production environments.

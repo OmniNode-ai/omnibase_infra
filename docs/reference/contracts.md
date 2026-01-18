@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > Reference > Contract.yaml
+
 # Contract.yaml Reference
 
 This reference documents the complete structure of ONEX contract files.
@@ -233,7 +235,25 @@ capabilities:
   - name: "sql.execute"        # Exposes SQL as implementation
   - name: "http.post"          # Transport detail, not capability
   - name: "async_handler"      # Implementation pattern, not business capability
+
+# WRONG: Non-descriptive or lazy names
+capabilities:
+  - name: "doStuff"            # Meaningless - what stuff?
+  - name: "handler1"           # Numbered handlers indicate poor design
+  - name: "run"                # Too generic, no domain context
+  - name: "execute"            # Ambiguous without operation type
+  - name: "data"               # What data? For what purpose?
 ```
+
+#### Capability Naming Quick Reference
+
+| Pattern | Good | Bad | Why |
+|---------|------|-----|-----|
+| Domain-scoped | `node.registration.create` | `create` | Context makes purpose clear |
+| Action-oriented | `node.introspection.query` | `query` | Domain prefix prevents ambiguity |
+| Hierarchical | `service.discovery.register` | `register` | Hierarchy enables routing |
+| Descriptive | `workflow.state.checkpoint` | `doStuff` | Names should be self-documenting |
+| Technology-agnostic | `registration.storage.upsert` | `postgres.insert` | Allows backend swaps |
 
 **Why This Matters**: Capability names are used for service discovery, routing, and dependency resolution. Technology-agnostic names allow backend swaps without contract changes.
 

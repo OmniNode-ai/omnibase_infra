@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Validation](README.md) > Troubleshooting
+
 # Validation Troubleshooting Guide
 
 Common issues and solutions for ONEX infrastructure validation.

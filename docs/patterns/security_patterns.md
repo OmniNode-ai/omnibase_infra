@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Security Patterns
+
 # Security Patterns
 
 ## Overview

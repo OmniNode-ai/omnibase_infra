@@ -1,6 +1,10 @@
+> **Navigation**: [Home](../index.md) > Decisions (ADRs)
+
 # Architecture Decision Records (ADRs)
 
 This directory contains Architecture Decision Records documenting significant design decisions in ONEX Infrastructure.
+
+> **Note**: ADRs explain *why* decisions were made. For the resulting coding rules and standards, see [CLAUDE.md](../../CLAUDE.md) which is the authoritative source for all development guidelines.
 
 ## What is an ADR?
 

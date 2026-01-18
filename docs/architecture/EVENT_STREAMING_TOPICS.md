@@ -1,4 +1,6 @@
-# ONEX Event Streaming Topics — Specification (v1)
+> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Event Streaming Topics
+
+# ONEX Event Streaming Topics - Specification (v1)
 
 **Status**: LOCKED (MVP-SAFE)
 **Scope**: Kafka-based event streaming for ONEX node lifecycle, registry workflows, and infrastructure observability

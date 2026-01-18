@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Event Bus Integration Guide
+
 # Event Bus Integration Guide
 
 ## Overview

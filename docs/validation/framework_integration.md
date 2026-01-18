@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Validation](README.md) > Framework Integration
+
 # Framework Integration Guide
 
 How omnibase_infra validation integrates with the omnibase_core validation framework.

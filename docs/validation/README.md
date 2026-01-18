@@ -1,6 +1,10 @@
+> **Navigation**: [Home](../index.md) > Validation
+
 # ONEX Infrastructure Validation Framework
 
 Comprehensive validation system for omnibase_infra, ensuring code quality, architecture compliance, and ONEX standards adherence.
+
+> **Note**: For authoritative coding rules and standards that validators enforce, see [CLAUDE.md](../../CLAUDE.md).
 
 ## Quick Start
 

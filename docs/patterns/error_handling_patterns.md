@@ -47,6 +47,8 @@ raise InfraConnectionError("Failed to connect to database", context=context) fro
 
 ## Error Hierarchy
 
+### ASCII Diagram
+
 ```
 ModelOnexError (omnibase_core)
 └── RuntimeHostError
@@ -56,6 +58,26 @@ ModelOnexError (omnibase_core)
     ├── InfraTimeoutError
     ├── InfraAuthenticationError
     └── InfraUnavailableError
+```
+
+### Mermaid Diagram
+
+```mermaid
+flowchart TB
+    accTitle: ONEX Error Class Hierarchy
+    accDescr: Class hierarchy diagram showing the ONEX infrastructure error types. ModelOnexError from omnibase_core is the root. RuntimeHostError extends it, and six specialized error types extend RuntimeHostError: ProtocolConfigurationError for invalid configs, SecretResolutionError for Vault and secret issues, InfraConnectionError for network failures with transport-aware error codes, InfraTimeoutError for operation timeouts, InfraAuthenticationError for auth failures, and InfraUnavailableError for service outages.
+
+    ONEX["ModelOnexError<br/>(omnibase_core)"] --> RH["RuntimeHostError"]
+
+    RH --> PCE["ProtocolConfigurationError<br/>Config validation failures"]
+    RH --> SRE["SecretResolutionError<br/>Vault/secret issues"]
+    RH --> ICE["InfraConnectionError<br/>Network failures<br/>(transport-aware codes)"]
+    RH --> ITE["InfraTimeoutError<br/>Operation timeouts"]
+    RH --> IAE["InfraAuthenticationError<br/>Auth/credential failures"]
+    RH --> IUE["InfraUnavailableError<br/>Service outages"]
+
+    style ONEX fill:#e3f2fd
+    style RH fill:#fff3e0
 ```
 
 ## Transport-Aware Error Codes

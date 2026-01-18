@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Current Node Architecture
+
 # ONEX Current Node Architecture (Pre-Runtime Host Migration)
 
 This document describes the current ONEX node architecture that uses a **1-container-per-node** deployment model. This is the "before" state that will be migrated to the new Runtime Host model.
@@ -16,7 +18,7 @@ In the current ONEX architecture, each node runs as an **independent container**
 - Kafka consumer/producer connections
 - Health check endpoint
 
-**Deployment Model:**
+**Deployment Model (ASCII):**
 ```
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │   Container 1   │  │   Container 2   │  │   Container 3   │
@@ -34,6 +36,36 @@ In the current ONEX architecture, each node runs as an **independent container**
                       └─────────────┘
 ```
 
+**Deployment Model (Mermaid):**
+```mermaid
+flowchart TB
+    accTitle: Current ONEX Deployment Model - 1 Container Per Node
+    accDescr: Diagram showing the current ONEX deployment architecture where each node runs in its own independent container. Three example containers are shown: Container 1 runs VaultNode, Container 2 runs ConsulNode, and Container 3 runs KafkaNode. Each container has its own asyncio.run entry point. All containers communicate through a shared Kafka Event Bus.
+
+    subgraph C1["Container 1"]
+        V[VaultNode]
+        A1[asyncio.run]
+    end
+
+    subgraph C2["Container 2"]
+        CN[ConsulNode]
+        A2[asyncio.run]
+    end
+
+    subgraph C3["Container 3"]
+        KN[KafkaNode]
+        A3[asyncio.run]
+    end
+
+    V --> A1
+    CN --> A2
+    KN --> A3
+
+    A1 --> K[(Kafka Event Bus)]
+    A2 --> K
+    A3 --> K
+```
+
 ### The 4 Node Types
 
 ONEX follows a strict **4-node architecture** pattern:
@@ -47,9 +79,20 @@ ONEX follows a strict **4-node architecture** pattern:
 
 **Note**: In `contract.yaml` files, use the `_GENERIC` suffix variants (e.g., `EFFECT_GENERIC`). In Python code, use `EnumNodeKind` values (e.g., `EnumNodeKind.EFFECT`).
 
-**Communication Pattern:**
+**Communication Pattern (ASCII):**
 ```
 Adapters (EFFECT) → Events → Reducer → Intents → Orchestrator → Workflows → Adapters
+```
+
+**Communication Pattern (Mermaid):**
+```mermaid
+flowchart LR
+    accTitle: ONEX Node Communication Pattern
+    accDescr: Linear flow diagram showing how ONEX nodes communicate. EFFECT nodes (Adapters) generate Events which flow to Reducers. Reducers emit Intents which go to Orchestrators. Orchestrators execute Workflows which call back to Adapters to complete the cycle.
+
+    A1[Adapters<br/>EFFECT] -->|Events| R[Reducer]
+    R -->|Intents| O[Orchestrator]
+    O -->|Workflows| A2[Adapters]
 ```
 
 ---

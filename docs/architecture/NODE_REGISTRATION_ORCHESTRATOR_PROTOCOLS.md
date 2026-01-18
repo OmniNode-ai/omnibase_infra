@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Node Registration Orchestrator Protocols
+
 # Node Registration Orchestrator Protocol Architecture
 
 ## Overview

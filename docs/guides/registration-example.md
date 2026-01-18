@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > Guides > 2-Way Registration
+
 # 2-Way Registration: A Complete ONEX Example
 
 This guide walks through the **2-way node registration flow** - a real-world example of ONEX contract-driven architecture. Understanding this flow demonstrates how all four node archetypes work together.
@@ -558,6 +560,31 @@ Effect handlers implement several resilience patterns:
 | Both fail | FAIL | FAIL | `failed` | Route to DLQ, alert operators |
 | Circuit open | SKIP | SKIP | `pending` | Wait for circuit reset |
 
+### Capability Naming in Effect Nodes
+
+Effect nodes are named by **capability** (what they do), not by **technology** (how they do it). This enables backend swaps without contract changes.
+
+**Good Capability Names** (used in this example):
+
+| Capability | Purpose | Why Good |
+|------------|---------|----------|
+| `consul.register` | Register service for discovery | Domain-scoped action |
+| `postgres.upsert_registration` | Persist registration record | Action-oriented with context |
+| `registration.storage` | Storage operations for registrations | Hierarchical, technology-agnostic |
+
+**Bad Capability Names** (avoid these):
+
+| Bad Name | Problem | Better Alternative |
+|----------|---------|-------------------|
+| `doStuff` | Meaningless, non-descriptive | `node.registration.create` |
+| `handler1` | Numbered handlers indicate poor design | `node.introspection.query` |
+| `process` | Too generic, no domain context | `registration.storage.upsert` |
+| `run` | Ambiguous without operation type | `workflow.state.checkpoint` |
+
+**Pattern**: `{domain}.{subdomain}.{action}` - e.g., `service.discovery.register`
+
+For the complete capability naming convention, see [Contract.yaml Reference - Capability Naming](../reference/contracts.md#capability-naming-convention).
+
 ## Phase 4: ACK Flow
 
 Phase 4 completes the 2-way handshake. The registering node acknowledges that it received the acceptance, confirming it's ready to receive work. This phase also establishes liveness tracking to ensure nodes remain healthy.
@@ -1045,5 +1072,6 @@ The 2-way registration flow demonstrates ONEX's key principles:
 | Quick start | [Quick Start Guide](../getting-started/quickstart.md) |
 | Node archetypes | [Node Archetypes Reference](../reference/node-archetypes.md) |
 | Contract format | [Contract.yaml Reference](../reference/contracts.md) |
+| Capability naming | [Capability Naming Convention](../reference/contracts.md#capability-naming-convention) |
 | Architecture | [Architecture Overview](../architecture/overview.md) |
 | All patterns | [Pattern Documentation](../patterns/README.md) |

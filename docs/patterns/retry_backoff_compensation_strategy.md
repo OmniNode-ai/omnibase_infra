@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Retry, Backoff, and Compensation Strategy
+
 # Retry, Backoff, and Compensation Strategy
 
 ## Overview

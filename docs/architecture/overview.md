@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > Architecture > Overview
+
 # ONEX Architecture Overview
 
 This document provides a high-level overview of the ONEX (OmniNode Execution) architecture used in `omnibase_infra`.
@@ -438,7 +440,7 @@ flowchart TB
 | **Handlers cannot publish events** | Only orchestrators have bus access |
 | **Orchestrators have no FSM logic** | Reducers own state transitions |
 | **No `Any` types** | Type safety, enforced by CI |
-| **Effects named by capability** | "registration.storage" not "postgres" |
+| **Effects named by capability** | "registration.storage" not "postgres" ([naming guide](../reference/contracts.md#capability-naming-convention)) |
 | **Immutable state models** | Use `with_*` methods for transitions |
 
 ## Package Layering

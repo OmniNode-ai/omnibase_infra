@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Dispatcher Resilience
+
 # Dispatcher Resilience Pattern
 
 ## Overview

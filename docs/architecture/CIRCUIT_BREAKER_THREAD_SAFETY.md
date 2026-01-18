@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Circuit Breaker Thread Safety
+
 # Circuit Breaker Concurrency Safety Implementation
 
 ## Overview

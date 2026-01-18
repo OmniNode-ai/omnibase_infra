@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Operations](README.md) > Database Index Monitoring
+
 # Database Index Monitoring Runbook
 
 Operational guide for monitoring GIN index performance on the `registration_projections` table, including write overhead assessment, alerting thresholds, and troubleshooting procedures.
