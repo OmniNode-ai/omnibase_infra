@@ -36,11 +36,17 @@ Thread Safety:
 Reconfiguration Log Loss Prevention:
     Without synchronization, a race condition can cause log loss:
     1. emit reads self._sink -> gets old_sink reference
-    2. configure swaps self._sink to new_sink, flushes old_sink
-    3. emit calls old_sink.emit() -> log goes to already-flushed buffer (LOST)
+    2. configure swaps self._sink to new_sink
+    3. emit calls old_sink.emit() -> log goes to abandoned sink (LOST)
 
-    The _emit_lock prevents this by ensuring the swap-and-flush sequence is
-    atomic with respect to emit operations.
+    The _emit_lock prevents this by ensuring the flush-then-swap sequence is
+    atomic with respect to emit operations. The sequence is:
+    1. Acquire _emit_lock (blocks all emits)
+    2. Flush old sink (write all buffered entries)
+    3. Swap to new sink
+    4. Release _emit_lock (emits resume to new sink)
+
+    This guarantees we never abandon a sink with unflushed entries.
 
 Drop Policy:
     The drop_policy configuration field accepts only "drop_oldest", which is the
@@ -64,6 +70,7 @@ import threading
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -82,6 +89,19 @@ from omnibase_infra.observability.handlers.model_logging_handler_config import (
 from omnibase_infra.observability.handlers.model_logging_handler_response import (
     ModelLoggingHandlerResponse,
 )
+
+# Dependency validation for structlog (via SinkLoggingStructured)
+# The sink requires structlog; check availability here for early error detection
+_STRUCTLOG_AVAILABLE: bool = False
+try:
+    import structlog
+
+    _STRUCTLOG_AVAILABLE = True
+    del structlog  # Not used at runtime, only for dependency check
+except ImportError:
+    pass
+
+# Import sink after dependency check (will fail at instantiation if structlog missing)
 from omnibase_infra.observability.sinks import SinkLoggingStructured
 
 if TYPE_CHECKING:
@@ -234,10 +254,25 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 - drop_policy: "drop_oldest" (only supported policy)
 
         Raises:
-            ProtocolConfigurationError: If configuration validation fails.
+            ProtocolConfigurationError: If structlog is not installed or
+                configuration validation fails.
             RuntimeHostError: If handler is already initialized.
         """
         init_correlation_id = uuid4()
+
+        # Validate required dependencies before proceeding
+        if not _STRUCTLOG_AVAILABLE:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=init_correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="initialize",
+                target_name="logging_handler",
+            )
+            raise ProtocolConfigurationError(
+                "Missing required dependency: structlog. "
+                "Install with: pip install structlog",
+                context=ctx,
+            )
 
         logger.info(
             "Initializing %s",
@@ -292,7 +327,8 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 context=ctx,
             ) from e
 
-        # Create the sink with configured drop policy
+        # Create the sink with ALL config fields applied, including drop_policy.
+        # The drop_policy controls buffer overflow behavior (currently only "drop_oldest").
         self._sink = SinkLoggingStructured(
             max_buffer_size=self._config.buffer_size,
             output_format=self._config.output_format,
@@ -525,8 +561,9 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 context=ctx,
             )
 
-        # Convert context values to strings (sink requirement)
-        context: dict[str, str] = {str(k): str(v) for k, v in context_raw.items()}
+        # Pass through JSON-compatible context values (sink accepts JsonType)
+        # This preserves rich context data (int, float, bool, list, dict) for structured logging
+        context: dict[str, JsonType] = {str(k): v for k, v in context_raw.items()}
 
         # Parse log level
         level = self._parse_log_level(level_raw, correlation_id)
@@ -610,15 +647,22 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         """Handle logging.configure operation.
 
         Note: Configuration changes require re-creating the sink. To prevent
-        log loss, the swap-and-flush sequence is protected by _emit_lock,
+        log loss, the flush-then-swap sequence is protected by _emit_lock,
         ensuring no emit operations can race with the reconfiguration.
 
         Thread Safety:
-            The _emit_lock is acquired during the critical swap-and-flush sequence.
+            The _emit_lock is acquired during the critical flush-then-swap sequence.
             This ensures that:
-            1. All in-flight emits complete before the swap
-            2. No new emits can start during swap+flush
-            3. After flush completes, new emits go to the new sink
+            1. All in-flight emits complete before we start
+            2. No new emits can start during flush+swap
+            3. Old sink is fully flushed before swap occurs
+            4. After swap completes, new emits go to the new sink
+
+        Reconfiguration Sequence (under _emit_lock):
+            1. Flush old sink first (ensures all buffered entries are written)
+            2. Swap to new sink atomically
+            3. Update config reference
+            This order guarantees no log loss: we flush before abandoning the old sink.
 
         Args:
             payload: Configuration payload (same fields as ModelLoggingHandlerConfig)
@@ -663,34 +707,34 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 ) from e
 
             # Create new sink with updated config BEFORE acquiring emit lock
-            # to minimize time spent blocking emit operations
+            # to minimize time spent blocking emit operations.
+            # All config fields are applied including drop_policy.
             new_sink = SinkLoggingStructured(
                 max_buffer_size=new_config.buffer_size,
                 output_format=new_config.output_format,
                 drop_policy=new_config.drop_policy,
             )
 
-            # Critical section: acquire emit lock for atomic swap-and-flush.
+            # Critical section: acquire emit lock for atomic flush-then-swap.
             # This prevents the race condition where:
             # 1. emit reads self._sink -> gets old_sink
-            # 2. configure swaps and flushes old_sink
-            # 3. emit calls old_sink.emit() -> log LOST (already flushed)
+            # 2. configure swaps to new_sink
+            # 3. emit calls old_sink.emit() -> log LOST (old sink abandoned)
             #
-            # With the lock, step 3 cannot happen until after flush completes.
+            # With the lock held during flush+swap, no emit can interleave.
             with self._emit_lock:
-                # Capture old sink for flush
+                # Step 1: Flush old sink FIRST to ensure all buffered entries
+                # are written before we abandon it. This is the key to preventing
+                # log loss - we never abandon a sink with unflushed entries.
                 old_sink = self._sink
-
-                # Swap sink and config references (atomic under lock)
-                self._config = new_config
-                self._sink = new_sink
-
-                # Reset drop count tracker for new sink
-                self._last_drop_count = 0
-
-                # Flush old sink while holding lock to ensure all buffered
-                # entries (including any that were being added) are written.
                 old_sink.flush()
+
+                # Step 2: Swap sink and config references atomically (under lock)
+                self._sink = new_sink
+                self._config = new_config
+
+                # Step 3: Reset drop count tracker for new sink
+                self._last_drop_count = 0
 
             # Handle flush interval changes (outside emit lock - these are async)
             if self._config.flush_interval_seconds > 0:

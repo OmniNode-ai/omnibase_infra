@@ -1278,24 +1278,6 @@ pattern_exemptions:
       - docs/patterns/container_dependency_injection.md (Registry patterns)
       - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1131
-  - file_pattern: 'node_service_discovery_effect/protocols/protocol_discovery_operations\.py'
-    class_pattern: "Class name 'ProtocolDiscoveryOperations'"
-    violation_pattern: "contains anti-pattern 'Service'"
-    reason: >
-      ProtocolDiscoveryOperations defines the protocol for service discovery backends. "Service" is the canonical domain term from HashiCorp Consul and Kubernetes APIs.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-    ticket: OMN-1131
-  - file_pattern: 'node_registration_storage_effect/protocols/protocol_registration_persistence\.py'
-    class_pattern: "Class name 'ProtocolRegistrationPersistence'"
-    violation_pattern: "contains anti-pattern 'Handler'"
-    reason: >
-      ProtocolRegistrationPersistence defines the persistence protocol for registration storage backends (PostgreSQL, Mock). This follows the pluggable handler architecture.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-    ticket: OMN-1131
   - file_pattern: 'handlers/registration_storage/handler_registration_storage_postgres\.py'
     method_pattern: "Function '__init__'"
     violation_pattern: 'has \d+ parameters'

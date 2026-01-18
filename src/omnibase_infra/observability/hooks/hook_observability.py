@@ -45,16 +45,36 @@ This class is thread-safe with the following guarantees:
    which provide per-task isolation in async code and per-thread isolation in
    threaded code. Concurrent operations NEVER share timing state.
 
-2. **Metrics Sink**: The metrics_sink is accessed from multiple async tasks.
-   The metrics_sink implementation MUST be thread-safe. The built-in
-   SinkMetricsPrometheus satisfies this requirement via internal locking.
-   If using a custom sink, ensure it is thread-safe.
+2. **Metrics Sink**: The metrics_sink is accessed via a read-only property
+   from multiple async tasks. The metrics_sink implementation MUST be
+   thread-safe. The built-in SinkMetricsPrometheus satisfies this requirement
+   via internal locking. If using a custom sink, ensure it is thread-safe.
+   The metrics_sink is set once during __init__ and exposed as read-only to
+   prevent accidental modification.
 
 3. **Class Constants**: _HIGH_CARDINALITY_KEYS is a frozenset (immutable),
    ensuring thread-safe read access.
 
-4. **Instance Variables**: The only instance variable (_metrics_sink) is set
-   once during __init__ and never modified, ensuring thread-safe reads.
+4. **Instance Variables**: The only instance variable (__metrics_sink) is set
+   once during __init__ and exposed via a read-only property, ensuring
+   thread-safe reads and preventing modification after construction.
+
+5. **Module-Level Singleton**: The global singleton hook instance is protected
+   by a threading.Lock for thread-safe initialization across threads.
+
+Singleton Support
+-----------------
+This module provides optional singleton support via get_global_hook() and
+configure_global_hook(). The singleton pattern is useful when:
+
+- Multiple components need to share the same observability infrastructure
+- You want centralized metrics collection across the application
+- Resource efficiency is important
+
+Important: When a singleton already exists, calling configure_global_hook()
+with different configuration will log a warning and return the existing
+instance. Use clear_global_hook() to reset the singleton if reconfiguration
+is needed.
 
 Usage Example:
     ```python
@@ -76,6 +96,10 @@ Usage Example:
     finally:
         duration_ms = hook.after_operation()
         logger.info(f"Operation took {duration_ms:.2f}ms")
+
+    # Or use the global singleton
+    from omnibase_infra.observability.hooks import get_global_hook
+    hook = get_global_hook()  # Returns singleton, creates if needed
     ```
 
 See Also:
@@ -87,12 +111,26 @@ See Also:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 _logger = logging.getLogger(__name__)
+
+# =============================================================================
+# MODULE-LEVEL SINGLETON STATE
+# =============================================================================
+#
+# Thread-safe singleton support for global hook instance. Protected by
+# _global_hook_lock for safe initialization from multiple threads.
+#
+# =============================================================================
+
+# Forward reference resolved by `from __future__ import annotations`
+_global_hook_instance: HookObservability | None = None
+_global_hook_lock = threading.Lock()
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -174,9 +212,9 @@ class HookObservability:
         - `circuit_breaker_state_change_total`: Counter for circuit state changes
 
     Attributes:
-        metrics_sink: Optional metrics sink for emitting observability data.
-            If None, metrics emission is skipped (no-op). The sink MUST be
-            thread-safe for concurrent access.
+        metrics_sink: Read-only property for the metrics sink. Returns None if
+            no sink was provided. The sink MUST be thread-safe for concurrent
+            access from multiple async tasks.
 
     Example:
         ```python
@@ -199,6 +237,9 @@ class HookObservability:
         ```
     """
 
+    # Use __slots__ to prevent accidental attribute addition and improve memory
+    __slots__ = ("__metrics_sink",)
+
     def __init__(
         self,
         metrics_sink: ProtocolHotPathMetricsSink | None = None,
@@ -219,12 +260,29 @@ class HookObservability:
             are thread-safe.
 
         Note:
-            The metrics_sink is stored as an instance variable because it is
-            a shared resource, not per-operation state. It is set once during
-            __init__ and never modified, ensuring thread-safe reads. This is
-            intentionally different from timing state which MUST be in contextvars.
+            The metrics_sink is stored as a private instance variable and
+            exposed via a read-only property. This prevents accidental
+            modification after construction, ensuring thread-safe reads.
+            This is intentionally different from timing state which MUST be
+            in contextvars for per-task isolation.
         """
-        self._metrics_sink = metrics_sink
+        # Use name mangling (__) to prevent external modification
+        # Access via the metrics_sink property
+        self.__metrics_sink = metrics_sink
+
+    @property
+    def metrics_sink(self) -> ProtocolHotPathMetricsSink | None:
+        """Read-only access to the metrics sink.
+
+        Returns:
+            The metrics sink provided during construction, or None if no
+            sink was provided.
+
+        Thread-Safety:
+            This property is thread-safe. The underlying value is set once
+            during __init__ and never modified.
+        """
+        return self.__metrics_sink
 
     # =========================================================================
     # CORE TIMING API
@@ -285,9 +343,9 @@ class HookObservability:
         _operation_labels.set(labels.copy() if labels else {})
 
         # Emit start metric if sink is available
-        if self._metrics_sink is not None:
+        if self.metrics_sink is not None:
             metric_labels = self._build_metric_labels(operation)
-            self._metrics_sink.increment_counter(
+            self.metrics_sink.increment_counter(
                 name="operation_started_total",
                 labels=metric_labels,
                 increment=1,
@@ -335,9 +393,9 @@ class HookObservability:
         duration_ms = duration_seconds * 1000.0
 
         # Emit duration metric if sink is available
-        if self._metrics_sink is not None and operation is not None:
+        if self.metrics_sink is not None and operation is not None:
             metric_labels = self._build_metric_labels(operation)
-            self._metrics_sink.observe_histogram(
+            self.metrics_sink.observe_histogram(
                 name="operation_duration_seconds",
                 labels=metric_labels,
                 value=duration_seconds,
@@ -413,7 +471,7 @@ class HookObservability:
             duration = hook.after_operation()
             ```
         """
-        if self._metrics_sink is None:
+        if self.metrics_sink is None:
             return
 
         operation = _operation_name.get()
@@ -423,7 +481,7 @@ class HookObservability:
         metric_labels = self._build_metric_labels(operation, labels)
         metric_labels["status"] = "success"
 
-        self._metrics_sink.increment_counter(
+        self.metrics_sink.increment_counter(
             name="operation_completed_total",
             labels=metric_labels,
             increment=1,
@@ -461,7 +519,7 @@ class HookObservability:
                 hook.after_operation()
             ```
         """
-        if self._metrics_sink is None:
+        if self.metrics_sink is None:
             return
 
         operation = _operation_name.get()
@@ -472,7 +530,7 @@ class HookObservability:
         metric_labels["status"] = "failure"
         metric_labels["error_type"] = error_type
 
-        self._metrics_sink.increment_counter(
+        self.metrics_sink.increment_counter(
             name="operation_failed_total",
             labels=metric_labels,
             increment=1,
@@ -515,7 +573,7 @@ class HookObservability:
                         raise
             ```
         """
-        if self._metrics_sink is None:
+        if self.metrics_sink is None:
             return
 
         operation = _operation_name.get() or "unknown"
@@ -523,7 +581,7 @@ class HookObservability:
         metric_labels["attempt"] = str(attempt_number)
         metric_labels["reason"] = reason
 
-        self._metrics_sink.increment_counter(
+        self.metrics_sink.increment_counter(
             name="retry_attempt_total",
             labels=metric_labels,
             increment=1,
@@ -560,7 +618,7 @@ class HookObservability:
             )
             ```
         """
-        if self._metrics_sink is None:
+        if self.metrics_sink is None:
             return
 
         metric_labels: dict[str, str] = {
@@ -575,7 +633,7 @@ class HookObservability:
                 if key not in metric_labels:  # Don't overwrite required labels
                     metric_labels[key] = value
 
-        self._metrics_sink.increment_counter(
+        self.metrics_sink.increment_counter(
             name="circuit_breaker_state_change_total",
             labels=metric_labels,
             increment=1,
@@ -614,10 +672,10 @@ class HookObservability:
             )
             ```
         """
-        if self._metrics_sink is None:
+        if self.metrics_sink is None:
             return
 
-        self._metrics_sink.set_gauge(
+        self.metrics_sink.set_gauge(
             name=name,
             labels=labels or {},
             value=value,
@@ -665,7 +723,7 @@ class HookObservability:
             )
             ```
         """
-        if self._metrics_sink is None:
+        if self.metrics_sink is None:
             return
 
         # Enforce non-negative values for buffer/count metrics
@@ -682,7 +740,7 @@ class HookObservability:
         else:
             safe_value = value
 
-        self._metrics_sink.set_gauge(
+        self.metrics_sink.set_gauge(
             name=name,
             labels=labels or {},
             value=safe_value,
@@ -764,31 +822,48 @@ class HookObservability:
         into a single label dictionary. High-cardinality keys are automatically
         filtered out to prevent metrics from being dropped by the policy.
 
-        IMPORTANT: This method NEVER drops metrics entirely. It only filters
-        high-cardinality label keys from the label set. The metric is always
-        recorded with the remaining valid labels. When keys are filtered, a
-        debug log is emitted to aid troubleshooting.
+        CRITICAL - Metric Recording Guarantee:
+            This method NEVER drops or suppresses metric recording. When called,
+            the metric WILL be recorded with the returned labels. The only
+            filtering that occurs is removal of high-cardinality label KEYS
+            from the label dictionary - the metric itself is ALWAYS recorded.
 
-        Note:
+            Example with correlation_id:
+                - Input: operation="db.query", labels={"correlation_id": "abc-123"}
+                - Output: {"operation": "db.query"}  # correlation_id filtered
+                - Metric: RECORDED with {"operation": "db.query"}
+
+            The correlation_id and other high-cardinality values remain available
+            via the _correlation_id contextvar for structured logging and
+            distributed tracing - they are just excluded from Prometheus labels
+            to prevent cardinality explosion.
+
+        Why Filter High-Cardinality Labels:
             High-cardinality values (correlation_id, request_id, trace_id, etc.)
-            are intentionally EXCLUDED from metric labels. These are unique per
-            request and would cause metrics to be dropped when ModelMetricsPolicy's
-            on_violation is set to WARN_AND_DROP or DROP_SILENT. The correlation_id
-            remains available via _correlation_id contextvar for structured logging
-            and distributed tracing purposes.
+            are unique per request. Including them in Prometheus labels would:
+            1. Create millions of unique time series (cardinality explosion)
+            2. Cause metrics to be dropped by ModelMetricsPolicy (WARN_AND_DROP)
+            3. Overwhelm Prometheus storage and query performance
+
+            By filtering these keys early, we ensure metrics are ALWAYS recorded
+            with stable, low-cardinality labels.
 
         Args:
-            operation: Operation name to include.
+            operation: Operation name to include. Always present in output.
             extra_labels: Optional additional labels to merge.
 
         Returns:
             Complete label dictionary for metric emission, with high-cardinality
-            keys filtered out. Always contains at least {"operation": operation}.
+            keys filtered out. GUARANTEED to contain at least {"operation": operation}.
+            Never returns empty dict. Never returns None.
         """
+        # INVARIANT: labels always contains at least {"operation": operation}
+        # This ensures metrics are NEVER dropped due to empty labels
         labels: dict[str, str] = {"operation": operation}
         filtered_keys: list[str] = []
 
         # Merge stored operation labels, filtering out high-cardinality keys
+        # Note: stored_labels dict is a copy made in before_operation(), safe to iterate
         stored_labels = _operation_labels.get()
         if stored_labels is not None:
             for key, value in stored_labels.items():
@@ -801,22 +876,26 @@ class HookObservability:
         if extra_labels:
             for key, value in extra_labels.items():
                 if key in self._HIGH_CARDINALITY_KEYS:
-                    # Only log if not already filtered from stored_labels
+                    # Only add to filtered_keys if not already tracked
                     if key not in filtered_keys:
                         filtered_keys.append(key)
                 else:
                     labels[key] = value
 
         # Log when high-cardinality keys are filtered (debug level)
-        # This provides visibility into what's happening without noise
+        # IMPORTANT: This is informational logging only - the metric IS being recorded
+        # The log includes correlation_id for tracing even though it's filtered from metrics
         if filtered_keys:
+            # Include correlation_id in log for tracing purposes
+            correlation_id = _correlation_id.get()
             _logger.debug(
                 "Filtered high-cardinality label keys from metrics "
-                "(metric still recorded with remaining labels)",
+                "(metric WILL be recorded with remaining labels)",
                 extra={
                     "operation": operation,
                     "filtered_keys": filtered_keys,
                     "remaining_label_count": len(labels),
+                    "correlation_id": correlation_id,  # Available for log correlation
                 },
             )
 
@@ -941,4 +1020,158 @@ class OperationScope:
                 _operation_labels.reset(self._labels_token)
 
 
-__all__ = ["HookObservability"]
+# =============================================================================
+# MODULE-LEVEL SINGLETON FUNCTIONS
+# =============================================================================
+#
+# These functions provide optional singleton access to a global HookObservability
+# instance. The singleton is thread-safe and lazily initialized.
+#
+# =============================================================================
+
+
+def get_global_hook(
+    metrics_sink: ProtocolHotPathMetricsSink | None = None,
+) -> HookObservability:
+    """Get or create the global singleton HookObservability instance.
+
+    Returns the cached singleton hook if one exists, otherwise creates a new
+    one with the provided configuration and caches it. This is the recommended
+    way to access a shared observability hook across the application.
+
+    Thread Safety:
+        This function is thread-safe. Multiple concurrent calls will receive
+        the same singleton instance. A threading.Lock ensures only one thread
+        creates the singleton.
+
+    Note:
+        The metrics_sink parameter is only used on first call when the singleton
+        is created. Subsequent calls ignore this parameter and return the
+        existing instance. A warning is logged when configuration is provided
+        but ignored due to an existing singleton.
+
+        To reconfigure the singleton, call clear_global_hook() first.
+
+    Args:
+        metrics_sink: Optional metrics sink for the hook. Only used if no
+            singleton exists yet. Subsequent calls ignore this parameter.
+
+    Returns:
+        The global singleton HookObservability instance.
+
+    Example:
+        ```python
+        # First call creates the singleton with the provided sink
+        hook1 = get_global_hook(metrics_sink=my_sink)
+
+        # Subsequent calls return the same instance
+        hook2 = get_global_hook()  # metrics_sink parameter ignored
+        assert hook1 is hook2
+
+        # Reconfigure if needed
+        clear_global_hook()
+        hook3 = get_global_hook(metrics_sink=new_sink)  # New singleton
+        ```
+    """
+    global _global_hook_instance  # noqa: PLW0603 - Standard singleton pattern
+
+    with _global_hook_lock:
+        if _global_hook_instance is None:
+            _global_hook_instance = HookObservability(metrics_sink=metrics_sink)
+            _logger.debug(
+                "Created global singleton HookObservability",
+                extra={"has_metrics_sink": metrics_sink is not None},
+            )
+        elif metrics_sink is not None:
+            # Log warning when config is provided but ignored for existing singleton
+            _logger.warning(
+                "Global HookObservability singleton already exists; "
+                "provided metrics_sink configuration ignored. "
+                "Call clear_global_hook() first to reconfigure.",
+                extra={
+                    "existing_has_metrics_sink": (
+                        _global_hook_instance.metrics_sink is not None
+                    ),
+                    "provided_metrics_sink_type": type(metrics_sink).__name__,
+                },
+            )
+        return _global_hook_instance
+
+
+def configure_global_hook(
+    metrics_sink: ProtocolHotPathMetricsSink | None = None,
+) -> HookObservability:
+    """Configure the global singleton HookObservability instance.
+
+    This is an alias for get_global_hook() that makes the intent clearer when
+    you want to explicitly configure the singleton on first use.
+
+    Args:
+        metrics_sink: Optional metrics sink for the hook.
+
+    Returns:
+        The global singleton HookObservability instance.
+
+    See Also:
+        get_global_hook(): Primary singleton access function.
+        clear_global_hook(): Reset the singleton for reconfiguration.
+    """
+    return get_global_hook(metrics_sink=metrics_sink)
+
+
+def clear_global_hook() -> None:
+    """Clear the global singleton HookObservability instance.
+
+    Removes the reference to the cached singleton hook, allowing it to be
+    garbage collected if no other references exist. Subsequent calls to
+    get_global_hook() will create a new instance.
+
+    Use Cases:
+        - Testing: Reset singleton state between tests
+        - Reconfiguration: Allow new singleton with different metrics_sink
+        - Shutdown: Release resources before application exit
+
+    Thread Safety:
+        This function is thread-safe.
+
+    Warning:
+        Existing references to the old singleton remain valid. Only future
+        get_global_hook() calls will create a new instance.
+
+    Example:
+        ```python
+        hook1 = get_global_hook(metrics_sink=sink1)
+        clear_global_hook()
+        hook2 = get_global_hook(metrics_sink=sink2)
+        assert hook1 is not hook2  # Different instances
+        # hook1 still works but is no longer the singleton
+        ```
+    """
+    global _global_hook_instance  # noqa: PLW0603 - Standard singleton pattern
+
+    with _global_hook_lock:
+        if _global_hook_instance is not None:
+            _logger.debug("Cleared global HookObservability singleton")
+        _global_hook_instance = None
+
+
+def has_global_hook() -> bool:
+    """Check if a global singleton HookObservability exists.
+
+    Returns:
+        True if a singleton hook has been created, False otherwise.
+
+    Thread Safety:
+        This function is thread-safe.
+    """
+    with _global_hook_lock:
+        return _global_hook_instance is not None
+
+
+__all__ = [
+    "HookObservability",
+    "get_global_hook",
+    "configure_global_hook",
+    "clear_global_hook",
+    "has_global_hook",
+]

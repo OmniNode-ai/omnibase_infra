@@ -100,10 +100,23 @@ from collections import deque
 from datetime import UTC, datetime
 from typing import Literal
 
-import structlog
+# Dependency validation for structlog with clear error message
+_STRUCTLOG_AVAILABLE: bool = False
+_STRUCTLOG_IMPORT_ERROR: str | None = None
+
+try:
+    import structlog
+
+    _STRUCTLOG_AVAILABLE = True
+except ImportError as e:
+    _STRUCTLOG_IMPORT_ERROR = str(e)
+    # Provide stub for type checking when structlog is not installed
+    structlog = None  # type: ignore[assignment]
 
 from omnibase_core.enums import EnumLogLevel
 from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.observability.models.enum_required_log_context_key import (
     EnumRequiredLogContextKey,
 )
@@ -239,8 +252,11 @@ class SinkLoggingStructured:
                 operation) are missing. Set to False to suppress these warnings.
 
         Raises:
-            ValueError: If max_buffer_size is less than 1 or output_format
-                is not recognized.
+            ImportError: If structlog is not installed. Install with:
+                pip install structlog
+            ProtocolConfigurationError: If max_buffer_size is less than 1 or
+                output_format is not recognized. Includes correlation_id for
+                distributed tracing.
 
         Note:
             The drop_oldest policy is implemented using a collections.deque with
@@ -249,13 +265,37 @@ class SinkLoggingStructured:
             left side. This provides O(1) performance for both append and drop
             operations.
         """
+        # Validate dependency is available with clear error message
+        if not _STRUCTLOG_AVAILABLE:
+            raise ImportError(
+                "structlog is required for SinkLoggingStructured but is not installed. "
+                f"Install with: pip install structlog\n"
+                f"Original error: {_STRUCTLOG_IMPORT_ERROR}"
+            )
+
         if max_buffer_size < 1:
-            msg = f"max_buffer_size must be >= 1, got {max_buffer_size}"
-            raise ValueError(msg)
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="initialize_logging_sink",
+            )
+            raise ProtocolConfigurationError(
+                f"max_buffer_size must be >= 1, got {max_buffer_size}",
+                context=context,
+                parameter="max_buffer_size",
+                value=max_buffer_size,
+            )
 
         if output_format not in ("json", "console"):
-            msg = f"output_format must be 'json' or 'console', got '{output_format}'"
-            raise ValueError(msg)
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="initialize_logging_sink",
+            )
+            raise ProtocolConfigurationError(
+                f"output_format must be 'json' or 'console', got '{output_format}'",
+                context=context,
+                parameter="output_format",
+                value=output_format,
+            )
 
         self._max_buffer_size = max_buffer_size
         self._output_format = output_format
@@ -375,7 +415,7 @@ class SinkLoggingStructured:
                 f"all instances, (2) all instances share the same base PrintLogger. "
                 f"This is typically fine but may cause unexpected behavior if you "
                 f"rely on global structlog configuration.",
-                stacklevel=3,  # Point to the caller that created the instance
+                stacklevel=4,  # Point to the caller that created the instance (warn -> _track -> __init__ -> caller)
             )
 
     @property
@@ -400,13 +440,28 @@ class SinkLoggingStructured:
         This counter is incremented each time an entry is dropped
         because the buffer is full. It can be used to monitor
         if the buffer size is adequate for the workload.
+
+        Guarantees:
+            - Always non-negative (initialized to 0, only incremented)
+            - Thread-safe (protected by lock)
+
+        Returns:
+            Non-negative integer count of dropped entries.
         """
         with self._lock:
             return self._drop_count
 
     @property
     def buffer_size(self) -> int:
-        """Current number of entries in the buffer."""
+        """Current number of entries in the buffer.
+
+        Guarantees:
+            - Always non-negative (0 <= buffer_size <= max_buffer_size)
+            - Thread-safe (protected by lock)
+
+        Returns:
+            Non-negative integer count of buffered entries.
+        """
         with self._lock:
             return len(self._buffer)
 
@@ -598,7 +653,7 @@ class SinkLoggingStructured:
                 warnings.warn(
                     f"Recommended context key '{key}' missing from log entry. "
                     f"Including {', '.join(sorted(recommended))} improves observability.",
-                    stacklevel=4,  # Point to caller of emit()
+                    stacklevel=4,  # Point to caller of flush() (warn -> _validate -> flush -> caller)
                 )
 
     def _emit_entry(self, entry: ModelBufferedLogEntry) -> None:

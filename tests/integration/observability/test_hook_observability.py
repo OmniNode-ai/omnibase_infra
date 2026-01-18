@@ -251,13 +251,20 @@ class TestNoSharedInstanceVariable:
 
         # Check it doesn't have a timing-related correlation_id attribute
         # (Note: it may have other attributes, but not timing state)
-        instance_vars = [
-            attr
-            for attr in dir(hook)
-            if not attr.startswith("__") and attr.startswith("_correlation")
-        ]
-        # Should not have any _correlation* instance vars used for timing
-        assert "_correlation_id" not in vars(hook), (
+        # Use hasattr instead of vars() to handle slotted classes
+        has_correlation_id_var = False
+        try:
+            # Try vars() for regular classes
+            has_correlation_id_var = "_correlation_id" in vars(hook)
+        except TypeError:
+            # For slotted classes, check __slots__ and direct attribute access
+            if hasattr(type(hook), "__slots__"):
+                has_correlation_id_var = "_correlation_id" in type(hook).__slots__
+            else:
+                # Fallback: try direct attribute access
+                has_correlation_id_var = hasattr(hook, "_correlation_id")
+
+        assert not has_correlation_id_var, (
             "Hook should NOT have _correlation_id instance variable for timing state"
         )
 
@@ -1018,3 +1025,210 @@ class TestHighCardinalityFilteringLogging:
         )
 
         hook.after_operation()
+
+
+# =============================================================================
+# COMPREHENSIVE METRICS COVERAGE TESTS
+# =============================================================================
+
+
+class TestComprehensiveMetricsCoverage:
+    """Test comprehensive coverage of all observability metrics.
+
+    These tests verify that the HookObservability class emits all required
+    metrics for complete observability. This addresses PR #169 review feedback
+    to ensure tests cover all observability requirements.
+    """
+
+    def test_all_counter_metrics_emitted(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify all expected counter metrics are emitted during a complete operation lifecycle.
+
+        This test simulates a complete operation lifecycle and verifies that
+        all expected counter metrics are incremented.
+        """
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        # Complete lifecycle: start -> success
+        hook.before_operation("test_op", correlation_id="test-corr")
+        hook.record_success()
+        hook.after_operation()
+
+        # Collect all counter metric names that were called
+        counter_calls = mock_metrics_sink.increment_counter.call_args_list
+        counter_names = {call[1]["name"] for call in counter_calls}
+
+        # Verify all expected counter metrics were emitted
+        expected_counters = {
+            "operation_started_total",
+            "operation_completed_total",
+        }
+        assert all(name in counter_names for name in expected_counters), (
+            f"Missing expected counters. Expected: {expected_counters}, "
+            f"Got: {counter_names}"
+        )
+
+    def test_all_histogram_metrics_emitted(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify histogram metrics are emitted for duration tracking."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        hook.before_operation("test_op")
+        time.sleep(0.01)  # Small delay
+        hook.after_operation()
+
+        # Verify histogram was observed
+        histogram_calls = mock_metrics_sink.observe_histogram.call_args_list
+        histogram_names = {call[1]["name"] for call in histogram_calls}
+
+        expected_histograms = {"operation_duration_seconds"}
+        assert all(name in histogram_names for name in expected_histograms), (
+            f"Missing expected histograms. Expected: {expected_histograms}, "
+            f"Got: {histogram_names}"
+        )
+
+    def test_failure_metrics_emitted_on_error(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify failure metrics are properly emitted when operations fail."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        hook.before_operation("test_op")
+        hook.record_failure("ConnectionError")
+        hook.after_operation()
+
+        # Collect failure-related metrics
+        counter_calls = mock_metrics_sink.increment_counter.call_args_list
+        failure_calls = [
+            c for c in counter_calls if c[1].get("name") == "operation_failed_total"
+        ]
+
+        assert len(failure_calls) >= 1, "Should emit operation_failed_total"
+        assert failure_calls[0][1]["labels"]["error_type"] == "ConnectionError"
+
+    def test_retry_metrics_emitted(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify retry metrics are emitted with correct labels."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        hook.before_operation("retry_test")
+        hook.record_retry_attempt(attempt_number=1, reason="timeout")
+        hook.record_retry_attempt(attempt_number=2, reason="connection_reset")
+        hook.after_operation()
+
+        counter_calls = mock_metrics_sink.increment_counter.call_args_list
+        retry_calls = [
+            c for c in counter_calls if c[1].get("name") == "retry_attempt_total"
+        ]
+
+        # Should have 2 retry attempts recorded
+        assert len(retry_calls) == 2, "Should emit retry_attempt_total for each attempt"
+
+        # Verify retry labels
+        retry_reasons = [c[1]["labels"]["reason"] for c in retry_calls]
+        assert "timeout" in retry_reasons
+        assert "connection_reset" in retry_reasons
+
+    def test_circuit_breaker_metrics_emitted(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify circuit breaker state change metrics are emitted."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        # Record multiple state transitions
+        hook.record_circuit_breaker_state_change(
+            service_name="database",
+            from_state="CLOSED",
+            to_state="OPEN",
+        )
+        hook.record_circuit_breaker_state_change(
+            service_name="database",
+            from_state="OPEN",
+            to_state="HALF_OPEN",
+        )
+        hook.record_circuit_breaker_state_change(
+            service_name="database",
+            from_state="HALF_OPEN",
+            to_state="CLOSED",
+        )
+
+        counter_calls = mock_metrics_sink.increment_counter.call_args_list
+        cb_calls = [
+            c
+            for c in counter_calls
+            if c[1].get("name") == "circuit_breaker_state_change_total"
+        ]
+
+        # Should have all 3 state transitions
+        assert len(cb_calls) == 3, "Should emit all circuit breaker state changes"
+
+    def test_gauge_metrics_delegation(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify gauge metrics are properly delegated to the sink."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        # Set multiple gauges
+        hook.set_gauge("active_connections", value=10.0, labels={"pool": "db"})
+        hook.set_gauge("queue_depth", value=5.0, labels={"queue": "main"})
+
+        gauge_calls = mock_metrics_sink.set_gauge.call_args_list
+        gauge_names = {call[1]["name"] for call in gauge_calls}
+
+        # Verify both gauges were set
+        expected_gauges = {"active_connections", "queue_depth"}
+        assert all(name in gauge_names for name in expected_gauges), (
+            f"Missing expected gauges. Expected: {expected_gauges}, Got: {gauge_names}"
+        )
+
+    def test_full_operation_lifecycle_metrics(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify all metrics are emitted for a complete successful operation.
+
+        This is a comprehensive test that verifies the complete set of metrics
+        emitted during a full operation lifecycle.
+        """
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        # Full lifecycle
+        hook.before_operation(
+            "comprehensive_test",
+            correlation_id="test-123",
+            labels={"handler": "test_handler", "method": "POST"},
+        )
+        time.sleep(0.01)
+        hook.record_success()
+        hook.after_operation()
+
+        # Verify counter metrics
+        counter_calls = mock_metrics_sink.increment_counter.call_args_list
+        counter_names = {call[1]["name"] for call in counter_calls}
+
+        assert "operation_started_total" in counter_names
+        assert "operation_completed_total" in counter_names
+
+        # Verify histogram metrics
+        histogram_calls = mock_metrics_sink.observe_histogram.call_args_list
+        assert len(histogram_calls) >= 1, "Should emit duration histogram"
+        assert histogram_calls[0][1]["name"] == "operation_duration_seconds"
+
+        # Verify labels are included in metrics
+        started_calls = [
+            c for c in counter_calls if c[1].get("name") == "operation_started_total"
+        ]
+        assert len(started_calls) >= 1
+        labels = started_calls[0][1]["labels"]
+        assert labels.get("operation") == "comprehensive_test"
+        assert labels.get("handler") == "test_handler"
+        assert labels.get("method") == "POST"

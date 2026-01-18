@@ -54,50 +54,30 @@ import logging
 import threading
 from typing import TYPE_CHECKING, cast
 
-from prometheus_client import Counter, Gauge, Histogram
+# Dependency validation for prometheus_client with clear error message
+_PROMETHEUS_CLIENT_AVAILABLE: bool = False
+_PROMETHEUS_IMPORT_ERROR: str | None = None
+
+try:
+    from prometheus_client import Counter, Gauge, Histogram
+
+    _PROMETHEUS_CLIENT_AVAILABLE = True
+except ImportError as e:
+    _PROMETHEUS_IMPORT_ERROR = str(e)
+    # Provide stubs for type checking when prometheus_client is not installed
+    Counter = None  # type: ignore[assignment, misc]
+    Gauge = None  # type: ignore[assignment, misc]
+    Histogram = None  # type: ignore[assignment, misc]
 
 if TYPE_CHECKING:
     from omnibase_core.models.observability import ModelMetricsPolicy
 
 _logger = logging.getLogger(__name__)
 
-# Default histogram buckets following Prometheus conventions.
-# Suitable for request latencies in seconds.
-#
-# Bucket Configuration Guide:
-# ---------------------------
-# These default buckets are optimized for typical HTTP/API request latencies:
-#   - Fast operations (5-100ms): 0.005, 0.01, 0.025, 0.05, 0.1
-#   - Normal operations (100ms-1s): 0.25, 0.5, 1.0
-#   - Slow operations (1-10s): 2.5, 5.0, 10.0
-#
-# Expected Use Cases:
-#   1. HTTP handler execution times
-#   2. Database query latencies
-#   3. External API call durations
-#   4. Message processing times
-#
-# Custom Bucket Guidelines:
-#   - For faster operations (memory caches, local computations):
-#     Use smaller buckets: (0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1)
-#   - For slow batch operations (file I/O, large data transfers):
-#     Use larger buckets: (0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0)
-#   - General rule: Include buckets near your SLA thresholds for alerting
-#
-# Example custom buckets for sub-millisecond operations:
-#   histogram_buckets=(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05)
-DEFAULT_HISTOGRAM_BUCKETS: tuple[float, ...] = (
-    0.005,
-    0.01,
-    0.025,
-    0.05,
-    0.1,
-    0.25,
-    0.5,
-    1.0,
-    2.5,
-    5.0,
-    10.0,
+# Import constants from dedicated constants module (ONEX pattern: constants in constants_*.py)
+# Note: DEFAULT_HISTOGRAM_BUCKETS is also re-exported from this module for backwards compatibility
+from omnibase_infra.observability.constants_metrics import (
+    DEFAULT_HISTOGRAM_BUCKETS,
 )
 
 
@@ -182,6 +162,10 @@ class SinkMetricsPrometheus:
                 namespacing metrics by service or component. The prefix will be
                 joined with the metric name using an underscore.
 
+        Raises:
+            ImportError: If prometheus_client is not installed. Install with:
+                pip install prometheus-client
+
         Example:
             >>> # Default policy - warns and drops on violation
             >>> sink = SinkMetricsPrometheus()
@@ -197,6 +181,14 @@ class SinkMetricsPrometheus:
             >>> # Namespaced metrics
             >>> sink = SinkMetricsPrometheus(metric_prefix="onex_infra")
         """
+        # Validate dependency is available with clear error message
+        if not _PROMETHEUS_CLIENT_AVAILABLE:
+            raise ImportError(
+                "prometheus_client is required for SinkMetricsPrometheus but is not installed. "
+                f"Install with: pip install prometheus-client\n"
+                f"Original error: {_PROMETHEUS_IMPORT_ERROR}"
+            )
+
         # Import here to avoid circular imports and allow TYPE_CHECKING
         from omnibase_core.models.observability import ModelMetricsPolicy as _Policy
 
@@ -270,6 +262,12 @@ class SinkMetricsPrometheus:
         Thread-safe lazy creation of Counter metrics. The counter is created
         on first access and cached for subsequent calls.
 
+        Thread-Safety:
+            Uses self._lock to ensure exactly-once initialization even under
+            concurrent access. The lock prevents race conditions where multiple
+            threads could attempt to register the same metric simultaneously,
+            which would raise a ValueError from prometheus_client.
+
         Args:
             name: Metric name (without prefix).
             label_names: Tuple of label key names for this metric.
@@ -304,6 +302,12 @@ class SinkMetricsPrometheus:
         Thread-safe lazy creation of Gauge metrics. The gauge is created
         on first access and cached for subsequent calls.
 
+        Thread-Safety:
+            Uses self._lock to ensure exactly-once initialization even under
+            concurrent access. The lock prevents race conditions where multiple
+            threads could attempt to register the same metric simultaneously,
+            which would raise a ValueError from prometheus_client.
+
         Args:
             name: Metric name (without prefix).
             label_names: Tuple of label key names for this metric.
@@ -337,6 +341,12 @@ class SinkMetricsPrometheus:
 
         Thread-safe lazy creation of Histogram metrics. The histogram is created
         on first access and cached for subsequent calls.
+
+        Thread-Safety:
+            Uses self._lock to ensure exactly-once initialization even under
+            concurrent access. The lock prevents race conditions where multiple
+            threads could attempt to register the same metric simultaneously,
+            which would raise a ValueError from prometheus_client.
 
         Args:
             name: Metric name (without prefix).
@@ -377,6 +387,11 @@ class SinkMetricsPrometheus:
         Counters are monotonically increasing values that reset only on process
         restart. Use counters for events, requests processed, errors, etc.
 
+        Early Return Optimization:
+            Non-positive increments (<=0) result in an immediate return without
+            label validation. This avoids unnecessary policy enforcement overhead
+            for no-op operations.
+
         Cardinality Enforcement:
             Labels are validated against the policy before recording. If any
             forbidden labels (envelope_id, correlation_id, node_id, runtime_id)
@@ -408,18 +423,18 @@ class SinkMetricsPrometheus:
             ...     increment=len(payload),
             ... )
         """
-        # Validate labels against policy
-        validated_labels = self._enforce_labels(labels)
-        if validated_labels is None:
-            # Policy dropped the metric
-            return
-
-        # Ignore non-positive increments
+        # Early return for non-positive increments (skip label validation for no-op)
         if increment < 1:
             _logger.debug(
                 "Ignoring non-positive counter increment",
                 extra={"metric_name": name, "increment": increment},
             )
+            return
+
+        # Validate labels against policy (only for positive increments)
+        validated_labels = self._enforce_labels(labels)
+        if validated_labels is None:
+            # Policy dropped the metric
             return
 
         # Get label names as sorted tuple for consistent ordering

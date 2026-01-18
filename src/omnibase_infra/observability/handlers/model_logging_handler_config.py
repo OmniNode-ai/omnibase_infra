@@ -42,7 +42,7 @@ class ModelLoggingHandlerConfig(BaseModel):
             buffer is full (preserves recent logs). Default: "drop_oldest".
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", validate_assignment=True)
 
     buffer_size: int = Field(
         default=1000,

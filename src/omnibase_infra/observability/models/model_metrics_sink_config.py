@@ -25,7 +25,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from omnibase_infra.observability.sinks.sink_metrics_prometheus import (
+# Import from dedicated constants module (ONEX pattern: constants in constants_*.py)
+# This decouples config models from sink implementations, preventing circular imports
+# and allowing config validation without requiring the full sink dependency chain.
+from omnibase_infra.observability.constants_metrics import (
     DEFAULT_HISTOGRAM_BUCKETS,
 )
 
@@ -90,7 +93,7 @@ class ModelMetricsSinkConfig(BaseModel):
         ```
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", validate_assignment=True)
 
     metric_prefix: str = Field(
         default="",

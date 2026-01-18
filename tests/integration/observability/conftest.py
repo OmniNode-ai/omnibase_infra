@@ -53,6 +53,34 @@ def isolated_registry() -> CollectorRegistry:
     return CollectorRegistry()
 
 
+def _get_prometheus_client_version() -> tuple[int, int, int] | None:
+    """Get prometheus_client version as tuple for version-specific handling.
+
+    Returns:
+        Version tuple (major, minor, patch) or None if version cannot be determined.
+    """
+    try:
+        import prometheus_client
+
+        version_str = getattr(prometheus_client, "__version__", "")
+        if not version_str:
+            return None
+        parts = version_str.split(".")
+        return (int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
+    except (ImportError, ValueError, IndexError, AttributeError):
+        return None
+
+
+# Known prometheus_client versions where _names_to_collectors is verified working
+_VERIFIED_PROMETHEUS_VERSIONS = {
+    (0, 17): True,
+    (0, 18): True,
+    (0, 19): True,
+    (0, 20): True,
+    (0, 21): True,
+}
+
+
 @pytest.fixture
 def cleanup_default_registry() -> Generator[None, None, None]:
     """Cleanup fixture that unregisters test metrics from the default registry.
@@ -87,21 +115,36 @@ def cleanup_default_registry() -> Generator[None, None, None]:
         2. Add integration test for this cleanup pattern
         3. Check prometheus_client CHANGELOG for registry API changes
 
-        Tested with prometheus_client versions: 0.17.x - 0.21.x
+        VERSION-SPECIFIC HANDLING:
+        This fixture includes version detection to warn when running on untested
+        prometheus_client versions. Verified working on: 0.17.x - 0.21.x
+
         If this breaks after a prometheus_client upgrade, consider:
         1. Using isolated registries instead (preferred)
         2. Tracking registered collectors manually in a set
         3. Checking prometheus_client release notes for API changes
     """
+    import warnings
+
     # INTERNAL API: _names_to_collectors - see docstring for rationale and risk
     # WARNING: This private attribute may change between prometheus_client versions.
-    # Verified working with prometheus_client 0.17.x - 0.21.x
+
+    # Version-specific handling: warn if running on untested version
+    prometheus_version = _get_prometheus_client_version()
+    if prometheus_version is not None:
+        major_minor = (prometheus_version[0], prometheus_version[1])
+        if major_minor not in _VERIFIED_PROMETHEUS_VERSIONS:
+            warnings.warn(
+                f"prometheus_client {prometheus_version[0]}.{prometheus_version[1]}.x "
+                "has not been verified for internal API compatibility. "
+                "Cleanup may not work correctly. Verified versions: 0.17.x - 0.21.x",
+                UserWarning,
+                stacklevel=2,
+            )
 
     # Defensive check: verify internal API exists before proceeding
     if not hasattr(REGISTRY, "_names_to_collectors"):
         # Internal API changed - skip cleanup and warn via pytest
-        import warnings
-
         warnings.warn(
             "prometheus_client internal API changed: _names_to_collectors not found. "
             "Test cleanup disabled. Consider using isolated_registry fixture instead.",
@@ -298,6 +341,8 @@ def metrics_sink() -> SinkMetricsPrometheus:
     from omnibase_infra.observability.sinks import SinkMetricsPrometheus
 
     sink = SinkMetricsPrometheus()
+    # Note: No explicit cleanup - Prometheus registry doesn't support metric removal.
+    # See isolated_registry fixture for better test isolation.
     return sink
 
 

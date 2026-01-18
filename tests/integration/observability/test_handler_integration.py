@@ -521,7 +521,7 @@ class TestFactoryObservabilitySink:
         hook = factory.create_hook(metrics_sink=None)
 
         assert hook is not None
-        assert hook._metrics_sink is None
+        assert hook.metrics_sink is None
 
     def test_create_hook_with_metrics_sink(
         self,
@@ -531,7 +531,7 @@ class TestFactoryObservabilitySink:
         metrics_sink = factory.create_metrics_sink()
         hook = factory.create_hook(metrics_sink=metrics_sink)
 
-        assert hook._metrics_sink is metrics_sink
+        assert hook.metrics_sink is metrics_sink
 
     def test_create_hook_with_singleton_metrics(
         self,
@@ -542,7 +542,7 @@ class TestFactoryObservabilitySink:
         hook2 = factory.create_hook_with_singleton_metrics()
 
         # Both hooks should use the same singleton metrics sink
-        assert hook1._metrics_sink is hook2._metrics_sink
+        assert hook1.metrics_sink is hook2.metrics_sink
 
     def test_clear_singletons(
         self,

@@ -32,6 +32,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.observability.sinks import SinkLoggingStructured
 
 if TYPE_CHECKING:
@@ -68,15 +69,15 @@ class TestSinkInitialization:
         assert sink.output_format == "console"
 
     def test_invalid_buffer_size_raises(self) -> None:
-        """Verify invalid buffer size raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
+        """Verify invalid buffer size raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             SinkLoggingStructured(max_buffer_size=0)
 
         assert "max_buffer_size must be >= 1" in str(exc_info.value)
 
     def test_invalid_output_format_raises(self) -> None:
-        """Verify invalid output format raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
+        """Verify invalid output format raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             SinkLoggingStructured(output_format="invalid")
 
         assert "output_format must be" in str(exc_info.value)
@@ -271,19 +272,23 @@ class TestFlush:
 
     def test_flush_writes_to_output(self) -> None:
         """Verify flush writes entries to configured output."""
-        sink = SinkLoggingStructured(max_buffer_size=100, output_format="json")
         from omnibase_core.enums import EnumLogLevel
 
-        # Capture stdout
-        with patch("structlog.get_logger") as mock_get_logger:
-            mock_logger = MagicMock()
-            mock_get_logger.return_value = mock_logger
+        # Create sink first, then emit and flush to verify buffer management
+        sink = SinkLoggingStructured(max_buffer_size=100, output_format="json")
 
-            # Re-create sink to use mocked logger
-            sink = SinkLoggingStructured(max_buffer_size=100)
+        # Emit entries to the buffer
+        sink.emit(EnumLogLevel.INFO, "Test message", {"key": "value"})
+        assert sink.buffer_size == 1, "Entry should be buffered"
 
-            sink.emit(EnumLogLevel.INFO, "Test message", {"key": "value"})
+        # Mock the internal logger to verify flush behavior
+        # NOTE: Patch the sink's _logger attribute directly to avoid import path issues
+        with patch.object(sink, "_logger") as mock_logger:
+            mock_logger.info = MagicMock()
             sink.flush()
+
+            # Verify logger was called (flush writes to logger)
+            mock_logger.info.assert_called()
 
         # Verify buffer was cleared (flush happened)
         assert sink.buffer_size == 0

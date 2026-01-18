@@ -19,49 +19,74 @@ HTTP Server:
     serves metrics at the configured path (default: /metrics on port 9090).
     The server is non-blocking and runs in the background.
 
+    **SECURE BY DEFAULT**: The server binds to localhost (127.0.0.1) by default.
+    External access requires explicit configuration AND reverse proxy protection.
+
 Thread-Safety:
     The handler is thread-safe. The underlying SinkMetricsPrometheus uses
     thread-safe metric caches with locking. The aiohttp server handles
     concurrent requests safely.
 
 Security Model:
+    **Secure Defaults:**
+    - Binds to localhost (127.0.0.1) by default - NOT accessible externally
+    - Request body size limited to 1MB (configurable via max_request_size_bytes)
+    - Request timeout of 30 seconds (configurable via request_timeout_seconds)
+    - Error responses use generic messages - no stack traces or internal details
+
     **Production Deployment Requirements:**
 
-    This handler exposes an HTTP endpoint that should be secured in production:
+    To expose metrics externally, you MUST:
 
-    1. **Reverse Proxy**: Deploy behind nginx/traefik/envoy with:
+    1. **Explicit Configuration**: Set host="0.0.0.0" explicitly (a warning will
+       be logged when binding to non-localhost addresses).
+
+    2. **Reverse Proxy**: Deploy behind nginx/traefik/envoy with:
        - TLS termination (HTTPS only)
        - IP allowlisting for Prometheus scrapers
-       - Rate limiting to prevent DoS
+       - Rate limiting to prevent DoS (NOT implemented in this handler)
        - Authentication (mTLS or bearer tokens recommended)
 
-    2. **Network Isolation**: Bind to internal network interfaces only:
-       - Use host="127.0.0.1" for localhost-only access
-       - Use internal network CIDR for container/pod networks
-       - NEVER bind to 0.0.0.0 without reverse proxy protection
+    3. **Network Isolation**: Consider using internal network CIDRs for
+       container/pod networks instead of 0.0.0.0.
 
-    3. **Input Validation**: The handler sanitizes:
-       - X-Correlation-ID headers (validated as UUID format)
-       - Error messages (no internal exception details exposed)
+    **Built-in Protections:**
+    - Input Validation: X-Correlation-ID headers validated as UUID format
+    - Error Sanitization: 500/503 errors return generic messages only
+    - Request Size Limits: Configurable max_request_size_bytes (default 1MB)
+    - Request Timeouts: Configurable request_timeout_seconds (default 30s)
 
-    4. **Metric Labels**: Ensure metric labels do not contain:
-       - PII (personally identifiable information)
-       - Secrets or credentials
-       - Internal hostnames/IPs (if sensitive)
+    **NOT Implemented (Requires Reverse Proxy):**
+    - Rate limiting: Use nginx/traefik/envoy limit_req/rate_limit
+    - TLS/HTTPS: Use reverse proxy for TLS termination
+    - Authentication: Use reverse proxy for mTLS or token auth
+
+    **Metric Labels**: Ensure metric labels do not contain:
+    - PII (personally identifiable information)
+    - Secrets or credentials
+    - Internal hostnames/IPs (if sensitive)
 
     **Threat Model:**
     - DoS via metric scraping: Mitigate with rate limiting at proxy
     - Information disclosure: Metrics may reveal system topology
     - Header injection: X-Correlation-ID is validated and sanitized
+    - Request body attacks: Limited by max_request_size_bytes
 
 Usage:
     >>> from omnibase_infra.observability.handlers import HandlerMetricsPrometheus
     >>>
+    >>> # Secure default: localhost only
     >>> handler = HandlerMetricsPrometheus()
     >>> await handler.initialize({"port": 9090, "path": "/metrics"})
+    >>> # Metrics available at http://127.0.0.1:9090/metrics (localhost only)
     >>>
-    >>> # Handler exposes metrics at http://localhost:9090/metrics
-    >>> # Prometheus can scrape this endpoint
+    >>> # External access (REQUIRES reverse proxy protection)
+    >>> handler = HandlerMetricsPrometheus()
+    >>> await handler.initialize({
+    ...     "host": "0.0.0.0",  # WARNING: Use only with reverse proxy
+    ...     "port": 9090,
+    ...     "path": "/metrics",
+    ... })
     >>>
     >>> await handler.shutdown()
 
@@ -79,7 +104,6 @@ import re
 import threading
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 # Optional dependencies with graceful degradation
@@ -109,9 +133,6 @@ except ImportError:
 
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
-
-if TYPE_CHECKING:
-    from aiohttp.web import Application, AppRunner, Request, Response, TCPSite
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -146,49 +167,21 @@ _UUID_REGEX: re.Pattern[str] = re.compile(
 # Maximum length for correlation ID header to prevent memory issues
 _MAX_CORRELATION_ID_LENGTH: int = 64
 
-# Timeout for metrics generation to prevent blocking (seconds)
-_METRICS_GENERATION_TIMEOUT: float = 5.0
+# Default timeout for metrics generation to prevent blocking (seconds)
+# This is used when config is not yet loaded or as internal timeout
+_DEFAULT_METRICS_GENERATION_TIMEOUT: float = 5.0
 
 # Timeout for Pushgateway operations (seconds)
 _PUSH_GATEWAY_TIMEOUT: float = 10.0
 
-# Histogram buckets for scrape duration (in seconds).
-# Covers typical scrape times from 1ms to 5s timeout.
-#
-# Bucket Configuration for Prometheus Scrape Metrics:
-# ---------------------------------------------------
-# These buckets are optimized for tracking the time spent generating
-# Prometheus metrics output during /metrics endpoint scrapes.
-#
-# Expected Scrape Duration Ranges:
-#   - Healthy (1-50ms): Small metric registries, efficient serialization
-#   - Normal (50-250ms): Medium registries, typical production workloads
-#   - Slow (250ms-1s): Large registries, many high-cardinality metrics
-#   - Critical (1-5s): Metrics generation approaching timeout threshold
-#
-# Use Cases for Monitoring:
-#   1. Alerting: Set up alerts when p99 > 1s (approaching timeout)
-#   2. Capacity planning: Track growth of scrape times over deployments
-#   3. Debugging: Identify registries with too many metrics/labels
-#   4. SLA compliance: Ensure scrapes complete within Prometheus timeout
-#
-# If scrapes consistently exceed 1s:
-#   - Review high-cardinality labels in your metrics
-#   - Consider splitting large registries into multiple endpoints
-#   - Increase _METRICS_GENERATION_TIMEOUT if justified by registry size
-_SCRAPE_DURATION_BUCKETS: tuple[float, ...] = (
-    0.001,  # 1ms - Very fast scrapes (small registries)
-    0.005,  # 5ms
-    0.010,  # 10ms
-    0.025,  # 25ms
-    0.050,  # 50ms - Healthy upper bound
-    0.100,  # 100ms
-    0.250,  # 250ms - Normal upper bound
-    0.500,  # 500ms
-    1.000,  # 1s - Warning threshold
-    2.500,  # 2.5s - Critical threshold
-    5.000,  # 5s - Timeout threshold (matches _METRICS_GENERATION_TIMEOUT)
-)
+# Default maximum request body size (1MB) - used when config not loaded
+_DEFAULT_MAX_REQUEST_SIZE_BYTES: int = 1048576
+
+# Import scrape duration buckets from constants module (ONEX pattern: constants in constants_*.py)
+# See constants_metrics.py for bucket configuration documentation.
+from omnibase_infra.observability.constants_metrics import SCRAPE_DURATION_BUCKETS
+
+_SCRAPE_DURATION_BUCKETS = SCRAPE_DURATION_BUCKETS
 
 # Lazily initialized scrape duration histogram
 # Initialized on first use to avoid import-time side effects when prometheus_client
@@ -270,10 +263,21 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         Prometheus Pushgateway. This is useful for short-lived batch jobs that
         may not live long enough to be scraped.
 
-    Security Considerations:
-        - The /metrics endpoint should be secured in production environments
-        - Consider using reverse proxy with authentication for public exposure
-        - No sensitive data should be included in metric labels
+    Security:
+        **SECURE BY DEFAULT**: The server binds to localhost (127.0.0.1) by default.
+
+        Built-in protections:
+        - Localhost binding by default (external access requires explicit config)
+        - Request size limits (configurable, default 1MB)
+        - Request timeouts (configurable, default 30s)
+        - Generic error messages (no stack traces or internal details)
+        - Correlation ID validation (UUID format enforced)
+
+        For external access, you MUST:
+        1. Explicitly set host="0.0.0.0" (a warning will be logged)
+        2. Deploy behind a reverse proxy with TLS, auth, and rate limiting
+
+        See module docstring for complete security model.
 
     Attributes:
         _config: Handler configuration.
@@ -283,13 +287,17 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         _site: aiohttp TCP site for serving requests.
 
     Example:
+        >>> # Secure default: localhost only
+        >>> handler = HandlerMetricsPrometheus()
+        >>> await handler.initialize({"port": 9090})
+        >>> # Metrics at http://127.0.0.1:9090/metrics (localhost only)
+        >>>
+        >>> # External access (REQUIRES reverse proxy)
         >>> handler = HandlerMetricsPrometheus()
         >>> await handler.initialize({
-        ...     "host": "0.0.0.0",
+        ...     "host": "0.0.0.0",  # WARNING: Use only with reverse proxy
         ...     "port": 9090,
-        ...     "path": "/metrics",
         ... })
-        >>> # Metrics available at http://localhost:9090/metrics
         >>> await handler.shutdown()
     """
 
@@ -348,15 +356,22 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         Validates the configuration and starts the HTTP server for metric
         scraping if enable_server is True.
 
+        Security Note:
+            The default bind address is "127.0.0.1" (localhost only).
+            To expose externally, explicitly set host="0.0.0.0" AND deploy
+            behind a reverse proxy with authentication, TLS, and rate limiting.
+
         Args:
             config: Configuration dict containing:
-                - host: Bind address (default: "0.0.0.0")
+                - host: Bind address (default: "127.0.0.1" - localhost only)
                 - port: Port number (default: 9090)
                 - path: Metrics endpoint path (default: "/metrics")
                 - push_gateway_url: Optional Pushgateway URL
                 - enable_server: Whether to start HTTP server (default: True)
                 - job_name: Job name for Pushgateway (default: "onex_metrics")
                 - shutdown_timeout_seconds: Shutdown timeout (default: 5.0)
+                - max_request_size_bytes: Max request body size (default: 1MB)
+                - request_timeout_seconds: Request processing timeout (default: 30s)
 
         Raises:
             ProtocolConfigurationError: If configuration validation fails.
@@ -365,6 +380,7 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         Example:
             >>> handler = HandlerMetricsPrometheus()
             >>> await handler.initialize({"port": 9091})
+            >>> # Server bound to 127.0.0.1:9091 (localhost only - secure)
         """
         init_correlation_id = uuid4()
 
@@ -458,8 +474,11 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             )
 
         try:
-            # Create aiohttp application
-            self._app = web.Application()
+            # Create aiohttp application with security limits
+            # client_max_size limits the maximum request body size
+            self._app = web.Application(
+                client_max_size=self._config.max_request_size_bytes,
+            )
             self._app.router.add_get(self._config.path, self._handle_metrics_request)
 
             # Create runner and site
@@ -473,6 +492,19 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             )
             await self._site.start()
 
+            # Log security-relevant configuration
+            is_localhost = self._config.host in ("127.0.0.1", "localhost", "::1")
+            if not is_localhost:
+                logger.warning(
+                    "HTTP metrics server binding to non-localhost address - "
+                    "ensure reverse proxy with auth/TLS is in place",
+                    extra={
+                        "correlation_id": str(correlation_id),
+                        "host": self._config.host,
+                        "port": self._config.port,
+                    },
+                )
+
             logger.info(
                 "HTTP metrics server started",
                 extra={
@@ -480,6 +512,9 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
                     "host": self._config.host,
                     "port": self._config.port,
                     "path": self._config.path,
+                    "max_request_size_bytes": self._config.max_request_size_bytes,
+                    "request_timeout_seconds": self._config.request_timeout_seconds,
+                    "localhost_only": is_localhost,
                 },
             )
 
@@ -596,13 +631,20 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         # Start timing for scrape duration metric
         start_time = time.perf_counter()
 
+        # Get timeout from config if available, otherwise use default
+        metrics_timeout = (
+            self._config.request_timeout_seconds
+            if self._config
+            else _DEFAULT_METRICS_GENERATION_TIMEOUT
+        )
+
         try:
             # Generate metrics with timeout protection to prevent DoS
             # generate_latest() is synchronous, so run in executor with timeout
             loop = asyncio.get_running_loop()
             metrics_bytes = await asyncio.wait_for(
                 loop.run_in_executor(None, generate_latest),
-                timeout=_METRICS_GENERATION_TIMEOUT,
+                timeout=metrics_timeout,
             )
 
             # Record scrape duration after generation completes
@@ -645,13 +687,13 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
                 "Metrics generation timed out",
                 extra={
                     "correlation_id": str(correlation_id),
-                    "timeout_seconds": _METRICS_GENERATION_TIMEOUT,
+                    "timeout_seconds": metrics_timeout,
                     "duration_seconds": duration_seconds,
                 },
             )
             # Security: Generic error message - no internal details exposed
             return web.Response(
-                text="Internal server error generating metrics",
+                text="Service temporarily unavailable",
                 status=503,  # Service Unavailable for timeout
                 headers={"X-Correlation-ID": str(correlation_id)},
             )
@@ -894,6 +936,13 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             extra={"correlation_id": str(correlation_id)},
         )
 
+        # Get timeout from config if available, otherwise use default
+        scrape_timeout = (
+            self._config.request_timeout_seconds
+            if self._config
+            else _DEFAULT_METRICS_GENERATION_TIMEOUT
+        )
+
         # Generate metrics from default Prometheus registry
         # generate_latest() is synchronous, so run in executor with timeout
         # to prevent blocking the event loop
@@ -901,7 +950,7 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             loop = asyncio.get_running_loop()
             metrics_bytes = await asyncio.wait_for(
                 loop.run_in_executor(None, generate_latest),
-                timeout=_METRICS_GENERATION_TIMEOUT,
+                timeout=scrape_timeout,
             )
         except TimeoutError:
             context = ModelInfraErrorContext.with_correlation(
@@ -911,7 +960,7 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
                 target_name="metrics_prometheus_handler",
             )
             raise RuntimeHostError(
-                f"Metrics generation timed out after {_METRICS_GENERATION_TIMEOUT}s",
+                f"Metrics generation timed out after {scrape_timeout}s",
                 context=context,
             ) from None
 
