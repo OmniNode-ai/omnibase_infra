@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > Handoff > Handler Routing
+
 # Handoff Document: Contract-Driven Handler Routing
 
 **Date**: 2026-01-12 (Updated)

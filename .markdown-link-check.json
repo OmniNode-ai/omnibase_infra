@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "https://json.schemastore.org/markdown-link-check.json",
   "description": "Configuration for markdown link validation. See scripts/validation/validate_markdown_links.py",
   "ignorePatterns": [
     {
@@ -40,6 +40,5 @@
     "dist/**",
     "htmlcov/**"
   ],
-  "checkExternal": false,
-  "externalTimeout": 5000
+  "checkExternal": false
 }

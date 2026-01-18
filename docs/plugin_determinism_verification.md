@@ -1,3 +1,5 @@
+> **Navigation**: [Home](index.md) > Plugin Determinism Verification
+
 # Compute Plugin Determinism Verification Guide
 
 ## Overview

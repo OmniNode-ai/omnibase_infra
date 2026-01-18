@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Design](README.md) > Handler Protocol Ticket Plan
+
 # Handler Protocol-Driven Architecture: Ticket Plan
 
 ## Purpose

@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > ADR-004 Performance Baselines
+
 # ADR-004: Performance Baseline Thresholds for E2E Tests
 
 ## Status

@@ -1,6 +1,6 @@
-# Protocol Patterns
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Protocol Patterns
 
-> **Navigation**: [Docs Index](../index.md) > [Patterns](README.md) > Protocol Patterns
+# Protocol Patterns
 
 ## Overview
 

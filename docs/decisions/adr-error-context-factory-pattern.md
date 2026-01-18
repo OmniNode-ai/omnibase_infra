@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Error Context Factory Pattern
+
 # ADR: Error Context Factory Pattern with `with_correlation()`
 
 **Status**: Accepted

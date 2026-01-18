@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Soft Validation Environment Parsing
+
 # ADR: Soft Validation for Environment Variable Parsing
 
 **Status**: Implemented

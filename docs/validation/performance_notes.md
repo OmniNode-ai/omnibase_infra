@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Validation](README.md) > Performance Notes
+
 # Validation Performance Notes
 
 Performance considerations and optimization strategies for ONEX infrastructure validation.

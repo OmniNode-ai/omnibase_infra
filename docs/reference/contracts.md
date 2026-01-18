@@ -82,12 +82,14 @@ As contracts grow complex, sections can be extracted into **subcontracts** for m
 - The node is self-contained without shared configurations
 - You're unsure whether to split (when in doubt, don't)
 
-**Source of Truth**: When using subcontracts, the main `contract.yaml` remains the authoritative source. Subcontracts are included via `!include` directives and are logically part of the main contract.
+**Source of Truth**: The main `contract.yaml` is always the authoritative source. Subcontracts are inline YAML sections within this file that get parsed into typed Pydantic models by the runtime.
 
-### Subcontract Reference Pattern
+### Subcontract Implementation Pattern
+
+**Current Implementation**: Subcontracts are defined as **inline sections** within the main `contract.yaml` file. The runtime parses these sections into typed Pydantic models (e.g., `ModelRoutingSubcontract`) using `load_handler_routing_subcontract()`.
 
 ```yaml
-# Main contract.yaml
+# contract.yaml - subcontracts are inline sections
 contract_version:
   major: 1
   minor: 0
@@ -95,23 +97,37 @@ contract_version:
 name: "node_registration_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
 
-# Reference external subcontract files
-routing_subcontract: !include subcontracts/routing.yaml
-fsm_subcontract: !include subcontracts/fsm.yaml
+# Handler routing is parsed as ModelRoutingSubcontract
+handler_routing:                       # <- This IS the routing_subcontract
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelNodeIntrospectionEvent"
+        module: "omnibase_infra.models.registration"
+      handler:
+        name: "HandlerNodeIntrospected"
+        module: "omnibase_infra.nodes.handlers"
 ```
 
-**Directory Structure**:
+**How Subcontracts Are Loaded**:
+
+```python
+from omnibase_infra.runtime.contract_loaders import load_handler_routing_subcontract
+
+# The loader extracts the handler_routing section from contract.yaml
+# and converts it to a typed ModelRoutingSubcontract
+routing = load_handler_routing_subcontract(Path("contract.yaml"))
+```
+
+**Directory Structure** (current pattern):
 ```
 nodes/node_registration_orchestrator/
-├── contract.yaml              # Main contract
-├── subcontracts/
-│   ├── routing.yaml           # Handler routing rules
-│   └── fsm.yaml               # FSM definitions
+├── contract.yaml              # Main contract with inline subcontracts
 ├── node.py                    # Declarative node class
 └── handlers/                  # Handler implementations
 ```
 
-**Reminder**: The main `contract.yaml` is always the entry point. Subcontracts are loaded and merged at contract parse time.
+**Note**: The `!include` directive pattern (e.g., `routing_subcontract: !include subcontracts/routing.yaml`) is mentioned in some contract comments as a potential future enhancement. However, this is **not currently implemented** - the runtime uses `yaml.safe_load()` which does not support custom YAML tags. All subcontracts must currently be inline.
 
 ### Type Safety Requirements
 
@@ -123,6 +139,29 @@ All contracts (and subcontracts) must adhere to ONEX type safety standards:
 | **Pydantic models** | All I/O types must be proper Pydantic models |
 | **Module paths** | All `module` fields must resolve to valid Python modules |
 | **Semantic versioning** | `contract_version` uses semver (major.minor.patch) |
+
+### Subcontracts vs External References
+
+**Key Distinction**: ONEX contracts use a **self-contained model** where all configuration lives within the contract file itself.
+
+| Concept | Definition | Status |
+|---------|------------|--------|
+| **Subcontract** | An inline YAML section within `contract.yaml` that gets parsed into a typed Pydantic model | Implemented |
+| **Linked-doc** | External documentation referenced for human consumption (not parsed by runtime) | Documentation only |
+| **`!include` directive** | YAML tag for external file inclusion | **Not implemented** |
+
+**Why Self-Contained Contracts**:
+- **Single source of truth**: All configuration in one file prevents configuration drift
+- **Validation**: The runtime validates the entire contract atomically
+- **Simplicity**: No dependency resolution or include ordering issues
+- **Security**: No risk of malicious include paths (see `CLAUDE.md` Handler Plugin Loader security)
+
+**If a section becomes too large** (>100 lines), consider:
+1. Refactoring to reduce complexity
+2. Splitting into multiple nodes (each with its own contract)
+3. Using capabilities and dependencies to compose behavior
+
+**Relationship to CLAUDE.md**: The contract patterns documented here are consistent with `CLAUDE.md` contract standards. When in doubt, `CLAUDE.md` is authoritative for coding standards.
 
 ---
 

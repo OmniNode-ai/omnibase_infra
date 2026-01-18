@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Design](README.md) > Policy Registry DI Integration
+
 # PolicyRegistry DI Integration Design
 
 ## Executive Summary

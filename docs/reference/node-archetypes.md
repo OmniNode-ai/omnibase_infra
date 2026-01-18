@@ -4,6 +4,8 @@
 
 ONEX organizes all processing into four node archetypes. This reference provides complete documentation for each type.
 
+> **Note**: For authoritative coding rules and standards, see [CLAUDE.md](../../CLAUDE.md). This documentation provides explanations and examples that supplement those rules.
+
 ## Quick Reference
 
 | Archetype | Contract Type | Base Class | Purpose | Side Effects |
@@ -821,6 +823,7 @@ __all__ = ["NodeRegistrationOrchestrator"]
 
 | Topic | Document |
 |-------|----------|
+| **Coding standards** | [CLAUDE.md](../../CLAUDE.md) - **authoritative source** for all rules |
 | Quick start | [Quick Start Guide](../getting-started/quickstart.md) |
 | Architecture overview | [Architecture Overview](../architecture/overview.md) |
 | Contract format | [Contract.yaml Reference](contracts.md) |

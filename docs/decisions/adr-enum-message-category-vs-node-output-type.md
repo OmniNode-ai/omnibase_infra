@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Enum Message Category vs Node Output Type
+
 # ADR: EnumMessageCategory vs EnumNodeOutputType Distinction
 
 **Status**: Accepted

@@ -4,6 +4,8 @@
 
 This guide walks through the **2-way node registration flow** - a real-world example of ONEX contract-driven architecture. Understanding this flow demonstrates how all four node archetypes work together.
 
+> **Note**: For authoritative coding rules and standards, see [CLAUDE.md](../../CLAUDE.md). This guide provides detailed explanations and examples that supplement those rules.
+
 ## What is 2-Way Registration?
 
 When an ONEX node starts up, it must:
@@ -1069,6 +1071,7 @@ The 2-way registration flow demonstrates ONEX's key principles:
 
 | Topic | Document |
 |-------|----------|
+| **Coding standards** | [CLAUDE.md](../../CLAUDE.md) - **authoritative source** for all rules |
 | Quick start | [Quick Start Guide](../getting-started/quickstart.md) |
 | Node archetypes | [Node Archetypes Reference](../reference/node-archetypes.md) |
 | Contract format | [Contract.yaml Reference](../reference/contracts.md) |

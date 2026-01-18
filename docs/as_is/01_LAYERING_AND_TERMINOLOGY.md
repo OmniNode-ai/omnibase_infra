@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [As-Is](INDEX.md) > Layering and Terminology
+
 ## Layering and Terminology (As-Is)
 
 This document pins down **what each repo “is responsible for” today**, and how key terms

@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [As-Is](INDEX.md) > Messaging and Envelopes
+
 ## Messaging and envelopes (As-Is)
 
 This document inventories the **message wrapper shapes** currently present, how they are

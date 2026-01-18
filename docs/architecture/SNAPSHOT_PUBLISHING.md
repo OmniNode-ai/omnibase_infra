@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](overview.md) > Snapshot Publishing
+
 # Snapshot Publishing Architecture
 
 ## Overview

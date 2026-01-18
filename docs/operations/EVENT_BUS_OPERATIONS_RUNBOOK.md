@@ -14,7 +14,7 @@ The KafkaEventBus provides production-grade message streaming using Apache Kafka
 - **Dead letter queue (DLQ)** for failed message processing
 - **Graceful degradation** when Kafka is unavailable
 
-**Source Location**: `src/omnibase_infra/event_bus/kafka_event_bus.py`
+**Source Location**: `src/omnibase_infra/event_bus/event_bus_kafka.py`
 
 ## Pre-Deployment Checklist
 

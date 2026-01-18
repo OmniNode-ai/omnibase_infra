@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Handler Type vs Handler Category
+
 # ADR: EnumHandlerType vs EnumHandlerTypeCategory Distinction
 
 **Status**: Accepted

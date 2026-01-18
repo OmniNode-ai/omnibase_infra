@@ -1,6 +1,8 @@
-# MVP Core (v0.1.0) - Milestone Details
+> **Navigation**: [Home](../index.md) > [Milestones](../MVP_PLAN.md) > MVP Core v0.1.0
+>
+> **Related**: [Next: Beta Hardening](./BETA_v0.2.0_HARDENING.md)
 
-> **Navigation**: [Back to Overview](../MVP_PLAN.md) | [Next: Beta Hardening](./BETA_v0.2.0_HARDENING.md)
+# MVP Core (v0.1.0) - Milestone Details
 
 **Repository**: omnibase_infra
 **Target Version**: v0.1.0

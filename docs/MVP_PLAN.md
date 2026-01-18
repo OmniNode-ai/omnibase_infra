@@ -1,3 +1,5 @@
+> **Navigation**: [Home](index.md) > MVP Plan
+
 # MVP Proposed Work Issues - omnibase_infra
 
 > **Why This Document Exists**: This is the canonical infrastructure plan for shipping ONEX Runtime Host. If a feature, requirement, or constraint is not in this document, it is not happening in MVP. This document is the single source of truth for scope, architecture, and acceptance criteria. When in doubt, check this document.

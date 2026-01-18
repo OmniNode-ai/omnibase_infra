@@ -248,6 +248,43 @@ Everything is declared in YAML contracts:
 - State machines → `state_machine:` section
 - Workflow graphs → `execution_graph:` section
 
+### Capability Naming
+
+Nodes and capabilities are named by **what they do**, not what they are. This is the "capability-oriented" design principle.
+
+**Good naming (capability-oriented):**
+```yaml
+capabilities:
+  - name: "service.discovery"        # What it does: discovers services
+    description: "Discover services by name, tags, or health status"
+  - name: "registration.storage"     # What it does: stores registrations
+    description: "Store and query node registration records"
+  - name: "node.validate"            # What it does: validates nodes
+    description: "Validate node contracts and architecture"
+  - name: "event.process"            # What it does: processes events
+    description: "Process and route events to handlers"
+```
+
+**Bad naming (vendor/implementation-oriented):**
+```yaml
+capabilities:
+  - name: "consulHandler"      # Exposes vendor (Consul) - what if you switch to Kubernetes?
+  - name: "postgresAdapter"    # Exposes implementation - not what it does
+  - name: "doThing"            # Vague - what thing?
+  - name: "myHandler"          # Meaningless - whose handler? for what?
+  - name: "processData"        # Too generic - what kind of data? what processing?
+```
+
+**Why this matters:**
+- Capability names appear in service discovery and routing
+- Good names are self-documenting: `service.discovery` tells you exactly what to expect
+- Bad names force you to read documentation or source code
+- Vendor-agnostic names allow backend swaps without interface changes
+
+**Naming pattern:** `domain.action` or `domain.subdomain.action`
+- `service.discovery` - domain: service, action: discovery
+- `registration.storage.query` - domain: registration, subdomain: storage, action: query
+
 ### Dependency Injection
 
 All nodes use container-based DI:

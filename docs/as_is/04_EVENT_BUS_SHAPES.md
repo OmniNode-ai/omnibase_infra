@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [As-Is](INDEX.md) > Event Bus Shapes
+
 ## Event bus shapes (As-Is)
 
 This document captures the “as-is” event bus **interfaces** and **implementations**.

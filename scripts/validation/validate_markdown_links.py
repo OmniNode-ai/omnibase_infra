@@ -87,6 +87,9 @@ DEFAULT_CONFIG = {
     "externalTimeout": 5000,
 }
 
+# Sentinel URL for reference-style links with missing definitions
+MISSING_REF_SENTINEL = "__ONEX_MISSING_REF__"
+
 
 # =============================================================================
 # Data Classes
@@ -199,18 +202,54 @@ class MarkdownLinkConfig:
 # =============================================================================
 
 
+def _remove_code_blocks(content: str) -> str:
+    """Remove fenced code blocks from content to avoid false positives.
+
+    Replaces fenced code blocks (``` ... ```) with empty lines to preserve
+    line number alignment while excluding code from link extraction.
+    """
+    result_lines = []
+    in_code_block = False
+    code_fence_pattern = re.compile(r"^```")
+
+    for line in content.split("\n"):
+        if code_fence_pattern.match(line):
+            in_code_block = not in_code_block
+            result_lines.append("")  # Preserve line count
+        elif in_code_block:
+            result_lines.append("")  # Preserve line count
+        else:
+            result_lines.append(line)
+
+    return "\n".join(result_lines)
+
+
+def _remove_inline_code(line: str) -> str:
+    """Remove inline code spans from a line to avoid false positives.
+
+    Inline code (backticks) can contain patterns that look like reference-style
+    links, e.g., `dict["key"]["value"]` would match as [key][value].
+    """
+    return re.sub(r"`[^`]+`", "", line)
+
+
 def extract_links_from_markdown(content: str, source_file: Path) -> Iterator[LinkInfo]:
     """Extract all links from markdown content."""
-    lines = content.split("\n")
-
-    # Build reference definitions map
+    # Build reference definitions map (before removing code blocks)
     ref_definitions: dict[str, str] = {}
     for match in MARKDOWN_REF_DEFINITION_PATTERN.finditer(content):
         ref_definitions[match.group("ref").lower()] = match.group("url")
 
+    # Remove fenced code blocks to avoid false positives
+    content_without_code = _remove_code_blocks(content)
+    lines = content_without_code.split("\n")
+
     for line_num, line in enumerate(lines, start=1):
+        # Remove inline code to avoid matching dict["key"]["value"] as links
+        line_without_inline_code = _remove_inline_code(line)
+
         # Extract inline links [text](url)
-        for match in MARKDOWN_LINK_PATTERN.finditer(line):
+        for match in MARKDOWN_LINK_PATTERN.finditer(line_without_inline_code):
             yield LinkInfo(
                 url=match.group("url"),
                 text=match.group("text"),
@@ -219,12 +258,20 @@ def extract_links_from_markdown(content: str, source_file: Path) -> Iterator[Lin
             )
 
         # Extract reference-style links [text][ref]
-        for match in MARKDOWN_REF_LINK_PATTERN.finditer(line):
+        for match in MARKDOWN_REF_LINK_PATTERN.finditer(line_without_inline_code):
             ref = match.group("ref") or match.group("text")
-            url = ref_definitions.get(ref.lower(), "")
+            url = ref_definitions.get(ref.lower())
             if url:
                 yield LinkInfo(
                     url=url,
+                    text=match.group("text"),
+                    line_number=line_num,
+                    source_file=source_file,
+                )
+            else:
+                # Yield sentinel for undefined reference - will be caught during validation
+                yield LinkInfo(
+                    url=f"{MISSING_REF_SENTINEL}:{ref}",
                     text=match.group("text"),
                     line_number=line_num,
                     source_file=source_file,
@@ -238,16 +285,29 @@ def extract_headings_as_anchors(content: str) -> set[str]:
     - Lowercase
     - Replace spaces with hyphens
     - Remove punctuation except hyphens
-    - Handle duplicates with -1, -2 suffix (not implemented here for simplicity)
+    - Handle duplicates with -1, -2 suffix for disambiguation
     """
     anchors: set[str] = set()
+    anchor_counts: dict[str, int] = {}
 
     # Match ATX headings: # Heading, ## Heading, etc.
     heading_pattern = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
     for match in heading_pattern.finditer(content):
         heading_text = match.group(1).strip()
-        anchor = _heading_to_anchor(heading_text)
-        anchors.add(anchor)
+        base_anchor = _heading_to_anchor(heading_text)
+
+        # Handle duplicate headings with -1, -2 suffixes (GitHub style)
+        if base_anchor in anchor_counts:
+            # This is a duplicate - add suffix
+            suffix = anchor_counts[base_anchor]
+            unique_anchor = f"{base_anchor}-{suffix}"
+            anchor_counts[base_anchor] += 1
+        else:
+            # First occurrence - no suffix needed
+            unique_anchor = base_anchor
+            anchor_counts[base_anchor] = 1
+
+        anchors.add(unique_anchor)
 
     # Match HTML anchors: <a name="anchor"> or <a id="anchor">
     for match in HTML_ANCHOR_PATTERN.finditer(content):
@@ -306,6 +366,11 @@ def validate_internal_link(
     """
     url = link.url
 
+    # Handle missing reference-style link definitions
+    if url.startswith(MISSING_REF_SENTINEL):
+        ref_name = url[len(MISSING_REF_SENTINEL) + 1 :]  # Skip sentinel and colon
+        return f"Reference-style link [{ref_name}] has no definition"
+
     # Handle anchor-only links (#section)
     if url.startswith("#"):
         anchor = url[1:]
@@ -323,18 +388,25 @@ def validate_internal_link(
         return None
 
     # Split URL into path and anchor
+    anchor_part: str | None
     if "#" in url:
-        path_part, anchor = url.split("#", 1)
+        path_part, anchor_part = url.split("#", 1)
     else:
-        path_part, anchor = url, None
+        path_part, anchor_part = url, None
 
     # Handle empty path (just anchor reference)
     if not path_part:
         return None  # Already handled above
 
     # Resolve the target file path
-    source_dir = link.source_file.parent
-    target_path = (source_dir / path_part).resolve()
+    # Handle repo-root relative links (starting with /)
+    if path_part.startswith("/"):
+        # Resolve relative to repository root, not source directory
+        target_path = (repo_root / path_part.lstrip("/")).resolve()
+    else:
+        # Resolve relative to source file directory
+        source_dir = link.source_file.parent
+        target_path = (source_dir / path_part).resolve()
 
     # Ensure target is within repo (security check)
     try:
@@ -351,7 +423,7 @@ def validate_internal_link(
             return f"Target file not found: {path_part}"
 
     # Validate anchor if present
-    if anchor and target_path.suffix.lower() == ".md":
+    if anchor_part and target_path.suffix.lower() == ".md":
         if target_path not in file_anchors_cache:
             try:
                 content = target_path.read_text(encoding="utf-8")
@@ -359,8 +431,8 @@ def validate_internal_link(
             except OSError:
                 file_anchors_cache[target_path] = set()
 
-        if anchor not in file_anchors_cache[target_path]:
-            return f"Anchor '{anchor}' not found in {path_part}"
+        if anchor_part not in file_anchors_cache[target_path]:
+            return f"Anchor '{anchor_part}' not found in {path_part}"
 
     return None
 

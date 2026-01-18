@@ -1,6 +1,6 @@
-# Error Handling Patterns
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Error Handling Patterns
 
-> **Navigation**: [Docs Index](../index.md) > [Patterns](README.md) > Error Handling Patterns
+# Error Handling Patterns
 
 ## Overview
 

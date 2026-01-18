@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > ADR-002 Enum Separation
+
 # ADR-002: Separation of EnumMessageCategory and EnumNodeOutputType
 
 ## Status

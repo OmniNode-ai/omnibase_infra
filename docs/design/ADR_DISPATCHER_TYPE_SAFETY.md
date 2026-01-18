@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Design](README.md) > Dispatcher Type Safety
+
 # ADR: Dispatcher Type Safety
 
 ## Status

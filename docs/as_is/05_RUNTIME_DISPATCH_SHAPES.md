@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [As-Is](INDEX.md) > Runtime Dispatch Shapes
+
 ## Runtime dispatch shapes (As-Is)
 
 This document captures the two parallel “runtime dispatch” patterns that exist today:

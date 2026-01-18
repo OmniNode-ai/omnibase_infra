@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Handler Plugin Loader Security
+
 # ADR: Handler Plugin Loader Security Model
 
 **Status**: Accepted

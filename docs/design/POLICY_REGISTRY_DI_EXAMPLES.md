@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Design](README.md) > Policy Registry DI Examples
+
 # PolicyRegistry DI Integration - Code Examples
 
 This document provides concrete code examples for integrating PolicyRegistry with ModelOnexContainer.

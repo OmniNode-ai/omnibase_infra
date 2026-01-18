@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > DSN Validation Strengthening
+
 # ADR: Strengthen DSN Validation with urllib.parse
 
 **Status**: Implemented

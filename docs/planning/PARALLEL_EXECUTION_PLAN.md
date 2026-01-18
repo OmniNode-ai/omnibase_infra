@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > Planning > Parallel Execution Plan
+
 # Parallelizable Execution Plan for ONEX Runtime & Registration Tickets
 
 **Resources**: 5 omnibase_core repos + 4 omnibase_infra repos = 9 parallel workers

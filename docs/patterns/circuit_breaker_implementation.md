@@ -1,6 +1,6 @@
-# Circuit Breaker Implementation Guide
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Circuit Breaker Implementation
 
-> **Navigation**: [Docs Index](../index.md) > [Patterns](README.md) > Circuit Breaker Implementation
+# Circuit Breaker Implementation Guide
 
 ## Overview
 
