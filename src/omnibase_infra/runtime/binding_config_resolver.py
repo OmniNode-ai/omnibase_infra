@@ -178,12 +178,17 @@ _RETRY_POLICY_FIELDS: Final[frozenset[str]] = frozenset(
     {"MAX_RETRIES", "BACKOFF_STRATEGY", "BASE_DELAY_MS", "MAX_DELAY_MS"}
 )
 
-# Async key lock cleanup configuration
-# Prevents unbounded growth of _async_key_locks dict in long-running processes
+# Async key lock cleanup configuration (default values)
+# These values are now configurable via ModelBindingConfigResolverConfig.
+# These constants are kept as fallbacks and for backward compatibility with tests
+# that directly manipulate internal state without going through config.
+# Prevents unbounded growth of _async_key_locks dict in long-running processes.
 _ASYNC_KEY_LOCK_CLEANUP_THRESHOLD: Final[int] = (
-    1000  # Trigger cleanup when > 1000 locks
+    1000  # Trigger cleanup when > 1000 locks (default, can be overridden via config)
 )
-_ASYNC_KEY_LOCK_MAX_AGE_SECONDS: Final[float] = 3600.0  # Clean locks older than 1 hour
+_ASYNC_KEY_LOCK_MAX_AGE_SECONDS: Final[float] = (
+    3600.0  # Clean locks older than 1 hour (default, can be overridden via config)
+)
 
 
 def _split_path_and_fragment(path: str) -> tuple[str, str | None]:
@@ -314,10 +319,36 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self._vault_loads = 0
         self._async_key_lock_cleanups = 0  # Track cleanup events for observability
 
-        # RLock is required for reentrant locking in the sync path:
-        # resolve() holds the lock while calling _resolve_config() -> _load_from_file(),
-        # which also acquires the lock to update _file_loads counter.
-        # Regular Lock would cause deadlock in this scenario.
+        # RLock (Reentrant Lock) is REQUIRED - DO NOT CHANGE TO REGULAR LOCK.
+        #
+        # Why RLock is necessary:
+        # -----------------------
+        # The sync path (resolve()) holds the lock while calling internal methods
+        # that also need to update counters protected by the same lock:
+        #
+        #   resolve() [holds _lock]
+        #     -> _get_from_cache() [updates _hits, _expired_evictions]
+        #     -> _resolve_config() [no lock needed directly]
+        #       -> _load_from_file() [updates _file_loads]
+        #       -> _load_from_env() [updates _env_loads]
+        #       -> _resolve_vault_refs() [updates _vault_loads]
+        #     -> _cache_config() [updates _misses, _lru_evictions]
+        #
+        # With a regular threading.Lock, this would cause DEADLOCK because:
+        # - Thread A calls resolve() and acquires _lock
+        # - Thread A calls _get_from_cache() which tries to update _hits
+        # - Since Thread A already holds _lock, a regular Lock would block forever
+        #
+        # RLock allows the same thread to acquire the lock multiple times,
+        # with a release count that must match the acquisition count.
+        #
+        # Alternative considered: Move counter updates outside the critical section.
+        # This was rejected because:
+        # 1. Counters must be updated atomically with cache operations for consistency
+        # 2. Would require significant refactoring with subtle race condition risks
+        # 3. RLock performance overhead is minimal for in-memory operations
+        #
+        # See PR #168 review for detailed analysis of this design decision.
         self._lock = threading.RLock()
 
         # Per-key async locks to allow parallel fetches for different handler types
@@ -671,7 +702,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Includes periodic cleanup of stale locks to prevent unbounded memory
         growth in long-running processes. Cleanup is triggered when the number
-        of locks exceeds _ASYNC_KEY_LOCK_CLEANUP_THRESHOLD.
+        of locks exceeds the configured threshold (async_lock_cleanup_threshold).
 
         Thread Safety:
             Uses threading.Lock to safely access the key locks dictionary,
@@ -683,10 +714,16 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Returns:
             asyncio.Lock for the given handler_type.
+
+        Note:
+            The cleanup threshold is configurable via
+            ModelBindingConfigResolverConfig.async_lock_cleanup_threshold.
+            Default is 1000 locks.
         """
         with self._lock:
-            # Periodic cleanup when threshold exceeded
-            if len(self._async_key_locks) > _ASYNC_KEY_LOCK_CLEANUP_THRESHOLD:
+            # Periodic cleanup when threshold exceeded (uses config value)
+            threshold = self._config.async_lock_cleanup_threshold
+            if len(self._async_key_locks) > threshold:
                 self._cleanup_stale_async_key_locks()
 
             if handler_type not in self._async_key_locks:
@@ -698,7 +735,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """Remove async key locks that have not been used recently.
 
         Only removes locks that are:
-        1. Older than _ASYNC_KEY_LOCK_MAX_AGE_SECONDS
+        1. Older than the configured max age (async_lock_max_age_seconds)
         2. Not currently held (not locked)
 
         Thread Safety:
@@ -709,13 +746,18 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             This method is called periodically from _get_async_key_lock()
             when the lock count exceeds the threshold. It does not require
             external scheduling.
+
+            The max age is configurable via
+            ModelBindingConfigResolverConfig.async_lock_max_age_seconds.
+            Default is 3600 seconds (1 hour).
         """
         current_time = time.monotonic()
         stale_keys: list[str] = []
+        max_age = self._config.async_lock_max_age_seconds
 
         for key, timestamp in self._async_key_lock_timestamps.items():
             age = current_time - timestamp
-            if age > _ASYNC_KEY_LOCK_MAX_AGE_SECONDS:
+            if age > max_age:
                 lock = self._async_key_locks.get(key)
                 # Only remove locks that are not currently held
                 if lock is not None and not lock.locked():
@@ -732,6 +774,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 extra={
                     "cleaned_count": len(stale_keys),
                     "remaining_count": len(self._async_key_locks),
+                    "max_age_seconds": max_age,
                 },
             )
 
@@ -833,8 +876,15 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             When a cache entry is evicted via LRU, this method also cleans up
             the associated async key lock to prevent memory leaks. The lock is
             only removed if it is not currently held by an async operation.
+
+        Thread Safety:
+            This method is ALWAYS called while holding self._lock (from resolve()
+            or resolve_async()), ensuring that LRU eviction and cache write are
+            atomic. There is no race window where another thread could observe
+            an inconsistent cache state. See PR #168 review for analysis.
         """
         # Evict LRU entry if cache is at capacity (before adding new entry)
+        # NOTE: This entire operation is atomic because the caller holds self._lock
         max_entries = self._config.max_cache_entries
         if max_entries is not None and handler_type not in self._cache:
             # Only evict if adding a NEW entry (not updating existing)
@@ -1189,7 +1239,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                         target_name="binding_config_resolver",
                     )
                     raise ProtocolConfigurationError(
-                        "config_dir does not exist",
+                        f"config_dir does not exist: path='{self._config.config_dir}'",
                         context=context,
                     )
                 if not self._config.config_dir.is_dir():
@@ -1200,7 +1250,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                         target_name="binding_config_resolver",
                     )
                     raise ProtocolConfigurationError(
-                        "config_dir is not a directory",
+                        f"config_dir exists but is not a directory: path='{self._config.config_dir}'",
                         context=context,
                     )
                 path = self._config.config_dir / path
@@ -1880,6 +1930,27 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Raises:
             ProtocolConfigurationError: If ``strict_env_coercion`` is enabled
                 and the value cannot be converted to the expected type.
+
+        Example:
+            Boolean coercion accepts case-insensitive values::
+
+                # All these evaluate to True:
+                # HANDLER_DB_ENABLED=true, HANDLER_DB_ENABLED=1
+                # HANDLER_DB_ENABLED=yes, HANDLER_DB_ENABLED=on
+
+                # All these evaluate to False:
+                # HANDLER_DB_ENABLED=false, HANDLER_DB_ENABLED=0
+                # HANDLER_DB_ENABLED=no, HANDLER_DB_ENABLED=off
+
+            Integer and float fields accept standard numeric strings::
+
+                # Integer: HANDLER_DB_TIMEOUT_MS=5000
+                # Float: HANDLER_DB_RATE_LIMIT_PER_SECOND=100.5
+
+            Invalid values in non-strict mode are skipped (original preserved)::
+
+                # HANDLER_DB_ENABLED=invalid -> warning logged, original kept
+                # HANDLER_DB_TIMEOUT_MS=not_a_number -> warning logged, original kept
         """
         # Boolean fields
         if field == "enabled":

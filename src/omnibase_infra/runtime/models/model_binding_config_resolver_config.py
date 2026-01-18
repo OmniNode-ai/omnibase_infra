@@ -70,9 +70,14 @@ class ModelBindingConfigResolverConfig(BaseModel):
         fail_on_vault_error: If True, fail when vault: references cannot be resolved.
             If False, keep placeholder (may be insecure). Default is False.
         max_cache_entries: Maximum cache entries before LRU eviction.
-            None means unlimited. Default is None.
+            None means unlimited. Default is None. Only applies when
+            enable_caching=True. To disable caching, use enable_caching=False.
         allow_symlinks: If True, allow configuration files that are symlinks.
             If False, reject symlinked config files for security. Default is True.
+        async_lock_cleanup_threshold: Number of async key locks that triggers cleanup.
+            Default is 1000. Prevents unbounded memory growth in long-running processes.
+        async_lock_max_age_seconds: Maximum age for async locks before cleanup.
+            Default is 3600 (1 hour). Locks older than this are removed if not held.
 
     Note:
         SecretResolver is resolved from the container via dependency injection
@@ -183,9 +188,11 @@ class ModelBindingConfigResolverConfig(BaseModel):
         ge=1,
         description="Maximum number of entries to keep in the configuration cache. "
         "When the limit is reached, the least recently used (LRU) entry is evicted. "
-        "None means unlimited cache size (current behavior). "
+        "None means unlimited cache size. "
         "For typical deployments with 10-50 handler types, leave as None. "
-        "Set a limit for environments with many dynamic handler types.",
+        "Set a limit for environments with many dynamic handler types. "
+        "Note: This setting only takes effect when enable_caching=True. "
+        "To disable caching entirely, set enable_caching=False instead of using this field.",
     )
 
     # Symlink security control
@@ -196,6 +203,27 @@ class ModelBindingConfigResolverConfig(BaseModel):
         "When True, symlinks are followed but still validated against config_dir "
         "to prevent path traversal attacks. "
         "Set to False in high-security environments to prevent symlink attacks.",
+    )
+
+    # Async key lock cleanup configuration
+    # These settings control cleanup of per-handler async locks to prevent memory leaks
+    # in long-running processes. See PR #168 for design rationale.
+    async_lock_cleanup_threshold: int = Field(
+        default=1000,
+        ge=1,
+        description="Number of async key locks that triggers cleanup check. "
+        "When the lock count exceeds this threshold, stale locks are removed. "
+        "Default is 1000, suitable for most deployments with <1000 handler types. "
+        "Lower values increase cleanup frequency but add minor overhead.",
+    )
+    async_lock_max_age_seconds: float = Field(
+        default=3600.0,
+        ge=60.0,
+        le=86400.0,
+        description="Maximum age (in seconds) for async key locks before cleanup. "
+        "Locks older than this AND not currently held are eligible for removal. "
+        "Default is 3600 (1 hour). Range: 60-86400 seconds. "
+        "Lower values free memory faster but may cleanup locks that could be reused.",
     )
 
     @field_validator("env_prefix")

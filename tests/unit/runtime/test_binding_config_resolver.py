@@ -1028,7 +1028,7 @@ class TestBindingConfigResolverVaultSource:
             assert "config" in call_args[0][0]
 
     def test_vault_resolver_not_configured(self) -> None:
-        """Error when vault:// used but no SecretResolver registered in container."""
+        """Error when vault: used but no SecretResolver registered in container."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -1097,7 +1097,7 @@ class TestBindingConfigResolverVaultSource:
             assert "vault" in str(exc_info.value).lower()
 
     def test_vault_inline_reference_resolution(self) -> None:
-        """Resolve vault:// references within config values."""
+        """Resolve vault: references within config values."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
             mock_secret = MagicMock()
@@ -2954,6 +2954,100 @@ class TestAsyncKeyLockCleanup:
             assert stats.async_key_lock_cleanups == 1
             assert stats.async_key_lock_count == 1
 
+    def test_configurable_cleanup_threshold(self) -> None:
+        """Test that async_lock_cleanup_threshold config is respected.
+
+        Verifies that the cleanup threshold can be configured via
+        ModelBindingConfigResolverConfig and the resolver uses the configured
+        value instead of the default (1000).
+
+        Related:
+        - PR #168 review feedback: make cleanup threshold configurable
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Configure with a low threshold (10 instead of default 1000)
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                async_lock_cleanup_threshold=10,
+                async_lock_max_age_seconds=3600.0,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create locks just above the custom threshold
+            stale_time = time.monotonic() - 4000  # Older than 3600 seconds
+            with resolver._lock:
+                for i in range(11):  # 11 > threshold of 10
+                    lock = asyncio.Lock()
+                    resolver._async_key_locks[f"handler_{i}"] = lock
+                    resolver._async_key_lock_timestamps[f"handler_{i}"] = stale_time
+
+            # Verify we have 11 locks
+            assert len(resolver._async_key_locks) == 11
+
+            # Create one more lock to trigger cleanup
+            resolver._get_async_key_lock("trigger_handler")
+
+            # After cleanup, only the trigger_handler (which is recent) should remain
+            assert len(resolver._async_key_locks) == 1
+            assert "trigger_handler" in resolver._async_key_locks
+            assert resolver._async_key_lock_cleanups == 1
+
+    def test_configurable_max_age_seconds(self) -> None:
+        """Test that async_lock_max_age_seconds config is respected.
+
+        Verifies that the max age can be configured via
+        ModelBindingConfigResolverConfig and the resolver uses the configured
+        value instead of the default (3600 seconds).
+
+        Related:
+        - PR #168 review feedback: make cleanup max age configurable
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Configure with a short max age (60 seconds instead of default 3600)
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                async_lock_cleanup_threshold=5,
+                async_lock_max_age_seconds=60.0,  # 1 minute
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Create some locks: some older than 60s, some newer
+            current_time = time.monotonic()
+            with resolver._lock:
+                # These should be cleaned up (older than 60 seconds)
+                for i in range(3):
+                    lock = asyncio.Lock()
+                    resolver._async_key_locks[f"old_handler_{i}"] = lock
+                    resolver._async_key_lock_timestamps[f"old_handler_{i}"] = (
+                        current_time - 100  # 100 seconds old, > 60s threshold
+                    )
+                # These should be preserved (newer than 60 seconds)
+                for i in range(3):
+                    lock = asyncio.Lock()
+                    resolver._async_key_locks[f"new_handler_{i}"] = lock
+                    resolver._async_key_lock_timestamps[f"new_handler_{i}"] = (
+                        current_time - 30  # 30 seconds old, < 60s threshold
+                    )
+
+            # Verify we have 6 locks total
+            assert len(resolver._async_key_locks) == 6
+
+            # Create one more lock to trigger cleanup (exceeds threshold of 5)
+            resolver._get_async_key_lock("trigger_handler")
+
+            # After cleanup:
+            # - old_handler_* (3 locks) should be removed (age > 60s)
+            # - new_handler_* (3 locks) should be preserved (age < 60s)
+            # - trigger_handler should be added (brand new)
+            assert len(resolver._async_key_locks) == 4
+            for i in range(3):
+                assert f"old_handler_{i}" not in resolver._async_key_locks
+                assert f"new_handler_{i}" in resolver._async_key_locks
+            assert "trigger_handler" in resolver._async_key_locks
+            assert resolver._async_key_lock_cleanups == 1
+
 
 class TestAsyncKeyLockCleanupOnEviction:
     """Tests for async key lock cleanup during cache eviction.
@@ -3437,7 +3531,7 @@ class TestDeferredConfigDirValidation:
                     config_ref="file:config.yaml",
                 )
 
-            assert "config_dir is not a directory" in str(exc_info.value)
+            assert "config_dir exists but is not a directory" in str(exc_info.value)
 
     def test_config_dir_created_after_config_construction(self) -> None:
         """Config works when directory is created after config object construction."""
