@@ -675,10 +675,25 @@ class SecretResolver:
                         operation="get_secret",
                         target_name="secret_resolver",
                     )
+                    # SECURITY: Log at DEBUG level only to avoid exposing secret identifiers
+                    # in error messages shown to users/logs
+                    logger.debug(
+                        "Secret not found (correlation_id=%s): %s",
+                        context.correlation_id,
+                        logical_name,
+                        extra={
+                            "correlation_id": str(context.correlation_id),
+                            "logical_name": logical_name,
+                        },
+                    )
+                    # SECURITY: Do NOT include logical_name in error - it exposes secret identifiers
+                    # Use correlation_id to trace back to DEBUG logs if needed
                     raise SecretResolutionError(
-                        f"Secret not found: {logical_name}",
+                        f"Required secret not found. "
+                        f"See logs with correlation_id={context.correlation_id} for details.",
                         context=context,
-                        logical_name=logical_name,
+                        # NOTE: Intentionally NOT passing logical_name to avoid exposing
+                        # secret identifiers in error messages, logs, or serialized responses.
                     )
                 return None
 
@@ -787,10 +802,25 @@ class SecretResolver:
                         operation="get_secret_async",
                         target_name="secret_resolver",
                     )
+                    # SECURITY: Log at DEBUG level only to avoid exposing secret identifiers
+                    # in error messages shown to users/logs
+                    logger.debug(
+                        "Secret not found (correlation_id=%s): %s",
+                        context.correlation_id,
+                        logical_name,
+                        extra={
+                            "correlation_id": str(context.correlation_id),
+                            "logical_name": logical_name,
+                        },
+                    )
+                    # SECURITY: Do NOT include logical_name in error - it exposes secret identifiers
+                    # Use correlation_id to trace back to DEBUG logs if needed
                     raise SecretResolutionError(
-                        f"Secret not found: {logical_name}",
+                        f"Required secret not found. "
+                        f"See logs with correlation_id={context.correlation_id} for details.",
                         context=context,
-                        logical_name=logical_name,
+                        # NOTE: Intentionally NOT passing logical_name to avoid exposing
+                        # secret identifiers in error messages, logs, or serialized responses.
                     )
                 return None
 
@@ -914,7 +944,7 @@ class SecretResolver:
 
         Args:
             logical_names: List of dotted paths
-            required: If True, raises on first missing secret
+            required: If True, aggregates all failures into a single error
             correlation_id: Optional correlation ID for distributed tracing.
 
         Returns:
@@ -922,8 +952,8 @@ class SecretResolver:
 
         Raises:
             SecretResolutionError: If required=True and any secret is not found.
-                The first missing secret will raise; other fetches may complete
-                or be cancelled depending on timing.
+                All secrets are attempted before raising, and all failures are
+                reported in a single aggregated error message.
         """
         if not logical_names:
             return {}
@@ -936,10 +966,62 @@ class SecretResolver:
             for name in logical_names
         ]
 
-        # Gather results - raises on first failure if required=True
-        values = await asyncio.gather(*tasks)
+        # Gather results with return_exceptions=True for better error aggregation
+        # This ensures all secrets are attempted before any error is raised
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        return dict(zip(logical_names, values, strict=True))
+        # Check for and aggregate exceptions
+        failed_secrets: list[str] = []
+        successful_results: dict[str, SecretStr | None] = {}
+
+        for name, result in zip(logical_names, results, strict=True):
+            if isinstance(result, BaseException):
+                failed_secrets.append(name)
+            else:
+                successful_results[name] = result
+
+        # If there were failures and required=True, raise aggregated error
+        if failed_secrets and required:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="get_secrets_async",
+                target_name="secret_resolver",
+            )
+            # SECURITY: Log at INFO level with count only (for operational awareness)
+            # Secret identifiers are logged at DEBUG level only to prevent exposure
+            logger.info(
+                "Secret resolution failed for %d secret(s) (correlation_id=%s). "
+                "Enable DEBUG logging to see secret names.",
+                len(failed_secrets),
+                context.correlation_id,
+                extra={
+                    "correlation_id": str(context.correlation_id),
+                    "failed_count": len(failed_secrets),
+                },
+            )
+            # SECURITY: Log failed secret names at DEBUG level only (with correlation_id)
+            # to avoid exposing secret structure in error messages shown to users/logs
+            logger.debug(
+                "Failed secret names (correlation_id=%s): %s",
+                context.correlation_id,
+                ", ".join(failed_secrets),
+                extra={
+                    "correlation_id": str(context.correlation_id),
+                    "failed_count": len(failed_secrets),
+                },
+            )
+            # SECURITY: Do NOT include logical_name in error - it exposes secret identifiers
+            # Use correlation_id to trace back to DEBUG logs if needed
+            raise SecretResolutionError(
+                f"Failed to resolve {len(failed_secrets)} secret(s). "
+                f"See logs with correlation_id={context.correlation_id} for details.",
+                context=context,
+                # NOTE: Intentionally NOT passing logical_name to avoid exposing
+                # secret identifiers in error messages, logs, or serialized responses.
+                # The correlation_id can be used to find secret names in DEBUG logs.
+            )
+
+        return successful_results
 
     # === Cache Management ===
 

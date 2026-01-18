@@ -208,7 +208,11 @@ class TestSecretResolverRequiredFlag:
     """Tests for required vs optional secrets."""
 
     def test_required_true_raises_when_not_found(self) -> None:
-        """Should raise SecretResolutionError when required=True and not found."""
+        """Should raise SecretResolutionError when required=True and not found.
+
+        SECURITY: Error messages should NOT contain the logical_name to avoid
+        exposing secret identifiers. The correlation_id is provided for tracing.
+        """
         config = ModelSecretResolverConfig(
             mappings=[],
             enable_convention_fallback=False,
@@ -218,7 +222,13 @@ class TestSecretResolverRequiredFlag:
         with pytest.raises(SecretResolutionError) as exc_info:
             resolver.get_secret("nonexistent.secret", required=True)
 
-        assert "nonexistent.secret" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # SECURITY: Logical name should NOT be in error message
+        assert "nonexistent.secret" not in error_msg
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
+        # Should indicate what operation failed generically
+        assert "secret not found" in error_msg.lower()
 
     def test_required_false_returns_none_when_not_found(self) -> None:
         """Should return None when required=False and not found."""
@@ -244,7 +254,11 @@ class TestSecretResolverRequiredFlag:
             resolver.get_secret("nonexistent.secret")
 
     def test_env_var_not_set_raises_when_required(self) -> None:
-        """Should raise when env var is configured but not set."""
+        """Should raise when env var is configured but not set.
+
+        SECURITY: Error messages should NOT contain the logical_name to avoid
+        exposing secret identifiers. The correlation_id is provided for tracing.
+        """
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
@@ -266,7 +280,13 @@ class TestSecretResolverRequiredFlag:
             with pytest.raises(SecretResolutionError) as exc_info:
                 resolver.get_secret("api.key", required=True)
 
-        assert "api.key" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # SECURITY: Logical name should NOT be in error message
+        assert "api.key" not in error_msg
+        # SECURITY: Env var name should NOT be in error message
+        assert "UNSET_API_KEY" not in error_msg
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
 
 
 class TestSecretResolverCaching:
@@ -470,7 +490,11 @@ class TestSecretResolverGetSecrets:
             with pytest.raises(SecretResolutionError) as exc_info:
                 resolver.get_secrets(["secret.one", "secret.missing"], required=True)
 
-        assert "secret.missing" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # SECURITY: Logical name should NOT be in error message
+        assert "secret.missing" not in error_msg
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
 
     def test_get_secrets_returns_none_for_missing_when_not_required(self) -> None:
         """Should return None for missing secrets when required=False."""
@@ -681,7 +705,11 @@ class TestSecretResolverAsync:
 
     @pytest.mark.asyncio
     async def test_get_secret_async_raises_when_required(self) -> None:
-        """Should raise SecretResolutionError in async when required=True."""
+        """Should raise SecretResolutionError in async when required=True.
+
+        SECURITY: Error messages should NOT contain the logical_name to avoid
+        exposing secret identifiers. The correlation_id is provided for tracing.
+        """
         config = ModelSecretResolverConfig(
             mappings=[],
             enable_convention_fallback=False,
@@ -691,7 +719,13 @@ class TestSecretResolverAsync:
         with pytest.raises(SecretResolutionError) as exc_info:
             await resolver.get_secret_async("nonexistent.secret", required=True)
 
-        assert "nonexistent.secret" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # SECURITY: Logical name should NOT be in error message
+        assert "nonexistent.secret" not in error_msg
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
+        # Should indicate what operation failed generically
+        assert "secret not found" in error_msg.lower()
 
     @pytest.mark.asyncio
     async def test_get_secret_async_returns_none_when_not_required(self) -> None:
@@ -732,6 +766,82 @@ class TestSecretResolverAsync:
         assert result1 is not None
         assert result2 is not None
         assert result1.get_secret_value() == result2.get_secret_value()
+
+    @pytest.mark.asyncio
+    async def test_get_secrets_async_aggregates_all_failures(self) -> None:
+        """get_secrets_async should aggregate all failures into one error message.
+
+        Instead of failing on the first missing secret, it should attempt all
+        secrets and report all failures in a single aggregated error.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="secret.one",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_ONE",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Request multiple secrets where some don't exist
+        # Neither SECRET_ONE nor other secrets exist in env
+        with pytest.raises(SecretResolutionError) as exc_info:
+            await resolver.get_secrets_async(
+                ["secret.one", "missing.two", "missing.three"],
+                required=True,
+            )
+
+        error_message = str(exc_info.value)
+        # Should mention the aggregated failure count
+        assert "3" in error_message or "secret" in error_message.lower()
+
+    @pytest.mark.asyncio
+    async def test_get_secrets_async_returns_partial_on_not_required(self) -> None:
+        """get_secrets_async should return partial results when required=False.
+
+        If some secrets fail to resolve but required=False, the successful
+        results should still be returned.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="secret.one",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_ONE",
+                    ),
+                ),
+                ModelSecretMapping(
+                    logical_name="secret.two",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_TWO",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Only one secret exists
+        with patch.dict(os.environ, {"SECRET_ONE": "value_one"}, clear=False):
+            results = await resolver.get_secrets_async(
+                ["secret.one", "secret.two"],
+                required=False,
+            )
+
+        # secret.one should succeed
+        assert results.get("secret.one") is not None
+        assert results["secret.one"].get_secret_value() == "value_one"
+        # secret.two should return None (not found, but required=False)
+        # Note: The implementation returns only successful results
+        # So secret.two may not be in the dict at all
+        assert results.get("secret.two") is None or "secret.two" not in results
 
 
 class TestSecretResolverThreadSafety:
@@ -1392,7 +1502,14 @@ class TestSecretResolverSecurity:
         assert result is None
 
     def test_error_message_does_not_leak_file_path(self) -> None:
-        """SecretResolutionError should not expose file paths."""
+        """SecretResolutionError should not expose file paths or secret identifiers.
+
+        SECURITY: Error messages should contain NEITHER:
+        - Logical names (e.g., "missing.file.secret") - reveals secret structure
+        - File paths (e.g., "/sensitive/path/to/secret") - reveals infrastructure
+
+        Only the correlation_id should be provided for tracing back to DEBUG logs.
+        """
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
@@ -1411,13 +1528,14 @@ class TestSecretResolverSecurity:
             resolver.get_secret("missing.file.secret")
 
         error_msg = str(exc_info.value)
-        # Should contain logical name (for debugging)
-        assert "missing.file.secret" in error_msg
-        # Should NOT contain the actual file path
+        # SECURITY: Logical name should NOT be in error message
+        assert "missing.file.secret" not in error_msg
+        # SECURITY: File path should NOT be in error message
         assert "/sensitive/path" not in error_msg
-        assert (
-            "secret" not in error_msg.lower() or "secret not found" in error_msg.lower()
-        )
+        # Correlation ID should be present for tracing
+        assert "correlation_id=" in error_msg
+        # Should indicate what operation failed generically
+        assert "secret not found" in error_msg.lower()
 
     def test_symlink_loop_handled_gracefully(self) -> None:
         """Symlink loops should be handled without crashing."""

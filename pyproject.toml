@@ -253,6 +253,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI
+# All omnibase packages are first-party to avoid blank lines between them
 known-first-party = ["omnibase_infra", "omnibase_core", "omnibase_spi", "tests"]
 # Force combine as imports for consistency
 force-single-line = false

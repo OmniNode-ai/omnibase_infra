@@ -8,6 +8,9 @@ All models are strongly typed to eliminate Any usage.
 Exports:
     ModelComputeKey: Strongly-typed compute registry key model
     ModelComputeRegistration: Compute plugin registration parameters model
+    ModelConfigRef: Parsed configuration reference (file, env, vault)
+    ModelConfigRefParseResult: Result of parsing a config reference
+    EnumConfigRefScheme: Supported config reference schemes
     ModelDomainPluginConfig: Configuration for domain plugin lifecycle hooks
     ModelDomainPluginResult: Result of domain plugin lifecycle operations
     ModelEventBusConfig: Event bus configuration model
@@ -43,15 +46,33 @@ Exports:
     ModelSecretCacheStats: Cache statistics for observability
     ModelSecretResolverMetrics: Resolution metrics for observability
     ModelSecretSourceInfo: Non-sensitive source information for introspection
+    ModelRetryPolicy: Retry policy configuration for handler operations
+    ModelBindingConfig: Configuration for binding a handler to the runtime
+    ModelBindingConfigCacheStats: Cache statistics for BindingConfigResolver
+    ModelBindingConfigResolverConfig: Configuration for BindingConfigResolver
+    ModelConfigCacheEntry: Internal cache entry for BindingConfigResolver
 """
 
+from omnibase_infra.runtime.enums.enum_config_ref_scheme import EnumConfigRefScheme
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
     ModelBatchLifecycleResult,
+)
+from omnibase_infra.runtime.models.model_binding_config import ModelBindingConfig
+from omnibase_infra.runtime.models.model_binding_config_cache_stats import (
+    ModelBindingConfigCacheStats,
+)
+from omnibase_infra.runtime.models.model_binding_config_resolver_config import (
+    ModelBindingConfigResolverConfig,
 )
 from omnibase_infra.runtime.models.model_cached_secret import ModelCachedSecret
 from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
 from omnibase_infra.runtime.models.model_compute_registration import (
     ModelComputeRegistration,
+)
+from omnibase_infra.runtime.models.model_config_cache_entry import ModelConfigCacheEntry
+from omnibase_infra.runtime.models.model_config_ref import ModelConfigRef
+from omnibase_infra.runtime.models.model_config_ref_parse_result import (
+    ModelConfigRefParseResult,
 )
 from omnibase_infra.runtime.models.model_domain_plugin_config import (
     ModelDomainPluginConfig,
@@ -95,6 +116,7 @@ from omnibase_infra.runtime.models.model_projector_plugin_loader_config import (
 from omnibase_infra.runtime.models.model_protocol_registration_config import (
     ModelProtocolRegistrationConfig,
 )
+from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
 from omnibase_infra.runtime.models.model_runtime_config import ModelRuntimeConfig
 from omnibase_infra.runtime.models.model_runtime_scheduler_config import (
     ModelRuntimeSchedulerConfig,
@@ -122,10 +144,17 @@ from omnibase_infra.runtime.models.model_shutdown_batch_result import (
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
 
 __all__: list[str] = [
+    "EnumConfigRefScheme",
     "ModelBatchLifecycleResult",
+    "ModelBindingConfig",
+    "ModelBindingConfigCacheStats",
+    "ModelBindingConfigResolverConfig",
     "ModelCachedSecret",
     "ModelComputeKey",
     "ModelComputeRegistration",
+    "ModelConfigCacheEntry",
+    "ModelConfigRef",
+    "ModelConfigRefParseResult",
     "ModelDomainPluginConfig",
     "ModelDomainPluginResult",
     "ModelDuplicateResponse",
@@ -146,6 +175,7 @@ __all__: list[str] = [
     "ModelPolicyTypeFilter",
     "ModelProjectorPluginLoaderConfig",
     "ModelProtocolRegistrationConfig",
+    "ModelRetryPolicy",
     "ModelRuntimeConfig",
     "ModelRuntimeSchedulerConfig",
     "ModelRuntimeSchedulerMetrics",
@@ -156,7 +186,7 @@ __all__: list[str] = [
     "ModelSecretResolverMetrics",
     "ModelSecretSourceInfo",
     "ModelSecretSourceSpec",
-    "SecretSourceType",
     "ModelShutdownBatchResult",
     "ModelShutdownConfig",
+    "SecretSourceType",
 ]
