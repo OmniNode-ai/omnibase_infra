@@ -9,8 +9,27 @@ from multiple sources with proper priority ordering:
     2. Inline config (passed directly to resolve()) - overrides config_ref values
     3. Config reference (file:, env:, vault:) - base configuration from external source
 
-Note: The config_ref scheme (file:, env:, vault:) determines WHERE to load base config from,
-not priority between those schemes. Only one config_ref is used per resolution call.
+Important: config_ref Schemes are Mutually Exclusive
+    The config_ref schemes (file:, env:, vault:) are **mutually exclusive** - only ONE
+    config_ref can be provided per resolution call. The scheme determines WHERE to load
+    the base configuration from, not a priority ordering between schemes.
+
+    Correct usage::
+
+        # Load from file
+        resolver.resolve(handler_type="db", config_ref="file:configs/db.yaml")
+
+        # OR load from environment variable
+        resolver.resolve(handler_type="db", config_ref="env:DB_CONFIG_JSON")
+
+        # OR load from Vault
+        resolver.resolve(handler_type="db", config_ref="vault:secret/data/db")
+
+    Invalid usage (would use only ONE, ignoring others)::
+
+        # WRONG: Cannot combine multiple config_ref schemes in a single call
+        # config_ref="file:..." AND config_ref="env:..." is NOT supported
+        # Pass only ONE config_ref string per resolve() call
 
 Design Philosophy:
     - Dumb and deterministic: resolves and caches, does not discover or mutate
@@ -85,6 +104,7 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -265,11 +285,13 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             # AttributeError: service_registry missing resolve_service method (test mocks)
             pass
 
-        self._cache: dict[str, ModelConfigCacheEntry] = {}
+        # Use OrderedDict for LRU eviction support - entries are moved to end on access
+        self._cache: OrderedDict[str, ModelConfigCacheEntry] = OrderedDict()
         # Track mutable stats internally since ModelBindingConfigCacheStats is frozen
         self._hits = 0
         self._misses = 0
         self._expired_evictions = 0
+        self._lru_evictions = 0
         self._refreshes = 0
         self._file_loads = 0
         self._env_loads = 0
@@ -309,7 +331,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Args:
             handler_type: Handler type identifier (e.g., "db", "vault", "consul").
             config_ref: Optional reference to external configuration.
-                Supported schemes: file:, env:, vault:
+                Supported schemes: file:, env:, vault: (mutually exclusive - use only ONE)
                 Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password
             inline_config: Optional inline configuration dictionary.
                 Takes precedence over config_ref for overlapping keys.
@@ -349,7 +371,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
     def resolve_many(
         self,
-        bindings: list[dict[str, object]],
+        bindings: list[dict[str, JsonType]],
         correlation_id: UUID | None = None,
     ) -> list[ModelBindingConfig]:
         """Resolve multiple handler configurations.
@@ -432,6 +454,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Args:
             handler_type: Handler type identifier (e.g., "db", "vault", "consul").
             config_ref: Optional reference to external configuration.
+                Supported schemes: file:, env:, vault: (mutually exclusive - use only ONE)
             inline_config: Optional inline configuration dictionary.
             correlation_id: Optional correlation ID for error tracking.
 
@@ -482,7 +505,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
     async def resolve_many_async(
         self,
-        bindings: list[dict[str, object]],
+        bindings: list[dict[str, JsonType]],
         correlation_id: UUID | None = None,
     ) -> list[ModelBindingConfig]:
         """Resolve multiple configurations asynchronously in parallel.
@@ -617,6 +640,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 misses=self._misses,
                 refreshes=self._refreshes,
                 expired_evictions=self._expired_evictions,
+                lru_evictions=self._lru_evictions,
                 file_loads=self._file_loads,
                 env_loads=self._env_loads,
                 vault_loads=self._vault_loads,
@@ -710,6 +734,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             _cache_config when caching is enabled, or in resolve/resolve_async
             when caching is disabled). This ensures accurate miss counting in
             the async path which uses a double-check locking pattern.
+
+            When max_cache_entries is configured, this method moves accessed entries
+            to the end of the OrderedDict to maintain LRU ordering. This ensures
+            the least recently used entry is at the front for eviction.
         """
         if not self._config.enable_caching:
             return None
@@ -723,6 +751,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             self._expired_evictions += 1
             return None
 
+        # Move to end for LRU tracking (most recently used)
+        # This is a no-op if max_cache_entries is None, but we do it anyway
+        # for consistency since OrderedDict.move_to_end() is O(1)
+        self._cache.move_to_end(handler_type)
         self._hits += 1
         return cached.config
 
@@ -738,7 +770,30 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             handler_type: The handler type being cached.
             config: The configuration to cache.
             source: Description of the configuration source.
+
+        Note:
+            When max_cache_entries is configured and the cache is at capacity,
+            this method evicts the least recently used (LRU) entry before adding
+            the new one. The LRU entry is the first entry in the OrderedDict
+            since entries are moved to the end on access.
         """
+        # Evict LRU entry if cache is at capacity (before adding new entry)
+        max_entries = self._config.max_cache_entries
+        if max_entries is not None and handler_type not in self._cache:
+            # Only evict if adding a NEW entry (not updating existing)
+            while len(self._cache) >= max_entries:
+                # popitem(last=False) removes the first (oldest/LRU) entry
+                evicted_key, _ = self._cache.popitem(last=False)
+                self._lru_evictions += 1
+                logger.debug(
+                    "LRU eviction: removed cache entry",
+                    extra={
+                        "evicted_handler_type": evicted_key,
+                        "new_handler_type": handler_type,
+                        "max_cache_entries": max_entries,
+                    },
+                )
+
         now = datetime.now(UTC)
         ttl_seconds = self._config.cache_ttl_seconds
         expires_at = now + timedelta(seconds=ttl_seconds)
@@ -1645,6 +1700,25 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
     ) -> object | None:
         """Convert environment variable string to appropriate type.
 
+        This method handles type coercion for environment variable overrides.
+        The behavior on invalid values depends on the ``strict_env_coercion``
+        configuration setting:
+
+        **Strict mode** (``strict_env_coercion=True``):
+            Raises ``ProtocolConfigurationError`` immediately when a value
+            cannot be converted to the expected type. This is appropriate
+            for production environments where configuration errors should
+            fail fast.
+
+        **Non-strict mode** (``strict_env_coercion=False``, default):
+            Logs a warning and returns ``None``. When ``None`` is returned,
+            the calling code skips the override entirely, leaving the
+            original configuration value unchanged. This is intentional
+            conservative behavior: rather than applying a potentially
+            incorrect default, the system preserves the existing
+            configuration when an environment variable contains an
+            invalid value.
+
         Args:
             value: String value from environment.
             field: Field name to determine type.
@@ -1652,10 +1726,13 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             correlation_id: Correlation ID for error tracking.
 
         Returns:
-            Converted value, or None if conversion fails.
+            The converted value if conversion succeeds, or ``None`` if
+            conversion fails in non-strict mode. When ``None`` is returned,
+            the override is skipped and the original configuration value
+            is preserved (the invalid environment variable is not applied).
 
         Raises:
-            ProtocolConfigurationError: If strict_env_coercion is enabled
+            ProtocolConfigurationError: If ``strict_env_coercion`` is enabled
                 and the value cannot be converted to the expected type.
         """
         # Boolean fields

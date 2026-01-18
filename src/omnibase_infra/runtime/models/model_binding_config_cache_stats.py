@@ -23,6 +23,7 @@ class ModelBindingConfigCacheStats(BaseModel):
         misses: Total number of cache misses.
         refreshes: Total number of cache refreshes (TTL expiration or manual).
         expired_evictions: Total number of entries evicted due to expiration.
+        lru_evictions: Total number of entries evicted due to LRU policy.
         file_loads: Total number of configurations loaded from files.
         env_loads: Total number of configurations loaded from environment variables.
         vault_loads: Total number of configurations loaded from Vault.
@@ -66,6 +67,11 @@ class ModelBindingConfigCacheStats(BaseModel):
         default=0,
         ge=0,
         description="Total number of entries evicted due to expiration.",
+    )
+    lru_evictions: int = Field(
+        default=0,
+        ge=0,
+        description="Total number of entries evicted due to LRU policy when max_cache_entries is reached.",
     )
     file_loads: int = Field(
         default=0,

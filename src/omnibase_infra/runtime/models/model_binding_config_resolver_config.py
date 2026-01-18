@@ -144,6 +144,17 @@ class ModelBindingConfigResolverConfig(BaseModel):
         "Set to True in production to prevent silent security fallbacks.",
     )
 
+    # Cache size limit with LRU eviction
+    max_cache_entries: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum number of entries to keep in the configuration cache. "
+        "When the limit is reached, the least recently used (LRU) entry is evicted. "
+        "None means unlimited cache size (current behavior). "
+        "For typical deployments with 10-50 handler types, leave as None. "
+        "Set a limit for environments with many dynamic handler types.",
+    )
+
     @field_validator("env_prefix")
     @classmethod
     def validate_env_prefix(cls, value: str) -> str:
