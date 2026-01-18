@@ -303,137 +303,6 @@ pattern_exemptions:
       - docs/decisions/adr-any-type-pydantic-workaround.md
     ticket: OMN-1276
   # ==========================================================================
-  # AST Visitor Method Naming Exemptions
-  # ==========================================================================
-  # Python ast.NodeVisitor convention uses visit_ClassDef, visit_Call, etc.
-  # These follow PEP 8 exception for consistency with stdlib patterns.
-  # Reference: https://docs.python.org/3/library/ast.html#ast.NodeVisitor
-  #
-  # Affected files:
-  # - topic_category_validator.py
-  # - validator_no_handler_publishing.py
-  # - validator_no_direct_dispatch.py
-  # - validator_no_orchestrator_fsm.py
-  # - validator_any_type.py (OMN-1276)
-  #
-  # Common AST visitor methods:
-  # - visit_ClassDef, visit_FunctionDef, visit_AsyncFunctionDef
-  # - visit_Assign, visit_AnnAssign, visit_Call, visit_Subscript
-  #
-  # Generic pattern for all AST visitor methods across all validator files
-  - file_pattern: '(topic_category_validator|validator_no_handler_publishing|validator_no_direct_dispatch|validator_no_orchestrator_fsm|any_type_validator)\.py'
-    violation_pattern: "Function name 'visit_[A-Z][a-zA-Z]+' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. Methods named visit_<NodeType> (e.g., visit_ClassDef, visit_FunctionDef, visit_Call) are standard AST visitor methods that the ast module dispatches to based on the node type being visited. These CANNOT be renamed as they are part of the visitor dispatch protocol.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-      - PEP 8 - Exception for stdlib compatibility
-    ticket: OMN-1263
-  # ==========================================================================
-  # Architecture Validator AST Visitor Method Exemptions (OMN-1099)
-  # ==========================================================================
-  # Python ast.NodeVisitor API requires specific method names like visit_ClassDef,
-  # visit_FunctionDef, etc. These are NOT snake_case but are mandated by the
-  # Python standard library. Reference: https://docs.python.org/3/library/ast.html
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-      - PEP 8 - Exception for stdlib compatibility
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Function name 'visit_FunctionDef' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_FunctionDef is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Function name 'visit_AsyncFunctionDef' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_AsyncFunctionDef is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Function name 'visit_Assign' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_Assign is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Function name 'visit_AnnAssign' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_AnnAssign is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_handler_publishing\.py'
-    violation_pattern: "Function name 'visit_Call' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_Call is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_direct_dispatch\.py'
-    violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_direct_dispatch\.py'
-    violation_pattern: "Function name 'visit_Assign' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_Assign is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_direct_dispatch\.py'
-    violation_pattern: "Function name 'visit_Call' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_Call is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_orchestrator_fsm\.py'
-    violation_pattern: "Function name 'visit_ClassDef' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_ClassDef is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_orchestrator_fsm\.py'
-    violation_pattern: "Function name 'visit_FunctionDef' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_FunctionDef is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  - file_pattern: 'validator_no_orchestrator_fsm\.py'
-    violation_pattern: "Function name 'visit_Assign' should use snake_case"
-    reason: >
-      Python ast.NodeVisitor convention. visit_Assign is a standard AST visitor method name that the ast module dispatches to.
-
-    documentation:
-      - Python ast.NodeVisitor (https://docs.python.org/3/library/ast.html)
-    ticket: OMN-1099
-  # ==========================================================================
   # RuntimeShapeValidator Exemptions
   # ==========================================================================
   # Design Doc: docs/patterns/error_handling_patterns.md - Validation error patterns
@@ -1008,6 +877,9 @@ pattern_exemptions:
     reason: >
       component_name is a simple string identifier for the failed component (e.g., "KafkaEventBus"). This is a shutdown tracking field, not an entity reference. The component is identified by its type name, not by a UUID.
 
+    documentation:
+      - docs/adr/ADR-001-graceful-shutdown-drain-period.md
+      - CLAUDE.md (Model Field Naming - computed display names)
     ticket: OMN-1007
   # ==========================================================================
   # ModelRegistryResponse Factory Method Exemptions (PR #79)
@@ -1021,6 +893,9 @@ pattern_exemptions:
     reason: >
       Classmethod factory requires all parameters to construct response from backend results: node_id, correlation_id, consul_result, postgres_result, timestamp. These are distinct required inputs for computing status, processing_time, and error_summary.
 
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - CLAUDE.md (Factory Method Patterns)
     ticket: PR-79
   # ==========================================================================
   # Union Reduction Phase 3 Result Model Exemptions (OMN-1003)
@@ -1033,6 +908,9 @@ pattern_exemptions:
     reason: >
       Result model with comprehensive API: computed properties (has_blocking, violation_count, blocking_count, warning_count), factory methods (from_violations, success, from_legacy_result), utility methods (to_legacy_result, format_for_ci), and dunder methods (__bool__, __str__). This is intentional API design for CI integration and developer ergonomics.
 
+    documentation:
+      - docs/validation/validator_reference.md
+      - CLAUDE.md (Custom __bool__ for Result Models)
     ticket: OMN-1003
   # ==========================================================================
   # OMN-1004: Union Reduction Phase 4 - New Model Exemptions
@@ -1328,12 +1206,18 @@ pattern_exemptions:
     reason: >
       ModelServiceInfo represents service metadata from discovery systems. "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - Kubernetes Service Discovery (https://kubernetes.io/docs/concepts/services-networking/service/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_info\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
       service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
 
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - CLAUDE.md (Model Field Naming - infrastructure identifiers)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/enum_service_discovery_operation\.py'
     class_pattern: "Class name 'EnumServiceDiscoveryOperation'"
@@ -1341,6 +1225,9 @@ pattern_exemptions:
     reason: >
       EnumServiceDiscoveryOperation defines operations for service discovery (REGISTER, DEREGISTER, DISCOVER). "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - Kubernetes Service Discovery (https://kubernetes.io/docs/concepts/services-networking/service/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_discovery_health_check_details\.py'
     class_pattern: "Class name 'ModelServiceDiscoveryHealthCheckDetails'"
@@ -1348,6 +1235,9 @@ pattern_exemptions:
     reason: >
       ModelServiceDiscoveryHealthCheckDetails contains health check configuration for service discovery. "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Health Checks (https://developer.hashicorp.com/consul/docs/services/usage/checks)
+      - Kubernetes Probes (https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_registration\.py'
     class_pattern: "Class name 'ModelServiceRegistration'"
@@ -1355,12 +1245,18 @@ pattern_exemptions:
     reason: >
       ModelServiceRegistration is the input model for registering services in discovery systems. "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Service Registration (https://developer.hashicorp.com/consul/api-docs/agent/service#register-service)
+      - Kubernetes Service Discovery (https://kubernetes.io/docs/concepts/services-networking/service/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_registration\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
       service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
 
+    documentation:
+      - HashiCorp Consul Service Registration (https://developer.hashicorp.com/consul/api-docs/agent/service#register-service)
+      - CLAUDE.md (Model Field Naming - infrastructure identifiers)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_discovery_health_check_result\.py'
     class_pattern: "Class name 'ModelServiceDiscoveryHealthCheckResult'"
@@ -1368,6 +1264,9 @@ pattern_exemptions:
     reason: >
       ModelServiceDiscoveryHealthCheckResult contains health check results from service discovery. "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Health Checks (https://developer.hashicorp.com/consul/docs/services/usage/checks)
+      - Kubernetes Probes (https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/registry/registry_infra_service_discovery\.py'
     class_pattern: "Class name 'RegistryInfraServiceDiscovery'"
@@ -1375,24 +1274,9 @@ pattern_exemptions:
     reason: >
       RegistryInfraServiceDiscovery is the DI registry for service discovery handlers. "Service" is the canonical domain term.
 
-    ticket: OMN-1131
-  - file_pattern: 'node_service_discovery_effect/protocols/protocol_discovery_operations\.py'
-    class_pattern: "Class name 'ProtocolDiscoveryOperations'"
-    violation_pattern: "contains anti-pattern 'Service'"
-    reason: >
-      ProtocolDiscoveryOperations defines the protocol for service discovery backends. "Service" is the canonical domain term from HashiCorp Consul and Kubernetes APIs.
-
     documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-    ticket: OMN-1131
-  - file_pattern: 'node_registration_storage_effect/protocols/protocol_registration_persistence\.py'
-    class_pattern: "Class name 'ProtocolRegistrationPersistence'"
-    violation_pattern: "contains anti-pattern 'Handler'"
-    reason: >
-      ProtocolRegistrationPersistence defines the persistence protocol for registration storage backends (PostgreSQL, Mock). This follows the pluggable handler architecture.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1131
   - file_pattern: 'handlers/registration_storage/handler_registration_storage_postgres\.py'
     method_pattern: "Function '__init__'"
@@ -1417,6 +1301,9 @@ pattern_exemptions:
     reason: >
       service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
 
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - CLAUDE.md (Model Field Naming - infrastructure identifiers)
     ticket: OMN-1131
   # ==========================================================================
   # Architecture Validator AST Exemptions (OMN-1099)
@@ -1522,26 +1409,6 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Model Field Naming - computed display names)
     ticket: OMN-1138
-  # ==========================================================================
-  # Architecture Validator Model Exemptions (model_architecture_violation.py) [OMN-1263]
-  # ==========================================================================
-  # Architecture violation rule_id and rule_name are human-readable identifiers.
-  - file_pattern: 'model_architecture_violation\.py'
-    violation_pattern: "Field 'rule_id' should use UUID"
-    reason: >
-      rule_id is a human-readable semantic identifier (e.g., "ARCH-001", "ARCH-002") for architecture validation rules. Used for CI output and developer reference. Not a UUID.
-
-    documentation:
-      - CLAUDE.md (ONEX Architecture - Handler Validation)
-    ticket: OMN-1263
-  - file_pattern: 'model_architecture_violation\.py'
-    violation_pattern: "Field 'rule_name' might reference an entity"
-    reason: >
-      rule_name is a human-readable descriptive label (e.g., "No Any Types", "One Model Per File") for architecture rules. It does not reference a rule entity - it is just a descriptive string for human consumption.
-
-    documentation:
-      - CLAUDE.md (ONEX Architecture - Handler Validation)
-    ticket: OMN-1263
   # ==========================================================================
   # ProjectorValidationError Exemptions (OMN-1168)
   # ==========================================================================
@@ -1667,16 +1534,6 @@ pattern_exemptions:
       - src/omnibase_infra/schemas/schema_registration_projection.sql (example usage)
       - src/omnibase_infra/models/projectors/model_projector_schema.py (ModelProjectorSchema defines table_name as identifier, temporary location in omnibase_infra)
     ticket: OMN-1168
-  # ModelProjectorValidationError __init__ requires 6 parameters for complete error context
-  - file_pattern: 'model_projector_validation_error\.py'
-    method_pattern: "Function '__init__'"
-    violation_pattern: 'has \d+ parameters'
-    reason: >
-      Error model requires multiple context parameters for complete error reporting: error_type, contract_path, message, remediation_hint, correlation_id. These are distinct required contexts for debugging projector validation failures.
-
-    documentation:
-      - docs/patterns/error_handling_patterns.md
-    ticket: OMN-1168
   # ==========================================================================
   # SecretResolver Exemptions (OMN-764)
   # ==========================================================================
@@ -1723,6 +1580,38 @@ pattern_exemptions:
     documentation:
       - docs/patterns/secret_resolver.md (Naming Conventions section)
     ticket: OMN-764
+  # ==========================================================================
+  # Observability Layer Exemptions (OMN-767)
+  # ==========================================================================
+  # The observability layer implements hot-path sinks and hooks that require
+  # comprehensive interfaces for metrics, logging, and timing operations.
+  # Per CLAUDE.md "Handlers own lifecycle, sinks own hot path" principle.
+  - file_pattern: 'sink_logging_structured\.py'
+    class_pattern: "Class 'SinkLoggingStructured'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Hot-path logging sink requires comprehensive interface for ProtocolHotPathLoggingSink compliance: emit(), flush(), buffer management, and output formatting. Methods are protocol-mandated.
+
+    documentation:
+      - CLAUDE.md (Observability Layer - Handlers own lifecycle, sinks own hot path)
+    ticket: OMN-767
+  - file_pattern: 'hook_observability\.py'
+    class_pattern: "Class 'HookObservability'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Pipeline observability hook requires comprehensive interface for cross-cutting concerns: before/after operation tracking, metrics integration, context management, retry tracking, and circuit breaker state changes.
+
+    documentation:
+      - CLAUDE.md (Observability Layer - Handlers own lifecycle, sinks own hot path)
+    ticket: OMN-767
+  - file_pattern: 'model_metrics_handler_config\.py'
+    violation_pattern: "Field 'job_name' might reference an entity"
+    reason: >
+      job_name is a Prometheus Pushgateway configuration value (human-readable string identifier), not an entity reference. It follows Prometheus naming conventions.
+
+    documentation:
+      - Prometheus Pushgateway documentation
+    ticket: OMN-767
   # ==========================================================================
   # BindingConfigResolver Exemptions (OMN-765)
   # ==========================================================================
@@ -1800,8 +1689,10 @@ architecture_exemptions:
     reason: >
       Domain-grouped models for timeout emission. ModelTimeoutEmissionResult and ModelTimeoutEmissionConfig define the complete interface for the ServiceTimeoutEmitter. Per CLAUDE.md domain-grouping convention for cohesive models that are always used together.
 
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+      - docs/patterns/timeout_scanner_emitter.md
     ticket: OMN-932
-# Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:
   # ==========================================================================

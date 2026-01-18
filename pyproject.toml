@@ -26,8 +26,17 @@ python = "^3.12"
 # - Breaking changes are communicated through semver major versions
 # - Internal packages are co-developed with this codebase
 #
-# omnibase-core v0.7.0: Major breaking changes release
-omnibase-core = "^0.7.0"
+# RELEASE STATUS: These packages are published to PyPI and version-pinned.
+# - omnibase-core: https://pypi.org/project/omnibase-core/
+# - omnibase-spi: https://pypi.org/project/omnibase-spi/
+#
+# PRE-RELEASE NOTE: If you need features from unreleased versions during
+# development, use git dependencies (comment out PyPI version):
+#   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
+# Remember to switch back to PyPI versions before merging to main.
+#
+# omnibase-core v0.8.0: Observability models (OMN-1367)
+omnibase-core = "^0.8.0"
 # omnibase-spi v0.5.0: Protocol updates for omnibase-core 0.7.0 compatibility
 omnibase-spi = "^0.5.0"
 
