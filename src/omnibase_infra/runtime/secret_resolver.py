@@ -136,13 +136,13 @@ from uuid import UUID, uuid4
 
 from pydantic import SecretStr
 
-from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     SecretResolutionError,
 )
 from omnibase_infra.runtime.models.model_cached_secret import ModelCachedSecret
@@ -158,8 +158,10 @@ from omnibase_infra.runtime.models.model_secret_source_spec import (
     ModelSecretSourceSpec,
     SecretSourceType,
 )
+from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.handlers.handler_vault import HandlerVault
 
 
@@ -319,6 +321,9 @@ MAX_ASYNC_KEY_LOCKS = 1000
 # Cache TTL jitter percentage for symmetric ±10% jitter (stampede prevention)
 CACHE_TTL_JITTER_PERCENT = 0.1
 
+# Rate limit interval for LRU eviction warnings (prevents log flooding)
+EVICTION_WARNING_INTERVAL_SECONDS = 60.0
+
 
 class SecretResolver:
     """Centralized secret resolution. Dumb and deterministic.
@@ -443,6 +448,10 @@ class SecretResolver:
         self._resolution_success_counts: defaultdict[str, int] = defaultdict(int)
         self._resolution_failure_counts: defaultdict[str, int] = defaultdict(int)
 
+        # === Rate Limiting for Warnings ===
+        # Track last eviction warning time to rate-limit log output
+        self._last_eviction_warning_time: float = 0.0
+
         # Build lookup table from mappings
         self._mappings: dict[str, ModelSecretSourceSpec] = {
             m.logical_name: m.source for m in config.mappings
@@ -452,6 +461,159 @@ class SecretResolver:
             for m in config.mappings
             if m.ttl_seconds is not None
         }
+
+    # === Container-Based Factory ===
+
+    @classmethod
+    async def from_container(
+        cls,
+        container: ModelONEXContainer,
+        config: ModelSecretResolverConfig,
+    ) -> SecretResolver:
+        """Create SecretResolver from ONEX container with dependency injection.
+
+        This async factory method supports the ONEX container-based dependency
+        injection pattern while the regular constructor remains available for
+        standalone use and testing scenarios.
+
+        The factory attempts to resolve optional dependencies (HandlerVault,
+        metrics collector) from the container's service registry. If a dependency
+        is not registered, the resolver is created without it - this allows
+        graceful degradation when optional services are unavailable.
+
+        Parameters:
+            This factory method accepts 2 parameters (both required):
+
+            - ``container`` (required): The ONEX container with registered services
+            - ``config`` (required): Resolver configuration with secret mappings
+
+        Args:
+            container: ONEX dependency injection container. May have HandlerVault
+                and/or ProtocolSecretResolverMetrics registered in its service
+                registry. These are resolved if available but not required.
+            config: Resolver configuration specifying secret mappings, default TTL,
+                and convention fallback settings. This is required because secret
+                mappings are application-specific and cannot be auto-discovered
+                from the container.
+
+        Returns:
+            Configured SecretResolver instance with container-resolved dependencies.
+
+        Raises:
+            ProtocolConfigurationError: If the container is invalid or missing
+                the required ``service_registry`` attribute. The error includes
+                :class:`ModelInfraErrorContext` with correlation_id for tracing.
+
+        Example:
+            Basic usage with container-resolved dependencies::
+
+                container = ModelONEXContainer()
+                await wire_infrastructure_services(container)
+
+                config = ModelSecretResolverConfig(
+                    mappings=[
+                        ModelSecretMapping(
+                            logical_name="database.password",
+                            source=ModelSecretSourceSpec(
+                                source_type=SecretSourceType.VAULT,
+                                path="secret/myapp/db#password",
+                            ),
+                        ),
+                    ],
+                )
+                resolver = await SecretResolver.from_container(container, config)
+                password = await resolver.get_secret_async("database.password")
+
+        Example (Container Without Optional Services):
+            If HandlerVault is not registered, Vault-sourced secrets will fail
+            at resolution time (not at factory creation)::
+
+                container = ModelONEXContainer()
+                # No wire_infrastructure_services() call - no Vault handler
+                resolver = await SecretResolver.from_container(container, config)
+                # Works for env/file secrets, fails for Vault secrets
+
+        Note:
+            **Why config is a required parameter:**
+
+            Unlike other services that can be fully configured via container
+            registration, SecretResolver requires explicit secret mappings that
+            are application-specific. The config defines:
+
+            - Which logical names map to which secret sources
+            - Default TTL for caching
+            - Whether convention fallback is enabled
+
+            These settings vary per application and cannot be auto-discovered
+            from the container's service registry.
+
+        See Also:
+            - :meth:`__init__`: Direct constructor for standalone usage
+            - :class:`ModelSecretResolverConfig`: Configuration model
+            - :class:`HandlerVault`: Vault handler for Vault-sourced secrets
+        """
+        from omnibase_infra.handlers.handler_vault import HandlerVault
+
+        correlation_id = generate_correlation_id()
+
+        # Validate container has service_registry
+        if not hasattr(container, "service_registry"):
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="from_container",
+                target_name="SecretResolver",
+            )
+            raise ProtocolConfigurationError(
+                "Container missing required 'service_registry' attribute. "
+                "Ensure container is a valid ModelONEXContainer instance.",
+                context=context,
+            )
+
+        # Try to resolve optional dependencies from container
+        vault_handler: HandlerVault | None = None
+        metrics_collector: ProtocolSecretResolverMetrics | None = None
+
+        # Attempt to resolve HandlerVault (optional)
+        try:
+            vault_handler = await container.service_registry.resolve_service(
+                HandlerVault
+            )
+            logger.debug(
+                "Resolved HandlerVault from container",
+                extra={"correlation_id": str(correlation_id)},
+            )
+        except Exception as e:
+            # HandlerVault not registered - this is acceptable
+            logger.debug(
+                "HandlerVault not available in container, Vault secrets disabled: %s",
+                type(e).__name__,
+                extra={"correlation_id": str(correlation_id)},
+            )
+
+        # Attempt to resolve metrics collector (optional)
+        # Note: We use a broad try/except since the protocol may not be registered
+        try:
+            metrics_collector = await container.service_registry.resolve_service(
+                ProtocolSecretResolverMetrics  # type: ignore[type-abstract]
+            )
+            logger.debug(
+                "Resolved ProtocolSecretResolverMetrics from container",
+                extra={"correlation_id": str(correlation_id)},
+            )
+        except Exception as e:
+            # Metrics collector not registered - this is acceptable
+            logger.debug(
+                "Metrics collector not available in container: %s",
+                type(e).__name__,
+                extra={"correlation_id": str(correlation_id)},
+            )
+
+        return cls(
+            config=config,
+            vault_handler=vault_handler,
+            metrics_collector=metrics_collector,
+        )
 
     # === Primary API (Sync) ===
 
@@ -633,6 +795,40 @@ class SecretResolver:
 
             return result
 
+    def _maybe_log_eviction_warning(self, evict_count: int) -> None:
+        """Log eviction warning with rate limiting (max once per minute).
+
+        Prevents log flooding in high-throughput scenarios where evictions
+        may occur frequently. The warning is only emitted if sufficient time
+        has passed since the last warning.
+
+        Args:
+            evict_count: Number of entries that were evicted.
+
+        Note:
+            Uses time.monotonic() for reliable elapsed time measurement
+            even if system clock changes.
+        """
+        current_time = time.monotonic()
+        if (
+            current_time - self._last_eviction_warning_time
+            >= EVICTION_WARNING_INTERVAL_SECONDS
+        ):
+            self._last_eviction_warning_time = current_time
+            logger.warning(
+                "Async key locks at capacity (%d). Evicted %d oldest entries. "
+                "This may indicate a DoS attack or dynamic logical name generation. "
+                "Consider validating logical names against configured mappings. "
+                "(Rate-limited: max 1 warning per minute)",
+                MAX_ASYNC_KEY_LOCKS,
+                evict_count,
+                extra={
+                    "max_locks": MAX_ASYNC_KEY_LOCKS,
+                    "evicted_count": evict_count,
+                    "current_count": len(self._async_key_locks),
+                },
+            )
+
     def _get_async_key_lock(self, logical_name: str) -> asyncio.Lock:
         """Get or create an async lock for a specific logical_name.
 
@@ -691,18 +887,8 @@ class SecretResolver:
                     for key in keys_to_evict:
                         del self._async_key_locks[key]
 
-                    logger.warning(
-                        "Async key locks at capacity (%d). Evicted %d oldest entries. "
-                        "This may indicate a DoS attack or dynamic logical name generation. "
-                        "Consider validating logical names against configured mappings.",
-                        MAX_ASYNC_KEY_LOCKS,
-                        evict_count,
-                        extra={
-                            "max_locks": MAX_ASYNC_KEY_LOCKS,
-                            "evicted_count": evict_count,
-                            "current_count": len(self._async_key_locks),
-                        },
-                    )
+                    # Rate-limited warning (max 1 per minute) to prevent log flooding
+                    self._maybe_log_eviction_warning(evict_count)
 
                 self._async_key_locks[logical_name] = asyncio.Lock()
 
@@ -890,9 +1076,9 @@ class SecretResolver:
                 if source_type == "cache" and hasattr(collector, "record_cache_hit"):
                     collector.record_cache_hit()
             except Exception as e:
-                # Never let metrics failures affect resolution, but log at warning
-                # level so operators can detect broken metrics collectors
-                logger.warning(
+                # Never let metrics failures affect resolution - log at debug
+                # level since these are explicitly ignored and non-fatal
+                logger.debug(
                     "Metrics collector error (ignored): %s",
                     e,
                     extra={
@@ -951,9 +1137,9 @@ class SecretResolver:
                 # are distinct from cache misses. Cache misses are already tracked
                 # in get_secret() and get_secret_async() via self._misses += 1
             except Exception as e:
-                # Never let metrics failures affect resolution, but log at warning
-                # level so operators can detect broken metrics collectors
-                logger.warning(
+                # Never let metrics failures affect resolution - log at debug
+                # level since these are explicitly ignored and non-fatal
+                logger.debug(
                     "Metrics collector error (ignored): %s",
                     e,
                     extra={
@@ -1547,7 +1733,7 @@ class SecretResolver:
         mount_point, vault_path, field = self._parse_vault_path_components(path)
 
         # Create envelope for vault.read_secret operation
-        envelope: JsonType = {
+        envelope: dict[str, object] = {
             "operation": "vault.read_secret",
             "payload": {
                 "path": vault_path,
