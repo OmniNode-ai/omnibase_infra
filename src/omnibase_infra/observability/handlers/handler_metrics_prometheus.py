@@ -76,6 +76,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import threading
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -195,12 +196,21 @@ _SCRAPE_DURATION_BUCKETS: tuple[float, ...] = (
 # duration value is available in the NEXT scrape (avoiding chicken-and-egg recursion).
 _scrape_duration_histogram: Histogram | None = None
 
+# Lock for thread-safe lazy initialization of the scrape duration histogram.
+# Prevents race conditions where multiple threads could create duplicate histograms.
+_histogram_init_lock: threading.Lock = threading.Lock()
+
 
 def _get_scrape_duration_histogram() -> Histogram | None:
     """Get or create the scrape duration histogram.
 
     Lazily initializes the histogram on first call to avoid import-time errors
     when prometheus_client is not installed.
+
+    Thread Safety:
+        Uses double-checked locking pattern to ensure thread-safe initialization.
+        The lock is only acquired when the histogram needs to be created, minimizing
+        contention after initial setup.
 
     Returns:
         Histogram metric for scrape duration, or None if prometheus_client unavailable.
@@ -210,12 +220,18 @@ def _get_scrape_duration_histogram() -> Histogram | None:
     if not _PROMETHEUS_AVAILABLE or Histogram is None:
         return None
 
+    # Double-checked locking pattern for thread-safe lazy initialization.
+    # First check without lock (fast path for already-initialized case).
     if _scrape_duration_histogram is None:
-        _scrape_duration_histogram = Histogram(
-            "prometheus_handler_scrape_duration_seconds",
-            "Time spent generating Prometheus metrics for scrape requests",
-            buckets=_SCRAPE_DURATION_BUCKETS,
-        )
+        with _histogram_init_lock:
+            # Second check with lock (handles race condition where multiple threads
+            # passed the first check before one acquired the lock and initialized).
+            if _scrape_duration_histogram is None:
+                _scrape_duration_histogram = Histogram(
+                    "prometheus_handler_scrape_duration_seconds",
+                    "Time spent generating Prometheus metrics for scrape requests",
+                    buckets=_SCRAPE_DURATION_BUCKETS,
+                )
 
     return _scrape_duration_histogram
 

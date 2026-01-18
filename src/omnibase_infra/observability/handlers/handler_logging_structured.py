@@ -249,7 +249,22 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         )
 
         if self._initialized:
+            # Log warning before raising to help users understand their config
+            # is not being applied (the handler maintains existing configuration)
+            logger.warning(
+                "Handler %s already initialized; ignoring new configuration. "
+                "Call shutdown() first to reinitialize with new config.",
+                self.__class__.__name__,
+                extra={
+                    "handler": self.__class__.__name__,
+                    "correlation_id": str(init_correlation_id),
+                    "existing_config": self._config.model_dump()
+                    if self._config
+                    else None,
+                },
+            )
             ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=init_correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="initialize",
                 target_name="logging_handler",

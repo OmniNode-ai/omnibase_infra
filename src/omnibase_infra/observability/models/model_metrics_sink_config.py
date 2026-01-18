@@ -49,7 +49,27 @@ class ModelMetricsSinkConfig(BaseModel):
             no prefix is added.
         histogram_buckets: Bucket boundaries for histogram metrics. Defaults
             to Prometheus-standard latency buckets suitable for request
-            durations in seconds.
+            durations in seconds. Must be positive and monotonically increasing.
+
+    Histogram Bucket Configuration:
+        Customize histogram_buckets based on your operation characteristics:
+
+        **API/HTTP Latencies (default)**: The default buckets (0.005s to 10s)
+        are optimized for typical web service request durations where most
+        requests complete in milliseconds but some may take seconds.
+
+        **Sub-millisecond Operations**: For fast operations like cache lookups,
+        in-memory computations, or high-frequency trading:
+        ``(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05)``
+
+        **Batch Processing**: For long-running jobs, ETL pipelines, or
+        background tasks that may take minutes:
+        ``(1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0)``
+
+        **SLA-Aligned**: Include buckets at your SLA thresholds for alerting.
+        If your SLA is "99% of requests under 200ms", include a 0.2 bucket.
+
+        Bucket boundaries are validated to be positive and strictly ascending.
 
     Example:
         ```python
@@ -78,7 +98,14 @@ class ModelMetricsSinkConfig(BaseModel):
     )
     histogram_buckets: tuple[float, ...] = Field(
         default=DEFAULT_HISTOGRAM_BUCKETS,
-        description="Bucket boundaries for histogram metrics in seconds.",
+        description=(
+            "Bucket boundaries for histogram metrics in seconds. "
+            "Customize based on your operation characteristics: "
+            "API latencies (0.005-10s default), sub-millisecond operations "
+            "(0.0001, 0.0005, 0.001, 0.005, 0.01), or batch processing "
+            "(1.0, 5.0, 10.0, 30.0, 60.0, 300.0). Include buckets near "
+            "SLA thresholds for effective alerting."
+        ),
     )
 
     @field_validator("histogram_buckets")

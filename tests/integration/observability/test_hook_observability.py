@@ -37,6 +37,7 @@ Why contextvars ARE correct:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from typing import TYPE_CHECKING
@@ -923,8 +924,6 @@ class TestBufferGaugeValidation:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify negative buffer gauge values trigger a warning log."""
-        import logging
-
         hook = HookObservability(metrics_sink=mock_metrics_sink)
 
         with caplog.at_level(logging.WARNING):
@@ -973,8 +972,6 @@ class TestHighCardinalityFilteringLogging:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify filtering high-cardinality labels produces debug log."""
-        import logging
-
         hook = HookObservability(metrics_sink=mock_metrics_sink)
 
         with caplog.at_level(logging.DEBUG):
@@ -999,8 +996,6 @@ class TestHighCardinalityFilteringLogging:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify no filtering log when no high-cardinality labels present."""
-        import logging
-
         hook = HookObservability(metrics_sink=mock_metrics_sink)
 
         with caplog.at_level(logging.DEBUG):

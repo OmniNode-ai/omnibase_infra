@@ -61,6 +61,9 @@ def cleanup_default_registry() -> Generator[None, None, None]:
     Use this when tests must use the default REGISTRY (e.g., for
     generate_latest() compatibility).
 
+    RECOMMENDATION: Prefer ``isolated_registry`` fixture when possible.
+    This fixture exists for tests requiring the default REGISTRY.
+
     Yields:
         None. Cleanup runs on test teardown.
 
@@ -93,23 +96,47 @@ def cleanup_default_registry() -> Generator[None, None, None]:
     # INTERNAL API: _names_to_collectors - see docstring for rationale and risk
     # WARNING: This private attribute may change between prometheus_client versions.
     # Verified working with prometheus_client 0.17.x - 0.21.x
+
+    # Defensive check: verify internal API exists before proceeding
+    if not hasattr(REGISTRY, "_names_to_collectors"):
+        # Internal API changed - skip cleanup and warn via pytest
+        import warnings
+
+        warnings.warn(
+            "prometheus_client internal API changed: _names_to_collectors not found. "
+            "Test cleanup disabled. Consider using isolated_registry fixture instead.",
+            UserWarning,
+            stacklevel=2,
+        )
+        yield
+        return
+
     # Track collectors before test
-    collectors_before = set(REGISTRY._names_to_collectors.keys())
+    try:
+        collectors_before = set(REGISTRY._names_to_collectors.keys())
+    except (AttributeError, TypeError):
+        # Defensive: if iteration fails, skip cleanup
+        yield
+        return
 
     yield
 
     # Remove collectors added during test
-    collectors_after = set(REGISTRY._names_to_collectors.keys())
-    new_collectors = collectors_after - collectors_before
+    try:
+        collectors_after = set(REGISTRY._names_to_collectors.keys())
+        new_collectors = collectors_after - collectors_before
 
-    for name in new_collectors:
-        try:
-            collector = REGISTRY._names_to_collectors.get(name)
-            if collector is not None:
-                REGISTRY.unregister(collector)
-        except Exception:
-            # Silently ignore cleanup failures - best-effort cleanup
-            pass
+        for name in new_collectors:
+            try:
+                collector = REGISTRY._names_to_collectors.get(name)
+                if collector is not None:
+                    REGISTRY.unregister(collector)
+            except Exception:
+                # Silently ignore individual cleanup failures - best-effort cleanup
+                pass
+    except (AttributeError, TypeError):
+        # Defensive: if cleanup fails entirely, silently continue
+        pass
 
 
 # =============================================================================

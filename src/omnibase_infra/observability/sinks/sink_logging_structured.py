@@ -125,6 +125,11 @@ _STRUCTLOG_LEVEL_MAP: dict[str, str] = {
     "unknown": "info",  # unknown defaults to info
 }
 
+# Default values for required context keys when not provided
+_DEFAULT_CORRELATION_ID = "00000000-0000-0000-0000-000000000000"
+_DEFAULT_NODE_ID = "unknown"
+_DEFAULT_OPERATION = "unknown"
+
 
 class SinkLoggingStructured:
     """Structured logging sink implementing ProtocolHotPathLoggingSink.
@@ -206,6 +211,11 @@ class SinkLoggingStructured:
     # Used to warn once per session about missing recommended keys
     _warned_missing_keys: set[str] = set()
 
+    # Instance tracking for global state conflict detection
+    # When multiple instances exist, warn users about potential conflicts
+    _instance_count: int = 0
+    _warned_multiple_instances: bool = False
+
     def __init__(
         self,
         max_buffer_size: int = 1000,
@@ -256,6 +266,9 @@ class SinkLoggingStructured:
         self._lock = threading.Lock()
         self._drop_count = 0
         self._logger = self._configure_structlog()
+
+        # Track instances and warn about potential global state conflicts
+        self._track_instance_creation()
 
     def _configure_structlog(self) -> structlog.BoundLogger:
         """Configure and return a structlog logger instance.
@@ -327,6 +340,43 @@ class SinkLoggingStructured:
             context_class=dict,
         )
         return logger
+
+    def _track_instance_creation(self) -> None:
+        """Track instance creation and warn about potential global state conflicts.
+
+        This method increments the class-level instance counter and emits a
+        warning when multiple instances are detected. While this sink uses
+        structlog.wrap_logger() to avoid global state modification, the warning
+        helps users understand that:
+
+        1. Multiple instances with different output formats can coexist safely
+        2. If other code calls structlog.configure(), it may affect all instances
+        3. Base logger configuration (PrintLogger) is shared
+
+        The warning is emitted once per process to avoid log spam.
+
+        Note:
+            This is a best-effort detection mechanism. In multi-threaded code,
+            the instance count may not be perfectly accurate, but this is
+            acceptable since the warning is informational only.
+        """
+        SinkLoggingStructured._instance_count += 1
+
+        if (
+            SinkLoggingStructured._instance_count > 1
+            and not SinkLoggingStructured._warned_multiple_instances
+        ):
+            SinkLoggingStructured._warned_multiple_instances = True
+            warnings.warn(
+                f"Multiple SinkLoggingStructured instances detected "
+                f"(count: {SinkLoggingStructured._instance_count}). "
+                f"While each instance has isolated processor chains via wrap_logger(), "
+                f"be aware that: (1) structlog.configure() called elsewhere may affect "
+                f"all instances, (2) all instances share the same base PrintLogger. "
+                f"This is typically fine but may cause unexpected behavior if you "
+                f"rely on global structlog configuration.",
+                stacklevel=3,  # Point to the caller that created the instance
+            )
 
     @property
     def max_buffer_size(self) -> int:
@@ -560,32 +610,43 @@ class SinkLoggingStructured:
         Args:
             entry: The buffered log entry to emit.
 
-        Context Keys Added:
-            - ``original_timestamp``: Preserved from emit() time to track latency
-              between buffering and flushing. This is distinct from structlog's
-              ``timestamp`` which reflects flush time.
+        Required Context Keys (always present in output):
+            The following keys are GUARANTEED to be present in every log entry.
+            If not provided by the caller, defaults are applied:
+
+            - ``original_timestamp``: ISO-8601 timestamp from emit() time
+            - ``correlation_id``: Default "00000000-0000-0000-0000-000000000000" if missing
+            - ``node_id``: Default "unknown" if missing
+            - ``operation``: Default "unknown" if missing
+
+            The structlog processor chain adds additional keys:
+            - ``level``: Log level string (via add_log_level processor)
+            - ``timestamp``: ISO-8601 timestamp at flush time (via TimeStamper)
 
         JSON Output Guarantee:
             When output_format="json", this method ensures valid JSON output:
             - All context values are JSON-serializable (enforced by JsonType)
             - Special characters are properly escaped
             - Output is single-line (no embedded newlines)
-
-        Note:
-            The structlog processor chain adds additional keys:
-            - ``level``: Log level string (via add_log_level processor)
-            - ``timestamp``: ISO-8601 timestamp at flush time (via TimeStamper)
+            - All required keys are present with valid values
         """
         # Map the log level to structlog method name
         level_str = str(entry.level.value).lower()
         structlog_level = _STRUCTLOG_LEVEL_MAP.get(level_str, "info")
 
-        # Build context dict with required timestamp
+        # Build context dict with REQUIRED keys guaranteed present
+        # Apply defaults for recommended keys if not provided by caller
         # All values are JsonType (JSON-compatible) for serialization safety
         log_context: dict[str, JsonType] = {
+            # Always-present auto-added key
             EnumRequiredLogContextKey.ORIGINAL_TIMESTAMP: entry.timestamp.isoformat(),
-            **entry.context,
+            # Required keys with defaults (applied first, then overwritten by entry.context)
+            EnumRequiredLogContextKey.CORRELATION_ID: _DEFAULT_CORRELATION_ID,
+            EnumRequiredLogContextKey.NODE_ID: _DEFAULT_NODE_ID,
+            EnumRequiredLogContextKey.OPERATION: _DEFAULT_OPERATION,
         }
+        # Caller-provided context overwrites defaults
+        log_context.update(entry.context)
 
         try:
             # Get the appropriate structlog method and call it
@@ -606,18 +667,28 @@ class SinkLoggingStructured:
         silently lost when structlog encounters errors. Output is always
         JSON format to maintain consistency with the primary output.
 
+        This fallback also ensures all required context keys are present
+        with defaults, maintaining the same guarantees as the primary path.
+
         Args:
             entry: The log entry to emit.
             level: The log level string.
         """
         try:
             # Always emit JSON for fallback to ensure consistent format
+            # Include all required context keys with defaults (same as primary path)
             fallback_entry: dict[str, JsonType] = {
                 EnumRequiredLogContextKey.TIMESTAMP: entry.timestamp.isoformat(),
                 EnumRequiredLogContextKey.LEVEL: level.upper(),
+                EnumRequiredLogContextKey.ORIGINAL_TIMESTAMP: entry.timestamp.isoformat(),
+                # Required keys with defaults
+                EnumRequiredLogContextKey.CORRELATION_ID: _DEFAULT_CORRELATION_ID,
+                EnumRequiredLogContextKey.NODE_ID: _DEFAULT_NODE_ID,
+                EnumRequiredLogContextKey.OPERATION: _DEFAULT_OPERATION,
                 "message": entry.message,
-                **entry.context,
             }
+            # Caller-provided context overwrites defaults
+            fallback_entry.update(entry.context)
             # Use json.dumps for guaranteed valid JSON output
             print(json.dumps(fallback_entry, default=str), file=sys.stderr)
         except (ValueError, TypeError, OSError):
@@ -648,6 +719,31 @@ class SinkLoggingStructured:
         warnings, allowing warnings to be emitted again. Useful for testing.
         """
         cls._warned_missing_keys.clear()
+
+    @classmethod
+    def reset_instance_tracking(cls) -> int:
+        """Reset the class-level instance tracking state.
+
+        This method resets the instance counter and warning flag.
+        Returns the previous instance count. Useful for testing.
+
+        Returns:
+            The number of instances that were tracked before the reset.
+        """
+        previous_count = cls._instance_count
+        cls._instance_count = 0
+        cls._warned_multiple_instances = False
+        return previous_count
+
+    @classmethod
+    def get_instance_count(cls) -> int:
+        """Get the current number of tracked instances.
+
+        Returns:
+            The number of SinkLoggingStructured instances created since
+            the last reset or process start.
+        """
+        return cls._instance_count
 
 
 __all__ = ["SinkLoggingStructured"]
