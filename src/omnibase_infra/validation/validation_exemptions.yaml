@@ -1723,6 +1723,38 @@ pattern_exemptions:
     documentation:
       - docs/patterns/secret_resolver.md (Naming Conventions section)
     ticket: OMN-764
+  # ==========================================================================
+  # Observability Layer Exemptions (OMN-767)
+  # ==========================================================================
+  # The observability layer implements hot-path sinks and hooks that require
+  # comprehensive interfaces for metrics, logging, and timing operations.
+  # Per CLAUDE.md "Handlers own lifecycle, sinks own hot path" principle.
+  - file_pattern: 'sink_logging_structured\.py'
+    class_pattern: "Class 'SinkLoggingStructured'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Hot-path logging sink requires comprehensive interface for ProtocolHotPathLoggingSink compliance: emit(), flush(), buffer management, and output formatting. Methods are protocol-mandated.
+
+    documentation:
+      - CLAUDE.md (Observability Layer - Handlers own lifecycle, sinks own hot path)
+    ticket: OMN-767
+  - file_pattern: 'hook_observability\.py'
+    class_pattern: "Class 'HookObservability'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Pipeline observability hook requires comprehensive interface for cross-cutting concerns: before/after operation tracking, metrics integration, context management, retry tracking, and circuit breaker state changes.
+
+    documentation:
+      - CLAUDE.md (Observability Layer - Handlers own lifecycle, sinks own hot path)
+    ticket: OMN-767
+  - file_pattern: 'model_metrics_handler_config\.py'
+    violation_pattern: "Field 'job_name' might reference an entity"
+    reason: >
+      job_name is a Prometheus Pushgateway configuration value (human-readable string identifier), not an entity reference. It follows Prometheus naming conventions.
+
+    documentation:
+      - Prometheus Pushgateway documentation
+    ticket: OMN-767
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -1782,71 +1814,6 @@ architecture_exemptions:
       Domain-grouped models for timeout emission. ModelTimeoutEmissionResult and ModelTimeoutEmissionConfig define the complete interface for the ServiceTimeoutEmitter. Per CLAUDE.md domain-grouping convention for cohesive models that are always used together.
 
     ticket: OMN-932
-  # ==========================================================================
-  # Observability Layer Exemptions (OMN-767)
-  # ==========================================================================
-  # The observability layer implements hot-path sinks and hooks that require
-  # comprehensive interfaces for metrics, logging, and timing operations.
-  # Per CLAUDE.md "Handlers own lifecycle, sinks own hot path" principle.
-  - file_pattern: 'sink_logging_structured\.py'
-    class_pattern: "Class 'SinkLoggingStructured'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      Hot-path logging sink requires comprehensive interface for ProtocolHotPathLoggingSink compliance: emit(), flush(), buffer management, and output formatting. Methods are protocol-mandated.
-
-    documentation:
-      - CLAUDE.md (Observability Layer - Handlers own lifecycle, sinks own hot path)
-    ticket: OMN-767
-  - file_pattern: 'hook_observability\.py'
-    class_pattern: "Class 'HookObservability'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      Pipeline observability hook requires comprehensive interface for cross-cutting concerns: before/after operation tracking, metrics integration, context management, retry tracking, and circuit breaker state changes.
-
-    documentation:
-      - CLAUDE.md (Observability Layer - Handlers own lifecycle, sinks own hot path)
-    ticket: OMN-767
-  - file_pattern: 'model_metrics_handler_config\.py'
-    violation_pattern: "Field 'job_name' might reference an entity"
-    reason: >
-      job_name is a Prometheus Pushgateway configuration value (human-readable string identifier), not an entity reference. It follows Prometheus naming conventions.
-
-    documentation:
-      - Prometheus Pushgateway documentation
-    ticket: OMN-767
-    # Union usage validator exemptions
-  # ==========================================================================
-  # Observability Layer Exemptions (OMN-767)
-  # ==========================================================================
-  # The observability layer implements hot-path sinks and hooks that require
-  # comprehensive interfaces for metrics, logging, and timing operations.
-  # Per CLAUDE.md "Handlers own lifecycle, sinks own hot path" principle.
-  - file_pattern: 'sink_logging_structured\.py'
-    class_pattern: "Class 'SinkLoggingStructured'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      Hot-path logging sink requires comprehensive interface for ProtocolHotPathLoggingSink compliance.
-
-    documentation:
-      - CLAUDE.md (Observability Layer)
-    ticket: OMN-767
-  - file_pattern: 'hook_observability\.py'
-    class_pattern: "Class 'HookObservability'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      Pipeline observability hook requires comprehensive interface for cross-cutting concerns.
-
-    documentation:
-      - CLAUDE.md (Observability Layer)
-    ticket: OMN-767
-  - file_pattern: 'model_metrics_handler_config\.py'
-    violation_pattern: "Field 'job_name' might reference an entity"
-    reason: >
-      job_name is a Prometheus Pushgateway configuration value, not an entity reference.
-
-    documentation:
-      - Prometheus Pushgateway documentation
-    ticket: OMN-767
 # These handle complex union type violations
 union_exemptions:
   # ==========================================================================
@@ -1862,37 +1829,3 @@ union_exemptions:
       - CLAUDE.md (Type Annotation Conventions - Union patterns)
       - Standard JSON config pattern (RFC 8259)
     ticket: null
-  # ==========================================================================
-  # Observability Layer Exemptions (OMN-767)
-  # ==========================================================================
-  # The observability layer implements hot-path sinks and hooks that require
-  # comprehensive interfaces for metrics, logging, and timing operations.
-  # Per CLAUDE.md "Handlers own lifecycle, sinks own hot path" principle.
-  - file_pattern: 'sink_logging_structured\.py'
-    class_pattern: "Class 'SinkLoggingStructured'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      Hot-path logging sink requires comprehensive interface for ProtocolHotPathLoggingSink compliance: emit(), flush(), buffer management, and output formatting. Methods are protocol-mandated and cannot be reduced without breaking protocol compliance.
-
-    documentation:
-      - CLAUDE.md (Observability Layer - Handlers own lifecycle, sinks own hot path)
-      - OMN-1368 (Observability Protocols)
-    ticket: OMN-767
-  - file_pattern: 'hook_observability\.py'
-    class_pattern: "Class 'HookObservability'"
-    violation_pattern: 'has \d+ methods'
-    reason: >
-      Pipeline observability hook requires comprehensive interface for cross-cutting concerns: before/after operation tracking, metrics integration, context management, retry tracking, and circuit breaker state changes. Methods support the full observability contract per OMN-767 acceptance criteria.
-
-    documentation:
-      - CLAUDE.md (Observability Layer - Handlers own lifecycle, sinks own hot path)
-      - OMN-767 (Observability Layer Requirements)
-    ticket: OMN-767
-  - file_pattern: 'model_metrics_handler_config\.py'
-    violation_pattern: "Field 'job_name' might reference an entity"
-    reason: >
-      job_name is a Prometheus Pushgateway configuration value (human-readable string identifier), not an entity reference. It follows Prometheus naming conventions where job_name identifies the source of metrics in push scenarios.
-
-    documentation:
-      - Prometheus Pushgateway documentation
-    ticket: OMN-767

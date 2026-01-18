@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from prometheus_client import Counter, Gauge, Histogram
 
@@ -233,7 +233,8 @@ class SinkMetricsPrometheus:
         # - Returns labels (possibly stripped) if allowed
         # - Returns None if metric should be dropped
         # - Raises ModelOnexError if on_violation=RAISE
-        return self._policy.enforce_labels(labels)
+        # Cast needed because omnibase_core lacks type stubs
+        return cast("dict[str, str] | None", self._policy.enforce_labels(labels))
 
     def _get_or_create_counter(
         self,
