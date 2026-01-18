@@ -92,6 +92,7 @@ from uuid import UUID, uuid4
 
 import yaml
 
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.runtime.models.model_binding_config import ModelBindingConfig
@@ -257,8 +258,11 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             self._secret_resolver = container.service_registry.resolve_service(
                 SecretResolver
             )
-        except Exception:
+        except (ImportError, KeyError, AttributeError):
             # SecretResolver is optional - if not registered, vault: schemes won't work
+            # ImportError: SecretResolver module not available
+            # KeyError: SecretResolver not registered in service registry
+            # AttributeError: service_registry missing resolve_service method (test mocks)
             pass
 
         self._cache: dict[str, ModelConfigCacheEntry] = {}
@@ -290,7 +294,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self,
         handler_type: str,
         config_ref: str | None = None,
-        inline_config: dict[str, object] | None = None,
+        inline_config: dict[str, JsonType] | None = None,
         correlation_id: UUID | None = None,
     ) -> ModelBindingConfig:
         """Resolve handler configuration synchronously.
@@ -412,7 +416,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self,
         handler_type: str,
         config_ref: str | None = None,
-        inline_config: dict[str, object] | None = None,
+        inline_config: dict[str, JsonType] | None = None,
         correlation_id: UUID | None = None,
     ) -> ModelBindingConfig:
         """Resolve handler configuration asynchronously.
@@ -1672,8 +1676,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 expected_type="boolean (true/false/1/0/yes/no/on/off)",
                 correlation_id=correlation_id,
             )
-            # In non-strict mode, coerce to False for backwards compatibility
-            return False
+            # In non-strict mode, skip override (return None) to match other types
+            return None
 
         # Integer fields
         if field in {
@@ -1825,16 +1829,36 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result[key] = secret.get_secret_value()
                     else:
+                        # Secret not found - check fail_on_vault_error
+                        if self._config.fail_on_vault_error:
+                            logger.error(
+                                "Vault secret not found for config key '%s'",
+                                key,
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "config_key": key,
+                                },
+                            )
+                            context = ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.VAULT,
+                                operation="resolve_vault_refs",
+                                target_name="binding_config_resolver",
+                            )
+                            raise ProtocolConfigurationError(
+                                f"Vault secret not found for config key '{key}'",
+                                context=context,
+                            )
                         result[key] = value  # Keep original if not found
                 except Exception as e:
                     # Log at ERROR level since silent fallback may be insecure
                     # Use logger.exception to include traceback for debugging
+                    # SECURITY: Do not log vault_path - reveals secret structure
                     logger.exception(
                         "Failed to resolve vault reference for config key '%s'",
                         key,
                         extra={
                             "correlation_id": str(correlation_id),
-                            "vault_path": logical_name,
                             "config_key": key,
                         },
                     )
@@ -1914,14 +1938,34 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result.append(secret.get_secret_value())
                     else:
+                        # Secret not found - check fail_on_vault_error
+                        if self._config.fail_on_vault_error:
+                            logger.error(
+                                "Vault secret not found at list index %d",
+                                i,
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "list_index": i,
+                                },
+                            )
+                            context = ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.VAULT,
+                                operation="resolve_vault_refs_in_list",
+                                target_name="binding_config_resolver",
+                            )
+                            raise ProtocolConfigurationError(
+                                f"Vault secret not found at list index {i}",
+                                context=context,
+                            )
                         result.append(item)  # Keep original if not found
                 except Exception as e:
+                    # SECURITY: Do not log vault_path - reveals secret structure
                     logger.exception(
                         "Failed to resolve vault reference at list index %d",
                         i,
                         extra={
                             "correlation_id": str(correlation_id),
-                            "vault_path": logical_name,
                             "list_index": i,
                         },
                     )
@@ -2013,16 +2057,36 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result[key] = secret.get_secret_value()
                     else:
+                        # Secret not found - check fail_on_vault_error
+                        if self._config.fail_on_vault_error:
+                            logger.error(
+                                "Vault secret not found for config key '%s'",
+                                key,
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "config_key": key,
+                                },
+                            )
+                            context = ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.VAULT,
+                                operation="resolve_vault_refs_async",
+                                target_name="binding_config_resolver",
+                            )
+                            raise ProtocolConfigurationError(
+                                f"Vault secret not found for config key '{key}'",
+                                context=context,
+                            )
                         result[key] = value  # Keep original if not found
                 except Exception as e:
                     # Log at ERROR level since silent fallback may be insecure
                     # Use logger.exception to include traceback for debugging
+                    # SECURITY: Do not log vault_path - reveals secret structure
                     logger.exception(
                         "Failed to resolve vault reference for config key '%s'",
                         key,
                         extra={
                             "correlation_id": str(correlation_id),
-                            "vault_path": logical_name,
                             "config_key": key,
                         },
                     )
@@ -2106,14 +2170,34 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result.append(secret.get_secret_value())
                     else:
+                        # Secret not found - check fail_on_vault_error
+                        if self._config.fail_on_vault_error:
+                            logger.error(
+                                "Vault secret not found at list index %d",
+                                i,
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "list_index": i,
+                                },
+                            )
+                            context = ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.VAULT,
+                                operation="resolve_vault_refs_in_list_async",
+                                target_name="binding_config_resolver",
+                            )
+                            raise ProtocolConfigurationError(
+                                f"Vault secret not found at list index {i}",
+                                context=context,
+                            )
                         result.append(item)  # Keep original if not found
                 except Exception as e:
+                    # SECURITY: Do not log vault_path - reveals secret structure
                     logger.exception(
                         "Failed to resolve vault reference at list index %d",
                         i,
                         extra={
                             "correlation_id": str(correlation_id),
-                            "vault_path": logical_name,
                             "list_index": i,
                         },
                     )

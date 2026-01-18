@@ -890,8 +890,14 @@ class TestBindingConfigResolverEnvOverrides:
 
             assert isinstance(exc_info.value.model.correlation_id, UUID)
 
-    def test_invalid_boolean_env_value_non_strict_mode_coerces(self) -> None:
-        """Invalid boolean value in non-strict mode coerces to False with warning."""
+    def test_invalid_boolean_env_value_non_strict_mode_skips_override(self) -> None:
+        """Invalid boolean value in non-strict mode skips override with warning.
+
+        Unlike the old behavior that coerced to False, the new behavior
+        skips the override entirely (returns None from _convert_env_value),
+        preserving the original config value. This is consistent with how
+        other types (integer, float) handle invalid values.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -904,11 +910,11 @@ class TestBindingConfigResolverEnvOverrides:
             with patch.dict(os.environ, {"HANDLER_DB_ENABLED": "invalid_value"}):
                 result = resolver.resolve(
                     handler_type="db",
-                    inline_config={"enabled": True},  # Would be True without override
+                    inline_config={"enabled": True},  # Original value preserved
                 )
 
-            # Invalid value coerced to False for backwards compatibility
-            assert result.enabled is False
+            # Invalid value is skipped, original config value preserved
+            assert result.enabled is True
 
     def test_valid_boolean_env_values_truthy(self) -> None:
         """Valid truthy boolean environment variable values are parsed correctly."""
@@ -2817,6 +2823,106 @@ class TestAsyncKeyLockCleanup:
             # Verify lock is released after resolution
             lock = resolver._async_key_locks[handler_type]
             assert not lock.locked(), "Lock should be released after resolution"
+
+    @pytest.mark.asyncio
+    async def test_async_key_lock_cleanup_removes_stale_locks(self) -> None:
+        """Test that stale locks created through resolve_async are cleaned up.
+
+        This is an end-to-end test that verifies the async lock cleanup mechanism
+        when locks are created through actual resolve_async() calls, not through
+        direct _get_async_key_lock() calls.
+
+        The test:
+        1. Creates a resolver with container
+        2. Makes multiple async resolve calls to create locks
+        3. Verifies locks are created
+        4. Simulates time passage by manipulating timestamps
+        5. Triggers cleanup via threshold
+        6. Verifies stale locks are removed
+
+        Related:
+        - OMN-765: BindingConfigResolver implementation
+        - PR #168 review feedback: missing test for async lock cleanup
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                enable_caching=False,  # Disable caching to force resolution each time
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Make multiple async resolve calls to create locks
+            handler_types = ["handler_a", "handler_b", "handler_c"]
+            for handler_type in handler_types:
+                await resolver.resolve_async(
+                    handler_type=handler_type,
+                    inline_config={"timeout_ms": 5000},
+                )
+
+            # Verify locks were created through resolve_async
+            for handler_type in handler_types:
+                assert handler_type in resolver._async_key_locks, (
+                    f"Lock for {handler_type} should exist after resolve_async"
+                )
+                assert handler_type in resolver._async_key_lock_timestamps, (
+                    f"Timestamp for {handler_type} should exist after resolve_async"
+                )
+
+            # Verify cache stats report correct lock count
+            stats = resolver.get_cache_stats()
+            assert stats.async_key_lock_count == len(handler_types)
+            assert stats.async_key_lock_cleanups == 0
+
+            # Simulate time passage by making locks appear stale
+            # _ASYNC_KEY_LOCK_MAX_AGE_SECONDS is 3600 (1 hour)
+            stale_time = time.monotonic() - 4000  # Older than 3600 seconds
+            with resolver._lock:
+                for handler_type in handler_types:
+                    resolver._async_key_lock_timestamps[handler_type] = stale_time
+
+            # To trigger cleanup, we need to exceed _ASYNC_KEY_LOCK_CLEANUP_THRESHOLD (1000)
+            # Add enough locks to exceed threshold
+            with resolver._lock:
+                for i in range(1001):
+                    lock = asyncio.Lock()
+                    resolver._async_key_locks[f"bulk_handler_{i}"] = lock
+                    resolver._async_key_lock_timestamps[f"bulk_handler_{i}"] = (
+                        stale_time
+                    )
+
+            # Verify we have many locks now (original + bulk)
+            assert len(resolver._async_key_locks) > 1000
+
+            # Trigger cleanup by creating one more lock via resolve_async
+            # This should call _get_async_key_lock which triggers cleanup when threshold exceeded
+            await resolver.resolve_async(
+                handler_type="trigger_handler",
+                inline_config={"timeout_ms": 5000},
+            )
+
+            # Verify stale locks were cleaned up
+            # Only the trigger_handler (which is recent) should remain
+            for handler_type in handler_types:
+                assert handler_type not in resolver._async_key_locks, (
+                    f"Stale lock for {handler_type} should be removed after cleanup"
+                )
+                assert handler_type not in resolver._async_key_lock_timestamps, (
+                    f"Stale timestamp for {handler_type} should be removed after cleanup"
+                )
+
+            # Bulk handlers should also be removed (they were also stale)
+            for i in range(1001):
+                assert f"bulk_handler_{i}" not in resolver._async_key_locks
+
+            # Only the trigger_handler should remain
+            assert "trigger_handler" in resolver._async_key_locks
+            assert len(resolver._async_key_locks) == 1
+
+            # Verify cleanup counter was incremented
+            stats = resolver.get_cache_stats()
+            assert stats.async_key_lock_cleanups == 1
+            assert stats.async_key_lock_count == 1
 
 
 class TestVaultReferencesInLists:

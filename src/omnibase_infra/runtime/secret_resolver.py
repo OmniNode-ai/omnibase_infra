@@ -445,11 +445,21 @@ class SecretResolver:
                 operation="get_secrets_async",
                 target_name="secret_resolver",
             )
-            failed_list = ", ".join(failed_secrets)
+            # SECURITY: Log failed secret names at DEBUG level only (with correlation_id)
+            # to avoid exposing secret structure in error messages shown to users/logs
+            logger.debug(
+                "Failed to resolve secrets (correlation_id=%s): %s",
+                context.correlation_id,
+                ", ".join(failed_secrets),
+                extra={
+                    "correlation_id": str(context.correlation_id),
+                    "failed_count": len(failed_secrets),
+                },
+            )
             raise SecretResolutionError(
-                f"Failed to resolve {len(failed_secrets)} secret(s): {failed_list}",
+                f"Failed to resolve {len(failed_secrets)} secret(s)",
                 context=context,
-                logical_name=failed_secrets[0],  # Primary failed secret
+                logical_name=failed_secrets[0],  # Primary failed secret (internal use)
             )
 
         return successful_results

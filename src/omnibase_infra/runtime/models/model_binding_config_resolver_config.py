@@ -10,12 +10,12 @@ which resolves handler-specific configuration from multiple sources (file, env, 
 
 Example:
     >>> from pathlib import Path
+    >>> from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
     >>> config = ModelBindingConfigResolverConfig(
     ...     config_dir=Path("/workspace/configs"),
     ...     cache_ttl_seconds=600.0,
     ...     env_prefix="HANDLER",
     ... )
-    >>> resolver = BindingConfigResolver(container=container)
 """
 
 from __future__ import annotations
@@ -32,10 +32,14 @@ class ModelBindingConfigResolverConfig(BaseModel):
     Configures the binding configuration resolution system that supports
     multiple configuration sources with priority-based resolution.
 
-    Source Priority Order (config_ref schemes):
-        1. vault: - Vault secrets for production configuration
-        2. env: - Environment variables for local development
-        3. file: - File-based configuration for Kubernetes deployments
+    Supported config_ref Schemes:
+        - vault: - Vault secrets (e.g., vault:secret/data/db#password)
+        - env: - Environment variables (e.g., env:DB_CONFIG_JSON)
+        - file: - File-based configuration (e.g., file:configs/db.yaml)
+
+    Note:
+        The config_ref scheme determines WHERE to load base config from,
+        not priority between schemes. Only one config_ref is used per call.
 
     Environment Variable Override Pattern:
         When env_prefix is set (e.g., "HANDLER"), the resolver looks for:
