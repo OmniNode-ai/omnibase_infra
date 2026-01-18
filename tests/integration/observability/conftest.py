@@ -53,34 +53,6 @@ def isolated_registry() -> CollectorRegistry:
     return CollectorRegistry()
 
 
-def _get_prometheus_client_version() -> tuple[int, int, int] | None:
-    """Get prometheus_client version as tuple for version-specific handling.
-
-    Returns:
-        Version tuple (major, minor, patch) or None if version cannot be determined.
-    """
-    try:
-        import prometheus_client
-
-        version_str = getattr(prometheus_client, "__version__", "")
-        if not version_str:
-            return None
-        parts = version_str.split(".")
-        return (int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
-    except (ImportError, ValueError, IndexError, AttributeError):
-        return None
-
-
-# Known prometheus_client versions where _names_to_collectors is verified working
-_VERIFIED_PROMETHEUS_VERSIONS = {
-    (0, 17): True,
-    (0, 18): True,
-    (0, 19): True,
-    (0, 20): True,
-    (0, 21): True,
-}
-
-
 @pytest.fixture
 def cleanup_default_registry() -> Generator[None, None, None]:
     """Cleanup fixture that unregisters test metrics from the default registry.
@@ -95,95 +67,41 @@ def cleanup_default_registry() -> Generator[None, None, None]:
     Yields:
         None. Cleanup runs on test teardown.
 
-    Warning:
-        INTERNAL API USAGE: This fixture uses ``REGISTRY._names_to_collectors``
-        which is a private/internal prometheus_client API. This is necessary
-        because there is no public API to list registered collectors by name.
+    Note:
+        PUBLIC API USAGE: This fixture uses ``REGISTRY.__iter__`` which is a
+        public API that yields registered collector objects. This is stable
+        across prometheus_client versions.
 
-        This approach was chosen over alternatives because:
-        - CollectorRegistry has no public clear() or list_collectors() method
-        - The only public cleanup method is unregister(collector), which
-          requires knowing the collector object, not just its name
-        - Tracking collectors manually would require modifying test code
+        The approach:
+        1. Before test: snapshot all registered collectors via iteration
+        2. After test: find new collectors by set difference
+        3. Unregister new collectors using the public unregister() method
 
-        Known limitation: https://github.com/prometheus/client_python/issues/546
-
-        VERSION PINNING RECOMMENDATION:
-        This internal API has been stable across prometheus_client 0.17.x - 0.21.x,
-        but may change in future versions. If upgrading prometheus_client:
-        1. Pin to a tested version range in pyproject.toml (e.g., ">=0.17,<0.22")
-        2. Add integration test for this cleanup pattern
-        3. Check prometheus_client CHANGELOG for registry API changes
-
-        VERSION-SPECIFIC HANDLING:
-        This fixture includes version detection to warn when running on untested
-        prometheus_client versions. Verified working on: 0.17.x - 0.21.x
-
-        PUBLIC API MONITORING:
-        As of prometheus_client 0.21.x, no public API exists for listing/clearing
-        registered collectors. Monitor prometheus_client releases for a public API
-        (e.g., CollectorRegistry.get_collectors() or CollectorRegistry.clear()).
-        If a public API becomes available, migrate to it immediately.
-
-        If this breaks after a prometheus_client upgrade, consider:
-        1. Using isolated registries instead (preferred)
-        2. Tracking registered collectors manually in a set
-        3. Checking prometheus_client release notes for API changes
+        This is safer than using internal APIs like ``_names_to_collectors``.
     """
-    import warnings
-
-    # INTERNAL API: _names_to_collectors - see docstring for rationale and risk
-    # WARNING: This private attribute may change between prometheus_client versions.
-
-    # Version-specific handling: warn if running on untested version
-    prometheus_version = _get_prometheus_client_version()
-    if prometheus_version is not None:
-        major_minor = (prometheus_version[0], prometheus_version[1])
-        if major_minor not in _VERIFIED_PROMETHEUS_VERSIONS:
-            warnings.warn(
-                f"prometheus_client {prometheus_version[0]}.{prometheus_version[1]}.x "
-                "has not been verified for internal API compatibility. "
-                "Cleanup may not work correctly. Verified versions: 0.17.x - 0.21.x",
-                UserWarning,
-                stacklevel=2,
-            )
-
-    # Defensive check: verify internal API exists before proceeding
-    if not hasattr(REGISTRY, "_names_to_collectors"):
-        # Internal API changed - skip cleanup and warn via pytest
-        warnings.warn(
-            "prometheus_client internal API changed: _names_to_collectors not found. "
-            "Test cleanup disabled. Consider using isolated_registry fixture instead.",
-            UserWarning,
-            stacklevel=2,
-        )
-        yield
-        return
-
-    # Track collectors before test
+    # Track collectors before test using public __iter__ API
+    # CollectorRegistry implements __iter__ which yields collector objects
     try:
-        collectors_before = set(REGISTRY._names_to_collectors.keys())
-    except (AttributeError, TypeError):
+        collectors_before: set[object] = set(REGISTRY)
+    except (TypeError, RuntimeError):
         # Defensive: if iteration fails, skip cleanup
         yield
         return
 
     yield
 
-    # Remove collectors added during test
+    # Remove collectors added during test using public APIs only
     try:
-        collectors_after = set(REGISTRY._names_to_collectors.keys())
+        collectors_after: set[object] = set(REGISTRY)
         new_collectors = collectors_after - collectors_before
 
-        for name in new_collectors:
+        for collector in new_collectors:
             try:
-                collector = REGISTRY._names_to_collectors.get(name)
-                if collector is not None:
-                    REGISTRY.unregister(collector)
+                REGISTRY.unregister(collector)
             except Exception:
                 # Silently ignore individual cleanup failures - best-effort cleanup
                 pass
-    except (AttributeError, TypeError):
+    except (TypeError, RuntimeError):
         # Defensive: if cleanup fails entirely, silently continue
         pass
 

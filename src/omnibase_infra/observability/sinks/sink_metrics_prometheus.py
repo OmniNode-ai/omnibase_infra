@@ -54,6 +54,9 @@ import logging
 import threading
 from typing import TYPE_CHECKING, cast
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 # Dependency validation for prometheus_client with clear error message
 _PROMETHEUS_CLIENT_AVAILABLE: bool = False
 _PROMETHEUS_IMPORT_ERROR: str | None = None
@@ -163,8 +166,8 @@ class SinkMetricsPrometheus:
                 joined with the metric name using an underscore.
 
         Raises:
-            ImportError: If prometheus_client is not installed. Install with:
-                pip install prometheus-client
+            ProtocolConfigurationError: If prometheus_client is not installed.
+                Install with: pip install prometheus-client
 
         Example:
             >>> # Default policy - warns and drops on violation
@@ -183,10 +186,15 @@ class SinkMetricsPrometheus:
         """
         # Validate dependency is available with clear error message
         if not _PROMETHEUS_CLIENT_AVAILABLE:
-            raise ImportError(
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="initialize_prometheus_sink",
+            )
+            raise ProtocolConfigurationError(
                 "prometheus_client is required for SinkMetricsPrometheus but is not installed. "
-                f"Install with: pip install prometheus-client\n"
-                f"Original error: {_PROMETHEUS_IMPORT_ERROR}"
+                f"Install with: pip install prometheus-client. "
+                f"Original error: {_PROMETHEUS_IMPORT_ERROR}",
+                context=context,
             )
 
         # Import here to avoid circular imports and allow TYPE_CHECKING

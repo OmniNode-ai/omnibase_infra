@@ -238,7 +238,8 @@ class HookObservability:
     """
 
     # Use __slots__ to prevent accidental attribute addition and improve memory
-    __slots__ = ("__metrics_sink",)
+    # _metrics_lock provides defense-in-depth thread safety for metrics operations
+    __slots__ = ("__metrics_sink", "_metrics_lock")
 
     def __init__(
         self,
@@ -265,10 +266,20 @@ class HookObservability:
             modification after construction, ensuring thread-safe reads.
             This is intentionally different from timing state which MUST be
             in contextvars for per-task isolation.
+
+        Thread-Safety Implementation:
+            A threading.Lock (_metrics_lock) is used for defense-in-depth protection
+            of all metrics sink operations. While the metrics_sink is expected to be
+            thread-safe, this lock ensures atomic operation sequences and protects
+            against potential subtle thread-safety issues in sink implementations.
         """
         # Use name mangling (__) to prevent external modification
         # Access via the metrics_sink property
         self.__metrics_sink = metrics_sink
+        # Defense-in-depth lock for metrics operations
+        # Ensures atomic counter increments and metric emissions even if sink
+        # has subtle thread-safety issues
+        self._metrics_lock = threading.Lock()
 
     @property
     def metrics_sink(self) -> ProtocolHotPathMetricsSink | None:
@@ -343,13 +354,15 @@ class HookObservability:
         _operation_labels.set(labels.copy() if labels else {})
 
         # Emit start metric if sink is available
+        # Lock ensures atomic counter increment across concurrent calls
         if self.metrics_sink is not None:
             metric_labels = self._build_metric_labels(operation)
-            self.metrics_sink.increment_counter(
-                name="operation_started_total",
-                labels=metric_labels,
-                increment=1,
-            )
+            with self._metrics_lock:
+                self.metrics_sink.increment_counter(
+                    name="operation_started_total",
+                    labels=metric_labels,
+                    increment=1,
+                )
 
     def after_operation(self) -> float:
         """Mark the end of an operation and calculate duration.
@@ -393,13 +406,15 @@ class HookObservability:
         duration_ms = duration_seconds * 1000.0
 
         # Emit duration metric if sink is available
+        # Lock ensures atomic histogram observation across concurrent calls
         if self.metrics_sink is not None and operation is not None:
             metric_labels = self._build_metric_labels(operation)
-            self.metrics_sink.observe_histogram(
-                name="operation_duration_seconds",
-                labels=metric_labels,
-                value=duration_seconds,
-            )
+            with self._metrics_lock:
+                self.metrics_sink.observe_histogram(
+                    name="operation_duration_seconds",
+                    labels=metric_labels,
+                    value=duration_seconds,
+                )
 
         # Clear timing state (but keep correlation_id for potential error handling)
         _start_time.set(None)
@@ -481,11 +496,13 @@ class HookObservability:
         metric_labels = self._build_metric_labels(operation, labels)
         metric_labels["status"] = "success"
 
-        self.metrics_sink.increment_counter(
-            name="operation_completed_total",
-            labels=metric_labels,
-            increment=1,
-        )
+        # Lock ensures atomic counter increment across concurrent calls
+        with self._metrics_lock:
+            self.metrics_sink.increment_counter(
+                name="operation_completed_total",
+                labels=metric_labels,
+                increment=1,
+            )
 
     def record_failure(
         self,
@@ -530,11 +547,13 @@ class HookObservability:
         metric_labels["status"] = "failure"
         metric_labels["error_type"] = error_type
 
-        self.metrics_sink.increment_counter(
-            name="operation_failed_total",
-            labels=metric_labels,
-            increment=1,
-        )
+        # Lock ensures atomic counter increment across concurrent calls
+        with self._metrics_lock:
+            self.metrics_sink.increment_counter(
+                name="operation_failed_total",
+                labels=metric_labels,
+                increment=1,
+            )
 
     # =========================================================================
     # SPECIALIZED TRACKING METHODS
@@ -581,11 +600,13 @@ class HookObservability:
         metric_labels["attempt"] = str(attempt_number)
         metric_labels["reason"] = reason
 
-        self.metrics_sink.increment_counter(
-            name="retry_attempt_total",
-            labels=metric_labels,
-            increment=1,
-        )
+        # Lock ensures atomic counter increment across concurrent calls
+        with self._metrics_lock:
+            self.metrics_sink.increment_counter(
+                name="retry_attempt_total",
+                labels=metric_labels,
+                increment=1,
+            )
 
     def record_circuit_breaker_state_change(
         self,
@@ -633,11 +654,13 @@ class HookObservability:
                 if key not in metric_labels:  # Don't overwrite required labels
                     metric_labels[key] = value
 
-        self.metrics_sink.increment_counter(
-            name="circuit_breaker_state_change_total",
-            labels=metric_labels,
-            increment=1,
-        )
+        # Lock ensures atomic counter increment across concurrent calls
+        with self._metrics_lock:
+            self.metrics_sink.increment_counter(
+                name="circuit_breaker_state_change_total",
+                labels=metric_labels,
+                increment=1,
+            )
 
     def set_gauge(
         self,
@@ -675,11 +698,13 @@ class HookObservability:
         if self.metrics_sink is None:
             return
 
-        self.metrics_sink.set_gauge(
-            name=name,
-            labels=labels or {},
-            value=value,
-        )
+        # Lock ensures atomic gauge update across concurrent calls
+        with self._metrics_lock:
+            self.metrics_sink.set_gauge(
+                name=name,
+                labels=labels or {},
+                value=value,
+            )
 
     def set_buffer_gauge(
         self,
@@ -740,11 +765,13 @@ class HookObservability:
         else:
             safe_value = value
 
-        self.metrics_sink.set_gauge(
-            name=name,
-            labels=labels or {},
-            value=safe_value,
-        )
+        # Lock ensures atomic gauge update across concurrent calls
+        with self._metrics_lock:
+            self.metrics_sink.set_gauge(
+                name=name,
+                labels=labels or {},
+                value=safe_value,
+            )
 
     # =========================================================================
     # CONTEXT MANAGER SUPPORT
@@ -884,23 +911,26 @@ class HookObservability:
 
         # Log when high-cardinality keys are filtered (debug level)
         # IMPORTANT: This is informational logging only - the metric IS being recorded
-        # The log includes correlation_id for tracing even though it's filtered from metrics
+        # We only remove specific label KEYS, NOT the entire metric
+        # The log includes correlation_id for tracing even though it's filtered from labels
         if filtered_keys:
             # Include correlation_id in log for tracing purposes
             correlation_id = _correlation_id.get()
             _logger.debug(
-                "Filtered high-cardinality label keys from metrics "
-                "(metric WILL be recorded with remaining labels)",
+                "Removed high-cardinality keys from metric labels - "
+                "metric WILL be recorded with %d remaining labels (keys removed: %s)",
+                len(labels),
+                filtered_keys,
                 extra={
                     "operation": operation,
                     "filtered_keys": filtered_keys,
-                    "remaining_label_count": len(labels),
+                    "remaining_labels": list(labels.keys()),
                     "correlation_id": correlation_id,  # Available for log correlation
                 },
             )
 
         # CRITICAL: Defense-in-depth guarantee that metrics are NEVER dropped.
-        # The invariant at line 860 ensures "operation" is always present, but this
+        # The invariant at line 889 ensures "operation" is always present, but this
         # explicit check provides runtime safety if the invariant is ever violated.
         # This protects against data loss from unexpected edge cases.
         if "operation" not in labels:
@@ -911,6 +941,10 @@ class HookObservability:
             )
             labels["operation"] = operation
 
+        # GUARANTEE: This method ALWAYS returns a non-empty dict containing at least
+        # {"operation": operation}. Metrics are NEVER dropped - only high-cardinality
+        # label keys (correlation_id, request_id, etc.) are removed from the label set.
+        # The metric itself is ALWAYS recorded with the remaining labels.
         return labels
 
 

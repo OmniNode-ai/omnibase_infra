@@ -221,22 +221,38 @@ class TestBufferManagement:
         assert elapsed < 1.0  # Should be << 1 second
 
     def test_context_defensive_copy(self) -> None:
-        """Verify context dict is copied to prevent mutation issues."""
+        """Verify context dict is copied to prevent mutation issues.
+
+        This test verifies that:
+        1. The buffered context is a separate object from the original (identity)
+        2. Mutations to the original dict do not affect the buffered entry (isolation)
+        """
         sink = SinkLoggingStructured(max_buffer_size=10)
         from omnibase_core.enums import EnumLogLevel
 
         context = {"key": "original"}
         sink.emit(EnumLogLevel.INFO, "Message", context)
 
+        # Verify entry was stored
+        assert sink.buffer_size == 1
+
+        # Access the internal buffer to verify defensive copy
+        with sink._lock:
+            buffered_entry = sink._buffer[0]
+
+            # Verify defensive copy: buffered context should be a DIFFERENT object
+            assert buffered_entry.context is not context, (
+                "Defensive copy failed: buffered context is the same object as original"
+            )
+
+            # Store reference to buffered context for mutation testing
+            buffered_context_ref = buffered_entry.context
+
         # Mutate the original context after emit
         context["key"] = "mutated"
         context["new_key"] = "new_value"
 
-        # Verify entry was stored
-        assert sink.buffer_size == 1
-
-        # Verify defensive copy: buffered entry should have original values
-        # Access the internal buffer directly for verification
+        # Verify isolation: buffered entry should have original values
         with sink._lock:
             buffered_entry = sink._buffer[0]
             # The buffered context should NOT reflect mutations to original dict
@@ -245,6 +261,10 @@ class TestBufferManagement:
             )
             assert "new_key" not in buffered_entry.context, (
                 "Defensive copy failed: new key appeared in buffered context"
+            )
+            # Verify it's still the same buffered object (not re-copied)
+            assert buffered_entry.context is buffered_context_ref, (
+                "Buffered context reference changed unexpectedly"
             )
 
 
@@ -293,13 +313,17 @@ class TestFlush:
         assert sink.buffer_size == 1, "Entry should be buffered"
 
         # Mock the internal logger to verify flush behavior
-        # NOTE: Patch the sink's _logger attribute directly to avoid import path issues
+        # NOTE: Patch the sink's _logger attribute directly. The mock captures
+        # all method calls regardless of log level (info, debug, error, etc.),
+        # making this test robust against implementation details.
         with patch.object(sink, "_logger") as mock_logger:
-            mock_logger.info = MagicMock()
             sink.flush()
 
-            # Verify logger was called (flush writes to logger)
-            mock_logger.info.assert_called()
+            # Verify logger was called at least once (flush writes to logger)
+            # Use method_calls to capture any log method that was invoked
+            assert len(mock_logger.method_calls) > 0, (
+                "Logger should have been called during flush"
+            )
 
         # Verify buffer was cleared (flush happened)
         assert sink.buffer_size == 0
@@ -321,13 +345,19 @@ class TestFlush:
         assert sink.buffer_size == 5
 
         # Capture the order of messages by mocking the logger
+        # Use a capturing approach that works regardless of which log method is called
         messages_in_order: list[str] = []
+
+        def capture_log_call(msg: str, **kwargs: object) -> None:
+            messages_in_order.append(msg)
+
         with patch.object(sink, "_logger") as mock_logger:
-
-            def capture_message(msg: str, **kwargs: object) -> None:
-                messages_in_order.append(msg)
-
-            mock_logger.info = MagicMock(side_effect=capture_message)
+            # Configure all common log methods to use our capture function
+            mock_logger.info = MagicMock(side_effect=capture_log_call)
+            mock_logger.debug = MagicMock(side_effect=capture_log_call)
+            mock_logger.warning = MagicMock(side_effect=capture_log_call)
+            mock_logger.error = MagicMock(side_effect=capture_log_call)
+            mock_logger.critical = MagicMock(side_effect=capture_log_call)
             sink.flush()
 
         # Verify buffer was cleared

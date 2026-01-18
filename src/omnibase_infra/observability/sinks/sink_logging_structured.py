@@ -420,7 +420,7 @@ class SinkLoggingStructured:
                 f"all instances, (2) all instances share the same base PrintLogger. "
                 f"This is typically fine but may cause unexpected behavior if you "
                 f"rely on global structlog configuration.",
-                stacklevel=4,  # Stack: 1=warn, 2=_track_instance_creation, 3=__init__, 4=caller
+                stacklevel=3,  # Points to user code that called SinkLoggingStructured()
             )
 
     @property
@@ -658,7 +658,7 @@ class SinkLoggingStructured:
                 warnings.warn(
                     f"Recommended context key '{key}' missing from log entry. "
                     f"Including {', '.join(sorted(recommended))} improves observability.",
-                    stacklevel=4,  # Point to caller of flush() (warn -> _validate -> flush -> caller)
+                    stacklevel=3,  # Points to user code that called flush()
                 )
 
     def _emit_entry(self, entry: ModelBufferedLogEntry) -> None:

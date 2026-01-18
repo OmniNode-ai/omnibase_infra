@@ -39,14 +39,16 @@ Reconfiguration Log Loss Prevention:
     2. configure swaps self._sink to new_sink
     3. emit calls old_sink.emit() -> log goes to abandoned sink (LOST)
 
-    The _emit_lock prevents this by ensuring the flush-then-swap sequence is
-    atomic with respect to emit operations. The sequence is:
+    The _emit_lock prevents this by ensuring the swap is atomic with respect
+    to emit operations. The swap-then-flush sequence is:
     1. Acquire _emit_lock (blocks all emits)
-    2. Flush old sink (write all buffered entries)
-    3. Swap to new sink
-    4. Release _emit_lock (emits resume to new sink)
+    2. Swap to new sink (atomic reference swap)
+    3. Release _emit_lock (emits resume to new sink immediately)
+    4. Flush old sink (outside lock - logs during flush go to new sink)
 
-    This guarantees we never abandon a sink with unflushed entries.
+    This guarantees no log loss while minimizing lock hold time. The old sink's
+    buffer is preserved until explicitly flushed, and any logs emitted during
+    the flush operation go directly to the new sink.
 
 Drop Policy:
     The drop_policy configuration field accepts only "drop_oldest", which is the
@@ -645,22 +647,25 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         """Handle logging.configure operation.
 
         Note: Configuration changes require re-creating the sink. To prevent
-        log loss, the flush-then-swap sequence is protected by _emit_lock,
-        ensuring no emit operations can race with the reconfiguration.
+        log loss, the swap-then-flush sequence ensures the atomic swap happens
+        first under _emit_lock, then the old sink is flushed after releasing
+        the lock.
 
         Thread Safety:
-            The _emit_lock is acquired during the critical flush-then-swap sequence.
+            The _emit_lock is acquired during the atomic swap operation only.
             This ensures that:
-            1. All in-flight emits complete before we start
-            2. No new emits can start during flush+swap
-            3. Old sink is fully flushed before swap occurs
-            4. After swap completes, new emits go to the new sink
+            1. All in-flight emits complete before we start the swap
+            2. No new emits can start during the swap
+            3. After swap completes, new emits immediately go to the new sink
+            4. Old sink is flushed after the lock is released (no blocking I/O under lock)
 
-        Reconfiguration Sequence (under _emit_lock):
-            1. Flush old sink first (ensures all buffered entries are written)
-            2. Swap to new sink atomically
-            3. Update config reference
-            This order guarantees no log loss: we flush before abandoning the old sink.
+        Reconfiguration Sequence:
+            1. Acquire _emit_lock
+            2. Swap to new sink atomically (under lock)
+            3. Update config reference (under lock)
+            4. Release _emit_lock
+            5. Flush old sink (outside lock - logs during flush go to new sink)
+            This order guarantees no log loss and minimizes lock hold time.
 
         Args:
             payload: Configuration payload (same fields as ModelLoggingHandlerConfig)
@@ -713,26 +718,30 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 drop_policy=new_config.drop_policy,
             )
 
-            # Critical section: acquire emit lock for atomic flush-then-swap.
+            # Critical section: acquire emit lock for atomic swap-then-flush.
             # This prevents the race condition where:
             # 1. emit reads self._sink -> gets old_sink
             # 2. configure swaps to new_sink
             # 3. emit calls old_sink.emit() -> log LOST (old sink abandoned)
             #
-            # With the lock held during flush+swap, no emit can interleave.
+            # By swapping BEFORE flush and flushing AFTER releasing the lock:
+            # - New emits immediately go to the new sink (no blocking during flush)
+            # - Old sink's buffer is preserved until explicitly flushed
+            # - Lock hold time is minimized (fast swap, no I/O under lock)
             with self._emit_lock:
-                # Step 1: Flush old sink FIRST to ensure all buffered entries
-                # are written before we abandon it. This is the key to preventing
-                # log loss - we never abandon a sink with unflushed entries.
+                # Step 1: Capture old sink reference and swap atomically
                 old_sink = self._sink
-                old_sink.flush()
-
-                # Step 2: Swap sink and config references atomically (under lock)
                 self._sink = new_sink
                 self._config = new_config
 
-                # Step 3: Reset drop count tracker for new sink
+                # Step 2: Reset drop count tracker for new sink
                 self._last_drop_count = 0
+
+            # Step 3: Flush old sink AFTER releasing lock.
+            # Logs emitted during this flush go to the new sink (not lost).
+            # This is safe because old_sink's buffer is independent.
+            if old_sink is not None:
+                old_sink.flush()
 
             # Handle flush interval changes (outside emit lock - these are async)
             if self._config.flush_interval_seconds > 0:

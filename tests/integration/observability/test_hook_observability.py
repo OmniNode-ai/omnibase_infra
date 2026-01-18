@@ -401,16 +401,33 @@ class TestMetricsIntegration:
         assert failed_calls[0][1]["labels"]["error_type"] == "TestError"
 
     def test_no_metrics_sink_operations_still_work(self) -> None:
-        """Verify operations work without metrics sink (no-op mode)."""
+        """Verify operations work without metrics sink (no-op mode).
+
+        This test verifies that the hook operates correctly in no-op mode
+        when no metrics sink is configured. All timing and context operations
+        should work, but metrics emission is silently skipped.
+        """
         hook = HookObservability(metrics_sink=None)
 
-        # Should not raise even without metrics sink
-        hook.before_operation("test_op")
+        # Verify context is properly set up even without metrics sink
+        hook.before_operation("test_op", correlation_id="test-corr-123")
+        ctx = hook.get_current_context()
+        assert ctx["operation"] == "test_op", "Operation name should be set"
+        assert ctx["correlation_id"] == "test-corr-123", "Correlation ID should be set"
+
+        # record_success and record_failure should not raise
         hook.record_success()
         hook.record_failure("SomeError")
-        duration = hook.after_operation()
 
-        assert duration >= 0.0
+        # Timing should still work and return valid duration
+        duration = hook.after_operation()
+        assert duration >= 0.0, "Duration should be non-negative"
+
+        # Context should be cleared after operation completes
+        ctx_after = hook.get_current_context()
+        assert ctx_after["operation"] is None, (
+            "Operation should be cleared after after_operation()"
+        )
 
     def test_record_retry_attempt(
         self,
@@ -988,9 +1005,15 @@ class TestHighCardinalityFilteringLogging:
             )
             hook.record_success()
 
-        # Should have logged debug message about filtering
+        # Should have logged debug message about removing high-cardinality keys
+        # The implementation logs "Removed high-cardinality keys from metric labels"
         debug_logs = [r for r in caplog.records if r.levelno == logging.DEBUG]
-        filtering_logs = [r for r in debug_logs if "filtered" in r.message.lower()]
+        filtering_logs = [
+            r
+            for r in debug_logs
+            if "high-cardinality" in r.message.lower()
+            and "removed" in r.message.lower()
+        ]
         assert len(filtering_logs) >= 1, (
             "Should log debug message when filtering labels"
         )
