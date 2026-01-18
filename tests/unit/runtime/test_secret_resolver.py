@@ -1914,8 +1914,8 @@ class TestSecretResolverMetrics:
 
         metrics = resolver.get_resolution_metrics()
 
-        assert metrics["success_counts"]["env"] >= 1
-        assert metrics["cache_hits"] >= 0
+        assert metrics.success_counts["env"] >= 1
+        assert metrics.cache_hits >= 0
 
     def test_external_metrics_collector_called(self) -> None:
         """Should call external metrics collector methods."""

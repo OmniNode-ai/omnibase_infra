@@ -41,6 +41,7 @@ Exports:
     ModelSecretResolverConfig: Configuration for SecretResolver
     ModelCachedSecret: Cached secret with TTL tracking
     ModelSecretCacheStats: Cache statistics for observability
+    ModelSecretResolverMetrics: Resolution metrics for observability
     ModelSecretSourceInfo: Non-sensitive source information for introspection
 """
 
@@ -107,6 +108,9 @@ from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMappin
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
+from omnibase_infra.runtime.models.model_secret_resolver_metrics import (
+    ModelSecretResolverMetrics,
+)
 from omnibase_infra.runtime.models.model_secret_source_info import ModelSecretSourceInfo
 from omnibase_infra.runtime.models.model_secret_source_spec import (
     ModelSecretSourceSpec,
@@ -149,6 +153,7 @@ __all__: list[str] = [
     "ModelSecretCacheStats",
     "ModelSecretMapping",
     "ModelSecretResolverConfig",
+    "ModelSecretResolverMetrics",
     "ModelSecretSourceInfo",
     "ModelSecretSourceSpec",
     "SecretSourceType",

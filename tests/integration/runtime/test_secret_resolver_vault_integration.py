@@ -284,7 +284,7 @@ class TestSecretResolverVaultIntegration:
         assert result is not None
         # The correlation ID should be tracked in metrics
         metrics = resolver.get_resolution_metrics()
-        assert metrics["success_counts"]["vault"] >= 1
+        assert metrics.success_counts["vault"] >= 1
 
     @pytest.mark.asyncio
     async def test_vault_secret_not_found_returns_none(
@@ -410,8 +410,8 @@ class TestSecretResolverVaultIntegration:
         metrics_after = resolver.get_resolution_metrics()
 
         # Should have incremented vault success count
-        vault_success_before = metrics_before["success_counts"].get("vault", 0)
-        vault_success_after = metrics_after["success_counts"].get("vault", 0)
+        vault_success_before = metrics_before.success_counts.get("vault", 0)
+        vault_success_after = metrics_after.success_counts.get("vault", 0)
 
         assert vault_success_after > vault_success_before
 
@@ -458,7 +458,7 @@ class TestSecretResolverVaultGracefulDegradation:
         resolver.get_secret("metrics.no.handler", required=False)
 
         metrics = resolver.get_resolution_metrics()
-        assert metrics["failure_counts"]["vault"] >= 1
+        assert metrics.failure_counts["vault"] >= 1
 
 
 __all__: list[str] = [

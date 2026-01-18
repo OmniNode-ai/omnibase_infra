@@ -42,7 +42,7 @@ Example:
     Get resolution metrics::
 
         metrics = resolver.get_resolution_metrics()
-        # {"success_counts": {"env": 5, "vault": 3}, "failure_counts": {...}, ...}
+        # ModelSecretResolverMetrics(success_counts={"env": 5, "vault": 3}, ...)
 
 Security Considerations:
     - Secret values are wrapped in SecretStr to prevent accidental logging
@@ -149,6 +149,9 @@ from omnibase_infra.runtime.models.model_cached_secret import ModelCachedSecret
 from omnibase_infra.runtime.models.model_secret_cache_stats import ModelSecretCacheStats
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
+)
+from omnibase_infra.runtime.models.model_secret_resolver_metrics import (
+    ModelSecretResolverMetrics,
 )
 from omnibase_infra.runtime.models.model_secret_source_info import ModelSecretSourceInfo
 from omnibase_infra.runtime.models.model_secret_source_spec import (
@@ -355,6 +358,14 @@ class SecretResolver:
             config: Resolver configuration with mappings and TTLs
             vault_handler: Optional Vault handler for Vault-sourced secrets
             metrics_collector: Optional external metrics collector for observability
+
+        Note:
+            For ONEX applications using ``ModelONEXContainer``, consider resolving
+            dependencies via container-based DI rather than direct constructor
+            injection. This enables centralized lifecycle management and consistent
+            dependency resolution across the application. The current explicit
+            constructor parameters are retained for flexibility in standalone usage
+            and testing scenarios.
         """
         self._config = config
         self._vault_handler = vault_handler
@@ -709,15 +720,17 @@ class SecretResolver:
                 expired_evictions=self._expired_evictions,
             )
 
-    def get_resolution_metrics(self) -> dict[str, object]:
+    def get_resolution_metrics(self) -> ModelSecretResolverMetrics:
         """Return resolution metrics for observability.
 
         Returns:
-            Dict containing:
+            ModelSecretResolverMetrics with:
                 - success_counts: Dict of source_type -> success count
                 - failure_counts: Dict of source_type -> failure count
                 - latency_samples: Number of latency samples collected
                 - avg_latency_ms: Average resolution latency (if samples > 0)
+                - cache_hits: Total number of cache hits
+                - cache_misses: Total number of cache misses
         """
         with self._lock:
             avg_latency = 0.0
@@ -726,19 +739,30 @@ class SecretResolver:
                     self._resolution_latencies
                 )
 
-            return {
-                "success_counts": dict(self._resolution_success_counts),
-                "failure_counts": dict(self._resolution_failure_counts),
-                "latency_samples": len(self._resolution_latencies),
-                "avg_latency_ms": avg_latency,
-                "cache_hits": self._hits,
-                "cache_misses": self._misses,
-            }
+            return ModelSecretResolverMetrics(
+                success_counts=dict(self._resolution_success_counts),
+                failure_counts=dict(self._resolution_failure_counts),
+                latency_samples=len(self._resolution_latencies),
+                avg_latency_ms=avg_latency,
+                cache_hits=self._hits,
+                cache_misses=self._misses,
+            )
 
     def set_metrics_collector(
         self, collector: ProtocolSecretResolverMetrics | None
     ) -> None:
         """Set the external metrics collector.
+
+        Thread Safety:
+            This method is thread-safe. The collector reference is updated
+            atomically under ``_lock``. Concurrent calls to resolution methods
+            will see either the old or new collector (never a partial state).
+
+            The pattern used in ``_record_resolution_success`` and
+            ``_record_resolution_failure`` captures the collector reference
+            while holding the lock, then uses it outside the lock. This ensures
+            that even if ``set_metrics_collector()`` is called concurrently,
+            each resolution operation uses a consistent collector reference.
 
         Args:
             collector: Metrics collector implementing ProtocolSecretResolverMetrics,
@@ -1620,10 +1644,9 @@ class SecretResolver:
             # and may not be supported by Vault's KV v2 engine which expects
             # paths like "mount/path". Log a warning to alert operators.
             logger.warning(
-                "Unusual Vault path format detected: '%s'. "
-                "Expected 'mount/path#field' format. Empty path may not work with Vault KV v2.",
-                path,
-                extra={"vault_path": path},
+                "Unusual Vault path format detected. "
+                "Expected 'mount/path#field' format with at least one '/' separator. "
+                "Empty path segment may not work with Vault KV v2.",
             )
             return parts[0], "", field
 
