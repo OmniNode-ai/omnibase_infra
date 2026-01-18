@@ -189,10 +189,52 @@ class ProtocolSecretResolverMetrics(Protocol):
         - Async callers running in parallel via ``asyncio.gather``
         - Mixed sync/async access patterns during bootstrap and runtime
 
-        Use thread-safe primitives (locks, atomic counters, thread-safe
-        collectors like prometheus_client) in your implementation.
+        Thread-Safe Primitives (recommended):
+            - ``threading.Lock``: Protects counter increments and dict updates
+            - ``threading.RLock``: For reentrant access (if metrics methods call each other)
+            - ``collections.Counter`` with lock protection: Convenient for source_type counts
+            - ``prometheus_client``: Inherently thread-safe (Counter, Histogram, Gauge)
+            - ``queue.Queue``: For async metric collection (producer-consumer pattern)
 
-    Example Implementation::
+    Example Implementation (threading.Lock)::
+
+        import threading
+        from collections import defaultdict
+
+        class ThreadSafeSecretResolverMetrics:
+            '''Minimal thread-safe metrics using threading.Lock.'''
+
+            def __init__(self) -> None:
+                self._lock = threading.Lock()
+                self._latencies: list[tuple[str, float]] = []
+                self._cache_hits = 0
+                self._cache_misses = 0
+                self._success_counts: defaultdict[str, int] = defaultdict(int)
+                self._failure_counts: defaultdict[str, int] = defaultdict(int)
+
+            def record_resolution_latency(
+                self, source_type: str, latency_ms: float
+            ) -> None:
+                with self._lock:
+                    self._latencies.append((source_type, latency_ms))
+
+            def record_cache_hit(self) -> None:
+                with self._lock:
+                    self._cache_hits += 1
+
+            def record_cache_miss(self) -> None:
+                with self._lock:
+                    self._cache_misses += 1
+
+            def record_resolution_success(self, source_type: str) -> None:
+                with self._lock:
+                    self._success_counts[source_type] += 1
+
+            def record_resolution_failure(self, source_type: str) -> None:
+                with self._lock:
+                    self._failure_counts[source_type] += 1
+
+    Example Implementation (prometheus_client)::
 
         from prometheus_client import Counter, Histogram
 
@@ -269,6 +311,13 @@ MAX_LATENCY_SAMPLES = 1000
 
 # Warning threshold for async key locks dictionary size (DoS mitigation)
 ASYNC_KEY_LOCKS_WARNING_THRESHOLD = 1000
+
+# Maximum async key locks before LRU eviction (memory leak prevention)
+# When this limit is reached, oldest 10% of entries are evicted
+MAX_ASYNC_KEY_LOCKS = 1000
+
+# Cache TTL jitter percentage for symmetric ±10% jitter (stampede prevention)
+CACHE_TTL_JITTER_PERCENT = 0.1
 
 
 class SecretResolver:
@@ -594,27 +643,26 @@ class SecretResolver:
             Uses threading.RLock to safely access the key locks dictionary,
             ensuring thread-safe creation of new locks.
 
-        Known Limitation - Unbounded Dictionary Growth:
-            The ``_async_key_locks`` dictionary grows monotonically as new
-            logical names are resolved asynchronously. Entries are never removed
-            because:
+        LRU Eviction (Memory Leak Prevention):
+            The ``_async_key_locks`` dictionary implements LRU eviction to prevent
+            unbounded memory growth. When the dictionary reaches ``MAX_ASYNC_KEY_LOCKS``
+            entries:
 
-            1. **Correctness over complexity**: Implementing lock cleanup requires
-               reference counting or periodic sweeps, adding significant complexity
-               for minimal benefit in typical use cases.
+            1. The oldest 10% of entries are evicted (based on insertion order)
+            2. A warning is logged indicating potential DoS or misconfiguration
+            3. The new lock is then added
 
-            2. **Bounded in practice**: The number of unique secrets is bounded by
-               the resolver's configuration (explicit mappings + convention-based
-               names). In production, this is typically <100 secrets.
+            This ensures memory usage is bounded while maintaining correctness:
+            - Evicted locks are for secrets that were resolved earlier
+            - If a secret is resolved again, a new lock will be created
+            - The worst case is a brief period of duplicate concurrent fetches
+              for recently-evicted secrets, which is acceptable (same value resolved)
 
-            3. **Minimal memory overhead**: Each ``asyncio.Lock`` is ~100 bytes.
-               Even 1000 unique secrets would use only ~100KB.
-
-            4. **DoS mitigation**: If an attacker can control logical names passed
-               to ``get_secret_async()``, they could cause unbounded growth. Mitigate
-               by validating logical names against configured mappings before calling
-               resolution methods, or by using ``get_secret()`` (sync) which doesn't
-               create per-key locks.
+        DoS Mitigation:
+            - Warning threshold at ``ASYNC_KEY_LOCKS_WARNING_THRESHOLD`` for early detection
+            - Hard cap at ``MAX_ASYNC_KEY_LOCKS`` with LRU eviction
+            - Repeated eviction warnings indicate potential attack or misconfiguration
+            - Validate logical names against configured mappings to prevent abuse
 
         Args:
             logical_name: The secret key to get a lock for
@@ -624,9 +672,9 @@ class SecretResolver:
         """
         with self._lock:
             if logical_name not in self._async_key_locks:
-                self._async_key_locks[logical_name] = asyncio.Lock()
-                # DoS mitigation: warn if lock dictionary grows too large
                 lock_count = len(self._async_key_locks)
+
+                # DoS mitigation: warn at threshold for early detection
                 if lock_count == ASYNC_KEY_LOCKS_WARNING_THRESHOLD:
                     logger.warning(
                         "Async key locks dictionary reached %d entries - potential DoS risk. "
@@ -634,6 +682,30 @@ class SecretResolver:
                         lock_count,
                         extra={"lock_count": lock_count},
                     )
+
+                # LRU eviction: when at capacity, evict oldest 10% of entries
+                if lock_count >= MAX_ASYNC_KEY_LOCKS:
+                    evict_count = max(1, MAX_ASYNC_KEY_LOCKS // 10)  # 10%, minimum 1
+                    # Python 3.7+ dicts maintain insertion order, so first keys are oldest
+                    keys_to_evict = list(self._async_key_locks.keys())[:evict_count]
+                    for key in keys_to_evict:
+                        del self._async_key_locks[key]
+
+                    logger.warning(
+                        "Async key locks at capacity (%d). Evicted %d oldest entries. "
+                        "This may indicate a DoS attack or dynamic logical name generation. "
+                        "Consider validating logical names against configured mappings.",
+                        MAX_ASYNC_KEY_LOCKS,
+                        evict_count,
+                        extra={
+                            "max_locks": MAX_ASYNC_KEY_LOCKS,
+                            "evicted_count": evict_count,
+                            "current_count": len(self._async_key_locks),
+                        },
+                    )
+
+                self._async_key_locks[logical_name] = asyncio.Lock()
+
             return self._async_key_locks[logical_name]
 
     async def get_secrets_async(
@@ -1664,9 +1736,11 @@ class SecretResolver:
         """Cache a resolved secret with appropriate TTL and jitter.
 
         TTL Jitter:
-            A random jitter of 0-10% is added to the base TTL to prevent
-            cache stampede scenarios where many cached entries expire at
-            the same time, causing a thundering herd of resolution requests.
+            A symmetric random jitter of ±10% is added to the base TTL to
+            prevent cache stampede scenarios where many cached entries expire
+            at the same time, causing a thundering herd of resolution requests.
+            The symmetric distribution provides better spread than additive-only
+            jitter, reducing the probability of clustered expirations.
 
         Args:
             logical_name: The logical name being cached
@@ -1674,9 +1748,11 @@ class SecretResolver:
             source_type: Source type for TTL selection
         """
         base_ttl_seconds = self._get_ttl(logical_name, source_type)
-        # Add 0-10% jitter to prevent cache stampede (thundering herd)
-        jitter_factor = random.uniform(0.0, 0.1)
-        ttl_seconds = int(base_ttl_seconds * (1 + jitter_factor))
+        # Add ±10% jitter to prevent cache stampede (thundering herd)
+        jitter_factor = random.uniform(
+            -CACHE_TTL_JITTER_PERCENT, CACHE_TTL_JITTER_PERCENT
+        )
+        ttl_seconds = max(1, int(base_ttl_seconds * (1 + jitter_factor)))
         now = datetime.now(UTC)
 
         self._cache[logical_name] = ModelCachedSecret(
