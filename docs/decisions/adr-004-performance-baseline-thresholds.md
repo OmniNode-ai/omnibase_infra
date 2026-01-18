@@ -12,7 +12,7 @@ Accepted
 
 ## Context
 
-The ONEX 2-way registration pattern E2E tests (OMN-892) require performance threshold assertions to ensure the registration flow meets latency requirements. These tests run against remote infrastructure at 192.168.86.200, which introduces network latency that differs significantly from local development environments.
+The ONEX 2-way registration pattern E2E tests (OMN-892) require performance threshold assertions to ensure the registration flow meets latency requirements. These tests run against remote infrastructure at remote infrastructure server, which introduces network latency that differs significantly from local development environments.
 
 **Problem Statement**: Without documented performance baselines:
 
@@ -29,7 +29,7 @@ We established empirically-calibrated performance thresholds with documented rat
 
 ### 1. Target Infrastructure
 
-All thresholds are calibrated for remote services at 192.168.86.200:
+All thresholds are calibrated for remote services at remote infrastructure server:
 - **Redpanda (Kafka)**: Port 29092 (external) / 9092 (Docker internal)
 - **PostgreSQL**: Port 5436
 - **Consul**: Port 28500
@@ -112,7 +112,7 @@ Documented conditions requiring recalibration:
 
 - **Documentation overhead**: Thresholds require documentation updates when recalibrated
 - **Potentially loose thresholds**: 2x safety margin may mask some regressions
-- **Remote infrastructure dependency**: Tests require access to 192.168.86.200
+- **Remote infrastructure dependency**: Tests require access to remote infrastructure server
 
 ### Neutral
 

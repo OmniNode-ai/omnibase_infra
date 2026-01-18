@@ -632,7 +632,7 @@ Never create `v1/`, `v2/`, or `v1_0_0/` directories. Version through `contract.y
 ```python
 class MyAdapter:
     def __init__(self):
-        self.host = "192.168.86.200"  # Hardcoded
+        self.host = "<infrastructure-host>"  # Hardcoded
         self.port = 5436              # Hardcoded
 ```
 

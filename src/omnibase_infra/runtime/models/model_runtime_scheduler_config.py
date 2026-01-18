@@ -71,7 +71,7 @@ Environment Variables:
     Valkey (Redis-compatible) Settings:
         REDIS_HOST: Valkey host for sequence number persistence
             Default: "localhost"
-            Example: "192.168.86.200" or "omninode-bridge-valkey"
+            Example: "omninode-bridge-valkey" or use REDIS_HOST env var
 
         REDIS_PORT: Valkey port (integer, 1-65535)
             Default: 6379

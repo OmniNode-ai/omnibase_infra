@@ -29,8 +29,8 @@ class TestParseBootstrapServers:
 
     def test_ip_with_port(self) -> None:
         """Test parsing IP address with port."""
-        host, port = parse_bootstrap_servers("192.168.86.200:29092")
-        assert host == "192.168.86.200"
+        host, port = parse_bootstrap_servers("localhost:29092")
+        assert host == "localhost"
         assert port == "29092"
 
     def test_hostname_without_port(self) -> None:
@@ -126,9 +126,9 @@ class TestValidateBootstrapServers:
 
     def test_valid_ip_format(self) -> None:
         """Test validation passes for IP:port format."""
-        result = validate_bootstrap_servers("192.168.86.200:29092")
+        result = validate_bootstrap_servers("localhost:29092")
         assert result.is_valid is True
-        assert result.host == "192.168.86.200"
+        assert result.host == "localhost"
         assert result.port == "29092"
 
     def test_valid_hostname_without_port(self) -> None:
