@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [As-Is](INDEX.md) > Two-Way Registration Trace
+
 ## Two-way registration workflow (As-Is Trace)
 
 This document traces the **current** 2-way registration flow as it exists in code today.

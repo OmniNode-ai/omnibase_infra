@@ -1,6 +1,8 @@
-# Production (v0.3.0) - Milestone Details
+> **Navigation**: [Home](../index.md) > [Milestones](README.md) > Production v0.3.0
+>
+> **Related**: [Previous: Beta Hardening](./BETA_v0.2.0_HARDENING.md)
 
-> **Navigation**: [Back to Overview](../MVP_PLAN.md) | [Previous: Beta Hardening](./BETA_v0.2.0_HARDENING.md)
+# Production (v0.3.0) - Milestone Details
 
 **Repository**: omnibase_infra
 **Target Version**: v0.3.0

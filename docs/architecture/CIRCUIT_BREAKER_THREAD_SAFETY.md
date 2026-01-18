@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Circuit Breaker Thread Safety
+
 # Circuit Breaker Concurrency Safety Implementation
 
 ## Overview
@@ -57,6 +59,10 @@ All circuit breaker state variables are protected:
 
 The circuit breaker implements a 3-state pattern:
 
+#### ASCII Version
+
+**Diagram Description**: This ASCII diagram shows the circuit breaker three-state pattern. CLOSED (Normal Operation) is the initial state where requests are allowed. When failure_count reaches the threshold, it transitions to OPEN (Blocking Requests) where all requests are blocked. After the reset timeout elapses (current_time >= open_until), it transitions to HALF_OPEN (Testing Recovery) where limited requests are allowed. From HALF_OPEN, a successful request transitions back to CLOSED, while a failed request transitions back to OPEN.
+
 ```
 CLOSED (Normal Operation)
     |
@@ -72,6 +78,25 @@ HALF_OPEN (Testing Recovery)
  v     v
 CLOSED  OPEN
 (success) (failure)
+```
+
+#### Mermaid Version
+
+```mermaid
+stateDiagram-v2
+    accTitle: Circuit Breaker State Machine
+    accDescr: Three-state circuit breaker pattern. CLOSED is normal operation where requests are allowed and failures counted. When failures reach threshold, transitions to OPEN where all requests are blocked. After reset timeout, transitions to HALF_OPEN for testing recovery. Success in HALF_OPEN returns to CLOSED, failure returns to OPEN.
+
+    [*] --> CLOSED
+
+    CLOSED --> OPEN : failure_count >= threshold
+    OPEN --> HALF_OPEN : reset timeout elapsed
+    HALF_OPEN --> CLOSED : success
+    HALF_OPEN --> OPEN : failure
+
+    note right of CLOSED : Normal Operation<br/>All requests allowed<br/>Failures counted
+    note right of OPEN : Blocking Requests<br/>All blocked
+    note right of HALF_OPEN : Testing Recovery<br/>Limited requests
 ```
 
 **State Descriptions**:

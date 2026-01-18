@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > Operations
+
 # Operations Documentation
 
 Operational runbooks and guides for deploying and managing omnibase_infra in production environments.

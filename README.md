@@ -27,6 +27,12 @@ src/omnibase_infra/
 └── utils/             # General utilities
 ```
 
+## Prerequisites
+
+- Python 3.12+
+- Poetry
+- Docker (optional, for infrastructure services)
+
 ## Getting Started
 
 ```bash
@@ -112,10 +118,17 @@ docker run -d -p 8200:8200 vault:1.15 server -dev
 
 ## Documentation
 
-See `docs/` for planning documents:
-- `MVP_EXECUTION_PLAN.md` - Detailed execution plan
-- `HANDOFF_OMNIBASE_INFRA_MVP.md` - Project handoff document
-- `DECLARATIVE_EFFECT_NODES_PLAN.md` - Contract-driven effect nodes plan
+**Start here**: [docs/index.md](docs/index.md) - Central documentation hub
+
+| I want to... | Go to... |
+|--------------|----------|
+| Get started quickly | [Quick Start Guide](docs/getting-started/quickstart.md) |
+| Understand the architecture | [Architecture Overview](docs/architecture/overview.md) |
+| Learn about node types | [Node Archetypes Reference](docs/reference/node-archetypes.md) |
+| See a complete example | [2-Way Registration Walkthrough](docs/guides/registration-example.md) |
+| Write a contract | [Contract.yaml Reference](docs/reference/contracts.md) |
+| Find implementation patterns | [Pattern Documentation](docs/patterns/README.md) |
+| Read coding standards | [CLAUDE.md](CLAUDE.md) |
 
 ## Development
 

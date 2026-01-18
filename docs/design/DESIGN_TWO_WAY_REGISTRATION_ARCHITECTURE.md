@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Design](README.md) > Two-Way Registration Architecture
+
 # DESIGN: Event-Driven Orchestration and Reducer Pattern
 ## Canonical Workflow Architecture for ONEX
 

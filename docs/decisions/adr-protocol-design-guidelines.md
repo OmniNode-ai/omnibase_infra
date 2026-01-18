@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Protocol Design Guidelines
+
 # ADR: Protocol Design Guidelines
 
 **Status**: Accepted

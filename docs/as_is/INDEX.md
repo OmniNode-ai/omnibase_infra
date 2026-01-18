@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > As-Is Architecture
+
 ## As-Is Architecture Map (Core + SPI + Infra3)
 
 This folder documents the **current (“as-is”) architecture shape** across:

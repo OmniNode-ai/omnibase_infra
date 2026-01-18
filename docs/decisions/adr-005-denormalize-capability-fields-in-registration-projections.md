@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > ADR-005 Denormalize Capability Fields
+
 # ADR-005: Denormalize Capability Fields in Registration Projections
 
 ## Status

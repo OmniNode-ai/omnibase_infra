@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Operation Routing
+
 # Operation Routing Pattern
 
 ## Overview
@@ -23,6 +25,9 @@ The pattern is designed for **dual-backend registration** where a node must be r
 
 ```mermaid
 flowchart TB
+    accTitle: Operation Routing Pattern Architecture
+    accDescr: Flow diagram showing the operation routing pattern in NodeRegistryEffect. A ModelRegistryRequest enters the Operation Router which uses operation_match strategy. The router dispatches to handlers in parallel via asyncio.gather, sending requests to both HandlerConsulRegister and HandlerPostgresUpsert simultaneously. Results from both handlers flow to an Aggregator using all_or_partial strategy, which produces a ModelRegistryResponse with status success, partial, or failed.
+
     subgraph Input
         REQ[ModelRegistryRequest<br/>operation: register_node]
     end

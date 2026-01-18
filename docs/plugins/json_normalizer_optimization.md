@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Plugins](README.md) > JSON Normalizer Optimization
+
 # PluginJsonNormalizer Performance Optimization
 
 ## Overview

@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [As-Is](INDEX.md) > Node Execution Shapes
+
 ## Node execution shapes (As-Is)
 
 This document captures the **current execution surface area** for node types in Core, and

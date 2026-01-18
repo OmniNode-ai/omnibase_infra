@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Design](README.md) > Core Models Inventory
+
 # omnibase_core Models Inventory for Union Pattern Replacement
 
 **Purpose**: Comprehensive inventory of omnibase_core models that can replace union patterns in omnibase_infra.

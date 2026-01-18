@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Migration](README.md) > Wire Default Handlers
+
 # Migration Guide: wire_default_handlers() to Contract-Driven Handler Discovery
 
 **Status**: IMMEDIATE - No deprecation period per project policy

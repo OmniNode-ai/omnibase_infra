@@ -1,3 +1,5 @@
+> **Navigation**: [Home](index.md) > Security Validation Integration
+
 # Security Validation Integration Report (OMN-1091)
 
 **Task**: Integrate `ModelHandlerValidationError` in security validation path

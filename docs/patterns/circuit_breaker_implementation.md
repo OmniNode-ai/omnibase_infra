@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Circuit Breaker Implementation
+
 # Circuit Breaker Implementation Guide
 
 ## Overview
@@ -7,6 +9,8 @@ Circuit breakers prevent cascading failures in distributed systems by detecting 
 ## Circuit Breaker States
 
 The circuit breaker operates in three states:
+
+### ASCII Diagram
 
 ```
 ┌─────────┐
@@ -19,6 +23,25 @@ The circuit breaker operates in three states:
      │                                   ┌───────────┐
      └── successes >= threshold ──────  │ HALF_OPEN │
                                          └───────────┘
+```
+
+### Mermaid Diagram
+
+```mermaid
+stateDiagram-v2
+    accTitle: Circuit Breaker State Machine
+    accDescr: State diagram showing circuit breaker transitions between three states. CLOSED is normal operation where requests pass through. When failures reach the threshold, it transitions to OPEN which rejects all requests immediately. After a timeout period, it moves to HALF_OPEN which allows limited test requests. Successful tests transition back to CLOSED, while any failure returns to OPEN.
+
+    [*] --> CLOSED
+
+    CLOSED --> OPEN : failures >= threshold
+    OPEN --> HALF_OPEN : timeout elapsed
+    HALF_OPEN --> CLOSED : successes >= threshold
+    HALF_OPEN --> OPEN : any failure
+
+    note right of CLOSED : Normal operation\nRequests allowed
+    note right of OPEN : Failing state\nRequests rejected
+    note right of HALF_OPEN : Testing recovery\nLimited requests
 ```
 
 ### State Descriptions

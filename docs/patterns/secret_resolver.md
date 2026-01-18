@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Secret Resolver
+
 # SecretResolver Pattern
 
 ## Overview

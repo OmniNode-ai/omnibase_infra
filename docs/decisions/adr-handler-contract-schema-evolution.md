@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Handler Contract Schema Evolution
+
 # ADR: Handler Contract Schema Evolution Strategy
 
 **Status**: Accepted

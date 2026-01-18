@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Any Type Pydantic Workaround
+
 # ADR: Use of Any Type as Pydantic 2.x JsonType Workaround
 
 **Status**: Superseded

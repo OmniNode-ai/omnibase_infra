@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Policy Registry Trust Model
+
 # Policy Registry Trust Model
 
 This document describes the trust model and security considerations for `PolicyRegistry`, which manages policy plugin registration in ONEX infrastructure.

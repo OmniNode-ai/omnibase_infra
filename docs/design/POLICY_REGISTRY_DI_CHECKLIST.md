@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Design](README.md) > Policy Registry DI Checklist
+
 # PolicyRegistry DI Integration - Implementation Checklist
 
 ## Phase 1: Container Support (ONM-812)

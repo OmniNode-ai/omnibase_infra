@@ -1,6 +1,10 @@
+> **Navigation**: [Home](../index.md) > Patterns
+
 # ONEX Infrastructure Patterns
 
 This directory contains detailed implementation guides and best practices for ONEX infrastructure development.
+
+> **Note**: For authoritative coding rules and standards, see [CLAUDE.md](../../CLAUDE.md). This documentation provides explanations, examples, and detailed implementation guides that supplement the rules defined there.
 
 ## Pattern Categories
 
@@ -118,6 +122,10 @@ This directory contains detailed implementation guides and best practices for ON
 | VALKEY | `SERVICE_UNAVAILABLE` | [Error Recovery](./error_recovery_patterns.md#graceful-degradation-pattern) |
 
 ## Pattern Relationships
+
+### ASCII Diagram
+
+**Diagram Description**: This ASCII diagram shows how ONEX infrastructure patterns relate to each other through dependencies. Error Handling Patterns is foundational, defining error classes and context used by all other patterns. Error Sanitization depends on Error Handling. Error Recovery depends on both Error Handling and Error Sanitization. Retry/Backoff/Compensation and Circuit Breaker Implementation depend on Error Handling and Error Recovery. Dispatcher Resilience depends on Circuit Breaker. Correlation ID Tracking is used by all patterns. Container DI is used by all infrastructure services. Protocol Patterns is foundational for structural typing. Security Patterns depends on error patterns and Correlation ID Tracking. Secret Resolver, Handler Plugin Loader, and Consul Integration depend on Security Patterns. Testing Patterns and Registry clear() Policy support test isolation. Mixin Dependencies documents composition patterns for all mixin classes.
 
 ```
 Error Handling Patterns
@@ -237,6 +245,78 @@ Mixin Dependencies
     └── Used by: All classes composing multiple mixins
 ```
 
+### Mermaid Diagram
+
+```mermaid
+flowchart TB
+    accTitle: ONEX Infrastructure Pattern Dependencies
+    accDescr: Dependency graph showing how ONEX infrastructure patterns relate to each other. Foundational patterns include Error Handling which defines error classes and context, Correlation ID Tracking for request tracing, Container DI for service resolution, and Protocol Patterns for structural typing. Error Sanitization depends on Error Handling. Error Recovery depends on Error Handling and Error Sanitization. Circuit Breaker depends on Error Handling and Error Recovery. Retry Backoff and Dispatcher Resilience depend on Circuit Breaker. Security Patterns depends on error patterns and Correlation ID. Secret Resolver and Handler Plugin Loader depend on Security Patterns. Consul Integration depends on Circuit Breaker and Security Patterns.
+
+    subgraph Foundation["Foundational Patterns"]
+        EH[Error Handling<br/>Error classes & context]
+        CID[Correlation ID Tracking<br/>Request tracing]
+        CDI[Container DI<br/>Service resolution]
+        PP[Protocol Patterns<br/>Structural typing]
+    end
+
+    subgraph ErrorResil["Error & Resilience"]
+        ES[Error Sanitization<br/>Data classification]
+        ER[Error Recovery<br/>Retry strategies]
+        CB[Circuit Breaker<br/>Failure prevention]
+        RB[Retry Backoff<br/>Compensation]
+        DR[Dispatcher Resilience<br/>Owned resilience]
+        OR[Operation Routing<br/>Handler dispatch]
+    end
+
+    subgraph Security["Security & Infrastructure"]
+        SP[Security Patterns<br/>Auth, validation, secrets]
+        SR[Secret Resolver<br/>Centralized secrets]
+        HPL[Handler Plugin Loader<br/>Dynamic discovery]
+        CI[Consul Integration<br/>Service discovery]
+        PRT[Policy Registry Trust<br/>Security boundaries]
+    end
+
+    subgraph Testing["Testing & Development"]
+        TP[Testing Patterns<br/>Assertions, errors]
+        RCP[Registry clear Policy<br/>Test isolation]
+        MD[Mixin Dependencies<br/>Composition patterns]
+    end
+
+    EH --> ES
+    EH --> ER
+    ES --> ER
+    ER --> CB
+    EH --> CB
+    CB --> RB
+    ER --> RB
+    CB --> DR
+    EH --> DR
+    EH --> OR
+    ES --> OR
+    CB --> OR
+
+    EH --> SP
+    CID --> SP
+    SP --> SR
+    EH --> SR
+    SP --> HPL
+    CID --> HPL
+    CB --> CI
+    EH --> CI
+    SP --> CI
+    CDI --> PRT
+
+    TP --> RCP
+    CDI --> MD
+    CB --> MD
+    EH --> MD
+
+    style EH fill:#e3f2fd
+    style CID fill:#e3f2fd
+    style CDI fill:#e3f2fd
+    style PP fill:#e3f2fd
+```
+
 ## Usage Examples
 
 ### Complete Error Handling Flow
@@ -299,5 +379,4 @@ Each pattern document should include:
 ## See Also
 
 - [CLAUDE.md](../../CLAUDE.md) - Quick reference rules (references these patterns)
-- [Infrastructure Migration Plan](../../CLAUDE.md#infrastructure-migration-plan) - Migration roadmap
 - [ONEX Principles](../../CLAUDE.md#core-onex-principles) - Architectural principles

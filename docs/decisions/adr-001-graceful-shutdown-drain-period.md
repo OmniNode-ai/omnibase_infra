@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > ADR-001 Graceful Shutdown
+
 # ADR-001: Graceful Shutdown with Drain Period
 
 ## Status

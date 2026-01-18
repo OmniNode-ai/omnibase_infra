@@ -135,6 +135,13 @@ jobs:
         run: |
           poetry run python scripts/validate.py all --verbose
 
+      - name: Run markdown link validation
+        run: |
+          echo "================================================================"
+          echo "Markdown Link Validation"
+          echo "================================================================"
+          poetry run python scripts/validate.py markdown_links --verbose
+
   # Parallel test execution - 10 splits for ~927 tests each
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:

@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Validation](README.md) > Event Bus Coverage Report
+
 # Event Bus Coverage Validation Report
 
 > **Status**: VALIDATED

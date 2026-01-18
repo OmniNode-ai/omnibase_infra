@@ -1,6 +1,10 @@
+> **Navigation**: [Home](../index.md) > Validation
+
 # ONEX Infrastructure Validation Framework
 
 Comprehensive validation system for omnibase_infra, ensuring code quality, architecture compliance, and ONEX standards adherence.
+
+> **Note**: For authoritative coding rules and standards that validators enforce, see [CLAUDE.md](../../CLAUDE.md).
 
 ## Quick Start
 
@@ -9,17 +13,40 @@ Comprehensive validation system for omnibase_infra, ensuring code quality, archi
 poetry run python scripts/validate.py all --verbose
 
 # Run specific validators
-poetry run python scripts/validate.py architecture
+poetry run python scripts/validate.py architecture        # One-model-per-file
+poetry run python scripts/validate.py architecture_layers # Core/Infra layer separation
 poetry run python scripts/validate.py contracts
 poetry run python scripts/validate.py patterns
 poetry run python scripts/validate.py unions
 poetry run python scripts/validate.py imports
+poetry run python scripts/validate.py any_types
+poetry run python scripts/validate.py markdown_links
 
 # Quick mode (skip medium priority validators)
 poetry run python scripts/validate.py all --quick
 ```
 
 ## Available Validators
+
+### 0. Architecture Layers Validator (HIGH Priority)
+**Purpose**: Verify `omnibase_core` does not contain infrastructure dependencies
+
+**Implementation**: `scripts/check_architecture.sh` (bash script)
+
+**Ticket Reference**: OMN-255
+
+**What it checks**:
+- Forbidden infrastructure imports in core layer
+- Packages like kafka, httpx, asyncpg, redis, consul, etc.
+
+**Why it matters**: The ONEX architecture requires strict layer separation. Infrastructure packages belong in `omnibase_infra`, not `omnibase_core`.
+
+**Known Issues** (tracked in Linear, not blocking):
+- `aiohttp`: OMN-1015
+- `redis`: OMN-1295
+- `consul`: OMN-1015
+
+See [Validator Reference](validator_reference.md#architecture_layers) for full documentation.
 
 ### 1. Architecture Validator (HIGH Priority)
 **Purpose**: Enforce ONEX one-model-per-file principle

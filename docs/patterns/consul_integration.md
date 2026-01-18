@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Consul Integration
+
 # Consul Integration Patterns
 
 This document describes patterns for integrating with HashiCorp Consul in ONEX infrastructure services.

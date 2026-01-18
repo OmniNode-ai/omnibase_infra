@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Operations](README.md) > Thread Pool Tuning
+
 # Thread Pool Tuning Operational Runbook
 
 Operational guide for tuning thread pool configurations in omnibase_infra components.

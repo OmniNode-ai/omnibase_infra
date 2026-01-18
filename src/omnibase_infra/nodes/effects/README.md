@@ -6,7 +6,7 @@
 
 > **Important**: Effect nodes are **single-shot operations** - they do NOT implement retries.
 > Retry logic is the exclusive responsibility of the orchestrator layer.
-> See [Retry Strategy: Orchestrator-Owned Retries](../../../docs/patterns/retry_backoff_compensation_strategy.md#architectural-responsibility-orchestrator-owned-retries) for details.
+> See [Retry Strategy: Orchestrator-Owned Retries](../../../../docs/patterns/retry_backoff_compensation_strategy.md#architectural-responsibility-orchestrator-owned-retries) for details.
 
 ### Architecture
 

@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Runtime Host Implementation Plan
+
 # Runtime Host Architecture Implementation Plan
 
 **Created**: December 3, 2025

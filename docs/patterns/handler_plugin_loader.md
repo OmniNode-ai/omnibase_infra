@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Handler Plugin Loader
+
 # Handler Plugin Loader Pattern
 
 ## Overview

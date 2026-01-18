@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > Custom Bool Result Models
+
 # ADR: Custom `__bool__` for Result Models
 
 **Status**: Accepted

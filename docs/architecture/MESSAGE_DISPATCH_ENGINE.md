@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Message Dispatch Engine
+
 # Message Dispatch Engine Architecture
 
 ## Overview
@@ -20,6 +22,10 @@ to registered dispatchers and collects dispatcher outputs for publishing.
 | **Observable** | Structured logging and comprehensive metrics |
 
 ## Architecture Diagram
+
+### ASCII Version
+
+**Diagram Description**: This ASCII diagram shows the six-step processing pipeline within the Message Dispatch Engine. Step 1 (Parse Topic) extracts the topic string and determines the EnumMessageCategory. Step 2 (Validate) performs category matching on the envelope. Step 3 (Match Dispatchers) finds all dispatchers matching the category and returns a dispatchers array. Step 4 (Execute Dispatchers) runs all matched dispatchers and collects their outputs. Step 5 (Collect Outputs) aggregates all dispatcher outputs. Step 6 (Return Result) constructs and returns the ModelDispatchResult containing all outputs and any errors.
 
 ```
 +------------------------------------------------------------------+
@@ -45,7 +51,30 @@ to registered dispatchers and collects dispatcher outputs for publishing.
 +------------------------------------------------------------------+
 ```
 
+### Mermaid Version
+
+```mermaid
+flowchart LR
+    accTitle: Message Dispatch Engine Processing Pipeline
+    accDescr: Six-step processing pipeline showing how the Message Dispatch Engine routes messages. Parse Topic extracts the category from the topic string. Validate checks the envelope against the category. Match Dispatchers finds all matching dispatchers. Execute Dispatchers runs each dispatcher. Collect Outputs aggregates results. Return Result builds the final ModelDispatchResult.
+
+    subgraph Engine["Message Dispatch Engine"]
+        S1[1. Parse Topic<br/>topic string → EnumMessageCategory]
+        S2[2. Validate<br/>category match]
+        S3[3. Match Dispatchers<br/>→ dispatchers array]
+        S4[4. Execute Dispatchers<br/>run all matched]
+        S5[5. Collect Outputs<br/>aggregate results]
+        S6[6. Return Result<br/>ModelDispatchResult]
+    end
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6
+```
+
 ## Dispatch Sequence Diagram
+
+### ASCII Version
+
+**Diagram Description**: This ASCII sequence diagram shows the interaction between three participants: User/Caller, MessageDispatchEngine, and Dispatcher(s). The User calls dispatch(topic, envelope) on the engine. The engine then performs five internal steps: (1) parse topic category, (2) validate envelope, (3) find matching dispatchers, (4) execute each dispatcher and receive DispatcherOutput (repeated for fan-out scenarios), and (5) aggregate all outputs. Finally, the engine returns the ModelDispatchResult to the caller.
 
 ```
 User/Caller          MessageDispatchEngine         Dispatcher(s)
@@ -77,6 +106,29 @@ User/Caller          MessageDispatchEngine         Dispatcher(s)
      | ModelDispatchResult    |                         |
      |<-----------------------|                         |
      |                        |                         |
+```
+
+### Mermaid Version
+
+```mermaid
+sequenceDiagram
+    accTitle: Message Dispatch Engine Sequence
+    accDescr: Sequence diagram showing the dispatch flow. User calls dispatch on the engine with topic and envelope. Engine parses the topic category, validates the envelope, finds matching dispatchers, executes each dispatcher receiving outputs (repeated for fan-out), aggregates all outputs, and returns a ModelDispatchResult to the caller.
+
+    participant Caller as User/Caller
+    participant Engine as MessageDispatchEngine
+    participant Dispatcher as Dispatcher(s)
+
+    Caller->>Engine: dispatch(topic, envelope)
+    Engine->>Engine: 1. Parse topic category
+    Engine->>Engine: 2. Validate envelope
+    Engine->>Engine: 3. Find matching dispatchers
+    loop For each matching dispatcher (fan-out)
+        Engine->>Dispatcher: 4. Execute dispatcher
+        Dispatcher-->>Engine: DispatcherOutput
+    end
+    Engine->>Engine: 5. Aggregate outputs
+    Engine-->>Caller: ModelDispatchResult
 ```
 
 ## Registration Phase

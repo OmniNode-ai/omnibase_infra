@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > DLQ Message Format
+
 # Dead Letter Queue (DLQ) Message Format
 
 ## Overview

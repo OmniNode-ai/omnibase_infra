@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Decisions](README.md) > ADR-003 Remove Handler Health Checks
+
 # ADR-003: Remove Health Check Methods from Handlers
 
 ## Status

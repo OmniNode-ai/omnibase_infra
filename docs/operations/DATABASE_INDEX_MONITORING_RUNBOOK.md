@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Operations](README.md) > Database Index Monitoring
+
 # Database Index Monitoring Runbook
 
 Operational guide for monitoring GIN index performance on the `registration_projections` table, including write overhead assessment, alerting thresholds, and troubleshooting procedures.
@@ -471,4 +473,3 @@ ALTER TABLE registration_projections SET (
 - [Database Migrations](../../docker/migrations/README.md) - Migration versioning and execution
 - [Event Bus Operations](EVENT_BUS_OPERATIONS_RUNBOOK.md) - Related Kafka event handling
 - [Thread Pool Tuning](THREAD_POOL_TUNING_RUNBOOK.md) - Connection pool optimization
-- [ADR-004: Performance Baseline Thresholds](../adr/ADR-004-performance-baseline-thresholds.md) - System-wide performance standards

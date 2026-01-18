@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Design](README.md) > Runtime Registration Ticket Plan
+
 # ONEX Runtime & Two-Way Registration — Canonical Ticket Plan
 
     Status: Canonical
@@ -1280,6 +1282,9 @@
 
 ```mermaid
 graph TD
+    accTitle: ONEX Runtime Registration Implementation Dependency Graph
+    accDescr: Dependency graph showing the implementation order for ONEX runtime registration. Eight sections are shown: A Foundation includes Canonical Layering, Execution Shapes, Message Envelope, Topic Taxonomy, and Registration Trigger. B Runtime includes Dispatch Engine, Message Registry, Handler Output, Idempotency Guard, Handler Context, Correlation Propagation, and Runtime Scheduler. C Orchestrator includes Projection Reader, Registration Orchestrator, and Durable Timeout. D Reducer includes Registration Reducer, FSM Contract, and Test Suite. E Effects includes Registry Effect, Compensation/Retry, and DLQ Handling. F Projection/Storage includes Projector Execution, Registration Schema, and Snapshot Publishing. G Testing includes Reducer, Orchestrator, E2E, Idempotency, Chaos, and Property-Based tests. H Migration includes omnibase_core update, Legacy Refactor, and Migration Checklist. Arrows show dependencies between sections.
+
     subgraph "A. Foundation - P0"
         A1["A1: Canonical Layering"]
         A2["A2: Execution Shapes"]

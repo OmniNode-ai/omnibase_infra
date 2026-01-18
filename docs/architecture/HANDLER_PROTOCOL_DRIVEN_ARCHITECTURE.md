@@ -1,4 +1,6 @@
-# Handler Wiring → Protocol-Driven Architecture
+> **Navigation**: [Home](../index.md) > [Architecture](README.md) > Handler Protocol-Driven Architecture
+
+# Handler Wiring -> Protocol-Driven Architecture
 
 ## Overview
 
@@ -20,6 +22,10 @@ type-safe, and extensible while preserving MVP velocity.
 | **No Backwards Compatibility** | Breaking changes acceptable; descriptor schema co-released with runtime |
 
 ## Architecture Diagram
+
+### ASCII Diagram
+
+**Diagram Description**: This diagram shows the Handler Loading Architecture with data flow from sources to runtime. At the top, ProtocolHandlerSource (from omnibase_spi) serves as the abstract protocol interface. Two concrete implementations branch from it: HandlerBootstrapSource (MVP - hardcoded handlers from _KNOWN_HANDLERS dict) and HandlerContractSource (Beta - YAML contracts from handler_contract.yaml files). Both sources produce data that flows downward to create a list of ModelHandlerDescriptor objects. These descriptors flow to RuntimeHostProcess, which registers them. Finally, Handler Instances are created with no publish access (a structural constraint, not a policy). Arrows indicate data flow direction, not control flow.
 
 ```
 +------------------------------------------------------------------+
@@ -51,6 +57,38 @@ type-safe, and extensible while preserving MVP velocity.
 |   |              (no publish access)                               |
 |   |                                                                |
 +------------------------------------------------------------------+
+```
+
+### Mermaid Diagram
+
+```mermaid
+flowchart TB
+    accTitle: Handler Loading Architecture
+    accDescr: Data flow diagram showing handler loading from sources to runtime. ProtocolHandlerSource is the abstract protocol interface from omnibase_spi. Two concrete implementations exist: HandlerBootstrapSource (hardcoded MVP handlers from _KNOWN_HANDLERS dict) and HandlerContractSource (YAML contracts from handler_contract.yaml files). Both produce ModelHandlerDescriptor lists that flow to RuntimeHostProcess for registration. Handler Instances are created with no publish access as a structural constraint. Arrows indicate data flow direction.
+
+    PROTOCOL["ProtocolHandlerSource<br/>(omnibase_spi)"]
+
+    subgraph Sources["Handler Sources"]
+        BOOTSTRAP["HandlerBootstrapSource<br/>(MVP - hardcoded)"]
+        CONTRACT["HandlerContractSource<br/>(Beta - YAML contracts)"]
+
+        BOOTSTRAP --> KNOWN["_KNOWN_HANDLERS dict"]
+        CONTRACT --> YAML["**/handler_contract.yaml"]
+    end
+
+    BOOTSTRAP -.->|implements| PROTOCOL
+    CONTRACT -.->|implements| PROTOCOL
+
+    KNOWN -->|"data flow"| DESC
+    YAML -->|"data flow"| DESC
+
+    DESC["list[ModelHandlerDescriptor]"]
+    DESC -->|"data flow"| RUNTIME["RuntimeHostProcess<br/>(registers descriptors)"]
+    RUNTIME -->|"data flow"| HANDLERS["Handler Instances<br/>(no publish access)"]
+
+    style PROTOCOL fill:#e3f2fd,stroke:#1976d2
+    style DESC fill:#fff3e0,stroke:#f57c00
+    style HANDLERS fill:#e8f5e9,stroke:#388e3c
 ```
 
 ## Two Handler Systems

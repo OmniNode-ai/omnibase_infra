@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Utility Directory Structure
+
 # Utility Directory Structure
 
 This document clarifies the distinction between `utils/` and `shared/utils/` directories in `omnibase_infra`.

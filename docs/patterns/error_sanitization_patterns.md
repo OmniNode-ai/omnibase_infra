@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Error Sanitization Patterns
+
 # Error Sanitization Patterns
 
 ## Overview

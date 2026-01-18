@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Mixin Dependencies
+
 # Mixin Dependencies Guide
 
 This document describes the mixin classes in `omnibase_infra` and their dependencies. Understanding these dependencies is essential when composing classes that use multiple mixins.

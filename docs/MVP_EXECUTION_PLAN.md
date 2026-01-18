@@ -1,3 +1,5 @@
+> **Navigation**: [Home](index.md) > MVP Execution Plan
+
 # omnibase_infra MVP Execution Plan
 
 **Created**: December 2, 2025

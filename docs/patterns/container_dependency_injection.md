@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Container Dependency Injection
+
 # Container-Based Dependency Injection
 
 ## Overview

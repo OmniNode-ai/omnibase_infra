@@ -1,3 +1,5 @@
+> **Navigation**: [Home](../index.md) > [Patterns](README.md) > Registry clear() Policy
+
 # Registry clear() Policy
 
 This document defines the policy for implementing `clear()` methods on registry classes, balancing test isolation requirements with production safety.
