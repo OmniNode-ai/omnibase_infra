@@ -75,7 +75,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
         allow_symlinks: If True, allow configuration files that are symlinks.
             If False, reject symlinked config files for security. Default is True.
         async_lock_cleanup_threshold: Number of async key locks that triggers cleanup.
-            Default is 1000. Prevents unbounded memory growth in long-running processes.
+            Default is 200. Prevents unbounded memory growth in long-running processes.
         async_lock_max_age_seconds: Maximum age for async locks before cleanup.
             Default is 3600 (1 hour). Locks older than this are removed if not held.
 
@@ -209,12 +209,13 @@ class ModelBindingConfigResolverConfig(BaseModel):
     # These settings control cleanup of per-handler async locks to prevent memory leaks
     # in long-running processes. See PR #168 for design rationale.
     async_lock_cleanup_threshold: int = Field(
-        default=1000,
+        default=200,
         ge=1,
         description="Number of async key locks that triggers cleanup check. "
         "When the lock count exceeds this threshold, stale locks are removed. "
-        "Default is 1000, suitable for most deployments with <1000 handler types. "
-        "Lower values increase cleanup frequency but add minor overhead.",
+        "Default is 200, suitable for typical deployments with 10-50 handler types. "
+        "Lower values increase cleanup frequency but add minor overhead. "
+        "Higher values (e.g., 1000) may be appropriate for deployments with many handler types.",
     )
     async_lock_max_age_seconds: float = Field(
         default=3600.0,

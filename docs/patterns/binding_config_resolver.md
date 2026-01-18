@@ -175,35 +175,35 @@ The BindingConfigResolver solves these problems with a single resolution interfa
 | `enable_caching` | `bool` | `True` | Whether to cache resolved configurations |
 | `cache_ttl_seconds` | `float` | `300.0` | TTL for cached configs (0-86400) |
 | `env_prefix` | `str` | `"HANDLER"` | Prefix for environment variable overrides |
-| `secret_resolver` | `object \| None` | `None` | SecretResolver for `vault:` references |
 | `strict_validation` | `bool` | `True` | Fail on unknown fields if True |
+| `strict_env_coercion` | `bool` | `False` | Fail on type conversion errors for env overrides (if False, log warning and skip) |
 | `allowed_schemes` | `frozenset[str]` | `{"file", "env", "vault"}` | Allowed config_ref schemes |
+| `fail_on_vault_error` | `bool` | `False` | Fail when `vault:` references cannot be resolved (set True in production) |
+| `max_cache_entries` | `int \| None` | `None` | Max cache entries before LRU eviction (None = unlimited) |
+| `allow_symlinks` | `bool` | `True` | Allow symlinked config files (set False for high-security) |
+| `async_lock_cleanup_threshold` | `int` | `200` | Number of async key locks that triggers cleanup |
+| `async_lock_max_age_seconds` | `float` | `3600.0` | Max age for async locks before cleanup (60-86400) |
+
+**Note**: SecretResolver is resolved from the container via dependency injection, not passed as a config parameter.
 
 **Example Configuration**:
 
 ```python
 from pathlib import Path
-from omnibase_infra.runtime.secret_resolver import SecretResolver
-from omnibase_infra.runtime.models import (
-    ModelBindingConfigResolverConfig,
-    ModelSecretResolverConfig,
-)
-
-# Create secret resolver for vault: references
-secret_config = ModelSecretResolverConfig(
-    enable_convention_fallback=True,
-    convention_env_prefix="ONEX_",
-)
-secret_resolver = SecretResolver(config=secret_config)
+from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
 
 # Create handler config resolver
 config = ModelBindingConfigResolverConfig(
     config_dir=Path("/etc/onex/handlers"),
-    cache_ttl_seconds=600.0,          # 10 minutes
-    env_prefix="ONEX_HANDLER",        # ONEX_HANDLER_DB_TIMEOUT_MS
-    secret_resolver=secret_resolver,  # For vault: resolution
-    strict_validation=True,           # Fail on unknown fields
+    cache_ttl_seconds=600.0,            # 10 minutes
+    env_prefix="ONEX_HANDLER",          # ONEX_HANDLER_DB_TIMEOUT_MS
+    strict_validation=True,             # Fail on unknown fields
+    strict_env_coercion=False,          # Warn on type conversion errors (default)
     allowed_schemes=frozenset({"file", "env"}),  # Disable vault: scheme
+    fail_on_vault_error=True,           # Fail on vault: resolution errors
+    max_cache_entries=100,              # LRU eviction after 100 entries
+    allow_symlinks=False,               # Reject symlinks for security
+    async_lock_cleanup_threshold=200,   # Cleanup after 200 async locks
 )
 ```
 
@@ -705,6 +705,7 @@ binding = resolver.resolve(
 ### Vault Integration Security
 
 - Vault access is via SecretResolver only (not direct Vault API)
+- SecretResolver is resolved from the container via dependency injection
 - Inherits SecretResolver's security controls
 - Bootstrap secrets for Vault must come from environment (see SecretResolver docs)
 
@@ -717,6 +718,9 @@ binding = resolver.resolve(
 | Validate configurations before deployment | Trust untrusted config sources |
 | Use environment overrides for secrets | Put secrets in config files |
 | Set appropriate cache TTLs | Cache forever with `cache_ttl_seconds=86400` |
+| Set `allow_symlinks=False` in high-security environments | Follow symlinks without validation |
+| Set `fail_on_vault_error=True` in production | Silently skip vault errors in production |
+| Register SecretResolver in container for vault: support | Pass SecretResolver directly to config |
 
 ---
 
@@ -725,6 +729,7 @@ binding = resolver.resolve(
 ### With Orchestrators
 
 ```python
+from pathlib import Path
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.nodes import NodeOrchestrator
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
@@ -734,16 +739,22 @@ class MyOrchestrator(NodeOrchestrator):
     def __init__(self, container: ModelONEXContainer) -> None:
         super().__init__(container)
 
-        # Get secret resolver from container if available
-        secret_resolver = container.get("secret_resolver", default=None)
-
-        self._config_resolver = BindingConfigResolver(
-            ModelBindingConfigResolverConfig(
-                config_dir=Path("/etc/onex/handlers"),
-                secret_resolver=secret_resolver,
-                cache_ttl_seconds=300.0,
-            )
+        # Register resolver config in container (typically done at bootstrap)
+        # SecretResolver for vault: references is resolved from container via DI
+        config = ModelBindingConfigResolverConfig(
+            config_dir=Path("/etc/onex/handlers"),
+            cache_ttl_seconds=300.0,
+            fail_on_vault_error=True,  # Recommended for production
         )
+        container.service_registry.register_instance(
+            interface=ModelBindingConfigResolverConfig,
+            instance=config,
+            scope="global",
+        )
+
+        # Create resolver with container injection
+        # SecretResolver is resolved from container automatically if registered
+        self._config_resolver = BindingConfigResolver(container)
 
     async def initialize_handlers(self) -> None:
         """Initialize handlers from contract bindings."""
@@ -1055,8 +1066,8 @@ Use this checklist when migrating handlers to `BindingConfigResolver`:
 
 **Preparation Phase**:
 - [ ] Create `ModelBindingConfigResolverConfig` with appropriate settings
-- [ ] Register `BindingConfigResolver` in container (if using DI)
-- [ ] Create `SecretResolver` if Vault integration is needed
+- [ ] Register `ModelBindingConfigResolverConfig` in container
+- [ ] Register `SecretResolver` in container if Vault integration is needed (resolved via DI)
 - [ ] Define config file directory structure (`config_dir`)
 - [ ] Establish environment variable prefix convention (`env_prefix`)
 
@@ -1085,7 +1096,7 @@ Use this checklist when migrating handlers to `BindingConfigResolver`:
 | Pitfall | Solution |
 |---------|----------|
 | Forgetting to set `config_dir` for relative paths | Always configure `config_dir` when using `file:` references |
-| Using `vault:` scheme without `SecretResolver` | Ensure `secret_resolver` is provided in config |
+| Using `vault:` scheme without `SecretResolver` | Ensure `SecretResolver` is registered in the container (resolved via DI) |
 | Expecting immediate cache updates | Call `refresh()` after external config changes |
 | Mixing old and new patterns | Fully migrate each handler before moving to the next |
 | Ignoring environment override naming | Follow `{PREFIX}_{HANDLER_TYPE}_{FIELD}` convention exactly |
