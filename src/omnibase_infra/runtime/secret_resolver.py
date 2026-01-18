@@ -261,6 +261,12 @@ class ProtocolSecretResolverMetrics(Protocol):
 # Prevents memory exhaustion from accidentally pointing at large files
 MAX_SECRET_FILE_SIZE = 1024 * 1024
 
+# Maximum latency samples to retain for metrics (rolling window)
+MAX_LATENCY_SAMPLES = 1000
+
+# Warning threshold for async key locks dictionary size (DoS mitigation)
+ASYNC_KEY_LOCKS_WARNING_THRESHOLD = 1000
+
 
 class SecretResolver:
     """Centralized secret resolution. Dumb and deterministic.
@@ -370,7 +376,9 @@ class SecretResolver:
 
         # === Metrics Tracking (OMN-1374) ===
         # Resolution latency tracking (deque of (source_type, latency_ms) tuples)
-        self._resolution_latencies: deque[tuple[str, float]] = deque(maxlen=1000)
+        self._resolution_latencies: deque[tuple[str, float]] = deque(
+            maxlen=MAX_LATENCY_SAMPLES
+        )
         # Resolution success/failure counts by source type
         self._resolution_success_counts: defaultdict[str, int] = defaultdict(int)
         self._resolution_failure_counts: defaultdict[str, int] = defaultdict(int)
@@ -606,6 +614,15 @@ class SecretResolver:
         with self._lock:
             if logical_name not in self._async_key_locks:
                 self._async_key_locks[logical_name] = asyncio.Lock()
+                # DoS mitigation: warn if lock dictionary grows too large
+                lock_count = len(self._async_key_locks)
+                if lock_count == ASYNC_KEY_LOCKS_WARNING_THRESHOLD:
+                    logger.warning(
+                        "Async key locks dictionary reached %d entries - potential DoS risk. "
+                        "Validate logical names against configured mappings.",
+                        lock_count,
+                        extra={"lock_count": lock_count},
+                    )
             return self._async_key_locks[logical_name]
 
     async def get_secrets_async(
@@ -777,8 +794,9 @@ class SecretResolver:
                 if source_type == "cache" and hasattr(collector, "record_cache_hit"):
                     collector.record_cache_hit()
             except Exception as e:
-                # Never let metrics failures affect resolution
-                logger.debug(
+                # Never let metrics failures affect resolution, but log at warning
+                # level so operators can detect broken metrics collectors
+                logger.warning(
                     "Metrics collector error (ignored): %s",
                     e,
                     extra={
@@ -837,8 +855,9 @@ class SecretResolver:
                 # are distinct from cache misses. Cache misses are already tracked
                 # in get_secret() and get_secret_async() via self._misses += 1
             except Exception as e:
-                # Never let metrics failures affect resolution
-                logger.debug(
+                # Never let metrics failures affect resolution, but log at warning
+                # level so operators can detect broken metrics collectors
+                logger.warning(
                     "Metrics collector error (ignored): %s",
                     e,
                     extra={
@@ -1599,8 +1618,13 @@ class SecretResolver:
             # Edge case: No slash in path - entire path is treated as mount_point
             # with empty vault_path. This format (e.g., "secret#field") is unusual
             # and may not be supported by Vault's KV v2 engine which expects
-            # paths like "mount/path". This case is preserved for backwards
-            # compatibility but callers should use full paths like "secret/data#field".
+            # paths like "mount/path". Log a warning to alert operators.
+            logger.warning(
+                "Unusual Vault path format detected: '%s'. "
+                "Expected 'mount/path#field' format. Empty path may not work with Vault KV v2.",
+                path,
+                extra={"vault_path": path},
+            )
             return parts[0], "", field
 
         mount_point = parts[0]
