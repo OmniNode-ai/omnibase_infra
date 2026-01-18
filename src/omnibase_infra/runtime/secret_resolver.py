@@ -406,15 +406,15 @@ class SecretResolver:
 
         Args:
             logical_names: List of dotted paths
-            required: If True, raises on first missing secret
+            required: If True, aggregates all failures into a single error
 
         Returns:
             Dict mapping logical_name -> SecretStr | None
 
         Raises:
             SecretResolutionError: If required=True and any secret is not found.
-                The first missing secret will raise; other fetches may complete
-                or be cancelled depending on timing.
+                All secrets are attempted before raising, and all failures are
+                reported in a single aggregated error message.
         """
         if not logical_names:
             return {}
@@ -424,10 +424,35 @@ class SecretResolver:
             self.get_secret_async(name, required=required) for name in logical_names
         ]
 
-        # Gather results - raises on first failure if required=True
-        values = await asyncio.gather(*tasks)
+        # Gather results with return_exceptions=True for better error aggregation
+        # This ensures all secrets are attempted before any error is raised
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        return dict(zip(logical_names, values, strict=True))
+        # Check for and aggregate exceptions
+        failed_secrets: list[str] = []
+        successful_results: dict[str, SecretStr | None] = {}
+
+        for name, result in zip(logical_names, results, strict=True):
+            if isinstance(result, BaseException):
+                failed_secrets.append(name)
+            else:
+                successful_results[name] = result
+
+        # If there were failures and required=True, raise aggregated error
+        if failed_secrets and required:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="get_secrets_async",
+                target_name="secret_resolver",
+            )
+            failed_list = ", ".join(failed_secrets)
+            raise SecretResolutionError(
+                f"Failed to resolve {len(failed_secrets)} secret(s): {failed_list}",
+                context=context,
+                logical_name=failed_secrets[0],  # Primary failed secret
+            )
+
+        return successful_results
 
     # === Cache Management ===
 

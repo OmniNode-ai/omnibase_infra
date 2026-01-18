@@ -7,11 +7,11 @@ configuration references that point to external configuration sources.
 Handler configs can reference external configuration via the `config_ref` field.
 
 Supported Reference Formats:
-    File references::
+    File references (preferred shorthand format)::
 
-        file:///absolute/path/to/config.yaml   # Absolute path
-        file://relative/path/config.yaml       # Relative path
-        file:configs/handler.yaml              # Shorthand relative
+        file:configs/handler.yaml              # Relative path (preferred)
+        file:/absolute/path/to/config.yaml     # Absolute path
+        file://relative/path/config.yaml       # Also supported (backwards compat)
 
     Environment variable references::
 
@@ -21,7 +21,7 @@ Supported Reference Formats:
     Vault secret references::
 
         vault:secret/data/handlers/db#config   # Specific field from secret
-        vault:secret/handlers/vault            # Whole secret
+        vault:secret/data/handlers/db          # Whole secret as JSON/YAML
 
 Security:
     File paths are validated to prevent path traversal attacks (../).
@@ -159,9 +159,9 @@ class ModelConfigRef(BaseModel):
 
         Args:
             config_ref: The raw config_ref string to parse. Supported formats:
-                - file:///absolute/path (absolute file path)
-                - file://relative/path (relative file path)
-                - file:path (shorthand relative)
+                - file:path/to/config.yaml (relative path - preferred)
+                - file:/absolute/path (absolute path)
+                - file://path (also supported for backwards compatibility)
                 - env:VAR_NAME (environment variable)
                 - vault:path/to/secret (whole vault secret)
                 - vault:path/to/secret#field (specific vault field)

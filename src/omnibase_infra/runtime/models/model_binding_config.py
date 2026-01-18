@@ -31,11 +31,12 @@ class ModelBindingConfig(BaseModel):
         priority: Execution priority for handler ordering. Higher values execute
             first. Use negative values to ensure late execution.
         config_ref: Reference to external configuration. Supported schemes:
-            - "file:///absolute/path/config.yaml" - Absolute file path
-            - "file://relative/path/config.yaml" - Relative file path
-            - "file:configs/handler.yaml" - Shorthand relative path
-            - "env:PREFIX_" - Load from environment variables with prefix
-            - "vault:secret/path" - Load from Vault secret path
+            - "file:configs/handler.yaml" - File path (preferred format)
+            - "file:/absolute/path/config.yaml" - Absolute file path
+            - "env:CONFIG_VAR" - Load from environment variable
+            - "vault:secret/data/path" - Load from Vault secret
+            - "vault:secret/data/path#field" - Load specific field from Vault secret
+            Note: file:// prefix is also supported for backwards compatibility.
         config: Inline configuration dictionary. If both config_ref and config
             are provided, config takes precedence for overlapping keys.
         retry_policy: Retry configuration for transient failures.

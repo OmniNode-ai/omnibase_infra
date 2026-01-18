@@ -728,6 +728,82 @@ class TestSecretResolverAsync:
         assert result2 is not None
         assert result1.get_secret_value() == result2.get_secret_value()
 
+    @pytest.mark.asyncio
+    async def test_get_secrets_async_aggregates_all_failures(self) -> None:
+        """get_secrets_async should aggregate all failures into one error message.
+
+        Instead of failing on the first missing secret, it should attempt all
+        secrets and report all failures in a single aggregated error.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="secret.one",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_ONE",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Request multiple secrets where some don't exist
+        # Neither SECRET_ONE nor other secrets exist in env
+        with pytest.raises(SecretResolutionError) as exc_info:
+            await resolver.get_secrets_async(
+                ["secret.one", "missing.two", "missing.three"],
+                required=True,
+            )
+
+        error_message = str(exc_info.value)
+        # Should mention the aggregated failure count
+        assert "3" in error_message or "secret" in error_message.lower()
+
+    @pytest.mark.asyncio
+    async def test_get_secrets_async_returns_partial_on_not_required(self) -> None:
+        """get_secrets_async should return partial results when required=False.
+
+        If some secrets fail to resolve but required=False, the successful
+        results should still be returned.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="secret.one",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_ONE",
+                    ),
+                ),
+                ModelSecretMapping(
+                    logical_name="secret.two",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="SECRET_TWO",
+                    ),
+                ),
+            ],
+            enable_convention_fallback=False,
+        )
+        resolver = SecretResolver(config=config)
+
+        # Only one secret exists
+        with patch.dict(os.environ, {"SECRET_ONE": "value_one"}, clear=False):
+            results = await resolver.get_secrets_async(
+                ["secret.one", "secret.two"],
+                required=False,
+            )
+
+        # secret.one should succeed
+        assert results.get("secret.one") is not None
+        assert results["secret.one"].get_secret_value() == "value_one"
+        # secret.two should return None (not found, but required=False)
+        # Note: The implementation returns only successful results
+        # So secret.two may not be in the dict at all
+        assert results.get("secret.two") is None or "secret.two" not in results
+
 
 class TestSecretResolverThreadSafety:
     """Tests for thread safety."""

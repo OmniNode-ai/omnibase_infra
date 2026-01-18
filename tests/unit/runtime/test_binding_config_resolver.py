@@ -20,9 +20,11 @@ Test Coverage:
 - Security (path traversal, sanitization)
 - Container-based dependency injection
 - Recursion depth limits for nested config resolution
+- Async lock lifecycle (acquisition, release on success/error, leak prevention)
 
 Related:
 - OMN-765: BindingConfigResolver implementation
+- PR #168: Async lock cleanup test coverage
 - docs/milestones/BETA_v0.2.0_HARDENING.md
 """
 
@@ -802,6 +804,156 @@ class TestBindingConfigResolverEnvOverrides:
             # Should fall back to inline config value
             assert result.timeout_ms == 5000
 
+    def test_invalid_boolean_env_value_strict_mode_raises(self) -> None:
+        """Invalid boolean value in strict mode raises ProtocolConfigurationError."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                env_prefix="HANDLER",
+                strict_env_coercion=True,  # Enable strict mode
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with patch.dict(os.environ, {"HANDLER_DB_ENABLED": "banana"}):
+                with pytest.raises(ProtocolConfigurationError) as exc_info:
+                    resolver.resolve(
+                        handler_type="db",
+                        inline_config={"enabled": True},
+                    )
+
+            # Verify error message mentions boolean and the expected values
+            assert "boolean" in str(exc_info.value).lower()
+            assert "enabled" in str(exc_info.value).lower()
+
+    def test_env_coercion_error_includes_correlation_id(self) -> None:
+        """Env coercion errors include correlation_id in error context.
+
+        Verifies that when strict_env_coercion=True and an invalid env value
+        is provided, the raised ProtocolConfigurationError includes the
+        correlation_id for traceability.
+
+        Related: PR #168 review - correlation_id propagation in env coercion errors.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                env_prefix="HANDLER",
+                strict_env_coercion=True,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            test_correlation_id = uuid4()
+
+            with patch.dict(os.environ, {"HANDLER_DB_TIMEOUT_MS": "not_a_number"}):
+                with pytest.raises(ProtocolConfigurationError) as exc_info:
+                    resolver.resolve(
+                        handler_type="db",
+                        inline_config={"timeout_ms": 5000},
+                        correlation_id=test_correlation_id,
+                    )
+
+            # Verify correlation_id is in error context
+            assert exc_info.value.model.correlation_id == test_correlation_id
+
+    def test_env_coercion_error_auto_generates_correlation_id(self) -> None:
+        """Env coercion errors auto-generate correlation_id when not provided.
+
+        Verifies that when no correlation_id is passed to resolve() and an
+        env coercion error occurs, a correlation_id is still generated and
+        included in the error context.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                env_prefix="HANDLER",
+                strict_env_coercion=True,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with patch.dict(
+                os.environ, {"HANDLER_DB_RATE_LIMIT_PER_SECOND": "invalid"}
+            ):
+                with pytest.raises(ProtocolConfigurationError) as exc_info:
+                    resolver.resolve(
+                        handler_type="db",
+                        inline_config={"rate_limit_per_second": 100.0},
+                        # No correlation_id provided
+                    )
+
+            # Verify correlation_id is auto-generated and present
+            assert exc_info.value.model.correlation_id is not None
+            # Verify it's a valid UUID (version 4)
+            from uuid import UUID
+
+            assert isinstance(exc_info.value.model.correlation_id, UUID)
+
+    def test_invalid_boolean_env_value_non_strict_mode_coerces(self) -> None:
+        """Invalid boolean value in non-strict mode coerces to False with warning."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                env_prefix="HANDLER",
+                strict_env_coercion=False,  # Non-strict mode (default)
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with patch.dict(os.environ, {"HANDLER_DB_ENABLED": "invalid_value"}):
+                result = resolver.resolve(
+                    handler_type="db",
+                    inline_config={"enabled": True},  # Would be True without override
+                )
+
+            # Invalid value coerced to False for backwards compatibility
+            assert result.enabled is False
+
+    def test_valid_boolean_env_values_truthy(self) -> None:
+        """Valid truthy boolean environment variable values are parsed correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                env_prefix="TEST",
+            )
+            container = create_mock_container(config)
+
+            # Test true values - each with unique handler type and matching env var
+            true_values = ["true", "1", "yes", "on", "TRUE", "YES", "ON"]
+            for idx, val in enumerate(true_values):
+                resolver = BindingConfigResolver(container)
+                handler_type = f"truthy{idx}"
+                env_var = f"TEST_{handler_type.upper()}_ENABLED"
+                with patch.dict(os.environ, {env_var: val}):
+                    result = resolver.resolve(
+                        handler_type=handler_type,
+                        inline_config={"enabled": False},
+                    )
+                assert result.enabled is True, f"Failed for truthy value '{val}'"
+
+    def test_valid_boolean_env_values_falsy(self) -> None:
+        """Valid falsy boolean environment variable values are parsed correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                env_prefix="TEST",
+            )
+            container = create_mock_container(config)
+
+            # Test false values - each with unique handler type and matching env var
+            false_values = ["false", "0", "no", "off", "FALSE", "NO", "OFF"]
+            for idx, val in enumerate(false_values):
+                resolver = BindingConfigResolver(container)
+                handler_type = f"falsy{idx}"
+                env_var = f"TEST_{handler_type.upper()}_ENABLED"
+                with patch.dict(os.environ, {env_var: val}):
+                    result = resolver.resolve(
+                        handler_type=handler_type,
+                        inline_config={"enabled": True},
+                    )
+                assert result.enabled is False, f"Failed for falsy value '{val}'"
+
 
 class TestBindingConfigResolverVaultSource:
     """Vault-based config resolution tests."""
@@ -961,6 +1113,103 @@ class TestBindingConfigResolverVaultSource:
 
             # Config should have the secret resolved (in the nested dict)
             assert result.config is not None
+
+    def test_fail_on_vault_error_true_raises_when_resolver_absent(self) -> None:
+        """Raise error when fail_on_vault_error=True and SecretResolver absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                fail_on_vault_error=True,
+            )
+            # Create container without SecretResolver registered
+            container = create_mock_container(config, secret_resolver=None)
+            resolver = BindingConfigResolver(container)
+
+            # Config with vault reference - should raise because no SecretResolver
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                resolver.resolve(
+                    handler_type="db",
+                    inline_config={
+                        "timeout_ms": 5000,
+                        "config": {"password": "vault:secret/db#password"},
+                    },
+                )
+
+            assert "secretresolver" in str(exc_info.value).lower()
+
+    def test_fail_on_vault_error_false_skips_when_resolver_absent(self) -> None:
+        """Skip vault resolution when fail_on_vault_error=False and SecretResolver absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                fail_on_vault_error=False,  # Default, but explicit for clarity
+            )
+            # Create container without SecretResolver registered
+            container = create_mock_container(config, secret_resolver=None)
+            resolver = BindingConfigResolver(container)
+
+            # Config with vault reference - should NOT raise, just return config unchanged
+            result = resolver.resolve(
+                handler_type="db",
+                inline_config={
+                    "timeout_ms": 5000,
+                    "config": {"password": "vault:secret/db#password"},
+                },
+            )
+
+            # Config returned with original vault reference (not resolved)
+            assert result.timeout_ms == 5000
+            assert result.config is not None
+            assert result.config.get("password") == "vault:secret/db#password"
+
+    @pytest.mark.asyncio
+    async def test_fail_on_vault_error_true_raises_async_when_resolver_absent(
+        self,
+    ) -> None:
+        """Async: Raise error when fail_on_vault_error=True and SecretResolver absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                fail_on_vault_error=True,
+            )
+            container = create_mock_container(config, secret_resolver=None)
+            resolver = BindingConfigResolver(container)
+
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                await resolver.resolve_async(
+                    handler_type="db",
+                    inline_config={
+                        "timeout_ms": 5000,
+                        "config": {"password": "vault:secret/db#password"},
+                    },
+                )
+
+            assert "secretresolver" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_fail_on_vault_error_false_skips_async_when_resolver_absent(
+        self,
+    ) -> None:
+        """Async: Skip vault resolution when fail_on_vault_error=False and SecretResolver absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                fail_on_vault_error=False,
+            )
+            container = create_mock_container(config, secret_resolver=None)
+            resolver = BindingConfigResolver(container)
+
+            result = await resolver.resolve_async(
+                handler_type="db",
+                inline_config={
+                    "timeout_ms": 5000,
+                    "config": {"password": "vault:secret/db#password"},
+                },
+            )
+
+            assert result.timeout_ms == 5000
+            assert result.config is not None
+            assert result.config.get("password") == "vault:secret/db#password"
 
 
 class TestBindingConfigResolverCaching:
@@ -2330,6 +2579,470 @@ class TestAsyncKeyLockCleanup:
             stats = resolver.get_cache_stats()
             assert stats.async_key_lock_cleanups == 1
 
+    @pytest.mark.asyncio
+    async def test_async_lock_released_after_successful_resolution(self) -> None:
+        """Verify async lock is released after successful resolution completes.
+
+        This test ensures that the per-key async lock used during resolve_async()
+        is properly released after resolution completes successfully, preventing
+        lock leaks that could cause deadlocks in subsequent calls.
+
+        Related:
+        - PR #168 review feedback: missing test for async lock cleanup
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                enable_caching=False,  # Disable caching to force resolution each time
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            handler_type = "test_handler_success"
+
+            # Perform successful async resolution
+            result = await resolver.resolve_async(
+                handler_type=handler_type,
+                inline_config={"timeout_ms": 5000},
+            )
+
+            # Verify resolution succeeded
+            assert result is not None
+            assert result.handler_type == handler_type
+            assert result.timeout_ms == 5000
+
+            # Verify the lock exists (was created during resolution)
+            assert handler_type in resolver._async_key_locks
+
+            # Verify the lock is NOT held (released after resolution)
+            lock = resolver._async_key_locks[handler_type]
+            assert not lock.locked(), (
+                "Async lock should be released after successful resolution"
+            )
+
+    @pytest.mark.asyncio
+    async def test_async_lock_released_after_failed_resolution(self) -> None:
+        """Verify async lock is released after resolution fails with error.
+
+        This test ensures that the per-key async lock is properly released
+        even when resolution raises an exception, preventing lock leaks.
+
+        Related:
+        - PR #168 review feedback: missing test for async lock cleanup
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                enable_caching=False,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            handler_type = "test_handler_failure"
+
+            # Attempt resolution that will fail (empty handler_type causes validation error)
+            # Note: We use an empty string as handler_type which fails validation
+            with pytest.raises(ProtocolConfigurationError):
+                await resolver.resolve_async(
+                    handler_type="",  # Invalid: empty handler_type
+                    inline_config={"timeout_ms": 5000},
+                )
+
+            # The empty string handler type should have had a lock created
+            # Verify the lock exists (was created during resolution attempt)
+            assert "" in resolver._async_key_locks
+
+            # Verify the lock is NOT held (released despite error)
+            lock = resolver._async_key_locks[""]
+            assert not lock.locked(), (
+                "Async lock should be released after failed resolution"
+            )
+
+    @pytest.mark.asyncio
+    async def test_async_lock_released_after_file_not_found_error(self) -> None:
+        """Verify async lock is released when config file is not found.
+
+        This tests a more realistic error scenario where resolution fails
+        due to a missing configuration file.
+
+        Related:
+        - PR #168 review feedback: missing test for async lock cleanup
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                enable_caching=False,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            handler_type = "test_handler_file_error"
+
+            # Attempt resolution with non-existent file
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                await resolver.resolve_async(
+                    handler_type=handler_type,
+                    config_ref="file:nonexistent.yaml",
+                )
+
+            # Verify appropriate error
+            assert "not found" in str(exc_info.value).lower()
+
+            # Verify the lock exists (was created during resolution)
+            assert handler_type in resolver._async_key_locks
+
+            # Verify the lock is NOT held (released despite error)
+            lock = resolver._async_key_locks[handler_type]
+            assert not lock.locked(), (
+                "Async lock should be released after file not found error"
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_lock_leak_on_consecutive_operations(self) -> None:
+        """Verify no lock leaks occur across consecutive async operations.
+
+        This test ensures that multiple consecutive resolve_async() calls
+        (both successful and failed) don't accumulate held locks.
+
+        Related:
+        - PR #168 review feedback: missing test for async lock cleanup
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                enable_caching=False,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Perform multiple consecutive operations
+            handlers = ["handler_a", "handler_b", "handler_c"]
+
+            for handler_type in handlers:
+                # Successful resolution
+                result = await resolver.resolve_async(
+                    handler_type=handler_type,
+                    inline_config={"timeout_ms": 1000},
+                )
+                assert result.handler_type == handler_type
+
+            # Also perform some failing operations
+            for i in range(3):
+                try:
+                    await resolver.resolve_async(
+                        handler_type=f"fail_handler_{i}",
+                        config_ref="file:nonexistent.yaml",
+                    )
+                except ProtocolConfigurationError:
+                    pass  # Expected
+
+            # Verify NO locks are held after all operations
+            for handler_type in handlers:
+                assert handler_type in resolver._async_key_locks
+                lock = resolver._async_key_locks[handler_type]
+                assert not lock.locked(), f"Lock for {handler_type} should be released"
+
+            for i in range(3):
+                handler_type = f"fail_handler_{i}"
+                assert handler_type in resolver._async_key_locks
+                lock = resolver._async_key_locks[handler_type]
+                assert not lock.locked(), (
+                    f"Lock for {handler_type} should be released despite error"
+                )
+
+            # Verify cache stats track lock count correctly
+            stats = resolver.get_cache_stats()
+            assert stats.async_key_lock_count == len(handlers) + 3
+
+    @pytest.mark.asyncio
+    async def test_lock_held_during_resolution(self) -> None:
+        """Verify the async lock is held during resolution.
+
+        This test confirms that the lock is properly acquired and held
+        while resolution is in progress, preventing concurrent resolution
+        for the same handler type.
+
+        Related:
+        - PR #168 review feedback: missing test for async lock cleanup
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            # Create a valid config file
+            config_file = config_dir / "slow_handler.yaml"
+            config_file.write_text(yaml.dump({"timeout_ms": 5000}))
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=config_dir,
+                enable_caching=False,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            handler_type = "slow_handler"
+            lock_was_held = False
+
+            # Track whether lock is held during resolution by intercepting
+            original_resolve_config = resolver._resolve_config_async
+
+            async def intercepting_resolve(
+                handler_type: str,
+                config_ref: str | None,
+                inline_config: dict[str, object] | None,
+                correlation_id: object,
+            ) -> ModelBindingConfig:
+                nonlocal lock_was_held
+                # Check if the lock is held during resolution
+                if handler_type in resolver._async_key_locks:
+                    lock = resolver._async_key_locks[handler_type]
+                    lock_was_held = lock.locked()
+                return await original_resolve_config(
+                    handler_type, config_ref, inline_config, correlation_id
+                )
+
+            # Patch the internal method to check lock state during resolution
+            resolver._resolve_config_async = intercepting_resolve  # type: ignore[method-assign]
+
+            # Perform resolution
+            result = await resolver.resolve_async(
+                handler_type=handler_type,
+                config_ref="file:slow_handler.yaml",
+            )
+
+            # Verify resolution succeeded
+            assert result.timeout_ms == 5000
+
+            # Verify lock was held during resolution
+            assert lock_was_held, "Lock should be held during resolution"
+
+            # Verify lock is released after resolution
+            lock = resolver._async_key_locks[handler_type]
+            assert not lock.locked(), "Lock should be released after resolution"
+
+
+class TestVaultReferencesInLists:
+    """Tests for vault reference resolution inside list values.
+
+    These tests verify that vault: references inside list values are properly
+    resolved, including nested lists and mixed structures.
+
+    Related:
+    - OMN-765: BindingConfigResolver implementation
+    - PR #168 review feedback: vault reference resolution skips list values
+    """
+
+    def test_vault_refs_in_simple_list(self) -> None:
+        """Test resolving vault references in a simple list."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create mock SecretResolver
+            mock_resolver = MagicMock()
+            mock_secret = MagicMock()
+            mock_secret.get_secret_value.return_value = "resolved_secret"
+            mock_resolver.get_secret.return_value = mock_secret
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Patch the _get_secret_resolver method to return our mock
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                # Config with vault refs in a list
+                test_config: dict[str, object] = {
+                    "secrets": [
+                        "vault:secret/key1",
+                        "vault:secret/key2#field",
+                        "plain_value",
+                    ]
+                }
+
+                result = resolver._resolve_vault_refs(test_config, uuid4())
+
+                # Verify list items were resolved
+                assert isinstance(result["secrets"], list)
+                secrets_list = result["secrets"]
+                assert secrets_list[0] == "resolved_secret"
+                assert secrets_list[1] == "resolved_secret"
+                assert secrets_list[2] == "plain_value"
+
+    def test_vault_refs_in_nested_list(self) -> None:
+        """Test resolving vault references in nested lists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_resolver = MagicMock()
+            mock_secret = MagicMock()
+            mock_secret.get_secret_value.return_value = "nested_secret"
+            mock_resolver.get_secret.return_value = mock_secret
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                # Config with vault refs in nested list
+                test_config: dict[str, object] = {
+                    "nested": [
+                        ["vault:secret/nested1", "plain"],
+                        ["vault:secret/nested2"],
+                    ]
+                }
+
+                result = resolver._resolve_vault_refs(test_config, uuid4())
+
+                nested = result["nested"]
+                assert isinstance(nested, list)
+                assert nested[0][0] == "nested_secret"
+                assert nested[0][1] == "plain"
+                assert nested[1][0] == "nested_secret"
+
+    def test_vault_refs_in_list_with_dict_items(self) -> None:
+        """Test resolving vault references in list containing dictionaries."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_resolver = MagicMock()
+            mock_secret = MagicMock()
+            mock_secret.get_secret_value.return_value = "dict_secret"
+            mock_resolver.get_secret.return_value = mock_secret
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                # Config with list of dicts containing vault refs
+                test_config: dict[str, object] = {
+                    "databases": [
+                        {"name": "db1", "password": "vault:secret/db1#password"},
+                        {"name": "db2", "password": "vault:secret/db2#password"},
+                    ]
+                }
+
+                result = resolver._resolve_vault_refs(test_config, uuid4())
+
+                databases = result["databases"]
+                assert isinstance(databases, list)
+                assert databases[0]["name"] == "db1"
+                assert databases[0]["password"] == "dict_secret"
+                assert databases[1]["name"] == "db2"
+                assert databases[1]["password"] == "dict_secret"
+
+    def test_has_vault_references_in_list(self) -> None:
+        """Test _has_vault_references detects vault refs in lists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            # Config with vault ref in list
+            with_ref: dict[str, object] = {"items": ["vault:secret/test"]}
+            assert resolver._has_vault_references(with_ref) is True
+
+            # Config with nested vault ref in list
+            nested_ref: dict[str, object] = {"items": [{"key": "vault:secret/nested"}]}
+            assert resolver._has_vault_references(nested_ref) is True
+
+            # Config without vault refs
+            without_ref: dict[str, object] = {"items": ["plain", "values"]}
+            assert resolver._has_vault_references(without_ref) is False
+
+    @pytest.mark.asyncio
+    async def test_vault_refs_in_list_async(self) -> None:
+        """Test async resolution of vault references in lists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_resolver = MagicMock()
+            mock_secret = MagicMock()
+            mock_secret.get_secret_value.return_value = "async_secret"
+
+            async def mock_get_secret_async(name: str, required: bool = True) -> object:
+                return mock_secret
+
+            mock_resolver.get_secret_async = mock_get_secret_async
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                test_config: dict[str, object] = {
+                    "api_keys": [
+                        "vault:secret/key1",
+                        "vault:secret/key2",
+                    ]
+                }
+
+                result = await resolver._resolve_vault_refs_async(test_config, uuid4())
+
+                api_keys = result["api_keys"]
+                assert isinstance(api_keys, list)
+                assert api_keys[0] == "async_secret"
+                assert api_keys[1] == "async_secret"
+
+    def test_vault_ref_resolution_failure_in_list(self) -> None:
+        """Test vault reference resolution failure in list with fail_on_vault_error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_resolver = MagicMock()
+            mock_resolver.get_secret.side_effect = Exception("Vault error")
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+                fail_on_vault_error=True,
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                test_config: dict[str, object] = {"secrets": ["vault:secret/will_fail"]}
+
+                with pytest.raises(ProtocolConfigurationError) as exc_info:
+                    resolver._resolve_vault_refs(test_config, uuid4())
+
+                assert "list index" in str(exc_info.value).lower()
+
+    def test_vault_ref_in_list_depth_limit(self) -> None:
+        """Test that deeply nested lists hit recursion limit."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_resolver = MagicMock()
+            mock_secret = MagicMock()
+            mock_secret.get_secret_value.return_value = "secret"
+            mock_resolver.get_secret.return_value = mock_secret
+
+            config = ModelBindingConfigResolverConfig(
+                config_dir=Path(tmpdir),
+            )
+            container = create_mock_container(config)
+            resolver = BindingConfigResolver(container)
+
+            with patch.object(
+                resolver, "_get_secret_resolver", return_value=mock_resolver
+            ):
+                # Create deeply nested list (21 levels to exceed limit)
+                nested: list[object] = ["vault:secret/deep"]
+                for _ in range(21):
+                    nested = [nested]
+
+                test_config: dict[str, object] = {"deep_list": nested}
+
+                with pytest.raises(ProtocolConfigurationError) as exc_info:
+                    resolver._resolve_vault_refs(test_config, uuid4())
+
+                assert "nesting exceeds maximum depth" in str(exc_info.value).lower()
+
 
 __all__: list[str] = [
     "TestBindingConfigResolverBasic",
@@ -2348,4 +3061,5 @@ __all__: list[str] = [
     "TestBindingConfigResolverInlinePrecedence",
     "TestBindingConfigResolverRecursionDepth",
     "TestAsyncKeyLockCleanup",
+    "TestVaultReferencesInLists",
 ]
