@@ -175,37 +175,39 @@ The BindingConfigResolver solves these problems with a single resolution interfa
 | `enable_caching` | `bool` | `True` | Whether to cache resolved configurations |
 | `cache_ttl_seconds` | `float` | `300.0` | TTL for cached configs (0-86400) |
 | `env_prefix` | `str` | `"HANDLER"` | Prefix for environment variable overrides |
-| `secret_resolver` | `object \| None` | `None` | SecretResolver for `vault:` references |
 | `strict_validation` | `bool` | `True` | Fail on unknown fields if True |
+| `strict_env_coercion` | `bool` | `False` | Fail on type conversion errors for env overrides (if False, log warning and skip) |
 | `allowed_schemes` | `frozenset[str]` | `{"file", "env", "vault"}` | Allowed config_ref schemes |
+| `fail_on_vault_error` | `bool` | `False` | Fail when `vault:` references cannot be resolved (set True in production) |
+| `max_cache_entries` | `int \| None` | `None` | Max cache entries before LRU eviction (None = unlimited) |
+| `allow_symlinks` | `bool` | `True` | Allow symlinked config files (set False for high-security) |
+| `async_lock_cleanup_threshold` | `int` | `200` | Number of async key locks that triggers cleanup |
+| `async_lock_max_age_seconds` | `float` | `3600.0` | Max age for async locks before cleanup (60-86400) |
+
+**Note**: SecretResolver is resolved from the container via dependency injection, not passed as a config parameter.
 
 **Example Configuration**:
 
 ```python
 from pathlib import Path
-from omnibase_infra.runtime.secret_resolver import SecretResolver
-from omnibase_infra.runtime.models import (
-    ModelBindingConfigResolverConfig,
-    ModelSecretResolverConfig,
-)
-
-# Create secret resolver for vault: references
-secret_config = ModelSecretResolverConfig(
-    enable_convention_fallback=True,
-    convention_env_prefix="ONEX_",
-)
-secret_resolver = SecretResolver(config=secret_config)
+from omnibase_infra.runtime.models import ModelBindingConfigResolverConfig
 
 # Create handler config resolver
 config = ModelBindingConfigResolverConfig(
     config_dir=Path("/etc/onex/handlers"),
-    cache_ttl_seconds=600.0,          # 10 minutes
-    env_prefix="ONEX_HANDLER",        # ONEX_HANDLER_DB_TIMEOUT_MS
-    secret_resolver=secret_resolver,  # For vault: resolution
-    strict_validation=True,           # Fail on unknown fields
+    cache_ttl_seconds=600.0,            # 10 minutes
+    env_prefix="ONEX_HANDLER",          # ONEX_HANDLER_DB_TIMEOUT_MS
+    strict_validation=True,             # Fail on unknown fields
+    strict_env_coercion=False,          # Warn on type conversion errors (default)
     allowed_schemes=frozenset({"file", "env"}),  # Disable vault: scheme
+    fail_on_vault_error=True,           # Fail on vault: resolution errors
+    max_cache_entries=100,              # LRU eviction after 100 entries
+    allow_symlinks=False,               # Reject symlinks for security
+    async_lock_cleanup_threshold=200,   # Cleanup after 200 async locks
 )
 ```
+
+**Note**: SecretResolver for `vault:` references is resolved from the container via dependency injection when creating `BindingConfigResolver`, not passed as a config parameter.
 
 ### Config Reference Formats
 

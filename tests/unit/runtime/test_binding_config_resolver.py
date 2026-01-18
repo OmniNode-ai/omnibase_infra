@@ -2965,7 +2965,7 @@ class TestAsyncKeyLockCleanup:
         - PR #168 review feedback: make cleanup threshold configurable
         """
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Configure with a low threshold (10 instead of default 1000)
+            # Configure with a low threshold (10 instead of default 200)
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
                 async_lock_cleanup_threshold=10,
