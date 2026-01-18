@@ -255,6 +255,15 @@ class FactoryObservabilitySink:
                     policy=policy,
                 )
                 _logger.debug("Created singleton SinkMetricsPrometheus")
+            elif config is not None or policy is not None:
+                _logger.debug(
+                    "Returning existing singleton SinkMetricsPrometheus; "
+                    "provided config/policy ignored",
+                    extra={
+                        "config_provided": config is not None,
+                        "policy_provided": policy is not None,
+                    },
+                )
             return self._metrics_sink_instance
 
     # =========================================================================
@@ -349,6 +358,11 @@ class FactoryObservabilitySink:
             if self._logging_sink_instance is None:
                 self._logging_sink_instance = self.create_logging_sink(config=config)
                 _logger.debug("Created singleton SinkLoggingStructured")
+            elif config is not None:
+                _logger.debug(
+                    "Returning existing singleton SinkLoggingStructured; "
+                    "provided config ignored",
+                )
             return self._logging_sink_instance
 
     # =========================================================================

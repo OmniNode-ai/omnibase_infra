@@ -396,9 +396,10 @@ class TestStderrFallback:
         sink.emit(EnumLogLevel.ERROR, "Fallback test", {"key": "value"})
 
         # Mock the logger to raise an exception
+        # Using ValueError as a specific exception type that triggers the fallback
         with patch.object(sink, "_logger") as mock_logger:
-            mock_logger.error = MagicMock(side_effect=Exception("Structlog failed"))
-            mock_logger.info = MagicMock(side_effect=Exception("Structlog failed"))
+            mock_logger.error = MagicMock(side_effect=ValueError("Structlog failed"))
+            mock_logger.info = MagicMock(side_effect=ValueError("Structlog failed"))
 
             # Capture stderr
             captured_stderr = io.StringIO()
@@ -418,7 +419,7 @@ class TestStderrFallback:
         sink.emit(EnumLogLevel.WARNING, "Timestamp test", {})
 
         with patch.object(sink, "_logger") as mock_logger:
-            mock_logger.warning = MagicMock(side_effect=Exception("Failed"))
+            mock_logger.warning = MagicMock(side_effect=ValueError("Failed"))
 
             captured_stderr = io.StringIO()
             with patch.object(sys, "stderr", captured_stderr):
@@ -436,7 +437,7 @@ class TestStderrFallback:
         sink.emit(EnumLogLevel.CRITICAL, "Level test", {})
 
         with patch.object(sink, "_logger") as mock_logger:
-            mock_logger.critical = MagicMock(side_effect=Exception("Failed"))
+            mock_logger.critical = MagicMock(side_effect=ValueError("Failed"))
 
             captured_stderr = io.StringIO()
             with patch.object(sys, "stderr", captured_stderr):
@@ -453,11 +454,11 @@ class TestStderrFallback:
         sink.emit(EnumLogLevel.INFO, "Double fail test", {})
 
         with patch.object(sink, "_logger") as mock_logger:
-            mock_logger.info = MagicMock(side_effect=Exception("Structlog failed"))
+            mock_logger.info = MagicMock(side_effect=ValueError("Structlog failed"))
 
-            # Make stderr.write also fail
+            # Make stderr.write also fail (OSError is typical for I/O failures)
             with patch.object(
-                sys.stderr, "write", side_effect=Exception("stderr failed")
+                sys.stderr, "write", side_effect=OSError("stderr failed")
             ):
                 # Should not raise even with double failure
                 sink.flush()
@@ -582,10 +583,7 @@ class TestThreadSafety:
         assert len(results) == num_threads
         # drop_counts should be monotonically non-decreasing
         for i in range(1, len(drop_counts)):
-            assert (
-                drop_counts[i] >= drop_counts[i - 1]
-                or drop_counts[i - 1] == drop_counts[i]
-            )
+            assert drop_counts[i] >= drop_counts[i - 1]
 
     def test_concurrent_buffer_size_read(self) -> None:
         """Verify buffer_size reads are consistent during concurrent operations."""

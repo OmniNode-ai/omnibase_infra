@@ -16,7 +16,6 @@ Usage:
     ...     buffer_size=500,
     ...     flush_interval_seconds=10.0,
     ...     output_format="console",
-    ...     drop_policy="drop_newest",
     ... )
 """
 
@@ -24,7 +23,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelLoggingHandlerConfig(BaseModel):
@@ -40,11 +39,12 @@ class ModelLoggingHandlerConfig(BaseModel):
             Default: "json".
         output_file: Optional file path for log output. When set, logs are
             written to both stdout and the specified file. Default: None.
-        drop_policy: Policy for handling buffer overflow. "drop_oldest" removes
-            the oldest entries when buffer is full (preserves recent logs).
-            "drop_newest" rejects new entries (preserves historical logs).
-            Default: "drop_oldest".
+        drop_policy: Policy for handling buffer overflow. Currently only
+            "drop_oldest" is supported, which removes the oldest entries when
+            buffer is full (preserves recent logs). Default: "drop_oldest".
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     buffer_size: int = Field(
         default=1000,
@@ -66,9 +66,9 @@ class ModelLoggingHandlerConfig(BaseModel):
         default=None,
         description="Optional file path for log output",
     )
-    drop_policy: Literal["drop_oldest", "drop_newest"] = Field(
+    drop_policy: Literal["drop_oldest"] = Field(
         default="drop_oldest",
-        description="Buffer overflow handling policy",
+        description="Buffer overflow handling policy (only drop_oldest supported)",
     )
 
 

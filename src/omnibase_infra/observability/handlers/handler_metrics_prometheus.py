@@ -313,6 +313,41 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
                 context=context,
             ) from e
 
+    def _parse_correlation_id_header(self, header_value: str | None) -> UUID:
+        """Parse and validate X-Correlation-ID header value.
+
+        Safely extracts a correlation ID from the request header. If the header
+        is missing, empty, or contains an invalid UUID format, generates a new
+        UUID and logs a warning for invalid values.
+
+        Args:
+            header_value: The raw X-Correlation-ID header value, or None if absent.
+
+        Returns:
+            A valid UUID - either parsed from the header or newly generated.
+
+        Note:
+            Invalid correlation IDs are handled gracefully to avoid crashing
+            the metrics endpoint. A warning is logged to help identify
+            misconfigured clients.
+        """
+        if not header_value:
+            return uuid4()
+
+        try:
+            return UUID(header_value)
+        except (ValueError, AttributeError):
+            # Log warning for debugging but don't crash - generate fallback UUID
+            fallback_id = uuid4()
+            logger.warning(
+                "Invalid X-Correlation-ID header format, using generated UUID",
+                extra={
+                    "invalid_correlation_id": header_value[:100],  # Truncate for safety
+                    "generated_correlation_id": str(fallback_id),
+                },
+            )
+            return fallback_id
+
     async def _handle_metrics_request(self, request: web.Request) -> web.Response:
         """Handle HTTP GET requests to the metrics endpoint.
 
@@ -325,10 +360,9 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
         Returns:
             aiohttp Response with metrics text.
         """
-        # Get correlation ID from request headers if present
-        correlation_id_header = request.headers.get("X-Correlation-ID")
-        correlation_id = (
-            UUID(correlation_id_header) if correlation_id_header else uuid4()
+        # Get and validate correlation ID from request headers
+        correlation_id = self._parse_correlation_id_header(
+            request.headers.get("X-Correlation-ID")
         )
 
         logger.debug(

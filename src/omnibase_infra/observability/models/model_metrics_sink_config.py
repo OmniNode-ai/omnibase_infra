@@ -25,7 +25,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.observability.sinks import DEFAULT_HISTOGRAM_BUCKETS
+from omnibase_infra.observability.sinks.sink_metrics_prometheus import (
+    DEFAULT_HISTOGRAM_BUCKETS,
+)
 
 
 class ModelMetricsSinkConfig(BaseModel):
@@ -42,9 +44,6 @@ class ModelMetricsSinkConfig(BaseModel):
         histogram_buckets: Bucket boundaries for histogram metrics. Defaults
             to Prometheus-standard latency buckets suitable for request
             durations in seconds.
-        policy: Optional cardinality policy for label validation. If None,
-            a default policy is used that forbids high-cardinality labels
-            and warns on violations.
 
     Example:
         ```python

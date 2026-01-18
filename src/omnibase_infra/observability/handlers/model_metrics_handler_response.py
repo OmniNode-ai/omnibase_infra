@@ -27,9 +27,10 @@ Usage:
 
 from __future__ import annotations
 
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumResponseStatus
 from omnibase_infra.observability.handlers.model_metrics_handler_payload import (
@@ -77,7 +78,22 @@ class ModelMetricsHandlerResponse(BaseModel):
         description="Error description if status is ERROR",
     )
 
-    model_config = {"frozen": True, "extra": "forbid"}
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_error_message_required_on_error(self) -> Self:
+        """Validate that error_message is provided when status is ERROR.
+
+        This validator ensures API consumers always receive a meaningful error
+        description when an operation fails.
+
+        Raises:
+            ValueError: If status is ERROR but error_message is None or empty.
+        """
+        if self.status == EnumResponseStatus.ERROR:
+            if not self.error_message:
+                raise ValueError("error_message is required when status is ERROR")
+        return self
 
 
 __all__: list[str] = [

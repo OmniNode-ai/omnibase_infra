@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelMetricsHandlerPayload(BaseModel):
@@ -92,7 +92,7 @@ class ModelMetricsHandlerPayload(BaseModel):
         description="Job name used for Pushgateway push",
     )
 
-    model_config = {"frozen": True, "extra": "forbid"}
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 __all__: list[str] = [

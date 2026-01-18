@@ -8,9 +8,9 @@ and flushes them to structlog with JSON formatting.
 
 Buffer Management:
     The sink maintains a thread-safe buffer of log entries. When the buffer
-    reaches capacity, the oldest entries are dropped to maintain bounded memory
-    usage. This "drop_oldest" policy ensures the sink never blocks on emit()
-    due to buffer fullness.
+    reaches capacity, oldest entries are dropped to make room for new ones
+    (drop_oldest policy). This ensures the sink never blocks on emit() due
+    to buffer fullness.
 
 Thread Safety:
     All buffer operations are protected by a threading.Lock. The emit() method
@@ -29,7 +29,7 @@ import sys
 import threading
 from collections import deque
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 import structlog
 
@@ -78,7 +78,7 @@ class SinkLoggingStructured:
 
     Buffer Management:
         - Configurable maximum buffer size (default: 1000 entries)
-        - drop_oldest policy: when buffer is full, oldest entries are discarded
+        - When buffer is full, oldest entries are dropped (drop_oldest policy)
         - Thread-safe: all operations use a lock for synchronization
 
     Output Formats:
@@ -92,12 +92,14 @@ class SinkLoggingStructured:
     Attributes:
         max_buffer_size: Maximum number of entries to buffer before dropping.
         output_format: Output format ("json" or "console").
+        drop_policy: Buffer overflow policy (only "drop_oldest" supported).
         drop_count: Number of entries dropped due to buffer overflow.
 
     Example:
         ```python
         from omnibase_core.enums import EnumLogLevel
 
+        # Create sink with custom buffer size (uses drop_oldest policy)
         sink = SinkLoggingStructured(max_buffer_size=500)
 
         # Hot path - emit without blocking
@@ -118,6 +120,7 @@ class SinkLoggingStructured:
         self,
         max_buffer_size: int = 1000,
         output_format: str = "json",
+        drop_policy: Literal["drop_oldest"] = "drop_oldest",
     ) -> None:
         """Initialize the structured logging sink.
 
@@ -127,6 +130,8 @@ class SinkLoggingStructured:
             output_format: Output format for log entries.
                 - "json": JSON format (default, machine-readable)
                 - "console": Colored console output (human-readable)
+            drop_policy: Policy for handling buffer overflow. Currently only
+                "drop_oldest" is supported. Default: "drop_oldest".
 
         Raises:
             ValueError: If max_buffer_size is less than 1 or output_format
@@ -142,16 +147,28 @@ class SinkLoggingStructured:
 
         self._max_buffer_size = max_buffer_size
         self._output_format = output_format
+        self._drop_policy: Literal["drop_oldest"] = drop_policy
+        # Use deque with maxlen to automatically drop oldest entries when full
         self._buffer: deque[BufferedLogEntry] = deque(maxlen=max_buffer_size)
         self._lock = threading.Lock()
         self._drop_count = 0
         self._logger = self._configure_structlog()
 
-    def _configure_structlog(self) -> structlog.stdlib.BoundLogger:
+    def _configure_structlog(self) -> structlog.BoundLogger:
         """Configure and return a structlog logger instance.
 
+        This method creates an instance-specific logger using structlog.wrap_logger()
+        instead of structlog.configure(). This avoids modifying global state,
+        preventing conflicts when multiple SinkLoggingStructured instances
+        are created with different configurations.
+
         Returns:
-            Configured structlog BoundLogger instance.
+            Configured structlog BoundLogger instance with instance-specific processors.
+
+        Note:
+            Using wrap_logger() is the recommended pattern for library code that
+            should not modify global logging configuration. Each instance gets
+            its own processor chain based on its output_format setting.
         """
         # Configure processors based on output format
         processors: list[structlog.types.Processor] = [
@@ -166,16 +183,16 @@ class SinkLoggingStructured:
         else:
             processors.append(structlog.dev.ConsoleRenderer(colors=True))
 
-        structlog.configure(
+        # Use wrap_logger() to create an instance-specific logger without
+        # modifying global state. This prevents conflicts when multiple
+        # instances are created with different output formats.
+        # The PrintLogger writes to stdout by default.
+        logger: structlog.BoundLogger = structlog.wrap_logger(
+            structlog.PrintLogger(),
             processors=processors,
             wrapper_class=structlog.BoundLogger,
             context_class=dict,
-            logger_factory=structlog.PrintLoggerFactory(),
-            cache_logger_on_first_use=True,
         )
-
-        # structlog.get_logger() returns Any per type stubs; cast for type safety
-        logger: structlog.stdlib.BoundLogger = structlog.get_logger()
         return logger
 
     @property
@@ -187,6 +204,11 @@ class SinkLoggingStructured:
     def output_format(self) -> str:
         """Current output format ('json' or 'console')."""
         return self._output_format
+
+    @property
+    def drop_policy(self) -> Literal["drop_oldest"]:
+        """Current drop policy for buffer overflow handling."""
+        return self._drop_policy
 
     @property
     def drop_count(self) -> int:
@@ -324,8 +346,12 @@ class SinkLoggingStructured:
             # Get the appropriate structlog method and call it
             log_method = getattr(self._logger, structlog_level, self._logger.info)
             log_method(entry.message, **log_context)
-        except Exception:
-            # Fall back to stderr if structlog fails
+        except (ValueError, TypeError, AttributeError, OSError):
+            # Fall back to stderr if structlog fails due to:
+            # - ValueError: invalid arguments to log methods
+            # - TypeError: type mismatches in context values
+            # - AttributeError: missing log method on logger
+            # - OSError: I/O errors when writing to stdout
             self._emit_to_stderr(entry, structlog_level)
 
     def _emit_to_stderr(self, entry: BufferedLogEntry, level: str) -> None:
@@ -345,9 +371,10 @@ class SinkLoggingStructured:
             if context_str:
                 stderr_msg += f" | {context_str}"
             print(stderr_msg, file=sys.stderr)
-        except Exception:
-            # Silently ignore errors in the fallback path
-            # to prevent cascading failures
+        except (ValueError, TypeError, OSError):
+            # Silently ignore errors in the fallback path to prevent cascading
+            # failures. Common errors: ValueError (string formatting),
+            # TypeError (type issues), OSError (stream write failures)
             pass
 
     def reset_drop_count(self) -> int:

@@ -576,7 +576,7 @@ class TestThreadSafety:
         # All operations should complete
         assert len(results) == num_threads
         # Verify all types were created
-        assert any(results.count(t) > 0 for t in ["counter", "gauge", "histogram"])
+        assert all(results.count(t) > 0 for t in ["counter", "gauge", "histogram"])
 
 
 # =============================================================================

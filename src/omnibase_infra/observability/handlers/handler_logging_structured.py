@@ -191,7 +191,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 - flush_interval_seconds: Flush interval (default: 5.0, 0 to disable)
                 - output_format: "json" or "console" (default: "json")
                 - output_file: Optional file path for output
-                - drop_policy: "drop_oldest" or "drop_newest" (default: "drop_oldest")
+                - drop_policy: "drop_oldest" (only supported policy)
 
         Raises:
             ProtocolConfigurationError: If configuration validation fails.
@@ -234,12 +234,11 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 context=ctx,
             ) from e
 
-        # Create the sink
-        # Note: SinkLoggingStructured only supports drop_oldest policy via deque
-        # The drop_newest policy would require custom implementation
+        # Create the sink with configured drop policy
         self._sink = SinkLoggingStructured(
             max_buffer_size=self._config.buffer_size,
             output_format=self._config.output_format,
+            drop_policy=self._config.drop_policy,
         )
 
         # Set up shutdown event and start periodic flush task
@@ -261,6 +260,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 "buffer_size": self._config.buffer_size,
                 "flush_interval_seconds": self._config.flush_interval_seconds,
                 "output_format": self._config.output_format,
+                "drop_policy": self._config.drop_policy,
                 "correlation_id": str(init_correlation_id),
             },
         )
@@ -581,6 +581,7 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
             new_sink = SinkLoggingStructured(
                 max_buffer_size=new_config.buffer_size,
                 output_format=new_config.output_format,
+                drop_policy=new_config.drop_policy,
             )
 
             # Swap sink and config

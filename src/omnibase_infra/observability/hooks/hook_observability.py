@@ -629,8 +629,17 @@ class HookObservability:
     ) -> dict[str, str]:
         """Build the complete label set for a metric.
 
-        Combines operation name, correlation ID, stored operation labels,
-        and any extra labels into a single label dictionary.
+        Combines operation name, stored operation labels, and any extra labels
+        into a single label dictionary.
+
+        Note:
+            correlation_id is intentionally NOT included in metric labels.
+            It is a high-cardinality value (unique per request) and is in the
+            default forbidden_label_keys of ModelMetricsPolicy. Including it
+            would cause metrics to be dropped when the policy's on_violation
+            is set to WARN_AND_DROP or DROP_SILENT. The correlation_id is
+            still available via _correlation_id contextvar for structured
+            logging and distributed tracing purposes.
 
         Args:
             operation: Operation name to include.
@@ -641,13 +650,10 @@ class HookObservability:
         """
         labels: dict[str, str] = {"operation": operation}
 
-        # Add correlation ID if present
-        correlation_id = _correlation_id.get()
-        if correlation_id is not None:
-            # Note: correlation_id is typically high-cardinality and may be
-            # filtered by the metrics policy. Including it here allows the
-            # policy to make that decision.
-            labels["correlation_id"] = correlation_id
+        # Note: correlation_id is NOT added to metric labels because it's
+        # high-cardinality and would cause metrics to be dropped by the
+        # policy. It remains available in _correlation_id contextvar for
+        # logging/tracing.
 
         # Merge stored operation labels
         stored_labels = _operation_labels.get()

@@ -62,7 +62,20 @@ def cleanup_default_registry() -> Generator[None, None, None]:
         This fixture attempts best-effort cleanup by removing collectors
         that may have been added during the test. Some metrics may persist
         if they were created before the test started.
+
+    Note:
+        This implementation uses prometheus_client internal API
+        (`_names_to_collectors`) because there is no public API to list
+        registered collectors by name. This is a known limitation:
+        https://github.com/prometheus/client_python/issues/546
+
+        Tested with prometheus_client versions: 0.17.x - 0.21.x
+        If this breaks after a prometheus_client upgrade, consider:
+        1. Using isolated registries instead (preferred)
+        2. Tracking registered collectors manually in a set
+        3. Checking prometheus_client release notes for API changes
     """
+    # NOTE: _names_to_collectors is internal API - see docstring for rationale
     # Track collectors before test
     collectors_before = set(REGISTRY._names_to_collectors.keys())
 
@@ -78,7 +91,7 @@ def cleanup_default_registry() -> Generator[None, None, None]:
             if collector is not None:
                 REGISTRY.unregister(collector)
         except Exception:
-            # Silently ignore cleanup failures
+            # Silently ignore cleanup failures - best-effort cleanup
             pass
 
 
@@ -236,12 +249,16 @@ def metrics_sink() -> Generator[
 
     Yields:
         SinkMetricsPrometheus instance.
+
+    Note:
+        Cleanup is limited because Prometheus doesn't support metric removal
+        from the default registry. For better test isolation, consider using
+        the isolated_registry fixture instead.
     """
     from omnibase_infra.observability.sinks import SinkMetricsPrometheus
 
     sink = SinkMetricsPrometheus()
     return sink
-    # Cleanup is limited because Prometheus doesn't support metric removal
 
 
 @pytest.fixture

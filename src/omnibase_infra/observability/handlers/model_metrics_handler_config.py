@@ -34,7 +34,7 @@ Usage:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelMetricsHandlerConfig(BaseModel):
@@ -113,7 +113,7 @@ class ModelMetricsHandlerConfig(BaseModel):
         description="Maximum time to wait for graceful server shutdown",
     )
 
-    model_config = {"frozen": True, "extra": "forbid"}
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 __all__: list[str] = ["ModelMetricsHandlerConfig"]
