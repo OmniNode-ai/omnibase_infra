@@ -1523,6 +1523,71 @@ class TestSecretResolverBootstrapSecrets:
 
         assert result is None
 
+    def test_bootstrap_secret_respects_explicit_env_mapping(self) -> None:
+        """Bootstrap secrets should respect explicit env var mappings.
+
+        When an explicit mapping exists for an env source, bootstrap secrets
+        should use that mapping instead of convention-based naming. This
+        allows operators to customize the env var name for bootstrap secrets.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="vault.token",
+                    source=ModelSecretSourceSpec(
+                        source_type="env",
+                        source_path="MY_CUSTOM_VAULT_TOKEN",  # Custom env var name
+                    ),
+                ),
+            ],
+            bootstrap_secrets=["vault.token"],
+            enable_convention_fallback=True,
+        )
+        resolver = SecretResolver(config=config)
+
+        with patch.dict(
+            os.environ,
+            {
+                "MY_CUSTOM_VAULT_TOKEN": "explicit_token_value",
+                "VAULT_TOKEN": "convention_token_value",  # Should NOT be used
+            },
+        ):
+            result = resolver.get_secret("vault.token")
+
+        assert result is not None
+        # Should use explicit mapping, not convention
+        assert result.get_secret_value() == "explicit_token_value"
+
+    def test_bootstrap_secret_vault_mapping_falls_back_to_convention(self) -> None:
+        """Bootstrap secrets with vault mapping should fall back to convention env var.
+
+        When an explicit mapping exists for vault/file source (not env), bootstrap
+        secrets should fall back to convention-based env var naming since they
+        cannot use vault/file sources.
+        """
+        config = ModelSecretResolverConfig(
+            mappings=[
+                ModelSecretMapping(
+                    logical_name="vault.addr",
+                    source=ModelSecretSourceSpec(
+                        source_type="vault",  # Vault mapping should be ignored
+                        source_path="secret/bootstrap#addr",
+                    ),
+                ),
+            ],
+            bootstrap_secrets=["vault.addr"],
+            convention_env_prefix="ONEX_",
+            enable_convention_fallback=True,
+        )
+        resolver = SecretResolver(config=config)
+
+        with patch.dict(os.environ, {"ONEX_VAULT_ADDR": "https://vault.local:8200"}):
+            result = resolver.get_secret("vault.addr")
+
+        assert result is not None
+        # Should use convention (ONEX_VAULT_ADDR), not the vault mapping
+        assert result.get_secret_value() == "https://vault.local:8200"
+
 
 class TestSecretResolverVaultIntegration:
     """Tests for Vault integration (OMN-1374).

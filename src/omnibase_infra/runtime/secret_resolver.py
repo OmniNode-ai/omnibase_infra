@@ -136,6 +136,7 @@ from uuid import UUID, uuid4
 
 from pydantic import SecretStr
 
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -1076,14 +1077,16 @@ class SecretResolver:
                 if source_type == "cache" and hasattr(collector, "record_cache_hit"):
                     collector.record_cache_hit()
             except Exception as e:
-                # Never let metrics failures affect resolution - log at debug
-                # level since these are explicitly ignored and non-fatal
-                logger.debug(
-                    "Metrics collector error (ignored): %s",
+                # Never let metrics failures affect secret resolution, but log
+                # at warning level since a configured collector failing indicates
+                # an integration issue worth investigating.
+                logger.warning(
+                    "Metrics collector error (ignored, resolution unaffected): %s",
                     e,
                     extra={
                         "logical_name": logical_name,
                         "correlation_id": str(correlation_id),
+                        "exception_type": type(e).__name__,
                     },
                 )
 
@@ -1137,14 +1140,16 @@ class SecretResolver:
                 # are distinct from cache misses. Cache misses are already tracked
                 # in get_secret() and get_secret_async() via self._misses += 1
             except Exception as e:
-                # Never let metrics failures affect resolution - log at debug
-                # level since these are explicitly ignored and non-fatal
-                logger.debug(
-                    "Metrics collector error (ignored): %s",
+                # Never let metrics failures affect secret resolution, but log
+                # at warning level since a configured collector failing indicates
+                # an integration issue worth investigating.
+                logger.warning(
+                    "Metrics collector error (ignored, resolution unaffected): %s",
                     e,
                     extra={
                         "logical_name": logical_name,
                         "correlation_id": str(correlation_id),
+                        "exception_type": type(e).__name__,
                     },
                 )
 
@@ -1271,8 +1276,9 @@ class SecretResolver:
 
         Security:
             Bootstrap secrets are isolated from the normal resolution chain.
-            They are ALWAYS resolved from environment variables using the
-            convention-based naming (logical_name -> ENV_VAR).
+            They are ALWAYS resolved from environment variables only (never vault/file).
+            If an explicit mapping exists for an env source, that mapping is honored.
+            Otherwise, convention-based naming (logical_name -> ENV_VAR) is used.
 
         Args:
             logical_name: The bootstrap secret's logical name
@@ -1280,8 +1286,24 @@ class SecretResolver:
         Returns:
             SecretStr if found, None if env var is not set
         """
-        # Convert logical name to env var name
-        env_var = self._logical_name_to_env_var(logical_name)
+        # First, check for explicit env var mapping (same priority as normal secrets)
+        # This ensures that explicit mappings like:
+        #   {"vault.token": ModelSecretSourceSpec(source_type="env", source_path="MY_VAULT_TOKEN")}
+        # are respected for bootstrap secrets.
+        if logical_name in self._mappings:
+            mapping = self._mappings[logical_name]
+            if mapping.source_type == "env":
+                # Use the explicitly mapped env var name
+                env_var = mapping.source_path
+            else:
+                # Non-env mappings (vault/file) are invalid for bootstrap secrets
+                # by design - they must come from env to avoid circular dependency.
+                # Fall back to convention for the env var name.
+                env_var = self._logical_name_to_env_var(logical_name)
+        else:
+            # No explicit mapping - use convention fallback
+            env_var = self._logical_name_to_env_var(logical_name)
+
         value = os.environ.get(env_var)
 
         if value is None:
@@ -1733,7 +1755,7 @@ class SecretResolver:
         mount_point, vault_path, field = self._parse_vault_path_components(path)
 
         # Create envelope for vault.read_secret operation
-        envelope: dict[str, object] = {
+        envelope: JsonType = {
             "operation": "vault.read_secret",
             "payload": {
                 "path": vault_path,
