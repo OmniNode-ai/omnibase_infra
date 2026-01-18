@@ -36,10 +36,8 @@ from omnibase_infra.observability.sinks import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.observability.models import (
-        EnumMetricsPolicyViolationAction,
-        ModelMetricsPolicy,
-    )
+    from omnibase_core.enums import EnumMetricsPolicyViolationAction
+    from omnibase_core.models.observability import ModelMetricsPolicy
 
 
 # =============================================================================

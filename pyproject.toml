@@ -26,8 +26,8 @@ python = "^3.12"
 # - Breaking changes are communicated through semver major versions
 # - Internal packages are co-developed with this codebase
 #
-# omnibase-core v0.7.0: Major breaking changes release
-omnibase-core = "^0.7.0"
+# omnibase-core v0.8.0: Observability models (OMN-1367)
+omnibase-core = "^0.8.0"
 # omnibase-spi v0.5.0: Protocol updates for omnibase-core 0.7.0 compatibility
 omnibase-spi = "^0.5.0"
 

@@ -48,7 +48,7 @@ See Also:
       Protocol implemented by SinkLoggingStructured
     - omnibase_spi.protocols.observability.ProtocolHotPathMetricsSink:
       Protocol implemented by SinkMetricsPrometheus
-    - omnibase_infra.observability.models.ModelMetricsPolicy:
+    - omnibase_core.models.observability.ModelMetricsPolicy:
       Cardinality policy for metrics sinks
 """
 

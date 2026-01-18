@@ -24,7 +24,7 @@ Thread-Safety:
     errors that would occur with concurrent first-access to the same metric.
 
 Usage Example:
-    >>> from omnibase_infra.observability.models import ModelMetricsPolicy
+    >>> from omnibase_core.models.observability import ModelMetricsPolicy
     >>> from omnibase_infra.observability.sinks import SinkMetricsPrometheus
     >>>
     >>> # Create with default policy (warns and drops on violation)
@@ -57,7 +57,7 @@ from typing import TYPE_CHECKING
 from prometheus_client import Counter, Gauge, Histogram
 
 if TYPE_CHECKING:
-    from omnibase_infra.observability.models import ModelMetricsPolicy
+    from omnibase_core.models.observability import ModelMetricsPolicy
 
 _logger = logging.getLogger(__name__)
 
@@ -164,10 +164,8 @@ class SinkMetricsPrometheus:
             >>> sink = SinkMetricsPrometheus()
             >>>
             >>> # Strict policy - raises on any violation
-            >>> from omnibase_infra.observability.models import (
-            ...     ModelMetricsPolicy,
-            ...     EnumMetricsPolicyViolationAction,
-            ... )
+            >>> from omnibase_core.models.observability import ModelMetricsPolicy
+            >>> from omnibase_core.enums import EnumMetricsPolicyViolationAction
             >>> strict_policy = ModelMetricsPolicy(
             ...     on_violation=EnumMetricsPolicyViolationAction.RAISE,
             ... )
@@ -177,8 +175,7 @@ class SinkMetricsPrometheus:
             >>> sink = SinkMetricsPrometheus(metric_prefix="onex_infra")
         """
         # Import here to avoid circular imports and allow TYPE_CHECKING
-        # NOTE: Using local model until omnibase_core release includes OMN-1367
-        from omnibase_infra.observability.models import ModelMetricsPolicy as _Policy
+        from omnibase_core.models.observability import ModelMetricsPolicy as _Policy
 
         self._policy: ModelMetricsPolicy = policy if policy is not None else _Policy()
         self._histogram_buckets = (
