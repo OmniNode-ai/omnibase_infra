@@ -112,6 +112,23 @@ class FactoryObservabilitySink:
         creation. Multiple threads calling get_or_create_* concurrently
         will receive the same singleton instance.
 
+    Warning - Test Isolation:
+        Singleton state persists across tests when using the same factory
+        instance. This can cause test pollution where state from one test
+        affects another. To ensure test isolation:
+
+        1. Call clear_singletons() in test fixtures (setup/teardown)
+        2. Create a fresh factory instance per test
+        3. Use create_* methods instead of get_or_create_* for isolation
+
+        Example pytest fixture::
+
+            @pytest.fixture
+            def observability_factory():
+                factory = FactoryObservabilitySink()
+                yield factory
+                factory.clear_singletons()  # Clean up after test
+
     Attributes:
         _metrics_sink_instance: Cached singleton metrics sink (or None).
         _logging_sink_instance: Cached singleton logging sink (or None).

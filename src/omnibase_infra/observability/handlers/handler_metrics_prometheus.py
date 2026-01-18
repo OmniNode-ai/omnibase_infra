@@ -151,20 +151,42 @@ _METRICS_GENERATION_TIMEOUT: float = 5.0
 # Timeout for Pushgateway operations (seconds)
 _PUSH_GATEWAY_TIMEOUT: float = 10.0
 
-# Histogram buckets for scrape duration (in seconds)
-# Covers typical scrape times from 1ms to 5s timeout
+# Histogram buckets for scrape duration (in seconds).
+# Covers typical scrape times from 1ms to 5s timeout.
+#
+# Bucket Configuration for Prometheus Scrape Metrics:
+# ---------------------------------------------------
+# These buckets are optimized for tracking the time spent generating
+# Prometheus metrics output during /metrics endpoint scrapes.
+#
+# Expected Scrape Duration Ranges:
+#   - Healthy (1-50ms): Small metric registries, efficient serialization
+#   - Normal (50-250ms): Medium registries, typical production workloads
+#   - Slow (250ms-1s): Large registries, many high-cardinality metrics
+#   - Critical (1-5s): Metrics generation approaching timeout threshold
+#
+# Use Cases for Monitoring:
+#   1. Alerting: Set up alerts when p99 > 1s (approaching timeout)
+#   2. Capacity planning: Track growth of scrape times over deployments
+#   3. Debugging: Identify registries with too many metrics/labels
+#   4. SLA compliance: Ensure scrapes complete within Prometheus timeout
+#
+# If scrapes consistently exceed 1s:
+#   - Review high-cardinality labels in your metrics
+#   - Consider splitting large registries into multiple endpoints
+#   - Increase _METRICS_GENERATION_TIMEOUT if justified by registry size
 _SCRAPE_DURATION_BUCKETS: tuple[float, ...] = (
-    0.001,  # 1ms
+    0.001,  # 1ms - Very fast scrapes (small registries)
     0.005,  # 5ms
     0.010,  # 10ms
     0.025,  # 25ms
-    0.050,  # 50ms
+    0.050,  # 50ms - Healthy upper bound
     0.100,  # 100ms
-    0.250,  # 250ms
+    0.250,  # 250ms - Normal upper bound
     0.500,  # 500ms
-    1.000,  # 1s
-    2.500,  # 2.5s
-    5.000,  # 5s (timeout threshold)
+    1.000,  # 1s - Warning threshold
+    2.500,  # 2.5s - Critical threshold
+    5.000,  # 5s - Timeout threshold (matches _METRICS_GENERATION_TIMEOUT)
 )
 
 # Lazily initialized scrape duration histogram

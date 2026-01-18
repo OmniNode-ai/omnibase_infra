@@ -693,3 +693,333 @@ class TestEdgeCases:
         assert ctx["operation"] == "test_op"
 
         hook.after_operation()
+
+
+# =============================================================================
+# HIGH-CARDINALITY LABEL FILTERING TESTS
+# =============================================================================
+
+
+class TestHighCardinalityLabelFiltering:
+    """Test that high-cardinality labels are filtered but metrics are still recorded.
+
+    These tests verify the fix for PR #169 issue where metrics could be
+    dropped when correlation_id or other high-cardinality labels were present.
+    The correct behavior is to filter out high-cardinality labels while still
+    recording the metric with remaining valid labels.
+    """
+
+    def test_correlation_id_in_labels_filtered_but_metric_recorded(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify correlation_id in labels is filtered but metric is still recorded."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        # Pass correlation_id as part of labels dict (not the separate parameter)
+        hook.before_operation(
+            "test_op",
+            labels={"correlation_id": "should-be-filtered", "handler": "test_handler"},
+        )
+        hook.record_success()
+
+        # Metric should be recorded
+        calls = mock_metrics_sink.increment_counter.call_args_list
+        completed_calls = [
+            c for c in calls if c[1].get("name") == "operation_completed_total"
+        ]
+        assert len(completed_calls) >= 1, (
+            "Metric should be recorded even with filtered labels"
+        )
+
+        # Labels should NOT contain correlation_id
+        labels = completed_calls[0][1]["labels"]
+        assert "correlation_id" not in labels, "correlation_id should be filtered"
+
+        # Labels SHOULD contain handler (non-high-cardinality)
+        assert labels.get("handler") == "test_handler", (
+            "Valid labels should be preserved"
+        )
+
+        hook.after_operation()
+
+    def test_multiple_high_cardinality_labels_all_filtered(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify all high-cardinality labels are filtered, others preserved."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        # Pass multiple high-cardinality labels
+        hook.before_operation(
+            "test_op",
+            labels={
+                "correlation_id": "corr-123",
+                "request_id": "req-456",
+                "trace_id": "trace-789",
+                "session_id": "sess-abc",
+                "user_id": "user-def",
+                "handler": "valid_handler",  # This should NOT be filtered
+                "status_code": "200",  # This should NOT be filtered
+            },
+        )
+        hook.record_success()
+
+        calls = mock_metrics_sink.increment_counter.call_args_list
+        completed_calls = [
+            c for c in calls if c[1].get("name") == "operation_completed_total"
+        ]
+        assert len(completed_calls) >= 1
+
+        labels = completed_calls[0][1]["labels"]
+
+        # All high-cardinality labels should be filtered
+        assert "correlation_id" not in labels
+        assert "request_id" not in labels
+        assert "trace_id" not in labels
+        assert "session_id" not in labels
+        assert "user_id" not in labels
+
+        # Valid labels should be preserved
+        assert labels.get("handler") == "valid_handler"
+        assert labels.get("status_code") == "200"
+        assert labels.get("operation") == "test_op"
+
+        hook.after_operation()
+
+    def test_only_high_cardinality_labels_still_records_metric(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify metric is recorded even if ALL labels are high-cardinality."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        # Pass only high-cardinality labels - all will be filtered
+        hook.before_operation(
+            "test_op",
+            labels={
+                "correlation_id": "corr-123",
+                "request_id": "req-456",
+            },
+        )
+        hook.record_success()
+
+        calls = mock_metrics_sink.increment_counter.call_args_list
+        completed_calls = [
+            c for c in calls if c[1].get("name") == "operation_completed_total"
+        ]
+
+        # Metric MUST still be recorded (this is the key fix)
+        assert len(completed_calls) >= 1, (
+            "Metric MUST be recorded even when all labels are filtered"
+        )
+
+        labels = completed_calls[0][1]["labels"]
+
+        # Should have at least the operation label
+        assert labels.get("operation") == "test_op"
+        # Should NOT have high-cardinality labels
+        assert "correlation_id" not in labels
+        assert "request_id" not in labels
+
+        hook.after_operation()
+
+    def test_context_manager_with_high_cardinality_labels(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify context manager filters high-cardinality labels correctly."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        with hook.operation_context(
+            "test_op",
+            labels={"correlation_id": "ctx-123", "method": "GET"},
+        ):
+            pass
+
+        calls = mock_metrics_sink.increment_counter.call_args_list
+        completed_calls = [
+            c for c in calls if c[1].get("name") == "operation_completed_total"
+        ]
+        assert len(completed_calls) >= 1
+
+        labels = completed_calls[0][1]["labels"]
+        assert "correlation_id" not in labels
+        assert labels.get("method") == "GET"
+
+
+# =============================================================================
+# BUFFER GAUGE VALIDATION TESTS
+# =============================================================================
+
+
+class TestBufferGaugeValidation:
+    """Test buffer gauge non-negative value enforcement.
+
+    These tests verify the fix for PR #169 nitpick about enforcing
+    non-negative buffer metrics with proper logging.
+    """
+
+    def test_negative_buffer_gauge_clamped_to_zero(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify negative buffer gauge values are clamped to 0.0."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        hook.set_buffer_gauge(
+            "queue_depth",
+            value=-5.0,  # Negative value
+            labels={"queue": "test"},
+        )
+
+        mock_metrics_sink.set_gauge.assert_called_once_with(
+            name="queue_depth",
+            labels={"queue": "test"},
+            value=0.0,  # Should be clamped to 0.0
+        )
+
+    def test_zero_buffer_gauge_allowed(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify zero buffer gauge values are passed through unchanged."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        hook.set_buffer_gauge(
+            "queue_depth",
+            value=0.0,
+            labels={"queue": "test"},
+        )
+
+        mock_metrics_sink.set_gauge.assert_called_once_with(
+            name="queue_depth",
+            labels={"queue": "test"},
+            value=0.0,
+        )
+
+    def test_positive_buffer_gauge_allowed(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify positive buffer gauge values are passed through unchanged."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        hook.set_buffer_gauge(
+            "queue_depth",
+            value=42.0,
+            labels={"queue": "test"},
+        )
+
+        mock_metrics_sink.set_gauge.assert_called_once_with(
+            name="queue_depth",
+            labels={"queue": "test"},
+            value=42.0,
+        )
+
+    def test_negative_buffer_gauge_logs_warning(
+        self,
+        mock_metrics_sink: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify negative buffer gauge values trigger a warning log."""
+        import logging
+
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        with caplog.at_level(logging.WARNING):
+            hook.set_buffer_gauge(
+                "buffer_size",
+                value=-10.0,
+                labels={"buffer": "write"},
+            )
+
+        # Should have logged a warning about negative value
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1, "Should log warning for negative buffer gauge"
+        assert "negative" in warning_logs[0].message.lower()
+
+    def test_regular_gauge_allows_negative(
+        self,
+        mock_metrics_sink: MagicMock,
+    ) -> None:
+        """Verify regular set_gauge allows negative values (e.g., temperature)."""
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        hook.set_gauge(
+            "temperature_delta",
+            value=-5.0,  # Negative is valid for non-buffer gauges
+            labels={"sensor": "cpu"},
+        )
+
+        mock_metrics_sink.set_gauge.assert_called_once_with(
+            name="temperature_delta",
+            labels={"sensor": "cpu"},
+            value=-5.0,  # Should NOT be clamped
+        )
+
+
+# =============================================================================
+# HIGH-CARDINALITY LABEL FILTERING LOGGING TESTS
+# =============================================================================
+
+
+class TestHighCardinalityFilteringLogging:
+    """Test that high-cardinality label filtering is logged for debugging."""
+
+    def test_filtering_logs_debug_message(
+        self,
+        mock_metrics_sink: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify filtering high-cardinality labels produces debug log."""
+        import logging
+
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        with caplog.at_level(logging.DEBUG):
+            hook.before_operation(
+                "test_op",
+                labels={"correlation_id": "debug-test-123", "handler": "test"},
+            )
+            hook.record_success()
+
+        # Should have logged debug message about filtering
+        debug_logs = [r for r in caplog.records if r.levelno == logging.DEBUG]
+        filtering_logs = [r for r in debug_logs if "filtered" in r.message.lower()]
+        assert len(filtering_logs) >= 1, (
+            "Should log debug message when filtering labels"
+        )
+
+        hook.after_operation()
+
+    def test_no_filtering_log_when_no_high_cardinality_labels(
+        self,
+        mock_metrics_sink: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify no filtering log when no high-cardinality labels present."""
+        import logging
+
+        hook = HookObservability(metrics_sink=mock_metrics_sink)
+
+        with caplog.at_level(logging.DEBUG):
+            hook.before_operation(
+                "test_op",
+                labels={"handler": "test", "method": "GET"},  # No high-cardinality
+            )
+            hook.record_success()
+
+        # Should NOT have logged about filtering (no high-cardinality labels)
+        debug_logs = [r for r in caplog.records if r.levelno == logging.DEBUG]
+        filtering_logs = [
+            r
+            for r in debug_logs
+            if "filtered" in r.message.lower()
+            and "high-cardinality" in r.message.lower()
+        ]
+        assert len(filtering_logs) == 0, (
+            "Should not log filtering when no high-cardinality labels"
+        )
+
+        hook.after_operation()

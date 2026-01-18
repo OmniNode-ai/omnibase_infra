@@ -23,7 +23,7 @@ Usage:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.observability.sinks.sink_metrics_prometheus import (
     DEFAULT_HISTOGRAM_BUCKETS,
@@ -80,6 +80,45 @@ class ModelMetricsSinkConfig(BaseModel):
         default=DEFAULT_HISTOGRAM_BUCKETS,
         description="Bucket boundaries for histogram metrics in seconds.",
     )
+
+    @field_validator("histogram_buckets")
+    @classmethod
+    def _validate_histogram_buckets(cls, v: tuple[float, ...]) -> tuple[float, ...]:
+        """Validate histogram bucket boundaries.
+
+        Enforces Prometheus histogram requirements:
+        1. All bucket values must be positive (> 0)
+        2. Buckets must be in strictly ascending order (monotonicity)
+
+        Args:
+            v: Tuple of bucket boundary values.
+
+        Returns:
+            The validated bucket tuple.
+
+        Raises:
+            ValueError: If any bucket is non-positive or buckets are not monotonic.
+        """
+        if not v:
+            raise ValueError("histogram_buckets cannot be empty")
+
+        # Check positivity: all values must be > 0
+        non_positive = [b for b in v if b <= 0]
+        if non_positive:
+            raise ValueError(
+                f"histogram_buckets must all be positive (> 0), "
+                f"found non-positive values: {non_positive}"
+            )
+
+        # Check monotonicity: buckets must be strictly ascending
+        for i in range(1, len(v)):
+            if v[i] <= v[i - 1]:
+                raise ValueError(
+                    f"histogram_buckets must be strictly ascending, "
+                    f"found {v[i]} <= {v[i - 1]} at index {i}"
+                )
+
+        return v
 
 
 __all__: list[str] = [

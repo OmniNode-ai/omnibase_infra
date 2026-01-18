@@ -19,9 +19,36 @@ Supported Operations:
     - logging.configure: Update logging configuration at runtime
 
 Thread Safety:
-    The handler uses asyncio locks for configuration changes and flush coordination.
-    The underlying sink uses threading locks for buffer operations. This dual-lock
-    design allows the sink to be safely used from both async and sync contexts.
+    The handler uses a multi-lock design for safe concurrent access:
+
+    1. _config_lock (asyncio.Lock): Guards async configuration changes and prevents
+       concurrent configure operations from interfering with each other.
+
+    2. _emit_lock (threading.Lock): Guards the critical section during emit and
+       reconfiguration to prevent log loss. This lock ensures that:
+       - While an emit is in progress, reconfiguration waits for it to complete
+       - While reconfiguration is in progress (swap + flush), emits are serialized
+
+    The underlying sink uses its own threading.Lock for buffer operations.
+    This multi-lock design allows safe operation from both async and sync contexts
+    while preventing log loss during reconfiguration.
+
+Reconfiguration Log Loss Prevention:
+    Without synchronization, a race condition can cause log loss:
+    1. emit reads self._sink -> gets old_sink reference
+    2. configure swaps self._sink to new_sink, flushes old_sink
+    3. emit calls old_sink.emit() -> log goes to already-flushed buffer (LOST)
+
+    The _emit_lock prevents this by ensuring the swap-and-flush sequence is
+    atomic with respect to emit operations.
+
+Drop Policy:
+    The drop_policy configuration field accepts only "drop_oldest", which is the
+    sole supported policy. When the buffer is full, the oldest entries are dropped
+    to make room for new ones. This field exists for:
+    - API completeness and documentation
+    - Future extensibility (e.g., "drop_newest", "block" policies)
+    The policy IS applied to the sink during both initialization and reconfiguration.
 
 Envelope-Based Routing:
     This handler uses envelope-based operation routing. See CLAUDE.md section
@@ -33,6 +60,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -100,9 +128,10 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         These metrics help detect if buffer size is insufficient before logs are lost.
 
     Thread Safety:
-        - Configuration changes use asyncio.Lock
-        - Sink operations use threading.Lock (internal to sink)
-        - Safe for concurrent async callers
+        - Configuration changes use asyncio.Lock (prevents concurrent configure calls)
+        - Emit operations use threading.Lock (prevents log loss during reconfiguration)
+        - Sink operations use threading.Lock (internal to sink for buffer access)
+        - Safe for concurrent async callers; emit is protected during sink swap
 
     Example:
         ```python
@@ -141,6 +170,9 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         self._flush_task: asyncio.Task[None] | None = None
         self._shutdown_event: asyncio.Event | None = None
         self._config_lock: asyncio.Lock = asyncio.Lock()
+        # Threading lock to prevent log loss during reconfiguration.
+        # This lock ensures emit operations complete before sink swap+flush.
+        self._emit_lock: threading.Lock = threading.Lock()
         # Track dropped count from previous flush cycle to emit delta
         self._last_drop_count: int = 0
 
@@ -199,7 +231,6 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 - buffer_size: Max buffer size (default: 1000)
                 - flush_interval_seconds: Flush interval (default: 5.0, 0 to disable)
                 - output_format: "json" or "console" (default: "json")
-                - output_file: Optional file path for output
                 - drop_policy: "drop_oldest" (only supported policy)
 
         Raises:
@@ -443,20 +474,14 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
 
         Returns:
             ModelLoggingHandlerResponse with operation result
-        """
-        if self._sink is None:
-            ctx = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="logging.emit",
-                target_name="logging_handler",
-            )
-            raise RuntimeHostError(
-                "Sink not initialized",
-                context=ctx,
-            )
 
-        # Extract and validate payload fields
+        Thread Safety:
+            This method acquires _emit_lock to prevent log loss during
+            reconfiguration. The lock ensures the sink reference is stable
+            throughout the emit operation.
+        """
+        # Extract and validate payload fields BEFORE acquiring lock
+        # to minimize time spent holding the lock
         level_raw = payload.get("level")
         message = payload.get("message")
         context_raw = payload.get("context", {})
@@ -491,16 +516,36 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         # Parse log level
         level = self._parse_log_level(level_raw, correlation_id)
 
-        # Emit to sink (synchronous, non-blocking)
-        self._sink.emit(level, message, context)
+        # Critical section: acquire emit lock to prevent log loss during reconfiguration.
+        # This ensures the sink reference is stable and any logs emitted here will be
+        # flushed before the old sink is abandoned.
+        with self._emit_lock:
+            if self._sink is None:
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="logging.emit",
+                    target_name="logging_handler",
+                )
+                raise RuntimeHostError(
+                    "Sink not initialized",
+                    context=ctx,
+                )
+
+            # Emit to sink (synchronous, non-blocking)
+            self._sink.emit(level, message, context)
+
+            # Capture metrics while still holding the lock for consistency
+            buffer_size = self._sink.buffer_size
+            drop_count = self._sink.drop_count
 
         return ModelLoggingHandlerResponse(
             status=EnumResponseStatus.SUCCESS,
             operation="logging.emit",
             message="Log entry buffered",
             correlation_id=correlation_id,
-            buffer_size=self._sink.buffer_size,
-            drop_count=self._sink.drop_count,
+            buffer_size=buffer_size,
+            drop_count=drop_count,
         )
 
     def _handle_flush(
@@ -550,9 +595,15 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         """Handle logging.configure operation.
 
         Note: Configuration changes require re-creating the sink. To prevent
-        log loss, operations are ordered: validate config, create new sink,
-        swap references, then flush old sink. This eliminates the window where
-        logs could be lost between flush and new sink creation.
+        log loss, the swap-and-flush sequence is protected by _emit_lock,
+        ensuring no emit operations can race with the reconfiguration.
+
+        Thread Safety:
+            The _emit_lock is acquired during the critical swap-and-flush sequence.
+            This ensures that:
+            1. All in-flight emits complete before the swap
+            2. No new emits can start during swap+flush
+            3. After flush completes, new emits go to the new sink
 
         Args:
             payload: Configuration payload (same fields as ModelLoggingHandlerConfig)
@@ -574,14 +625,11 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                     context=ctx,
                 )
 
-            # Capture old sink reference for flush after swap
-            old_sink = self._sink
-
             # Merge existing config with new values
             current_dict = self._config.model_dump()
             current_dict.update(payload)
 
-            # Validate new configuration
+            # Validate new configuration BEFORE acquiring emit lock
             # NOTE: Broad Exception catch is intentional here because Pydantic can raise
             # various exception types (ValidationError, TypeError, ValueError) depending
             # on the validation failure. We wrap all in ProtocolConfigurationError.
@@ -599,26 +647,37 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                     context=ctx,
                 ) from e
 
-            # Create new sink with updated config (BEFORE swap to prevent log loss)
+            # Create new sink with updated config BEFORE acquiring emit lock
+            # to minimize time spent blocking emit operations
             new_sink = SinkLoggingStructured(
                 max_buffer_size=new_config.buffer_size,
                 output_format=new_config.output_format,
                 drop_policy=new_config.drop_policy,
             )
 
-            # Swap sink and config references (new logs now go to new sink)
-            self._config = new_config
-            self._sink = new_sink
+            # Critical section: acquire emit lock for atomic swap-and-flush.
+            # This prevents the race condition where:
+            # 1. emit reads self._sink -> gets old_sink
+            # 2. configure swaps and flushes old_sink
+            # 3. emit calls old_sink.emit() -> log LOST (already flushed)
+            #
+            # With the lock, step 3 cannot happen until after flush completes.
+            with self._emit_lock:
+                # Capture old sink for flush
+                old_sink = self._sink
 
-            # Reset drop count tracker for new sink
-            self._last_drop_count = 0
+                # Swap sink and config references (atomic under lock)
+                self._config = new_config
+                self._sink = new_sink
 
-            # Flush old sink AFTER swap to ensure all buffered entries are written.
-            # This eliminates the log loss window that existed when flush happened
-            # before new sink creation.
-            old_sink.flush()
+                # Reset drop count tracker for new sink
+                self._last_drop_count = 0
 
-            # Handle flush interval changes
+                # Flush old sink while holding lock to ensure all buffered
+                # entries (including any that were being added) are written.
+                old_sink.flush()
+
+            # Handle flush interval changes (outside emit lock - these are async)
             if self._config.flush_interval_seconds > 0:
                 # Restart flush task if not running or interval changed
                 if self._flush_task is None or self._flush_task.done():

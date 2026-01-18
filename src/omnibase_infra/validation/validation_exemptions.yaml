@@ -877,6 +877,9 @@ pattern_exemptions:
     reason: >
       component_name is a simple string identifier for the failed component (e.g., "KafkaEventBus"). This is a shutdown tracking field, not an entity reference. The component is identified by its type name, not by a UUID.
 
+    documentation:
+      - docs/adr/ADR-001-graceful-shutdown-drain-period.md
+      - CLAUDE.md (Model Field Naming - computed display names)
     ticket: OMN-1007
   # ==========================================================================
   # ModelRegistryResponse Factory Method Exemptions (PR #79)
@@ -890,6 +893,9 @@ pattern_exemptions:
     reason: >
       Classmethod factory requires all parameters to construct response from backend results: node_id, correlation_id, consul_result, postgres_result, timestamp. These are distinct required inputs for computing status, processing_time, and error_summary.
 
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - CLAUDE.md (Factory Method Patterns)
     ticket: PR-79
   # ==========================================================================
   # Union Reduction Phase 3 Result Model Exemptions (OMN-1003)
@@ -902,6 +908,9 @@ pattern_exemptions:
     reason: >
       Result model with comprehensive API: computed properties (has_blocking, violation_count, blocking_count, warning_count), factory methods (from_violations, success, from_legacy_result), utility methods (to_legacy_result, format_for_ci), and dunder methods (__bool__, __str__). This is intentional API design for CI integration and developer ergonomics.
 
+    documentation:
+      - docs/validation/validator_reference.md
+      - CLAUDE.md (Custom __bool__ for Result Models)
     ticket: OMN-1003
   # ==========================================================================
   # OMN-1004: Union Reduction Phase 4 - New Model Exemptions
@@ -1197,12 +1206,18 @@ pattern_exemptions:
     reason: >
       ModelServiceInfo represents service metadata from discovery systems. "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - Kubernetes Service Discovery (https://kubernetes.io/docs/concepts/services-networking/service/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_info\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
       service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
 
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - CLAUDE.md (Model Field Naming - infrastructure identifiers)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/enum_service_discovery_operation\.py'
     class_pattern: "Class name 'EnumServiceDiscoveryOperation'"
@@ -1210,6 +1225,9 @@ pattern_exemptions:
     reason: >
       EnumServiceDiscoveryOperation defines operations for service discovery (REGISTER, DEREGISTER, DISCOVER). "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - Kubernetes Service Discovery (https://kubernetes.io/docs/concepts/services-networking/service/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_discovery_health_check_details\.py'
     class_pattern: "Class name 'ModelServiceDiscoveryHealthCheckDetails'"
@@ -1217,6 +1235,9 @@ pattern_exemptions:
     reason: >
       ModelServiceDiscoveryHealthCheckDetails contains health check configuration for service discovery. "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Health Checks (https://developer.hashicorp.com/consul/docs/services/usage/checks)
+      - Kubernetes Probes (https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_registration\.py'
     class_pattern: "Class name 'ModelServiceRegistration'"
@@ -1224,12 +1245,18 @@ pattern_exemptions:
     reason: >
       ModelServiceRegistration is the input model for registering services in discovery systems. "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Service Registration (https://developer.hashicorp.com/consul/api-docs/agent/service#register-service)
+      - Kubernetes Service Discovery (https://kubernetes.io/docs/concepts/services-networking/service/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_registration\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
       service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
 
+    documentation:
+      - HashiCorp Consul Service Registration (https://developer.hashicorp.com/consul/api-docs/agent/service#register-service)
+      - CLAUDE.md (Model Field Naming - infrastructure identifiers)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/models/model_service_discovery_health_check_result\.py'
     class_pattern: "Class name 'ModelServiceDiscoveryHealthCheckResult'"
@@ -1237,6 +1264,9 @@ pattern_exemptions:
     reason: >
       ModelServiceDiscoveryHealthCheckResult contains health check results from service discovery. "Service" is the canonical domain term.
 
+    documentation:
+      - HashiCorp Consul Health Checks (https://developer.hashicorp.com/consul/docs/services/usage/checks)
+      - Kubernetes Probes (https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/registry/registry_infra_service_discovery\.py'
     class_pattern: "Class name 'RegistryInfraServiceDiscovery'"
@@ -1244,6 +1274,9 @@ pattern_exemptions:
     reason: >
       RegistryInfraServiceDiscovery is the DI registry for service discovery handlers. "Service" is the canonical domain term.
 
+    documentation:
+      - docs/patterns/container_dependency_injection.md (Registry patterns)
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1131
   - file_pattern: 'node_service_discovery_effect/protocols/protocol_discovery_operations\.py'
     class_pattern: "Class name 'ProtocolDiscoveryOperations'"
@@ -1286,6 +1319,9 @@ pattern_exemptions:
     reason: >
       service_name is the canonical Consul/K8s service identifier. This is infrastructure configuration, not an entity reference.
 
+    documentation:
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+      - CLAUDE.md (Model Field Naming - infrastructure identifiers)
     ticket: OMN-1131
   # ==========================================================================
   # Architecture Validator AST Exemptions (OMN-1099)
@@ -1652,6 +1688,9 @@ architecture_exemptions:
     reason: >
       Domain-grouped models for timeout emission. ModelTimeoutEmissionResult and ModelTimeoutEmissionConfig define the complete interface for the ServiceTimeoutEmitter. Per CLAUDE.md domain-grouping convention for cohesive models that are always used together.
 
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+      - docs/patterns/timeout_scanner_emitter.md
     ticket: OMN-932
 # These handle complex union type violations
 union_exemptions:

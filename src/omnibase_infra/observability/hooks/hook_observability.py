@@ -37,6 +37,25 @@ Why contextvars ARE correct:
         def after_operation(self):
             return time.perf_counter() - _start_time.get()  # Correct per-task
 
+Thread-Safety Guarantees
+------------------------
+This class is thread-safe with the following guarantees:
+
+1. **Timing State**: All timing and operation state is stored in contextvars,
+   which provide per-task isolation in async code and per-thread isolation in
+   threaded code. Concurrent operations NEVER share timing state.
+
+2. **Metrics Sink**: The metrics_sink is accessed from multiple async tasks.
+   The metrics_sink implementation MUST be thread-safe. The built-in
+   SinkMetricsPrometheus satisfies this requirement via internal locking.
+   If using a custom sink, ensure it is thread-safe.
+
+3. **Class Constants**: _HIGH_CARDINALITY_KEYS is a frozenset (immutable),
+   ensuring thread-safe read access.
+
+4. **Instance Variables**: The only instance variable (_metrics_sink) is set
+   once during __init__ and never modified, ensuring thread-safe reads.
+
 Usage Example:
     ```python
     from omnibase_infra.observability.hooks import HookObservability
@@ -67,10 +86,13 @@ See Also:
 
 from __future__ import annotations
 
+import logging
 import time
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING
 from uuid import UUID
+
+_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -120,12 +142,28 @@ class HookObservability:
         - Metrics emission via ProtocolHotPathMetricsSink
         - Operation context propagation across async boundaries
         - Support for nested operation tracking via context manager
+        - High-cardinality label filtering to prevent metric explosion
 
-    Thread-Safety:
+    Thread-Safety Guarantees:
         This class is safe for concurrent use from multiple async tasks.
         All timing and operation state is stored in contextvars, which provide
-        per-task isolation. The metrics sink (if provided) should also be
-        thread-safe.
+        per-task isolation. The metrics sink (if provided) MUST be thread-safe.
+
+        Specific guarantees:
+        1. Timing state (start_time, operation_name, etc.) is isolated per-task
+        2. The metrics_sink is set once in __init__ and never modified
+        3. _HIGH_CARDINALITY_KEYS is immutable (frozenset)
+        4. No mutable shared state exists between concurrent operations
+
+    High-Cardinality Label Filtering:
+        Labels containing high-cardinality keys (correlation_id, request_id,
+        trace_id, span_id, session_id, user_id) are automatically filtered
+        from metrics to prevent cardinality explosion. These values remain
+        available via get_current_context() for logging and tracing.
+
+        When labels are filtered, a debug log is emitted to aid troubleshooting.
+        Metrics are NEVER dropped entirely - only high-cardinality labels are
+        removed from the label set.
 
     Metrics Emitted:
         - `operation_started_total`: Counter incremented when operation starts
@@ -137,7 +175,8 @@ class HookObservability:
 
     Attributes:
         metrics_sink: Optional metrics sink for emitting observability data.
-            If None, metrics emission is skipped (no-op).
+            If None, metrics emission is skipped (no-op). The sink MUST be
+            thread-safe for concurrent access.
 
     Example:
         ```python
@@ -172,10 +211,18 @@ class HookObservability:
                 is still tracked). This allows the hook to be used even when
                 metrics infrastructure is not available.
 
+        Thread-Safety Requirements:
+            The metrics_sink (if provided) MUST be thread-safe for concurrent
+            access from multiple async tasks. The built-in SinkMetricsPrometheus
+            satisfies this requirement. If using a custom sink implementation,
+            ensure all methods (increment_counter, set_gauge, observe_histogram)
+            are thread-safe.
+
         Note:
             The metrics_sink is stored as an instance variable because it is
-            a shared resource, not per-operation state. This is intentionally
-            different from the timing state which MUST be in contextvars.
+            a shared resource, not per-operation state. It is set once during
+            __init__ and never modified, ensuring thread-safe reads. This is
+            intentionally different from timing state which MUST be in contextvars.
         """
         self._metrics_sink = metrics_sink
 
@@ -589,7 +636,8 @@ class HookObservability:
         cannot be negative (e.g., queue depth, buffer size, connection pool size).
 
         The value is clamped to 0.0 if negative, preventing invalid metric values
-        that could occur from race conditions or calculation errors.
+        that could occur from race conditions or calculation errors. A warning
+        is logged when clamping occurs to aid debugging.
 
         Args:
             name: Metric name following Prometheus conventions.
@@ -598,6 +646,7 @@ class HookObservability:
 
         Side Effects:
             - Sets gauge metric via metrics sink with max(0.0, value)
+            - Logs warning if negative value is clamped
 
         Example:
             ```python
@@ -620,7 +669,18 @@ class HookObservability:
             return
 
         # Enforce non-negative values for buffer/count metrics
-        safe_value = max(0.0, value)
+        if value < 0.0:
+            _logger.warning(
+                "Buffer gauge received negative value; clamping to 0.0",
+                extra={
+                    "metric_name": name,
+                    "original_value": value,
+                    "labels": labels,
+                },
+            )
+            safe_value = 0.0
+        else:
+            safe_value = value
 
         self._metrics_sink.set_gauge(
             name=name,
@@ -704,6 +764,11 @@ class HookObservability:
         into a single label dictionary. High-cardinality keys are automatically
         filtered out to prevent metrics from being dropped by the policy.
 
+        IMPORTANT: This method NEVER drops metrics entirely. It only filters
+        high-cardinality label keys from the label set. The metric is always
+        recorded with the remaining valid labels. When keys are filtered, a
+        debug log is emitted to aid troubleshooting.
+
         Note:
             High-cardinality values (correlation_id, request_id, trace_id, etc.)
             are intentionally EXCLUDED from metric labels. These are unique per
@@ -718,22 +783,42 @@ class HookObservability:
 
         Returns:
             Complete label dictionary for metric emission, with high-cardinality
-            keys filtered out.
+            keys filtered out. Always contains at least {"operation": operation}.
         """
         labels: dict[str, str] = {"operation": operation}
+        filtered_keys: list[str] = []
 
         # Merge stored operation labels, filtering out high-cardinality keys
         stored_labels = _operation_labels.get()
         if stored_labels is not None:
             for key, value in stored_labels.items():
-                if key not in self._HIGH_CARDINALITY_KEYS:
+                if key in self._HIGH_CARDINALITY_KEYS:
+                    filtered_keys.append(key)
+                else:
                     labels[key] = value
 
         # Merge extra labels (overrides stored if same key), filtering high-cardinality
         if extra_labels:
             for key, value in extra_labels.items():
-                if key not in self._HIGH_CARDINALITY_KEYS:
+                if key in self._HIGH_CARDINALITY_KEYS:
+                    # Only log if not already filtered from stored_labels
+                    if key not in filtered_keys:
+                        filtered_keys.append(key)
+                else:
                     labels[key] = value
+
+        # Log when high-cardinality keys are filtered (debug level)
+        # This provides visibility into what's happening without noise
+        if filtered_keys:
+            _logger.debug(
+                "Filtered high-cardinality label keys from metrics "
+                "(metric still recorded with remaining labels)",
+                extra={
+                    "operation": operation,
+                    "filtered_keys": filtered_keys,
+                    "remaining_label_count": len(labels),
+                },
+            )
 
         return labels
 

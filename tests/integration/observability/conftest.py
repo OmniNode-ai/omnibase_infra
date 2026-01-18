@@ -22,6 +22,12 @@ if TYPE_CHECKING:
 
     from omnibase_core.enums import EnumMetricsPolicyViolationAction
     from omnibase_core.models.observability import ModelMetricsPolicy
+    from omnibase_infra.observability import FactoryObservabilitySink
+    from omnibase_infra.observability.hooks import HookObservability
+    from omnibase_infra.observability.sinks import (
+        SinkLoggingStructured,
+        SinkMetricsPrometheus,
+    )
 
 
 # =============================================================================
@@ -71,6 +77,13 @@ def cleanup_default_registry() -> Generator[None, None, None]:
 
         Known limitation: https://github.com/prometheus/client_python/issues/546
 
+        VERSION PINNING RECOMMENDATION:
+        This internal API has been stable across prometheus_client 0.17.x - 0.21.x,
+        but may change in future versions. If upgrading prometheus_client:
+        1. Pin to a tested version range in pyproject.toml (e.g., ">=0.17,<0.22")
+        2. Add integration test for this cleanup pattern
+        3. Check prometheus_client CHANGELOG for registry API changes
+
         Tested with prometheus_client versions: 0.17.x - 0.21.x
         If this breaks after a prometheus_client upgrade, consider:
         1. Using isolated registries instead (preferred)
@@ -78,6 +91,8 @@ def cleanup_default_registry() -> Generator[None, None, None]:
         3. Checking prometheus_client release notes for API changes
     """
     # INTERNAL API: _names_to_collectors - see docstring for rationale and risk
+    # WARNING: This private attribute may change between prometheus_client versions.
+    # Verified working with prometheus_client 0.17.x - 0.21.x
     # Track collectors before test
     collectors_before = set(REGISTRY._names_to_collectors.keys())
 
@@ -239,17 +254,13 @@ def mock_logging_sink() -> MagicMock:
 
 
 @pytest.fixture
-def metrics_sink() -> Generator[
-    SinkMetricsPrometheus,  # noqa: F821 - forward reference
-    None,
-    None,
-]:
+def metrics_sink() -> SinkMetricsPrometheus:
     """Create a real SinkMetricsPrometheus instance for integration testing.
 
     This fixture creates a fresh sink for each test. Note that metrics
     registered in the default Prometheus registry persist across tests.
 
-    Yields:
+    Returns:
         SinkMetricsPrometheus instance.
 
     Note:
@@ -264,11 +275,7 @@ def metrics_sink() -> Generator[
 
 
 @pytest.fixture
-def logging_sink() -> Generator[
-    SinkLoggingStructured,  # noqa: F821 - forward reference
-    None,
-    None,
-]:
+def logging_sink() -> Generator[SinkLoggingStructured, None, None]:
     """Create a real SinkLoggingStructured instance for integration testing.
 
     This fixture creates a sink with a small buffer for testing buffer
@@ -294,7 +301,7 @@ def logging_sink() -> Generator[
 
 
 @pytest.fixture
-def hook_without_metrics() -> HookObservability:  # noqa: F821 - forward reference
+def hook_without_metrics() -> HookObservability:
     """Create a HookObservability instance without a metrics sink.
 
     This hook operates in timing-only mode where metrics emission is a no-op.
@@ -310,7 +317,7 @@ def hook_without_metrics() -> HookObservability:  # noqa: F821 - forward referen
 @pytest.fixture
 def hook_with_mock_metrics(
     mock_metrics_sink: MagicMock,
-) -> HookObservability:  # noqa: F821 - forward reference
+) -> HookObservability:
     """Create a HookObservability instance with a mock metrics sink.
 
     This allows testing that the hook emits the correct metrics without
@@ -333,11 +340,7 @@ def hook_with_mock_metrics(
 
 
 @pytest.fixture
-def factory() -> Generator[
-    FactoryObservabilitySink,  # noqa: F821 - forward reference
-    None,
-    None,
-]:
+def factory() -> Generator[FactoryObservabilitySink, None, None]:
     """Create a FactoryObservabilitySink instance for testing.
 
     The factory is cleared of singletons after each test to ensure

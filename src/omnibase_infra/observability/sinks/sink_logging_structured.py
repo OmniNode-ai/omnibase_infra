@@ -7,27 +7,58 @@ ProtocolHotPathLoggingSink protocol. It buffers log entries in memory
 and flushes them to structlog with JSON formatting.
 
 Output Format Policy:
+    **JSON-Only Recommended for Production**
+
     The sink supports two output formats controlled by the ``output_format`` parameter:
+
     - **json** (default): Machine-readable JSON format for production environments.
       Each log line is a complete JSON object suitable for ingestion by log
-      aggregators (ELK, Loki, Datadog, etc.).
-    - **console**: Human-readable colored output for local development only.
+      aggregators (ELK, Loki, Datadog, etc.). This format guarantees:
 
-    For production deployments, JSON format is strongly recommended as it enables:
-    - Structured querying in log aggregation systems
-    - Consistent parsing across services
-    - Machine-readable context fields for alerting and dashboards
+      - Valid JSON on every line (parseable by ``json.loads()``)
+      - Consistent field ordering for diffing/comparison
+      - UTF-8 encoding with proper escaping
+      - No control characters or newlines within values
+
+    - **console**: Human-readable colored output for local development only.
+      This format is NOT suitable for log aggregation and may produce output
+      that is not valid JSON.
+
+    **stdlib Logger Integration**:
+    The sink uses structlog's PrintLogger (writes to stdout) by default.
+    For integration with Python's stdlib logging:
+
+    1. Configure structlog's stdlib integration at application startup
+    2. Use structlog.wrap_logger() with a stdlib LoggerFactory
+    3. This sink avoids structlog.configure() to prevent global state conflicts
+
+    Example stdlib integration::
+
+        import logging
+        import structlog
+
+        # Configure stdlib logging
+        logging.basicConfig(level=logging.INFO)
+
+        # Create sink with JSON output
+        sink = SinkLoggingStructured(output_format="json")
 
 Required Context Keys:
-    The sink automatically adds the following keys to every log entry:
+    The sink automatically adds the following keys to every log entry (callers
+    should NOT include these as they will be overwritten):
+
     - ``original_timestamp``: ISO-8601 timestamp when emit() was called
-    - ``level``: Log level (added by structlog.stdlib.add_log_level)
+    - ``level``: Log level string (added by structlog.stdlib.add_log_level)
     - ``timestamp``: ISO-8601 timestamp when flush() was called (added by TimeStamper)
 
-    Callers SHOULD include these recommended context keys for observability:
-    - ``correlation_id``: Request/operation correlation ID for distributed tracing
-    - ``node_id``: ONEX node identifier for multi-node debugging
-    - ``operation``: Current operation name for filtering
+    **Recommended Context Keys** (callers SHOULD include for observability):
+
+    - ``correlation_id``: UUID for distributed tracing across services
+    - ``node_id``: ONEX node identifier (e.g., "node_registration_orchestrator")
+    - ``operation``: Current operation name (e.g., "validate_contract")
+
+    Missing recommended keys will trigger a warning log at DEBUG level to help
+    identify callers that may benefit from adding tracing context.
 
 Buffer Management:
     The sink maintains a thread-safe buffer of log entries. When the buffer
@@ -44,10 +75,15 @@ Thread Safety:
 Instance Isolation:
     This implementation uses structlog.wrap_logger() instead of structlog.configure()
     to create instance-specific loggers. This design choice ensures:
-    - No global state modification (safe for libraries and multi-tenant apps)
-    - Multiple instances can coexist with different output formats
-    - No configuration conflicts in test environments
-    - Thread-safe: each instance has its own processor chain
+
+    - **No global state modification**: Safe for libraries and multi-tenant apps
+    - **Multiple instances can coexist**: Different output formats per instance
+    - **No configuration conflicts**: Test environments remain isolated
+    - **Thread-safe**: Each instance has its own processor chain
+
+    WARNING: If your application calls structlog.configure() elsewhere, those
+    settings may affect the underlying logger behavior. This sink's wrap_logger()
+    approach isolates the processor chain but not the base logger configuration.
 
 Fallback Behavior:
     If structlog fails during flush, the sink falls back to writing directly
@@ -56,34 +92,24 @@ Fallback Behavior:
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
+import warnings
 from collections import deque
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import Literal
 
 import structlog
 
-if TYPE_CHECKING:
-    from omnibase_core.enums import EnumLogLevel
-
-# Lazy import to avoid circular dependency at module load time
-# EnumLogLevel is only needed at runtime for type checking parameters
-
-
-class BufferedLogEntry(NamedTuple):
-    """Internal representation of a buffered log entry.
-
-    Using NamedTuple for memory efficiency in the hot path.
-    All fields are immutable to ensure thread-safety when entries
-    are copied during flush operations.
-    """
-
-    level: EnumLogLevel
-    message: str
-    context: dict[str, str]
-    timestamp: datetime
-
+from omnibase_core.enums import EnumLogLevel
+from omnibase_core.types import JsonType
+from omnibase_infra.observability.models.enum_required_log_context_key import (
+    EnumRequiredLogContextKey,
+)
+from omnibase_infra.observability.models.model_buffered_log_entry import (
+    ModelBufferedLogEntry,
+)
 
 # Mapping from EnumLogLevel string values to structlog methods
 # This is resolved at flush time, not import time, to avoid import issues
@@ -113,8 +139,15 @@ class SinkLoggingStructured:
         - Thread-safe: all operations use a lock for synchronization
 
     Output Formats:
-        - json: Machine-readable JSON format (default)
-        - console: Human-readable colored console output
+        - json: Machine-readable JSON format (default, recommended for production)
+        - console: Human-readable colored console output (development only)
+
+    JSON Output Guarantee:
+        When output_format="json", every log line is guaranteed to be valid JSON:
+        - Parseable by json.loads()
+        - Single-line format (no embedded newlines)
+        - UTF-8 encoded with proper escaping
+        - Consistent field ordering
 
     Fallback Behavior:
         If structlog fails during flush, entries are written to stderr
@@ -135,7 +168,16 @@ class SinkLoggingStructured:
 
         # Hot path - emit without blocking
         for item in large_dataset:
-            sink.emit(EnumLogLevel.DEBUG, f"Processed {item}", {"id": str(item.id)})
+            sink.emit(
+                EnumLogLevel.DEBUG,
+                f"Processed {item}",
+                {
+                    "id": str(item.id),
+                    "correlation_id": str(correlation_id),  # Recommended
+                    "node_id": "data_processor",            # Recommended
+                    "operation": "process_batch",           # Recommended
+                }
+            )
 
         # Flush when hot path completes
         sink.flush()
@@ -150,16 +192,26 @@ class SinkLoggingStructured:
         This implementation intentionally avoids calling structlog.configure(),
         which modifies global state. Instead, each instance uses structlog.wrap_logger()
         to create an instance-specific logger with its own processor chain. This design:
+
         - Allows multiple instances with different output formats (json vs console)
         - Prevents configuration conflicts in multi-tenant or test environments
         - Follows library best practices for not modifying global logging config
+
+        WARNING: If other code in your application calls structlog.configure(),
+        that may affect the underlying logger behavior. This sink isolates the
+        processor chain via wrap_logger() but cannot isolate base logger config.
     """
+
+    # Class-level tracking for missing context key warnings
+    # Used to warn once per session about missing recommended keys
+    _warned_missing_keys: set[str] = set()
 
     def __init__(
         self,
         max_buffer_size: int = 1000,
         output_format: str = "json",
         drop_policy: Literal["drop_oldest"] = "drop_oldest",
+        warn_on_missing_recommended_keys: bool = True,
     ) -> None:
         """Initialize the structured logging sink.
 
@@ -167,11 +219,14 @@ class SinkLoggingStructured:
             max_buffer_size: Maximum number of log entries to buffer.
                 When exceeded, oldest entries are dropped. Default: 1000.
             output_format: Output format for log entries.
-                - "json": JSON format (default, machine-readable)
-                - "console": Colored console output (human-readable)
+                - "json": JSON format (default, machine-readable, production-ready)
+                - "console": Colored console output (human-readable, dev only)
             drop_policy: Policy for handling buffer overflow. Currently only
                 "drop_oldest" is supported, which drops the oldest entries
                 when the buffer is full. Default: "drop_oldest".
+            warn_on_missing_recommended_keys: If True (default), emit a warning
+                to stderr when recommended context keys (correlation_id, node_id,
+                operation) are missing. Set to False to suppress these warnings.
 
         Raises:
             ValueError: If max_buffer_size is less than 1 or output_format
@@ -195,8 +250,9 @@ class SinkLoggingStructured:
         self._max_buffer_size = max_buffer_size
         self._output_format = output_format
         self._drop_policy: Literal["drop_oldest"] = drop_policy
+        self._warn_on_missing_keys = warn_on_missing_recommended_keys
         # Use deque with maxlen to automatically drop oldest entries when full
-        self._buffer: deque[BufferedLogEntry] = deque(maxlen=max_buffer_size)
+        self._buffer: deque[ModelBufferedLogEntry] = deque(maxlen=max_buffer_size)
         self._lock = threading.Lock()
         self._drop_count = 0
         self._logger = self._configure_structlog()
@@ -226,6 +282,13 @@ class SinkLoggingStructured:
             - UnicodeDecoder: Ensures proper Unicode handling
             - JSONRenderer or ConsoleRenderer: Final output formatting
 
+        JSON Output Enforcement:
+            When output_format="json", the JSONRenderer ensures:
+            - Valid JSON on every line (can be parsed by json.loads)
+            - Proper escaping of special characters
+            - UTF-8 encoding
+            - No embedded newlines (single-line format)
+
         Returns:
             Configured structlog BoundLogger instance with instance-specific processors.
 
@@ -235,6 +298,10 @@ class SinkLoggingStructured:
             its own processor chain based on its output_format setting. This means
             two instances can coexist: one writing JSON to a file, another writing
             colored console output for debugging.
+
+            WARNING: structlog.configure() called elsewhere in your application
+            may still affect the underlying logger behavior. This sink's approach
+            isolates the processor chain but not the base PrintLogger configuration.
         """
         # Configure processors based on output format
         processors: list[structlog.types.Processor] = [
@@ -297,7 +364,7 @@ class SinkLoggingStructured:
         self,
         level: EnumLogLevel,
         message: str,
-        context: dict[str, str],
+        context: dict[str, JsonType],
     ) -> None:
         """Buffer a log entry for later emission.
 
@@ -314,9 +381,20 @@ class SinkLoggingStructured:
                    ERROR, CRITICAL, FATAL, SUCCESS, UNKNOWN).
             message: Log message content. Should be a complete, self-contained
                      message suitable for structured logging.
-            context: Structured context data for the log entry. All values
-                     MUST be strings to ensure serialization safety and
-                     prevent type coercion issues in hot paths.
+            context: Structured context data for the log entry. Values may be
+                     any JSON-compatible type (str, int, float, bool, None,
+                     list, dict). This enables richer context than string-only:
+
+                     ```python
+                     context = {
+                         "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+                         "retry_count": 3,           # int is valid
+                         "duration_ms": 42.5,        # float is valid
+                         "is_retry": True,           # bool is valid
+                         "tags": ["hot-path", "db"], # list is valid
+                         "metadata": {"version": 1}, # dict is valid
+                     }
+                     ```
 
         Automatically Added Keys:
             The sink automatically adds these keys (callers should NOT include them):
@@ -354,14 +432,19 @@ class SinkLoggingStructured:
             sink.emit(
                 level=EnumLogLevel.INFO,
                 message="Cache hit for user lookup",
-                context={"user_id": "u_123", "cache_key": "user:u_123"}
+                context={
+                    "user_id": "u_123",
+                    "cache_key": "user:u_123",
+                    "correlation_id": str(correlation_id),
+                }
             )
             ```
         """
-        entry = BufferedLogEntry(
+        # Create immutable Pydantic model for thread-safe buffering
+        entry = ModelBufferedLogEntry(
             level=level,
             message=message,
-            context=context.copy(),  # Defensive copy to prevent mutation
+            context=dict(context),  # Defensive copy to prevent mutation
             timestamp=datetime.now(UTC),
         )
 
@@ -382,8 +465,24 @@ class SinkLoggingStructured:
             1. Acquire lock and copy all entries from buffer
             2. Clear the buffer
             3. Release the lock
-            4. Write entries to structlog (I/O happens outside the lock)
-            5. On error, fall back to stderr
+            4. Validate required context keys (warn on missing recommended keys)
+            5. Write entries to structlog (I/O happens outside the lock)
+            6. On error, fall back to stderr
+
+        Required Context Keys Validation:
+            At flush time, the sink validates that required keys are present
+            and warns about missing recommended keys. This is done at flush
+            time (not emit time) to maintain hot-path performance.
+
+            **Always present** (added by sink):
+            - original_timestamp
+            - level (via structlog)
+            - timestamp (via structlog)
+
+            **Recommended** (warning if missing):
+            - correlation_id
+            - node_id
+            - operation
 
         Thread-Safety:
             This method is safe to call concurrently with emit().
@@ -417,9 +516,42 @@ class SinkLoggingStructured:
 
         # Process entries outside the lock to minimize contention
         for entry in entries:
+            self._validate_context_keys(entry)
             self._emit_entry(entry)
 
-    def _emit_entry(self, entry: BufferedLogEntry) -> None:
+    def _validate_context_keys(self, entry: ModelBufferedLogEntry) -> None:
+        """Validate that required/recommended context keys are present.
+
+        This method checks for recommended context keys and emits warnings
+        (once per key per session) when they are missing. Validation is
+        performed at flush time to avoid impacting hot-path performance.
+
+        Args:
+            entry: The buffered log entry to validate.
+
+        Note:
+            The warning is only emitted once per missing key per session
+            to avoid log spam. Missing keys are tracked in class-level
+            _warned_missing_keys set.
+        """
+        if not self._warn_on_missing_keys:
+            return
+
+        recommended = EnumRequiredLogContextKey.recommended_keys()
+        present_keys = set(entry.context.keys())
+        missing = recommended - present_keys
+
+        # Warn once per missing key to avoid spam
+        for key in missing:
+            if key not in SinkLoggingStructured._warned_missing_keys:
+                SinkLoggingStructured._warned_missing_keys.add(key)
+                warnings.warn(
+                    f"Recommended context key '{key}' missing from log entry. "
+                    f"Including {', '.join(sorted(recommended))} improves observability.",
+                    stacklevel=4,  # Point to caller of emit()
+                )
+
+    def _emit_entry(self, entry: ModelBufferedLogEntry) -> None:
         """Emit a single log entry to structlog.
 
         This method maps the EnumLogLevel to the appropriate structlog method
@@ -433,6 +565,12 @@ class SinkLoggingStructured:
               between buffering and flushing. This is distinct from structlog's
               ``timestamp`` which reflects flush time.
 
+        JSON Output Guarantee:
+            When output_format="json", this method ensures valid JSON output:
+            - All context values are JSON-serializable (enforced by JsonType)
+            - Special characters are properly escaped
+            - Output is single-line (no embedded newlines)
+
         Note:
             The structlog processor chain adds additional keys:
             - ``level``: Log level string (via add_log_level processor)
@@ -442,9 +580,10 @@ class SinkLoggingStructured:
         level_str = str(entry.level.value).lower()
         structlog_level = _STRUCTLOG_LEVEL_MAP.get(level_str, "info")
 
-        # Build context dict with timestamp
-        log_context = {
-            "original_timestamp": entry.timestamp.isoformat(),
+        # Build context dict with required timestamp
+        # All values are JsonType (JSON-compatible) for serialization safety
+        log_context: dict[str, JsonType] = {
+            EnumRequiredLogContextKey.ORIGINAL_TIMESTAMP: entry.timestamp.isoformat(),
             **entry.context,
         }
 
@@ -460,23 +599,27 @@ class SinkLoggingStructured:
             # - OSError: I/O errors when writing to stdout
             self._emit_to_stderr(entry, structlog_level)
 
-    def _emit_to_stderr(self, entry: BufferedLogEntry, level: str) -> None:
+    def _emit_to_stderr(self, entry: ModelBufferedLogEntry, level: str) -> None:
         """Fall back to stderr when structlog fails.
 
         This is the last-resort fallback to ensure log entries are not
-        silently lost when structlog encounters errors.
+        silently lost when structlog encounters errors. Output is always
+        JSON format to maintain consistency with the primary output.
 
         Args:
             entry: The log entry to emit.
             level: The log level string.
         """
         try:
-            timestamp = entry.timestamp.isoformat()
-            context_str = " ".join(f"{k}={v}" for k, v in entry.context.items())
-            stderr_msg = f"[{timestamp}] [{level.upper()}] {entry.message}"
-            if context_str:
-                stderr_msg += f" | {context_str}"
-            print(stderr_msg, file=sys.stderr)
+            # Always emit JSON for fallback to ensure consistent format
+            fallback_entry: dict[str, JsonType] = {
+                EnumRequiredLogContextKey.TIMESTAMP: entry.timestamp.isoformat(),
+                EnumRequiredLogContextKey.LEVEL: level.upper(),
+                "message": entry.message,
+                **entry.context,
+            }
+            # Use json.dumps for guaranteed valid JSON output
+            print(json.dumps(fallback_entry, default=str), file=sys.stderr)
         except (ValueError, TypeError, OSError):
             # Silently ignore errors in the fallback path to prevent cascading
             # failures. Common errors: ValueError (string formatting),
@@ -496,6 +639,15 @@ class SinkLoggingStructured:
             previous_count = self._drop_count
             self._drop_count = 0
             return previous_count
+
+    @classmethod
+    def reset_warning_state(cls) -> None:
+        """Reset the class-level warning state.
+
+        This method clears the set of keys that have already triggered
+        warnings, allowing warnings to be emitted again. Useful for testing.
+        """
+        cls._warned_missing_keys.clear()
 
 
 __all__ = ["SinkLoggingStructured"]

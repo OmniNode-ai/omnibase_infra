@@ -9,6 +9,12 @@ Note:
     omnibase_core.models.observability and omnibase_core.enums respectively.
 """
 
+from omnibase_infra.observability.models.enum_required_log_context_key import (
+    EnumRequiredLogContextKey,
+)
+from omnibase_infra.observability.models.model_buffered_log_entry import (
+    ModelBufferedLogEntry,
+)
 from omnibase_infra.observability.models.model_logging_sink_config import (
     ModelLoggingSinkConfig,
 )
@@ -17,6 +23,8 @@ from omnibase_infra.observability.models.model_metrics_sink_config import (
 )
 
 __all__: list[str] = [
+    "EnumRequiredLogContextKey",
+    "ModelBufferedLogEntry",
     "ModelLoggingSinkConfig",
     "ModelMetricsSinkConfig",
 ]

@@ -61,8 +61,31 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
-# Default histogram buckets following Prometheus conventions
-# Suitable for request latencies in seconds
+# Default histogram buckets following Prometheus conventions.
+# Suitable for request latencies in seconds.
+#
+# Bucket Configuration Guide:
+# ---------------------------
+# These default buckets are optimized for typical HTTP/API request latencies:
+#   - Fast operations (5-100ms): 0.005, 0.01, 0.025, 0.05, 0.1
+#   - Normal operations (100ms-1s): 0.25, 0.5, 1.0
+#   - Slow operations (1-10s): 2.5, 5.0, 10.0
+#
+# Expected Use Cases:
+#   1. HTTP handler execution times
+#   2. Database query latencies
+#   3. External API call durations
+#   4. Message processing times
+#
+# Custom Bucket Guidelines:
+#   - For faster operations (memory caches, local computations):
+#     Use smaller buckets: (0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1)
+#   - For slow batch operations (file I/O, large data transfers):
+#     Use larger buckets: (0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0)
+#   - General rule: Include buckets near your SLA thresholds for alerting
+#
+# Example custom buckets for sub-millisecond operations:
+#   histogram_buckets=(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05)
 DEFAULT_HISTOGRAM_BUCKETS: tuple[float, ...] = (
     0.005,
     0.01,
