@@ -5,26 +5,33 @@ Fresh ONEX-compliant infrastructure repository for OmniNode AI.
 ## Status
 
 **Created**: December 2, 2025
-**Version**: 0.1.0 (MVP)
+**Version**: 0.2.0
 
 ## Overview
 
 This repository contains ONEX infrastructure services built with:
-- `omnibase-core` ^0.3.5 (PyPI)
-- `omnibase-spi` ^0.2.0 (PyPI)
+- `omnibase-core` ^0.7.0 (PyPI)
+- `omnibase-spi` ^0.5.0 (PyPI)
 
 ## Structure
 
 ```
 src/omnibase_infra/
-├── adapters/          # Thin external service wrappers
+├── cli/               # Command-line interface
 ├── clients/           # Service clients
+├── contracts/         # ONEX contract definitions
+├── decorators/        # Python decorators
+├── dlq/               # Dead letter queue handling
 ├── enums/             # Centralized enums
+├── errors/            # Error hierarchy and types
+├── event_bus/         # Event bus abstractions
+├── handlers/          # Message and request handlers
+├── idempotency/       # Idempotency utilities
+├── infrastructure/    # Infrastructure utilities
+├── mixins/            # Reusable mixin classes
 ├── models/            # Centralized Pydantic models
 ├── nodes/             # ONEX nodes (Effect, Compute, Reducer, Orchestrator)
-├── infrastructure/    # Infrastructure utilities
-├── shared/            # Shared utilities
-└── utils/             # General utilities
+└── orchestrators/     # Workflow orchestration
 ```
 
 ## Prerequisites
