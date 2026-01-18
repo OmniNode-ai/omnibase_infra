@@ -9,6 +9,7 @@ Usage:
     python scripts/validate.py [--verbose] [--quick]
     python scripts/validate.py architecture
     python scripts/validate.py architecture_layers
+    python scripts/validate.py clean_root
     python scripts/validate.py contracts
     python scripts/validate.py patterns
     python scripts/validate.py unions
@@ -398,6 +399,54 @@ def run_localhandler(verbose: bool = False) -> bool:
         return True
 
 
+def run_clean_root(verbose: bool = False) -> bool:
+    """Run root directory cleanliness validation.
+
+    Ensures the project root contains only allowed files and directories.
+    Working documents, development notes, and other ephemeral files should
+    be moved to docs/ or deleted.
+
+    This is critical for public release readiness.
+    """
+    import importlib.util
+
+    try:
+        # Load the validator module directly to avoid import path issues
+        validator_path = Path(__file__).parent / "validation" / "validate_clean_root.py"
+
+        if not validator_path.exists():
+            print(f"Clean Root: SKIP (validator not found: {validator_path})")
+            return True
+
+        spec = importlib.util.spec_from_file_location(
+            "validate_clean_root", validator_path
+        )
+        if spec is None or spec.loader is None:
+            print("Clean Root: SKIP (could not load validator module)")
+            return True
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["validate_clean_root"] = module
+        spec.loader.exec_module(module)
+
+        repo_path = Path(__file__).parent.parent
+        result = module.validate_root_directory(repo_path, verbose=verbose)
+
+        if verbose or not result.is_valid:
+            report = module.generate_report(result, repo_path)
+            print(report)
+
+        return result.is_valid
+
+    except Exception as e:
+        print(f"Clean Root: ERROR ({type(e).__name__}: {e})")
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
+        return False
+
+
 def run_imports(verbose: bool = False) -> bool:
     """Run circular import check."""
     # Use src/ as the source path so module names are fully qualified
@@ -525,6 +574,7 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
     validators = [
         ("Architecture", run_architecture),
         ("Architecture Layers", run_architecture_layers),
+        ("Clean Root", run_clean_root),
         ("Contracts", run_contracts),
         ("Patterns", run_patterns),
     ]
@@ -570,6 +620,7 @@ def main() -> int:
             "all",
             "architecture",
             "architecture_layers",
+            "clean_root",
             "contracts",
             "patterns",
             "unions",
@@ -589,6 +640,7 @@ def main() -> int:
     validator_map = {
         "architecture": run_architecture,
         "architecture_layers": run_architecture_layers,
+        "clean_root": run_clean_root,
         "contracts": run_contracts,
         "patterns": run_patterns,
         "unions": run_unions,
