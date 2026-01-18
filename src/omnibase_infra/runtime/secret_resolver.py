@@ -125,6 +125,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import threading
 import time
 from collections import defaultdict, deque
@@ -1613,14 +1614,22 @@ class SecretResolver:
         value: SecretStr,
         source_type: SecretSourceType,
     ) -> None:
-        """Cache a resolved secret with appropriate TTL.
+        """Cache a resolved secret with appropriate TTL and jitter.
+
+        TTL Jitter:
+            A random jitter of 0-10% is added to the base TTL to prevent
+            cache stampede scenarios where many cached entries expire at
+            the same time, causing a thundering herd of resolution requests.
 
         Args:
             logical_name: The logical name being cached
             value: The secret value to cache
             source_type: Source type for TTL selection
         """
-        ttl_seconds = self._get_ttl(logical_name, source_type)
+        base_ttl_seconds = self._get_ttl(logical_name, source_type)
+        # Add 0-10% jitter to prevent cache stampede (thundering herd)
+        jitter_factor = random.uniform(0.0, 0.1)
+        ttl_seconds = int(base_ttl_seconds * (1 + jitter_factor))
         now = datetime.now(UTC)
 
         self._cache[logical_name] = ModelCachedSecret(
