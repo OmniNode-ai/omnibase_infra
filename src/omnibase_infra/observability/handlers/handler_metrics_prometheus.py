@@ -76,6 +76,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -93,12 +94,13 @@ except ImportError:
     web = None  # type: ignore[assignment, misc]
 
 try:
-    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+    from prometheus_client import CONTENT_TYPE_LATEST, Histogram, generate_latest
 
     _PROMETHEUS_AVAILABLE = True
 except ImportError:
     # Provide stubs for type checking when prometheus_client is not installed
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+    Histogram = None  # type: ignore[assignment, misc]
 
     def generate_latest() -> bytes:  # type: ignore[misc]
         """Stub for when prometheus_client is not installed."""
@@ -145,6 +147,53 @@ _MAX_CORRELATION_ID_LENGTH: int = 64
 
 # Timeout for metrics generation to prevent blocking (seconds)
 _METRICS_GENERATION_TIMEOUT: float = 5.0
+
+# Histogram buckets for scrape duration (in seconds)
+# Covers typical scrape times from 1ms to 5s timeout
+_SCRAPE_DURATION_BUCKETS: tuple[float, ...] = (
+    0.001,  # 1ms
+    0.005,  # 5ms
+    0.010,  # 10ms
+    0.025,  # 25ms
+    0.050,  # 50ms
+    0.100,  # 100ms
+    0.250,  # 250ms
+    0.500,  # 500ms
+    1.000,  # 1s
+    2.500,  # 2.5s
+    5.000,  # 5s (timeout threshold)
+)
+
+# Lazily initialized scrape duration histogram
+# Initialized on first use to avoid import-time side effects when prometheus_client
+# is not installed. The metric is observed AFTER generate_latest() returns, so the
+# duration value is available in the NEXT scrape (avoiding chicken-and-egg recursion).
+_scrape_duration_histogram: Histogram | None = None
+
+
+def _get_scrape_duration_histogram() -> Histogram | None:
+    """Get or create the scrape duration histogram.
+
+    Lazily initializes the histogram on first call to avoid import-time errors
+    when prometheus_client is not installed.
+
+    Returns:
+        Histogram metric for scrape duration, or None if prometheus_client unavailable.
+    """
+    global _scrape_duration_histogram  # noqa: PLW0603 - Module-level metric cache
+
+    if not _PROMETHEUS_AVAILABLE or Histogram is None:
+        return None
+
+    if _scrape_duration_histogram is None:
+        _scrape_duration_histogram = Histogram(
+            "prometheus_handler_scrape_duration_seconds",
+            "Time spent generating Prometheus metrics for scrape requests",
+            buckets=_SCRAPE_DURATION_BUCKETS,
+        )
+
+    return _scrape_duration_histogram
+
 
 SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
     {
@@ -503,6 +552,9 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             },
         )
 
+        # Start timing for scrape duration metric
+        start_time = time.perf_counter()
+
         try:
             # Generate metrics with timeout protection to prevent DoS
             # generate_latest() is synchronous, so run in executor with timeout
@@ -510,6 +562,23 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             metrics_bytes = await asyncio.wait_for(
                 loop.run_in_executor(None, generate_latest),
                 timeout=_METRICS_GENERATION_TIMEOUT,
+            )
+
+            # Record scrape duration after generation completes
+            # The duration is observed AFTER generate_latest() returns, so it will
+            # be available in the NEXT scrape (avoiding chicken-and-egg recursion)
+            duration_seconds = time.perf_counter() - start_time
+            histogram = _get_scrape_duration_histogram()
+            if histogram is not None:
+                histogram.observe(duration_seconds)
+
+            logger.debug(
+                "Metrics scrape completed",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "duration_seconds": duration_seconds,
+                    "metrics_size_bytes": len(metrics_bytes),
+                },
             )
 
             # Use headers dict for Content-Type because CONTENT_TYPE_LATEST includes
@@ -523,6 +592,12 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             )
 
         except TimeoutError:
+            # Record duration even on timeout (will be at or near timeout threshold)
+            duration_seconds = time.perf_counter() - start_time
+            histogram = _get_scrape_duration_histogram()
+            if histogram is not None:
+                histogram.observe(duration_seconds)
+
             # Log timeout with full details, but return generic message
             # Using warning level since timeout is expected behavior (DoS protection)
             logger.warning(
@@ -530,6 +605,7 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
                 extra={
                     "correlation_id": str(correlation_id),
                     "timeout_seconds": _METRICS_GENERATION_TIMEOUT,
+                    "duration_seconds": duration_seconds,
                 },
             )
             # Security: Generic error message - no internal details exposed
@@ -540,10 +616,19 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             )
 
         except Exception:
+            # Record duration even on error for observability
+            duration_seconds = time.perf_counter() - start_time
+            histogram = _get_scrape_duration_histogram()
+            if histogram is not None:
+                histogram.observe(duration_seconds)
+
             # Log full exception details internally for debugging
             logger.exception(
                 "Failed to generate metrics",
-                extra={"correlation_id": str(correlation_id)},
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "duration_seconds": duration_seconds,
+                },
             )
             # Security: Generic error message - no exception type or details exposed
             # This prevents information leakage about internal implementation

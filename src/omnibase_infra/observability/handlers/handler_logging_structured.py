@@ -92,6 +92,13 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         - Threshold flush: Automatic flush when buffer nears capacity
         - Shutdown flush: Final flush ensures no data loss
 
+    Buffer Metrics:
+        The periodic flush loop emits the following metrics for monitoring:
+        - logging_buffer_utilization_ratio: Gauge (0.0-1.0) of buffer usage
+        - logging_buffer_dropped_total: Counter of entries dropped since last flush
+
+        These metrics help detect if buffer size is insufficient before logs are lost.
+
     Thread Safety:
         - Configuration changes use asyncio.Lock
         - Sink operations use threading.Lock (internal to sink)
@@ -134,6 +141,8 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
         self._flush_task: asyncio.Task[None] | None = None
         self._shutdown_event: asyncio.Event | None = None
         self._config_lock: asyncio.Lock = asyncio.Lock()
+        # Track dropped count from previous flush cycle to emit delta
+        self._last_drop_count: int = 0
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -243,6 +252,9 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
             output_format=self._config.output_format,
             drop_policy=self._config.drop_policy,
         )
+
+        # Reset drop count tracker for new sink
+        self._last_drop_count = 0
 
         # Set up shutdown event and start periodic flush task
         self._shutdown_event = asyncio.Event()
@@ -597,6 +609,9 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
             self._config = new_config
             self._sink = new_sink
 
+            # Reset drop count tracker for new sink
+            self._last_drop_count = 0
+
             # Handle flush interval changes
             if self._config.flush_interval_seconds > 0:
                 # Restart flush task if not running or interval changed
@@ -678,6 +693,10 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
 
         Runs until shutdown_event is set or task is cancelled.
         Handles flush errors gracefully to prevent task crash.
+
+        Emits buffer utilization metrics before each flush:
+        - logging_buffer_utilization_ratio: Gauge showing buffer usage (0.0-1.0)
+        - logging_buffer_dropped_total: Counter of entries dropped since last flush
         """
         if self._shutdown_event is None:
             return
@@ -701,8 +720,43 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                     # Normal timeout - time to flush
                     pass
 
-                # Perform flush
+                # Perform flush with metrics emission
                 if self._sink is not None:
+                    # Emit buffer utilization metric (gauge: 0.0 to 1.0)
+                    # Safe from division by zero: max_buffer_size validated >= 1 at init
+                    max_size = self._sink.max_buffer_size
+                    current_size = self._sink.buffer_size
+                    utilization_ratio = current_size / max_size if max_size > 0 else 0.0
+
+                    logger.debug(
+                        "logging_buffer_utilization_ratio",
+                        extra={
+                            "handler": self.__class__.__name__,
+                            "metric_type": "gauge",
+                            "metric_name": "logging_buffer_utilization_ratio",
+                            "value": utilization_ratio,
+                            "buffer_size": current_size,
+                            "max_buffer_size": max_size,
+                        },
+                    )
+
+                    # Emit dropped logs counter (delta since last flush)
+                    current_drop_count = self._sink.drop_count
+                    dropped_since_last = current_drop_count - self._last_drop_count
+                    if dropped_since_last > 0:
+                        logger.warning(
+                            "logging_buffer_dropped_total",
+                            extra={
+                                "handler": self.__class__.__name__,
+                                "metric_type": "counter",
+                                "metric_name": "logging_buffer_dropped_total",
+                                "value": dropped_since_last,
+                                "total_dropped": current_drop_count,
+                            },
+                        )
+                    self._last_drop_count = current_drop_count
+
+                    # Perform flush
                     self._sink.flush()
 
             except asyncio.CancelledError:
@@ -739,7 +793,9 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
                 - version: Handler version string
                 - config: Current configuration (if initialized)
                 - buffer_size: Current buffer size (if initialized)
+                - max_buffer_size: Maximum buffer capacity (if initialized)
                 - drop_count: Total dropped entries (if initialized)
+                - buffer_utilization_ratio: Current utilization (0.0-1.0)
 
         See Also:
             - handler_type property: Full documentation of architectural role
@@ -763,7 +819,13 @@ class HandlerLoggingStructured(MixinEnvelopeExtraction):
 
         if self._sink is not None:
             result["buffer_size"] = self._sink.buffer_size
+            result["max_buffer_size"] = self._sink.max_buffer_size
             result["drop_count"] = self._sink.drop_count
+            # Include utilization ratio for monitoring
+            max_size = self._sink.max_buffer_size
+            result["buffer_utilization_ratio"] = (
+                self._sink.buffer_size / max_size if max_size > 0 else 0.0
+            )
 
         return result
 
