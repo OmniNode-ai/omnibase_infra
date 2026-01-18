@@ -207,8 +207,6 @@ config = ModelBindingConfigResolverConfig(
 )
 ```
 
-**Note**: SecretResolver for `vault:` references is resolved from the container via dependency injection when creating `BindingConfigResolver`, not passed as a config parameter.
-
 ### Config Reference Formats
 
 | Format | Example | Description |
@@ -707,6 +705,7 @@ binding = resolver.resolve(
 ### Vault Integration Security
 
 - Vault access is via SecretResolver only (not direct Vault API)
+- SecretResolver is resolved from the container via dependency injection
 - Inherits SecretResolver's security controls
 - Bootstrap secrets for Vault must come from environment (see SecretResolver docs)
 
@@ -719,6 +718,9 @@ binding = resolver.resolve(
 | Validate configurations before deployment | Trust untrusted config sources |
 | Use environment overrides for secrets | Put secrets in config files |
 | Set appropriate cache TTLs | Cache forever with `cache_ttl_seconds=86400` |
+| Set `allow_symlinks=False` in high-security environments | Follow symlinks without validation |
+| Set `fail_on_vault_error=True` in production | Silently skip vault errors in production |
+| Register SecretResolver in container for vault: support | Pass SecretResolver directly to config |
 
 ---
 
@@ -727,6 +729,7 @@ binding = resolver.resolve(
 ### With Orchestrators
 
 ```python
+from pathlib import Path
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.nodes import NodeOrchestrator
 from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
@@ -736,16 +739,22 @@ class MyOrchestrator(NodeOrchestrator):
     def __init__(self, container: ModelONEXContainer) -> None:
         super().__init__(container)
 
-        # Get secret resolver from container if available
-        secret_resolver = container.get("secret_resolver", default=None)
-
-        self._config_resolver = BindingConfigResolver(
-            ModelBindingConfigResolverConfig(
-                config_dir=Path("/etc/onex/handlers"),
-                secret_resolver=secret_resolver,
-                cache_ttl_seconds=300.0,
-            )
+        # Register resolver config in container (typically done at bootstrap)
+        # SecretResolver for vault: references is resolved from container via DI
+        config = ModelBindingConfigResolverConfig(
+            config_dir=Path("/etc/onex/handlers"),
+            cache_ttl_seconds=300.0,
+            fail_on_vault_error=True,  # Recommended for production
         )
+        container.service_registry.register_instance(
+            interface=ModelBindingConfigResolverConfig,
+            instance=config,
+            scope="global",
+        )
+
+        # Create resolver with container injection
+        # SecretResolver is resolved from container automatically if registered
+        self._config_resolver = BindingConfigResolver(container)
 
     async def initialize_handlers(self) -> None:
         """Initialize handlers from contract bindings."""
@@ -1057,8 +1066,8 @@ Use this checklist when migrating handlers to `BindingConfigResolver`:
 
 **Preparation Phase**:
 - [ ] Create `ModelBindingConfigResolverConfig` with appropriate settings
-- [ ] Register `BindingConfigResolver` in container (if using DI)
-- [ ] Create `SecretResolver` if Vault integration is needed
+- [ ] Register `ModelBindingConfigResolverConfig` in container
+- [ ] Register `SecretResolver` in container if Vault integration is needed (resolved via DI)
 - [ ] Define config file directory structure (`config_dir`)
 - [ ] Establish environment variable prefix convention (`env_prefix`)
 
@@ -1087,7 +1096,7 @@ Use this checklist when migrating handlers to `BindingConfigResolver`:
 | Pitfall | Solution |
 |---------|----------|
 | Forgetting to set `config_dir` for relative paths | Always configure `config_dir` when using `file:` references |
-| Using `vault:` scheme without `SecretResolver` | Ensure `secret_resolver` is provided in config |
+| Using `vault:` scheme without `SecretResolver` | Ensure `SecretResolver` is registered in the container (resolved via DI) |
 | Expecting immediate cache updates | Call `refresh()` after external config changes |
 | Mixing old and new patterns | Fully migrate each handler before moving to the next |
 | Ignoring environment override naming | Follow `{PREFIX}_{HANDLER_TYPE}_{FIELD}` convention exactly |

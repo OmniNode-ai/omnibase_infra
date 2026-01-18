@@ -1231,7 +1231,22 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         if not path.is_absolute():
             if self._config.config_dir is not None:
                 # Validate config_dir at use-time (deferred from model construction)
-                if not self._config.config_dir.exists():
+                try:
+                    config_dir_exists = self._config.config_dir.exists()
+                    config_dir_is_dir = self._config.config_dir.is_dir()
+                except ValueError:
+                    # config_dir contains null bytes (defense-in-depth)
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="load_from_file",
+                        target_name="binding_config_resolver",
+                    )
+                    raise ProtocolConfigurationError(
+                        "Invalid config_dir path: contains invalid characters",
+                        context=context,
+                    )
+                if not config_dir_exists:
                     context = ModelInfraErrorContext.with_correlation(
                         correlation_id=correlation_id,
                         transport_type=EnumInfraTransportType.RUNTIME,
@@ -1242,7 +1257,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                         f"config_dir does not exist: path='{self._config.config_dir}'",
                         context=context,
                     )
-                if not self._config.config_dir.is_dir():
+                if not config_dir_is_dir:
                     context = ModelInfraErrorContext.with_correlation(
                         correlation_id=correlation_id,
                         transport_type=EnumInfraTransportType.RUNTIME,
@@ -1268,7 +1283,21 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         # Security: Check for symlinks if not allowed
         # Check before resolve() to detect symlinks in the original path
-        if not self._config.allow_symlinks and path.is_symlink():
+        try:
+            is_symlink = not self._config.allow_symlinks and path.is_symlink()
+        except ValueError:
+            # Path contains null bytes or other invalid characters
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_file",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Invalid configuration file path: contains invalid characters",
+                context=context,
+            )
+        if is_symlink:
             logger.warning(
                 "Symlink rejected in config file path",
                 extra={"correlation_id": str(correlation_id)},
@@ -1287,7 +1316,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         # Resolve to absolute path for security validation
         try:
             resolved_path = path.resolve()
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, ValueError):
+            # ValueError: path contains null bytes or other invalid characters
+            # OSError/RuntimeError: filesystem/symlink resolution errors
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
@@ -1304,7 +1335,21 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         if not self._config.allow_symlinks:
             current = path
             while current != current.parent:
-                if current.is_symlink():
+                try:
+                    is_current_symlink = current.is_symlink()
+                except ValueError:
+                    # Path contains null bytes or other invalid characters
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="load_from_file",
+                        target_name="binding_config_resolver",
+                    )
+                    raise ProtocolConfigurationError(
+                        "Invalid configuration file path: contains invalid characters",
+                        context=context,
+                    )
+                if is_current_symlink:
                     logger.warning(
                         "Symlink detected in path hierarchy",
                         extra={"correlation_id": str(correlation_id)},
@@ -1323,7 +1368,21 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         # Security: Validate path is within config_dir if configured
         if self._config.config_dir is not None:
-            config_dir_resolved = self._config.config_dir.resolve()
+            try:
+                config_dir_resolved = self._config.config_dir.resolve()
+            except (OSError, RuntimeError, ValueError):
+                # ValueError: config_dir contains null bytes (defense-in-depth)
+                # OSError/RuntimeError: filesystem/symlink resolution errors
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="load_from_file",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Invalid config_dir path",
+                    context=context,
+                )
             try:
                 resolved_path.relative_to(config_dir_resolved)
             except ValueError:
