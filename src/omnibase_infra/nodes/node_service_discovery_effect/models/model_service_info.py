@@ -58,7 +58,7 @@ class ModelServiceInfo(BaseModel):
         >>> info = ModelServiceInfo(
         ...     service_id=uuid4(),
         ...     service_name="user-service",
-        ...     address="10.0.0.5",
+        ...     address="localhost",
         ...     port=8080,
         ...     tags=("api", "v2"),
         ...     health_status=EnumHealthStatus.HEALTHY,

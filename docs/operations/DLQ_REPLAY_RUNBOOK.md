@@ -22,13 +22,13 @@ The DLQ Replay utility allows operators to reprocess failed messages from the De
 **Required**:
 ```bash
 # Kafka connection (REQUIRED - no default for security)
-export KAFKA_BOOTSTRAP_SERVERS="192.168.86.200:29092"
+export KAFKA_BOOTSTRAP_SERVERS="<infrastructure-host>:29092"
 ```
 
 **Optional (for PostgreSQL tracking)**:
 ```bash
 # PostgreSQL tracking configuration (required if --enable-tracking is used)
-export POSTGRES_HOST="192.168.86.200"
+export POSTGRES_HOST="<infrastructure-host>"
 export POSTGRES_PORT="5436"
 export POSTGRES_DATABASE="omninode_bridge"
 export POSTGRES_USER="postgres"
@@ -236,7 +236,7 @@ Enable PostgreSQL-based tracking to persist replay attempt history for auditing 
 Set the required environment variables:
 
 ```bash
-export POSTGRES_HOST="192.168.86.200"
+export POSTGRES_HOST="<infrastructure-host>"
 export POSTGRES_PORT="5436"
 export POSTGRES_DATABASE="omninode_bridge"
 export POSTGRES_USER="postgres"

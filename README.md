@@ -1,264 +1,139 @@
-# omnibase_infra
+# ONEX Infrastructure
 
-Fresh ONEX-compliant infrastructure repository for OmniNode AI.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy.readthedocs.io/)
+[![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
+[![Framework: Infrastructure](https://img.shields.io/badge/framework-infrastructure-green.svg)](https://github.com/OmniNode-ai/omnibase_infra)
 
-## Status
+**Production infrastructure services for the ONEX execution layer.** Handlers, adapters, and runtime services for PostgreSQL, Kafka, Consul, Vault, and Redis.
 
-**Created**: December 2, 2025
-**Version**: 0.2.0
+## What is This?
 
-## Overview
+This repository provides the **infrastructure layer** for ONEX-based systems. While [omnibase_core](https://github.com/OmniNode-ai/omnibase_core) defines the execution protocol and node archetypes, this package provides:
 
-This repository contains ONEX infrastructure services built with:
-- `omnibase-core` ^0.7.0 (PyPI)
-- `omnibase-spi` ^0.5.0 (PyPI)
+- **Handlers** for external services (database, HTTP, messaging)
+- **Adapters** wrapping infrastructure clients
+- **Event bus** abstractions for Kafka/Redpanda
+- **Runtime services** deployable via Docker
 
-## Structure
+Built on `omnibase-core` ^0.8.0 and `omnibase-spi` ^0.5.0.
 
-```
-src/omnibase_infra/
-├── cli/               # Command-line interface
-├── clients/           # Service clients
-├── contracts/         # ONEX contract definitions
-├── decorators/        # Python decorators
-├── dlq/               # Dead letter queue handling
-├── enums/             # Centralized enums
-├── errors/            # Error hierarchy and types
-├── event_bus/         # Event bus abstractions
-├── handlers/          # Message and request handlers
-├── idempotency/       # Idempotency utilities
-├── infrastructure/    # Infrastructure utilities
-├── mixins/            # Reusable mixin classes
-├── models/            # Centralized Pydantic models
-├── nodes/             # ONEX nodes (Effect, Compute, Reducer, Orchestrator)
-└── orchestrators/     # Workflow orchestration
-```
-
-## Prerequisites
-
-- Python 3.12+
-- Poetry
-- Docker (optional, for infrastructure services)
-
-## Getting Started
+## Quick Start
 
 ```bash
-poetry install
-poetry run python -c "import omnibase_infra; print('Ready')"
-```
+# Clone the repository
+git clone https://github.com/OmniNode-ai/omnibase_infra.git
+cd omnibase_infra
 
-## Deployment Options
-
-### Docker Deployment
-
-For containerized deployment, see the [Docker documentation](docker/README.md).
-
-**Quick Start with Docker:**
-
-```bash
+# Start the runtime with Docker
 cd docker
 cp .env.example .env
-# Edit .env and replace ALL __REPLACE_WITH_*__ placeholders
+# Edit .env - set POSTGRES_PASSWORD, VAULT_TOKEN, REDIS_PASSWORD
+
 docker compose -f docker-compose.runtime.yml --profile main up -d --build
+
+# Verify it's running
 curl http://localhost:8085/health
 ```
 
-**Available Docker Profiles:**
+## Docker Services
 
-| Profile   | Services                    | Use Case                          |
-|-----------|-----------------------------|-----------------------------------|
-| `main`    | runtime-main                | Core kernel only                  |
-| `effects` | runtime-main + effects      | Main + external service I/O       |
-| `workers` | runtime-main + workers ×2   | Main + parallel compute           |
-| `all`     | All services                | Full deployment                   |
+The runtime deploys as containerized services connecting to your infrastructure:
 
-See [docker/README.md](docker/README.md) for detailed configuration, security, and troubleshooting.
+| Service | Profile | Port | Description |
+|---------|---------|------|-------------|
+| **runtime-main** | `main` | 8085 | Core kernel - request/response handling |
+| **runtime-effects** | `effects` | 8086 | External service I/O (DB, HTTP, messaging) |
+| **runtime-worker** | `workers` | — | Scalable compute workers (default: 2 replicas) |
 
-### Non-Docker Development
-
-For local development without Docker:
-
-1. **Install Python dependencies:**
-   ```bash
-   poetry install
-   ```
-
-2. **Configure environment variables:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your infrastructure settings
-   # See "Integration Testing" section for required variables
-   ```
-
-3. **Run the application:**
-   ```bash
-   poetry run python -m omnibase_infra.runtime.kernel
-   ```
-
-**Infrastructure Options for Non-Docker Users:**
-
-| Option | Description |
-|--------|-------------|
-| **Remote Server** | Connect to `192.168.86.200` (ONEX development infrastructure) |
-| **Local Services** | Run PostgreSQL, Consul, Vault, Kafka locally |
-| **CI/CD Mode** | Leave infrastructure variables unset (tests skip gracefully) |
-
-**Local Service Setup (if needed):**
-
+**Profiles:**
 ```bash
-# PostgreSQL (via Homebrew on macOS)
-brew install postgresql@15 && brew services start postgresql@15
+# Core only
+docker compose -f docker-compose.runtime.yml --profile main up -d
 
-# Consul (via Homebrew on macOS)
-brew install consul && consul agent -dev
+# Core + effects
+docker compose -f docker-compose.runtime.yml --profile effects up -d
 
-# Vault (via Homebrew on macOS)
-brew install vault && vault server -dev
+# Core + workers (parallel compute)
+docker compose -f docker-compose.runtime.yml --profile workers up -d
 
-# Or use Docker for just the services (without running the app in Docker)
-docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:15
-docker run -d -p 8500:8500 consul:1.15
-docker run -d -p 8200:8200 vault:1.15 server -dev
+# Everything
+docker compose -f docker-compose.runtime.yml --profile all up -d
 ```
 
-**Note:** Most integration tests will skip gracefully if infrastructure is unavailable. The HTTP handler tests always run using local mock servers (pytest-httpserver).
+## Infrastructure Dependencies
+
+The runtime connects to external services (not included in compose):
+
+| Service | Purpose | Default Host |
+|---------|---------|--------------|
+| **PostgreSQL** | Persistence | `omninode-bridge-postgres:5432` |
+| **Kafka/Redpanda** | Event bus | `omninode-bridge-redpanda:9092` |
+| **Consul** | Service discovery | `omninode-bridge-consul:8500` |
+| **Vault** | Secrets management | `omninode-bridge-vault:8200` |
+| **Redis/Valkey** | Caching | `omninode-bridge-redis:6379` |
+
+See [docker/README.md](docker/README.md) for configuration details.
 
 ## Documentation
-
-**Start here**: [docs/index.md](docs/index.md) - Central documentation hub
 
 | I want to... | Go to... |
 |--------------|----------|
 | Get started quickly | [Quick Start Guide](docs/getting-started/quickstart.md) |
 | Understand the architecture | [Architecture Overview](docs/architecture/overview.md) |
-| Learn about node types | [Node Archetypes Reference](docs/reference/node-archetypes.md) |
-| See a complete example | [2-Way Registration Walkthrough](docs/guides/registration-example.md) |
-| Write a contract | [Contract.yaml Reference](docs/reference/contracts.md) |
+| Deploy with Docker | [Docker Guide](docker/README.md) |
+| See a complete example | [Registration Walkthrough](docs/guides/registration-example.md) |
+| Write a contract | [Contract Reference](docs/reference/contracts.md) |
 | Find implementation patterns | [Pattern Documentation](docs/patterns/README.md) |
 | Read coding standards | [CLAUDE.md](CLAUDE.md) |
 
+**Full documentation**: [docs/index.md](docs/index.md)
+
+## Repository Structure
+
+```
+src/omnibase_infra/
+├── handlers/          # Request/message handlers
+├── event_bus/         # Kafka/Redpanda abstractions
+├── clients/           # Service clients
+├── models/            # Pydantic models
+├── nodes/             # ONEX nodes (Effect, Compute, Reducer, Orchestrator)
+├── errors/            # Error hierarchy
+├── mixins/            # Reusable behaviors
+└── enums/             # Centralized enums
+```
+
 ## Development
+
+```bash
+# Install dependencies
+poetry install
+
+# Run tests
+poetry run pytest
+
+# Type checking
+poetry run mypy src/omnibase_infra/
+
+# Format code
+poetry run ruff format .
+poetry run ruff check --fix .
+```
 
 ### Pre-commit Hooks Setup
 
-This repository uses pre-commit hooks for automatic code formatting and validation.
-
-**Initial Setup** (run once):
+Run once after cloning:
 ```bash
 poetry run pre-commit install
 poetry run pre-commit install --hook-type pre-push
 ```
 
-**What happens automatically**:
-- On `git commit`: Ruff formatting, file checks, ONEX validations
-- On `git push`: Type checking with mypy
+## Contributing
 
-**Manual execution** (optional):
-```bash
-# Run all pre-commit hooks
-poetry run pre-commit run --all-files
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and PR guidelines.
 
-# Run specific hook
-poetry run pre-commit run ruff-format --all-files
+## License
 
-# Update hook versions
-poetry run pre-commit autoupdate
-```
-
-**Note**: If hooks modify files, you need to re-stage and commit again. This ensures formatting is always applied before code reaches CI.
-
-### Ruff Formatting
-
-Ruff handles both formatting and linting (replaces black + isort):
-- Format code: `poetry run ruff format .`
-- Check and fix linting: `poetry run ruff check --fix .`
-- Both run automatically via pre-commit hooks
-
-### Development Workflow
-
-Follow the patterns in `omniintelligence` repository for ONEX compliance.
-
-## Integration Testing
-
-Integration tests validate handlers against real infrastructure services. They are designed to skip gracefully when infrastructure is unavailable, enabling CI/CD pipelines to run without hard failures.
-
-### Required Infrastructure
-
-| Service | Default Host | Default Port | Environment Variables |
-|---------|-------------|--------------|----------------------|
-| PostgreSQL | `192.168.86.200` | `5436` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_PASSWORD` |
-| Consul | `192.168.86.200` | `28500` | `CONSUL_HOST`, `CONSUL_PORT` |
-| Vault | `192.168.86.200` | `8200` | `VAULT_ADDR`, `VAULT_TOKEN` |
-| Kafka/Redpanda | `192.168.86.200` | `29092` | `KAFKA_BOOTSTRAP_SERVERS` |
-
-### Environment Setup
-
-```bash
-# Copy example environment file
-cp .env.example .env
-
-# Set required credentials (example values - use your own)
-export POSTGRES_HOST=192.168.86.200
-export POSTGRES_PORT=5436
-export POSTGRES_PASSWORD=your_password
-export CONSUL_HOST=192.168.86.200
-export CONSUL_PORT=28500
-export VAULT_ADDR=http://192.168.86.200:8200
-export VAULT_TOKEN=your_vault_token
-```
-
-### Running Integration Tests
-
-```bash
-# Run all integration tests
-poetry run pytest tests/integration/ -v
-
-# Run specific handler integration tests
-poetry run pytest tests/integration/handlers/ -v
-
-# Run with markers
-poetry run pytest -m integration -v
-```
-
-### CI/CD Graceful Skip Behavior
-
-Integration tests automatically skip when infrastructure is unavailable:
-
-| Handler | Skip Conditions |
-|---------|----------------|
-| **HandlerDb** | `POSTGRES_HOST` not set, or `POSTGRES_PASSWORD` not set |
-| **HandlerConsul** | `CONSUL_HOST` not set, or TCP connection fails |
-| **HandlerVault** | `VAULT_ADDR` not set, `VAULT_TOKEN` not set, or health endpoint unreachable |
-| **HttpRestHandler** | Never skips (uses pytest-httpserver for local mock testing) |
-
-Example CI/CD output when infrastructure is unavailable:
-
-```
-tests/.../test_db_handler_integration.py::test_db_health_check SKIPPED (PostgreSQL not available)
-tests/.../test_consul_handler_integration.py::test_consul_health_check SKIPPED (Consul not available)
-tests/.../test_vault_handler_integration.py::test_vault_health_check SKIPPED (Vault not available)
-tests/.../test_http_handler_integration.py::test_http_get_success PASSED
-```
-
-### Local Development Without Infrastructure
-
-For local development without access to the remote infrastructure server:
-
-1. **Use Docker Compose** (recommended): See [docker/README.md](docker/README.md) for running local services
-2. **Skip infrastructure tests**: Tests automatically skip when services are unavailable
-3. **Mock testing**: HTTP handler tests use `pytest-httpserver` and always run locally
-
-### Test Isolation
-
-Integration tests use isolation patterns to prevent test pollution:
-
-- **Unique identifiers**: Each test generates unique table names, KV keys, and secret paths
-- **Cleanup fixtures**: Fixtures ensure test data is cleaned up after each test
-- **Idempotent cleanup**: Cleanup operations ignore errors (e.g., deleting non-existent resources)
-
-### Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Commit message format and conventions
-- Agent attribution guidelines
-- Code review processes
+MIT License - see [LICENSE](LICENSE) for details.

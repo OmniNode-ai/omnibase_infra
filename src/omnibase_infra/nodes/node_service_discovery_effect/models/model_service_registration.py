@@ -65,7 +65,7 @@ class ModelServiceRegistration(BaseModel):
         >>> registration = ModelServiceRegistration(
         ...     service_id=uuid4(),
         ...     service_name="user-service",
-        ...     address="10.0.0.5",
+        ...     address="localhost",
         ...     port=8080,
         ...     tags=("api", "v2", "production"),
         ...     metadata={"version": "2.1.0", "region": "us-east-1"},

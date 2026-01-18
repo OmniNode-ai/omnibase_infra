@@ -62,7 +62,7 @@ Example:
         # Register a service
         registration = ModelServiceRegistration(
             service_name="user-service",
-            address="10.0.0.5",
+            address="localhost",
             port=8080,
             tags=("api", "v2"),
         )
