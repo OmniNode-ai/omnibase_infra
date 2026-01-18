@@ -122,7 +122,9 @@ poetry run ruff format .
 poetry run ruff check --fix .
 ```
 
-**Pre-commit hooks** (run once):
+### Pre-commit Hooks Setup
+
+Run once after cloning:
 ```bash
 poetry run pre-commit install
 poetry run pre-commit install --hook-type pre-push
