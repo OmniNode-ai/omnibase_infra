@@ -12,6 +12,10 @@ ONEX is built on three core principles:
 
 ## System Architecture
 
+### ASCII Diagram
+
+The following diagram shows the complete ONEX runtime architecture:
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              ONEX RUNTIME                                    │
@@ -72,6 +76,69 @@ ONEX is built on three core principles:
                       │  │  Vault  │  │    Kafka    │   │
                       │  └─────────┘  └─────────────┘   │
                       └─────────────────────────────────┘
+```
+
+### Mermaid Diagram
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e3f2fd'}}}%%
+flowchart TB
+    accTitle: ONEX Runtime System Architecture
+    accDescr: Complete system architecture diagram showing the ONEX runtime layers. Events flow from Kafka through the Message Dispatch Engine to Orchestrators, which route to Handlers and Reducers. Reducers emit Intents that are executed by Effect nodes, which interact with external services like Consul, PostgreSQL, Vault, and Kafka.
+
+    subgraph ONEX["ONEX Runtime"]
+        subgraph EventBus["Event Bus (Kafka)"]
+            K[Topics: introspection, registration,<br/>heartbeat, commands]
+        end
+
+        subgraph Dispatch["Message Dispatch Engine"]
+            MDE[Routes events to orchestrators<br/>based on topic patterns]
+        end
+
+        subgraph OrchestratorLayer["Orchestrator Layer"]
+            REG_ORCH[Registration<br/>Orchestrator]
+            WF_ORCH[Workflow<br/>Orchestrator]
+            CUSTOM_ORCH[Custom<br/>Orchestrator]
+        end
+
+        subgraph HandlerLayer["Handler Layer"]
+            H_INTRO[HandlerNode-<br/>Introspected]
+            H_ACKED[HandlerNode-<br/>Acked]
+        end
+
+        subgraph ReducerLayer["Reducer Layer"]
+            RED[Registration Reducer<br/>FSM-driven]
+        end
+
+        subgraph EffectLayer["Effect Layer"]
+            CONSUL_EFF[Consul Effect]
+            PG_EFF[Postgres Effect]
+        end
+    end
+
+    subgraph External["External Services"]
+        CONSUL[(Consul)]
+        PG[(PostgreSQL)]
+        VAULT[(Vault)]
+        KAFKA[(Kafka)]
+    end
+
+    K --> MDE
+    MDE --> REG_ORCH
+    MDE --> WF_ORCH
+    MDE --> CUSTOM_ORCH
+
+    REG_ORCH -->|handler_routing| H_INTRO
+    REG_ORCH -->|handler_routing| H_ACKED
+    REG_ORCH -->|emit intents| RED
+
+    RED -->|ModelIntent| CONSUL_EFF
+    RED -->|ModelIntent| PG_EFF
+
+    CONSUL_EFF --> CONSUL
+    PG_EFF --> PG
+    EffectLayer --> VAULT
+    EffectLayer --> KAFKA
 ```
 
 ## The Four Node Archetypes
@@ -180,6 +247,8 @@ io_operations:
 
 ### Event-Driven Flow
 
+#### ASCII Version
+
 ```
 Event arrives on Kafka topic
          │
@@ -202,7 +271,26 @@ Event arrives on Kafka topic
 └─────────────────────┘
 ```
 
-### Intent Flow (Reducer → Effect)
+#### Mermaid Version
+
+```mermaid
+flowchart TB
+    accTitle: Event-Driven Flow
+    accDescr: Flow diagram showing how events are processed in ONEX. Events arrive on Kafka, are received by the Orchestrator which routes them to appropriate Handlers based on payload type. Handlers process the event and return a ModelHandlerOutput with events and intents. The Orchestrator then publishes events and routes intents to Effect nodes.
+
+    KAFKA[Event arrives<br/>on Kafka topic] --> ORCH1[Orchestrator<br/>coordinator]
+
+    ORCH1 -->|1. Receives event<br/>2. Routes by payload type| HANDLER[Handler<br/>business logic]
+
+    HANDLER -->|3. Processes event<br/>4. Returns ModelHandlerOutput| ORCH2[Orchestrator<br/>publisher]
+
+    ORCH2 -->|5. Publishes events| KAFKA_OUT[Kafka Topics]
+    ORCH2 -->|6. Routes intents| EFFECTS[Effect Nodes]
+```
+
+### Intent Flow (Reducer -> Effect)
+
+#### ASCII Version
 
 ```
 ┌─────────────────────┐
@@ -223,6 +311,22 @@ Event arrives on Kafka topic
 │   External Service  │  7. Actual I/O operation
 │   (Consul/Postgres) │
 └─────────────────────┘
+```
+
+#### Mermaid Version
+
+```mermaid
+flowchart TB
+    accTitle: Intent Flow from Reducer to Effect
+    accDescr: Flow diagram showing how intents flow from Reducers to Effect nodes. The Reducer receives an event, transitions its FSM state, and emits intents wrapped in ModelIntent with an extension intent_type and a payload containing the specific routing key. Effect nodes receive the intent, execute via their handlers, and interact with external services like Consul or PostgreSQL.
+
+    REDUCER[Reducer<br/>FSM-driven] -->|1. Receives event<br/>2. Transitions state<br/>3. Emits intents| INTENT["ModelIntent<br/>intent_type='extension'<br/>payload.intent_type='consul.register'"]
+
+    INTENT --> EFFECT[Effect Node<br/>external I/O]
+
+    EFFECT -->|4. Receives intent<br/>5. Executes via handler<br/>6. Returns result| EXTERNAL[(External Service<br/>Consul/PostgreSQL)]
+
+    EXTERNAL -->|7. Actual I/O operation| RESULT[Operation Complete]
 ```
 
 ## Contract-Driven Architecture
@@ -257,7 +361,9 @@ All logic is driven by the contract. The runtime reads the contract and wires ev
 
 ## Handler Architecture
 
-Handlers implement business logic and are wired via contracts:
+Handlers implement business logic and are wired via contracts.
+
+### ASCII Version
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -294,6 +400,37 @@ Handlers implement business logic and are wired via contracts:
 └───────────────────────────────────────────────────────────────┘
 ```
 
+### Mermaid Version
+
+```mermaid
+flowchart TB
+    accTitle: Handler Plugin System Architecture
+    accDescr: Architecture diagram showing the Handler Plugin System. Contract.yaml files declare handler routing rules mapping event models to handler classes. The HandlerPluginLoader reads contracts, validates that handlers implement the required 5-method protocol, and registers them in a registry. Handler instances implement handler_type property, initialize, shutdown, handle, and describe methods.
+
+    subgraph Contract["contract.yaml"]
+        ROUTING["handler_routing:<br/>  handlers:<br/>    - event_model: ModelIntrospectionEvent<br/>      handler: HandlerNodeIntrospected"]
+    end
+
+    subgraph Loader["HandlerPluginLoader"]
+        L1[Reads contract.yaml]
+        L2[Validates handler protocol<br/>5 required methods]
+        L3[Registers handlers<br/>in registry]
+    end
+
+    subgraph Handler["Handler Instance"]
+        M1["handler_type (property)"]
+        M2["initialize(config) (async)"]
+        M3["shutdown() (async)"]
+        M4["handle(envelope) (async)"]
+        M5["describe() (sync)"]
+    end
+
+    Contract --> L1
+    L1 --> L2
+    L2 --> L3
+    L3 --> Handler
+```
+
 ## Key Design Constraints
 
 | Constraint | Reason |
@@ -305,6 +442,8 @@ Handlers implement business logic and are wired via contracts:
 | **Immutable state models** | Use `with_*` methods for transitions |
 
 ## Package Layering
+
+### ASCII Version
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -335,6 +474,39 @@ Handlers implement business logic and are wired via contracts:
 │   - ModelONEXContainer                           │
 │   - Core enums and types                         │
 └─────────────────────────────────────────────────┘
+```
+
+### Mermaid Version
+
+```mermaid
+flowchart TB
+    accTitle: ONEX Package Layering
+    accDescr: Dependency diagram showing the three-layer package architecture. omnibase_infra at the top contains infrastructure implementations including handlers for Consul, DB, Vault, and HTTP, plus nodes and runtime components. It depends on omnibase_spi which provides Service Provider Interface protocols like ProtocolHandler, ProtocolDispatcher, and ProtocolProjectionReader. Both depend on omnibase_core at the bottom which provides core models and base classes including NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator, ModelONEXContainer, and core enums.
+
+    subgraph INFRA["omnibase_infra"]
+        I1[Infrastructure implementations]
+        I2["Handlers (Consul, DB, Vault, HTTP)"]
+        I3["Nodes (Registration, Effects)"]
+        I4["Runtime (Dispatchers, Loaders)"]
+    end
+
+    subgraph SPI["omnibase_spi"]
+        S1[Service Provider Interface<br/>protocols]
+        S2[ProtocolHandler]
+        S3[ProtocolDispatcher]
+        S4[ProtocolProjectionReader]
+    end
+
+    subgraph CORE["omnibase_core"]
+        C1[Core models and base classes]
+        C2["NodeEffect, NodeCompute"]
+        C3["NodeReducer, NodeOrchestrator"]
+        C4[ModelONEXContainer]
+        C5[Core enums and types]
+    end
+
+    INFRA -->|depends on| SPI
+    SPI -->|depends on| CORE
 ```
 
 ## Related Documentation

@@ -433,6 +433,6 @@ if __name__ == "__main__":
 
 - [EnumSecurityRuleId](../../src/omnibase_infra/enums/enum_security_rule_id.py) - Security rule definitions
 - [SecurityMetadataValidator](../../src/omnibase_infra/runtime/security_metadata_validator.py) - Handler loading validation
-- [RegistrationSecurityValidator](../../src/omnibase_infra/validation/registration_validator_security.py) - Registration validation
+- [RegistrationSecurityValidator](../../src/omnibase_infra/validation/validator_registration_security.py) - Registration validation
 - [InvocationSecurityEnforcer](../../src/omnibase_infra/runtime/invocation_security_enforcer.py) - Runtime enforcement
 - [Two-Layer Security Tests](../../tests/integration/security/test_two_layer_security_validation.py) - Integration tests demonstrating the full flow

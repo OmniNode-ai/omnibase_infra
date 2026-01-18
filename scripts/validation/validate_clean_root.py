@@ -71,6 +71,8 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         ".flake8",
         ".pylintrc",
         ".isort.cfg",
+        # Markdown link validation
+        ".markdown-link-check.json",
         # Standard documentation
         "README.md",
         "README.rst",

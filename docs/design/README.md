@@ -8,14 +8,7 @@ A comprehensive design for migrating PolicyRegistry from singleton pattern to co
 
 ### Documents
 
-1. **[POLICY_REGISTRY_DI_SUMMARY.md](POLICY_REGISTRY_DI_SUMMARY.md)** - Start here
-   - Executive summary of the design
-   - Current vs. target architecture
-   - Implementation phases
-   - Migration examples
-   - Quick reference
-
-2. **[POLICY_REGISTRY_DI_INTEGRATION.md](POLICY_REGISTRY_DI_INTEGRATION.md)** - Detailed design
+1. **[POLICY_REGISTRY_DI_INTEGRATION.md](POLICY_REGISTRY_DI_INTEGRATION.md)** - Start here (Detailed design)
    - Full architectural analysis
    - Container API documentation
    - Phase-by-phase implementation plan
@@ -23,7 +16,7 @@ A comprehensive design for migrating PolicyRegistry from singleton pattern to co
    - Documentation requirements
    - Risk mitigation
 
-3. **[POLICY_REGISTRY_DI_EXAMPLES.md](POLICY_REGISTRY_DI_EXAMPLES.md)** - Code examples
+2. **[POLICY_REGISTRY_DI_EXAMPLES.md](POLICY_REGISTRY_DI_EXAMPLES.md)** - Code examples
    - Container bootstrap examples
    - Node integration patterns
    - Service class patterns
@@ -31,7 +24,7 @@ A comprehensive design for migrating PolicyRegistry from singleton pattern to co
    - Migration patterns
    - Configuration examples
 
-4. **[POLICY_REGISTRY_DI_CHECKLIST.md](POLICY_REGISTRY_DI_CHECKLIST.md)** - Implementation checklist
+3. **[POLICY_REGISTRY_DI_CHECKLIST.md](POLICY_REGISTRY_DI_CHECKLIST.md)** - Implementation checklist
    - Phase 1 tasks (ONM-812)
    - Phase 2-5 tasks (future)
    - Verification steps
@@ -41,7 +34,7 @@ A comprehensive design for migrating PolicyRegistry from singleton pattern to co
 ### Quick Navigation
 
 **For developers implementing ONM-812**:
-1. Read [POLICY_REGISTRY_DI_SUMMARY.md](POLICY_REGISTRY_DI_SUMMARY.md) for overview
+1. Read [POLICY_REGISTRY_DI_INTEGRATION.md](POLICY_REGISTRY_DI_INTEGRATION.md) for overview
 2. Follow [POLICY_REGISTRY_DI_CHECKLIST.md](POLICY_REGISTRY_DI_CHECKLIST.md) Phase 1 tasks
 3. Reference [POLICY_REGISTRY_DI_EXAMPLES.md](POLICY_REGISTRY_DI_EXAMPLES.md) for patterns
 
@@ -51,9 +44,8 @@ A comprehensive design for migrating PolicyRegistry from singleton pattern to co
 3. Verify alignment with ONEX principles
 
 **For users migrating code**:
-1. See "Migration Examples" in [POLICY_REGISTRY_DI_SUMMARY.md](POLICY_REGISTRY_DI_SUMMARY.md)
-2. Study patterns in [POLICY_REGISTRY_DI_EXAMPLES.md](POLICY_REGISTRY_DI_EXAMPLES.md)
-3. Follow migration phases in [POLICY_REGISTRY_DI_CHECKLIST.md](POLICY_REGISTRY_DI_CHECKLIST.md)
+1. Study patterns in [POLICY_REGISTRY_DI_EXAMPLES.md](POLICY_REGISTRY_DI_EXAMPLES.md)
+2. Follow migration phases in [POLICY_REGISTRY_DI_CHECKLIST.md](POLICY_REGISTRY_DI_CHECKLIST.md)
 
 ### Key Concepts
 
@@ -107,7 +99,6 @@ For questions about this design:
 ### Changelog
 
 - **2025-12-16**: Initial design documents created for ONM-812
-  - POLICY_REGISTRY_DI_SUMMARY.md
   - POLICY_REGISTRY_DI_INTEGRATION.md
   - POLICY_REGISTRY_DI_EXAMPLES.md
   - POLICY_REGISTRY_DI_CHECKLIST.md

@@ -17,6 +17,10 @@ The "2-way" refers to **dual-backend registration** - nodes register simultaneou
 
 ## Architecture Overview
 
+### ASCII Diagram
+
+The following diagram shows the complete 2-way registration flow through all four phases:
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      2-WAY REGISTRATION FLOW                                 │
@@ -97,6 +101,45 @@ The "2-way" refers to **dual-backend registration** - nodes register simultaneou
 │                                   └─────────────────────┘                   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Mermaid Diagram
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e1f5fe'}}}%%
+flowchart TB
+    accTitle: 2-Way Registration Flow
+    accDescr: Complete flow diagram showing all four phases of ONEX node registration: Phase 1 Node Introspection where an ONEX node publishes to Kafka and the orchestrator routes to a handler; Phase 2 Reducer Processing where the FSM transitions state and emits intents; Phase 3 Effect Execution where Consul and PostgreSQL effects run in parallel; and Phase 4 Ack Flow where the node sends acknowledgment and becomes active.
+
+    subgraph Phase1["Phase 1: Node Introspection"]
+        N1[ONEX Node<br/>starting] -->|publishes| K1[Kafka Topic<br/>node-introspection]
+        K1 --> O1[Registration<br/>ORCHESTRATOR]
+        O1 -->|routes to| H1[HandlerNode-<br/>Introspected]
+        H1 -->|emits| E1[NodeRegistration-<br/>Initiated event]
+    end
+
+    subgraph Phase2["Phase 2: Reducer Processing"]
+        E1 --> R1[Registration<br/>REDUCER FSM]
+        R1 -->|"state: idle → pending"| I1["Intents:<br/>• consul.register<br/>• postgres.upsert"]
+    end
+
+    subgraph Phase3["Phase 3: Effect Execution (Parallel)"]
+        I1 --> CE[Consul EFFECT<br/>consul.register]
+        I1 --> PE[Postgres EFFECT<br/>upsert_record]
+        CE --> CS[(Consul Service)]
+        PE --> PG[(PostgreSQL)]
+        CS --> CF[Consul Confirmed]
+        PG --> PC[Postgres Confirmed]
+    end
+
+    subgraph Phase4["Phase 4: Ack Flow"]
+        CF --> R2[Reducer:<br/>partial → complete]
+        PC --> R2
+        R2 --> AE[Accepted Event<br/>published]
+        AE --> N2[ONEX Node<br/>running]
+        N2 -->|ack command| O2[Registration<br/>ORCHESTRATOR]
+        O2 --> BA[NodeBecameActive<br/>event published]
+    end
 ```
 
 ## Key Files
@@ -302,7 +345,120 @@ consul_intent = ModelIntent(
 
 ## Phase 3: Effect Execution
 
-### Parallel Execution
+Phase 3 is where the actual work happens - EFFECT nodes interact with external systems to persist the registration. This phase demonstrates ONEX's parallel execution capabilities and resilience patterns.
+
+### What Happens During Effect Execution
+
+1. **Intent Routing**: The orchestrator receives intents from the reducer and routes them to appropriate effect nodes
+2. **Parallel Dispatch**: Both Consul and PostgreSQL effects execute simultaneously (not sequentially)
+3. **External I/O**: Each effect handler performs actual I/O operations against external services
+4. **Confirmation Events**: Each handler returns confirmation events upon success
+5. **Error Handling**: Failures trigger retry logic, circuit breakers, and potentially DLQ routing
+
+### ASCII Diagram: Effect Execution Detail
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    PHASE 3: EFFECT EXECUTION (DETAILED)                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ORCHESTRATOR receives intents from reducer:                                 │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ intents = (consul_intent, postgres_intent)                           │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                              │                                               │
+│                              │ parallel dispatch                             │
+│           ┌──────────────────┴──────────────────┐                           │
+│           ▼                                      ▼                           │
+│  ┌──────────────────────┐            ┌──────────────────────┐               │
+│  │   CONSUL EFFECT      │            │  POSTGRES EFFECT     │               │
+│  │   (node_registry_    │            │  (node_registry_     │               │
+│  │    effect)           │            │   effect)            │               │
+│  └──────────────────────┘            └──────────────────────┘               │
+│           │                                      │                           │
+│           │ intent_type=                         │ intent_type=              │
+│           │ "consul.register"                    │ "postgres.upsert"         │
+│           ▼                                      ▼                           │
+│  ┌──────────────────────┐            ┌──────────────────────┐               │
+│  │ HandlerConsulRegister│            │ HandlerPostgresUpsert│               │
+│  │                      │            │                      │               │
+│  │ • Check circuit      │            │ • Check circuit      │               │
+│  │   breaker state      │            │   breaker state      │               │
+│  │ • Execute with       │            │ • Execute with       │               │
+│  │   retry logic        │            │   retry logic        │               │
+│  │ • Track correlation  │            │ • Track correlation  │               │
+│  └──────────────────────┘            └──────────────────────┘               │
+│           │                                      │                           │
+│           │                                      │                           │
+│           ▼                                      ▼                           │
+│  ┌──────────────────────┐            ┌──────────────────────┐               │
+│  │    CONSUL API        │            │    POSTGRESQL        │               │
+│  │    (external)        │            │    (external)        │               │
+│  │                      │            │                      │               │
+│  │ PUT /v1/agent/       │            │ INSERT INTO          │               │
+│  │   service/register   │            │   node_registrations │               │
+│  └──────────────────────┘            └──────────────────────┘               │
+│           │                                      │                           │
+│           │ success                              │ success                   │
+│           ▼                                      ▼                           │
+│  ┌──────────────────────┐            ┌──────────────────────┐               │
+│  │ ModelConsulRegistra- │            │ ModelPostgresRegis-  │               │
+│  │ tionConfirmed        │            │ trationConfirmed     │               │
+│  │ (event)              │            │ (event)              │               │
+│  └──────────────────────┘            └──────────────────────┘               │
+│           │                                      │                           │
+│           └──────────────────┬───────────────────┘                           │
+│                              │                                               │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ ORCHESTRATOR aggregates results:                                     │    │
+│  │ • Both succeeded → publish acceptance event                          │    │
+│  │ • One failed → partial state (retry or compensate)                   │    │
+│  │ • Both failed → failure state (DLQ routing)                          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Mermaid Diagram: Effect Execution
+
+```mermaid
+flowchart TB
+    accTitle: Phase 3 Effect Execution Detail
+    accDescr: Detailed flow of Phase 3 Effect Execution showing how the orchestrator dispatches intents to Consul and PostgreSQL effect handlers in parallel, each handler checks circuit breaker state, executes with retry logic, performs external I/O operations, and returns confirmation events that are aggregated by the orchestrator.
+
+    ORCH[Orchestrator receives intents] --> |parallel dispatch| SPLIT{Parallel Execution}
+
+    SPLIT --> CONSUL_EFFECT[Consul Effect Handler]
+    SPLIT --> PG_EFFECT[Postgres Effect Handler]
+
+    subgraph ConsulPath["Consul Registration Path"]
+        CONSUL_EFFECT --> CB1{Circuit Breaker<br/>Open?}
+        CB1 -->|No| RETRY1[Execute with Retry]
+        CB1 -->|Yes| FAIL1[Fast Fail]
+        RETRY1 --> CONSUL_API[(Consul API<br/>PUT /v1/agent/service/register)]
+        CONSUL_API --> CONSUL_OK[ConsulRegistrationConfirmed]
+    end
+
+    subgraph PGPath["PostgreSQL Persistence Path"]
+        PG_EFFECT --> CB2{Circuit Breaker<br/>Open?}
+        CB2 -->|No| RETRY2[Execute with Retry]
+        CB2 -->|Yes| FAIL2[Fast Fail]
+        RETRY2 --> PG_DB[(PostgreSQL<br/>INSERT/ON CONFLICT UPDATE)]
+        PG_DB --> PG_OK[PostgresRegistrationConfirmed]
+    end
+
+    CONSUL_OK --> AGG[Orchestrator Aggregates Results]
+    PG_OK --> AGG
+    FAIL1 --> ERR[Error Handling]
+    FAIL2 --> ERR
+
+    AGG --> |Both succeeded| ACCEPT[Publish Acceptance Event]
+    AGG --> |Partial failure| PARTIAL[Partial State - Retry/Compensate]
+    ERR --> |Circuit open| DLQ[DLQ Routing]
+```
+
+### Parallel Execution Configuration
 
 The orchestrator routes intents to effects in parallel:
 
@@ -321,6 +477,8 @@ handler_routing:
 ```
 
 ### Consul Effect Handler
+
+The Consul handler registers the node as a service with service discovery:
 
 ```python
 # handler_consul_register.py
@@ -345,6 +503,8 @@ async def handle(self, intent: ModelIntent) -> ModelHandlerOutput:
 ```
 
 ### PostgreSQL Effect Handler
+
+The PostgreSQL handler persists the registration record with upsert semantics:
 
 ```python
 # handler_postgres_upsert.py
@@ -376,7 +536,158 @@ async def handle(self, intent: ModelIntent) -> ModelHandlerOutput:
     )
 ```
 
+### Resilience Patterns in Effect Execution
+
+Effect handlers implement several resilience patterns:
+
+| Pattern | Purpose | Implementation |
+|---------|---------|----------------|
+| **Circuit Breaker** | Prevent cascading failures when external service is down | `MixinAsyncCircuitBreaker` with configurable threshold |
+| **Retry with Backoff** | Handle transient failures | Exponential backoff (2^n seconds) with max 3 retries |
+| **Correlation Tracking** | Trace requests across services | `correlation_id` propagated through all operations |
+| **Partial Failure Handling** | Continue when one backend fails | Aggregate results, track partial state |
+| **DLQ Routing** | Handle persistent failures | Route failed intents to dead letter queue |
+
+### Error Scenarios
+
+| Scenario | Consul | PostgreSQL | Result State | Next Action |
+|----------|--------|------------|--------------|-------------|
+| Both succeed | OK | OK | `complete` | Publish acceptance event |
+| Consul fails | FAIL | OK | `partial` | Retry Consul or compensate |
+| PostgreSQL fails | OK | FAIL | `partial` | Retry PostgreSQL or compensate |
+| Both fail | FAIL | FAIL | `failed` | Route to DLQ, alert operators |
+| Circuit open | SKIP | SKIP | `pending` | Wait for circuit reset |
+
 ## Phase 4: ACK Flow
+
+Phase 4 completes the 2-way handshake. The registering node acknowledges that it received the acceptance, confirming it's ready to receive work. This phase also establishes liveness tracking to ensure nodes remain healthy.
+
+### What Happens During ACK Flow
+
+1. **Acceptance Event Received**: The registering node receives the acceptance event from Phase 3
+2. **ACK Command Sent**: The node sends an acknowledgment command back to the orchestrator
+3. **State Verification**: The handler verifies the node is in a valid state for ACK
+4. **Liveness Deadline Calculation**: A deadline is set for the node's first heartbeat
+5. **Activation Events Published**: The orchestrator publishes `NodeBecameActive` event
+6. **Node is ACTIVE**: The node can now receive and process work
+
+### ASCII Diagram: ACK Flow Detail
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      PHASE 4: ACK FLOW (DETAILED)                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  STEP 1: Node receives acceptance event                                      │
+│  ┌──────────────────────┐         ┌─────────────────────────────────┐       │
+│  │   ONEX Node          │ ◄────── │ Kafka: node-registration-       │       │
+│  │   (awaiting ack)     │         │        accepted.v1              │       │
+│  └──────────────────────┘         └─────────────────────────────────┘       │
+│                                                                              │
+│  STEP 2: Node sends ACK command                                              │
+│  ┌──────────────────────┐         ┌─────────────────────────────────┐       │
+│  │   ONEX Node          │ ──────► │ Kafka: node-registration-       │       │
+│  │   (sending ack)      │         │        acked.v1                 │       │
+│  └──────────────────────┘         └─────────────────────────────────┘       │
+│           │                                       │                          │
+│           │                                       ▼                          │
+│           │                        ┌─────────────────────────────────┐       │
+│           │                        │ Registration ORCHESTRATOR       │       │
+│           │                        │ • Consumes ACK command          │       │
+│           │                        │ • Routes to handler             │       │
+│           │                        └─────────────────────────────────┘       │
+│           │                                       │                          │
+│           │                                       ▼                          │
+│  STEP 3: State verification                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  HandlerNodeRegistrationAcked                                        │    │
+│  │  ┌─────────────────────────────────────────────────────────────┐    │    │
+│  │  │ Query projection: entity_id=node_id                          │    │    │
+│  │  │   ┌───────────────────────────────────────────┐              │    │    │
+│  │  │   │ current_state in ("ACCEPTED", "AWAITING_ACK")?           │    │    │
+│  │  │   │   YES → Continue to Step 4                               │    │    │
+│  │  │   │   NO  → Return empty (no-op)                             │    │    │
+│  │  │   └───────────────────────────────────────────┘              │    │    │
+│  │  └─────────────────────────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                       │                                      │
+│                                       ▼                                      │
+│  STEP 4: Calculate liveness deadline                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  liveness_deadline = envelope_timestamp + LIVENESS_WINDOW (30s)      │    │
+│  │  • Node must send heartbeat before deadline                          │    │
+│  │  • Missed deadline → LIVENESS_EXPIRED state                          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                       │                                      │
+│                                       ▼                                      │
+│  STEP 5: Publish activation events                                           │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  ORCHESTRATOR publishes:                                             │    │
+│  │  ┌─────────────────────────┐  ┌────────────────────────────┐        │    │
+│  │  │ ModelNodeRegistration-  │  │ ModelNodeBecameActive      │        │    │
+│  │  │ AckReceived             │  │ • node_id                  │        │    │
+│  │  │ • Confirms ACK received │  │ • liveness_deadline        │        │    │
+│  │  └─────────────────────────┘  │ • activated_at             │        │    │
+│  │                               └────────────────────────────┘        │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                       │                                      │
+│                                       ▼                                      │
+│  STEP 6: Node is ACTIVE                                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  ┌───────────────────────────────────────────────────────────┐      │    │
+│  │  │   ONEX Node (ACTIVE)                                      │      │    │
+│  │  │   • Can receive work                                      │      │    │
+│  │  │   • Must send heartbeats every HEARTBEAT_INTERVAL         │      │    │
+│  │  │   • Visible in service discovery (Consul)                 │      │    │
+│  │  │   • Persisted in database (PostgreSQL)                    │      │    │
+│  │  └───────────────────────────────────────────────────────────┘      │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Mermaid Diagram: ACK Flow
+
+```mermaid
+flowchart TB
+    accTitle: Phase 4 ACK Flow Detail
+    accDescr: Detailed flow of Phase 4 ACK Flow showing how the registering node receives the acceptance event, sends an acknowledgment command, the handler verifies state via projection query, calculates a liveness deadline, and the orchestrator publishes activation events resulting in the node becoming active and ready to receive work.
+
+    subgraph Step1["Step 1: Receive Acceptance"]
+        K1[Kafka: node-registration-accepted.v1] --> N1[ONEX Node<br/>awaiting ack]
+    end
+
+    subgraph Step2["Step 2: Send ACK"]
+        N1 --> |sends| ACK[ACK Command]
+        ACK --> K2[Kafka: node-registration-acked.v1]
+    end
+
+    subgraph Step3["Step 3: Orchestrator Processing"]
+        K2 --> ORCH[Registration Orchestrator]
+        ORCH --> H1[HandlerNodeRegistrationAcked]
+    end
+
+    subgraph Step4["Step 4: State Verification"]
+        H1 --> Q1{Query Projection:<br/>current_state?}
+        Q1 -->|ACCEPTED or<br/>AWAITING_ACK| VALID[Valid State]
+        Q1 -->|Other| NOOP[No-op Return]
+    end
+
+    subgraph Step5["Step 5: Liveness Calculation"]
+        VALID --> CALC["Calculate liveness_deadline<br/>= timestamp + 30s"]
+    end
+
+    subgraph Step6["Step 6: Publish Events"]
+        CALC --> PUB[Orchestrator publishes:]
+        PUB --> E1[NodeRegistrationAckReceived]
+        PUB --> E2[NodeBecameActive<br/>+ liveness_deadline]
+    end
+
+    subgraph Step7["Step 7: Node Active"]
+        E2 --> ACTIVE[Node is ACTIVE<br/>Ready for work]
+        ACTIVE --> HB[Must send heartbeats<br/>before deadline]
+    end
+```
 
 ### Node Sends Acknowledgment
 
@@ -432,7 +743,62 @@ async def handle(self, envelope: ModelEventEnvelope) -> ModelHandlerOutput:
     )
 ```
 
+### ACK Timeout Handling
+
+If the node fails to send an ACK within the expected window, the system handles it gracefully:
+
+| Scenario | Timeout | Next Action |
+|----------|---------|-------------|
+| ACK received on time | N/A | Node becomes ACTIVE |
+| ACK not received within 30s | ACK_TIMED_OUT | Retry ACK request or re-register |
+| Multiple ACK timeouts | After 3 retries | Mark as FAILED, alert operators |
+
+### Liveness Tracking After ACK
+
+Once a node is ACTIVE, it must maintain liveness through heartbeats:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    LIVENESS TRACKING                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Timeline (starting from ACK):                                   │
+│                                                                  │
+│  T+0s         T+10s        T+20s        T+30s        T+40s      │
+│    │            │            │            │            │         │
+│    ▼            ▼            ▼            ▼            ▼         │
+│  ┌───┐       ┌───┐       ┌───┐       ┌───┐       ┌───┐         │
+│  │ACK│       │ HB│       │ HB│       │ HB│       │ HB│         │
+│  └───┘       └───┘       └───┘       └───┘       └───┘         │
+│    │                                   │                         │
+│    │                                   │ liveness_deadline       │
+│    │                                   │                         │
+│    │◄──────────────────────────────────┤                         │
+│            30 second window                                      │
+│                                                                  │
+│  If no heartbeat by T+30s → LIVENESS_EXPIRED (terminal state)    │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Error Handling in ACK Flow
+
+| Error Condition | Handler Response | System Recovery |
+|-----------------|------------------|-----------------|
+| Invalid state for ACK | Return empty `ModelHandlerOutput` | No state change, log warning |
+| Projection query fails | Raise error, retry | Automatic retry with backoff |
+| ACK duplicate | Idempotent no-op | Return existing active state |
+| ACK after liveness expired | Reject ACK | Node must re-register |
+
 ## FSM State Diagram
+
+The registration flow involves two cooperating finite state machines:
+
+### Registration FSM (Reducer)
+
+Manages the backend registration state tracking whether Consul and PostgreSQL have confirmed.
+
+#### ASCII Version
 
 ```
                     REGISTRATION FSM
@@ -465,8 +831,42 @@ async def handle(self, envelope: ModelEventEnvelope) -> ModelHandlerOutput:
       └────────────────────│ FAILED │─────────┘
                            └────────┘
                           error from *
+```
 
+#### Mermaid Version
 
+```mermaid
+stateDiagram-v2
+    accTitle: Registration FSM State Diagram
+    accDescr: State diagram for the Registration Reducer FSM showing transitions from IDLE to PENDING when introspection is received, then to PARTIAL when the first backend confirms, then to COMPLETE when the second backend confirms. FAILED state can be reached from any state on error, and both COMPLETE and FAILED can reset back to IDLE.
+
+    [*] --> IDLE
+
+    IDLE --> PENDING : introspection_received
+    PENDING --> PARTIAL : first_backend_confirmed
+    PARTIAL --> COMPLETE : second_backend_confirmed
+
+    IDLE --> FAILED : error
+    PENDING --> FAILED : error
+    PARTIAL --> FAILED : error
+
+    COMPLETE --> IDLE : reset_requested
+    FAILED --> IDLE : reset_requested
+
+    note right of IDLE : Waiting for introspection
+    note right of PENDING : Awaiting backend confirmations
+    note right of PARTIAL : One backend confirmed
+    note right of COMPLETE : Both backends confirmed
+    note right of FAILED : Error occurred, retriable
+```
+
+### Orchestrator FSM
+
+Manages the overall registration workflow state including the ACK handshake.
+
+#### ASCII Version
+
+```
                     ORCHESTRATOR FSM
 ═══════════════════════════════════════════════════════
 
@@ -499,6 +899,38 @@ async def handle(self, envelope: ModelEventEnvelope) -> ModelHandlerOutput:
                             │ EXPIRED     │
                             │ (terminal)  │
                             └─────────────┘
+```
+
+#### Mermaid Version
+
+```mermaid
+stateDiagram-v2
+    accTitle: Orchestrator FSM State Diagram
+    accDescr: State diagram for the Registration Orchestrator FSM showing the workflow from PENDING_REGISTRATION through ACCEPTED and AWAITING_ACK states. On ACK received, node transitions to ACK_RECEIVED then ACTIVE. On timeout, transitions to ACK_TIMED_OUT which can retry to ACTIVE. ACTIVE nodes that miss liveness deadline transition to terminal LIVENESS_EXPIRED. REJECTED is also a terminal state for denied registrations.
+
+    [*] --> PENDING_REGISTRATION
+
+    PENDING_REGISTRATION --> ACCEPTED : registration_accepted
+    PENDING_REGISTRATION --> REJECTED : registration_rejected
+
+    ACCEPTED --> AWAITING_ACK : ack_sent
+
+    AWAITING_ACK --> ACK_RECEIVED : ack_received
+    AWAITING_ACK --> ACK_TIMED_OUT : timeout
+
+    ACK_RECEIVED --> ACTIVE : activation_complete
+    ACK_TIMED_OUT --> ACTIVE : retry_successful
+
+    ACTIVE --> LIVENESS_EXPIRED : liveness_deadline_missed
+
+    REJECTED --> [*]
+    LIVENESS_EXPIRED --> [*]
+
+    note right of PENDING_REGISTRATION : Awaiting backend results
+    note right of ACCEPTED : Ready for ACK handshake
+    note right of AWAITING_ACK : Waiting for node ACK
+    note right of ACTIVE : Node ready for work
+    note right of LIVENESS_EXPIRED : Terminal - must re-register
 ```
 
 ## Event Timeline

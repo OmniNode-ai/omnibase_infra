@@ -976,7 +976,6 @@ CONSUL_PORT = 8500
 ## Related Documentation
 
 - [ONEX Runtime Kernel](../src/omnibase_infra/runtime/kernel.py) - Core kernel implementation
-- [Health Server](../src/omnibase_infra/runtime/health_server.py) - HTTP health endpoint
 - [Main README](../README.md) - Project overview and setup
 
 ## License

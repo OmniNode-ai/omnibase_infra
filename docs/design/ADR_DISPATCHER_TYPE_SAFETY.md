@@ -517,7 +517,7 @@ Add tests for:
 - [PEP 544 - Protocols: Structural subtyping](https://peps.python.org/pep-0544/)
 - [Python `typing.Protocol` documentation](https://docs.python.org/3/library/typing.html#typing.Protocol)
 - [Python `inspect.signature()` documentation](https://docs.python.org/3/library/inspect.html#inspect.signature)
-- [PR #61 Review Comment](./PR_61_REVIEW.md) (internal reference)
+- PR #61 Review Comment (internal reference - original document no longer available)
 - `src/omnibase_infra/runtime/message_dispatch_engine.py` - Current implementation
 - `src/omnibase_infra/runtime/dispatcher_registry.py` - `ProtocolMessageDispatcher` example
 

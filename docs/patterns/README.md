@@ -289,5 +289,4 @@ Each pattern document should include:
 ## See Also
 
 - [CLAUDE.md](../../CLAUDE.md) - Quick reference rules (references these patterns)
-- [Infrastructure Migration Plan](../../CLAUDE.md#infrastructure-migration-plan) - Migration roadmap
 - [ONEX Principles](../../CLAUDE.md#core-onex-principles) - Architectural principles

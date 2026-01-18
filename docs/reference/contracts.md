@@ -50,6 +50,69 @@ Use `_GENERIC` suffix in contracts:
 
 ---
 
+## Subcontracts
+
+As contracts grow complex, sections can be extracted into **subcontracts** for modularity. ONEX supports 6 subcontract types defined in `ModelContract`:
+
+| Subcontract Type | Purpose | Example Use Case |
+|------------------|---------|------------------|
+| `fsm_subcontract` | FSM state machine definitions | Complex state transitions for reducers |
+| `event_subcontract` | Event type definitions and routing | Event schemas and topic mappings |
+| `aggregation_subcontract` | Aggregation/projection rules | Result aggregation strategies |
+| `state_subcontract` | State management configuration | Checkpoint and persistence settings |
+| `routing_subcontract` | Message routing rules | Handler routing tables |
+| `caching_subcontract` | Caching strategy definitions | Cache TTL and invalidation rules |
+
+### When to Extract Subcontracts
+
+Extract a section into a subcontract when:
+- A section exceeds ~100 lines
+- The section is reusable across multiple nodes
+- The section has independent versioning needs
+- The main contract becomes difficult to read
+
+### Subcontract Reference Pattern
+
+```yaml
+# Main contract.yaml
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+name: "node_registration_orchestrator"
+node_type: "ORCHESTRATOR_GENERIC"
+
+# Reference external subcontract files
+routing_subcontract: !include subcontracts/routing.yaml
+fsm_subcontract: !include subcontracts/fsm.yaml
+```
+
+**Directory Structure**:
+```
+nodes/node_registration_orchestrator/
+├── contract.yaml              # Main contract
+├── subcontracts/
+│   ├── routing.yaml           # Handler routing rules
+│   └── fsm.yaml               # FSM definitions
+├── node.py                    # Declarative node class
+└── handlers/                  # Handler implementations
+```
+
+**Note**: Subcontract extraction is optional. Simple nodes should keep everything in a single `contract.yaml`. Extract only when complexity warrants it.
+
+### Type Safety Requirements
+
+All contracts (and subcontracts) must adhere to ONEX type safety standards:
+
+| Requirement | Description |
+|-------------|-------------|
+| **No `Any` types** | Use `object` for generic payloads; see `CLAUDE.md` for exceptions |
+| **Pydantic models** | All I/O types must be proper Pydantic models |
+| **Module paths** | All `module` fields must resolve to valid Python modules |
+| **Semantic versioning** | `contract_version` uses semver (major.minor.patch) |
+
+---
+
 ## Common Fields
 
 These fields apply to all node types:
@@ -89,6 +152,8 @@ output_model:
 
 ### Capabilities
 
+Capabilities declare what a node can do, enabling discovery and routing.
+
 ```yaml
 capabilities:
   - name: "registration.storage"
@@ -98,9 +163,68 @@ capabilities:
   - name: "registration.storage.delete"
 ```
 
-**Naming Convention**: Use capability-oriented names (what it does), not technology names.
-- Good: `registration.storage`, `service.discovery`
-- Bad: `postgres`, `consul`
+#### Capability Naming Convention
+
+**Use capability-oriented names** (what it does), **not technology names** (how it does it).
+
+| Aspect | Good Examples | Bad Examples |
+|--------|--------------|--------------|
+| **Domain-scoped** | `registration.storage` | `postgres` |
+| **Action-oriented** | `service.discovery.register` | `consul` |
+| **Hierarchical** | `node.lifecycle.introspection` | `introspect` |
+| **Descriptive** | `workflow.coordination.parallel` | `parallel_exec` |
+
+**Good Naming Patterns**:
+
+```yaml
+# Pattern: {domain}.{subdomain}.{action}
+capabilities:
+  # Service discovery capabilities
+  - name: "service.discovery.register"
+    description: "Register a service for discovery"
+  - name: "service.discovery.deregister"
+    description: "Remove a service from discovery"
+  - name: "service.discovery.lookup"
+    description: "Find services by criteria"
+
+  # Data persistence capabilities
+  - name: "registration.storage.upsert"
+    description: "Insert or update registration records"
+  - name: "registration.storage.query"
+    description: "Query registration records"
+  - name: "registration.storage.delete"
+    description: "Remove registration records"
+
+  # Workflow capabilities
+  - name: "workflow.coordination.parallel"
+    description: "Execute workflow steps in parallel"
+  - name: "workflow.coordination.checkpoint"
+    description: "Create workflow state checkpoints"
+```
+
+**Bad Naming (Avoid These)**:
+
+```yaml
+# WRONG: Technology-specific names
+capabilities:
+  - name: "postgres"           # Too vague, ties to implementation
+  - name: "consul"             # Technology, not capability
+  - name: "kafka.publish"      # Exposes transport detail
+
+# WRONG: Non-hierarchical names
+capabilities:
+  - name: "store"              # Too generic, no context
+  - name: "query"              # Ambiguous - query what?
+  - name: "process"            # Meaningless without domain
+
+# WRONG: Implementation-leaking names
+capabilities:
+  - name: "sql.execute"        # Exposes SQL as implementation
+  - name: "http.post"          # Transport detail, not capability
+  - name: "async_handler"      # Implementation pattern, not business capability
+```
+
+**Why This Matters**: Capability names are used for service discovery, routing, and dependency resolution. Technology-agnostic names allow backend swaps without contract changes.
 
 ### Dependencies
 
@@ -625,20 +749,108 @@ Contracts are validated at runtime. Common errors:
 
 ## Best Practices
 
-1. **Use capabilities, not technologies**: Name by what it does, not what it uses
+1. **Use capabilities, not technologies**: Name by what it does, not what it uses (see [Capability Naming Convention](#capability-naming-convention))
 2. **Keep contracts focused**: One node = one responsibility
 3. **Define error handling**: Always include retry and circuit breaker config
 4. **Version intentionally**: Bump major for breaking changes
 5. **Document thoroughly**: Use description fields liberally
 6. **Validate early**: Run `onex validate` in CI
+7. **Extract subcontracts when needed**: Keep main contract readable (see [Subcontracts](#subcontracts))
+
+## Common Mistakes
+
+Avoid these frequently encountered contract issues:
+
+### 1. Technology-Leaking Capability Names
+
+```yaml
+# WRONG
+capabilities:
+  - name: "postgres"
+  - name: "consul.register"
+
+# CORRECT
+capabilities:
+  - name: "registration.storage"
+  - name: "service.discovery.register"
+```
+
+### 2. Missing Module Paths
+
+```yaml
+# WRONG - module path missing
+input_model:
+  name: "ModelExampleInput"
+
+# CORRECT - full module path
+input_model:
+  name: "ModelExampleInput"
+  module: "omnibase_infra.nodes.node_example.models"
+```
+
+### 3. Incorrect Node Type Suffix
+
+```yaml
+# WRONG - missing _GENERIC suffix
+node_type: "EFFECT"
+
+# CORRECT - use _GENERIC suffix in contracts
+node_type: "EFFECT_GENERIC"
+```
+
+### 4. Ambiguous Contract Files
+
+```
+# WRONG - both files in same directory
+nodes/my_node/
+├── contract.yaml
+└── handler_contract.yaml  # Causes AMBIGUOUS_CONTRACT_CONFIGURATION error
+
+# CORRECT - one contract per directory
+nodes/my_node/
+└── contract.yaml          # Single source of truth
+```
+
+### 5. Any Types in Contracts
+
+```yaml
+# WRONG - Any type not allowed
+input_model:
+  name: "dict[str, Any]"  # Violates type safety
+
+# CORRECT - use object or specific types
+input_model:
+  name: "ModelSpecificInput"
+  module: "omnibase_infra.models"
+```
+
+### 6. Inline Coordination Settings (Deprecated)
+
+```yaml
+# WRONG - coordination settings at top level
+workflow_coordination:
+  parallel_execution: true  # Don't put here
+  workflow_definition:
+    coordination_rules:
+      # ...
+
+# CORRECT - all coordination in coordination_rules
+workflow_coordination:
+  workflow_definition:
+    coordination_rules:
+      parallel_execution_allowed: true  # Single source of truth
+```
+
+**Note**: `CLAUDE.md` is the authoritative source for ONEX coding standards. When in doubt about contract requirements, consult `CLAUDE.md`.
 
 ## Related Documentation
 
 | Topic | Document |
 |-------|----------|
+| Coding standards | [CLAUDE.md](../../CLAUDE.md) (authoritative source) |
 | Quick start | [Quick Start Guide](../getting-started/quickstart.md) |
 | Node archetypes | [Node Archetypes Reference](node-archetypes.md) |
 | Architecture | [Architecture Overview](../architecture/overview.md) |
-| Registration example | [2-Way Registration](../guides/registration-example.md) |
+| Registration example | [2-Way Registration](../guides/registration-example.md) (complete 4-phase walkthrough) |
 | All patterns | [Pattern Documentation](../patterns/README.md) |
 | Handler patterns | [Handler Plugin Loader](../patterns/handler_plugin_loader.md) |

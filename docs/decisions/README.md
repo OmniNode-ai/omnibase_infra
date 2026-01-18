@@ -44,14 +44,16 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 
 | Category | Description | ADRs |
 |----------|-------------|------|
-| **Type System** | Type safety, generics, Pydantic patterns | 3 |
+| **Type System** | Type safety, generics, Pydantic patterns | 4 |
 | **Security** | Authentication, encryption, plugin security | 3 |
-| **Architecture** | Node types, handlers, protocols | 2 |
+| **Architecture** | Node types, handlers, protocols, runtime lifecycle | 4 |
 | **Error Handling** | Error patterns, context, recovery | 1 |
 | **Contracts** | Contract format, evolution | 1 |
-| **Data Layer** | Persistence, projections | 1 |
+| **Data Layer** | Persistence, projections | 2 |
 | **Configuration** | Environment, settings | 1 |
 | **Performance** | Baselines, thresholds | 1 |
+
+**Note**: Numbered ADRs (001-005) are included in these category counts. ADR-001 and ADR-003 are Architecture, ADR-002 is Type System, ADR-004 is Performance, ADR-005 is Data Layer.
 
 ## Writing ADRs
 
@@ -68,7 +70,7 @@ New ADRs should:
 
 ## Status
 
-Accepted | Superseded by [ADR-XXX](link) | Deprecated
+Accepted | Superseded by ADR-XXX | Deprecated
 
 ## Context
 

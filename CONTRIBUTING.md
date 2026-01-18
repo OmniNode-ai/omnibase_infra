@@ -2,6 +2,21 @@
 
 This document provides guidelines for contributing to the ONEX Infrastructure repository.
 
+## Coding Standards
+
+**[CLAUDE.md](CLAUDE.md) is the authoritative source for all coding standards and conventions.**
+
+Before writing code, read CLAUDE.md for:
+- Type system rules (no `Any` types)
+- File and class naming conventions
+- Error handling patterns
+- Node architecture requirements
+- Container dependency injection patterns
+
+The `docs/` directory provides explanations and examples, but **CLAUDE.md rules take precedence** when there is any conflict.
+
+---
+
 ## Commit Message Guidelines
 
 ### Standard Format

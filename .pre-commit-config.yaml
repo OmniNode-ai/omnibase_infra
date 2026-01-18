@@ -180,6 +180,16 @@ repos:
         files: ^src/omnibase_infra/nodes/reducers/
         pass_filenames: false
         stages: [pre-commit]
+      # Markdown link validation (PR #172)
+      # Ensures all internal markdown links point to existing files and anchors
+      # External links are skipped by default (configurable in .markdown-link-check.json)
+      - id: onex-validate-markdown-links
+        name: ONEX Markdown Link Validation
+        entry: poetry run python scripts/validate.py markdown_links
+        language: system
+        types: [markdown]
+        pass_filenames: false
+        stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]

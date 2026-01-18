@@ -750,7 +750,7 @@ Each node is deployed as an independent Docker container:
 
 ```dockerfile
 # Example Dockerfile for a node
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 COPY . .

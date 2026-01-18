@@ -1354,7 +1354,7 @@ kafka-acls.sh --add --deny-principal User:* \\
 """
 ```
 
-**Related**: [CLAUDE.md - Node Introspection Security Considerations](../../CLAUDE.md#node-introspection-security-considerations)
+**Related**: [CLAUDE.md - Node Introspection Security](../../CLAUDE.md#node-introspection-security)
 
 ### Structured Security Error Reporting
 
@@ -1547,7 +1547,7 @@ if __name__ == "__main__":
 **Related**:
 - [ModelHandlerValidationError](../../src/omnibase_infra/models/errors/model_handler_validation_error.py) - Error model implementation
 - [SecurityRuleId](../../src/omnibase_infra/validation/validator_security.py) - Rule ID definitions
-- [Contract Linter](../../src/omnibase_infra/validation/contract_linter.py) - Similar integration pattern
+- [Contract Linter](../../src/omnibase_infra/validation/linter_contract.py) - Similar integration pattern
 
 ---
 
@@ -1804,8 +1804,8 @@ Use this checklist before deploying to production:
 
 ## See Also
 
-- [CLAUDE.md - Error Sanitization Guidelines](../../CLAUDE.md#error-sanitization-guidelines)
-- [CLAUDE.md - Node Introspection Security Considerations](../../CLAUDE.md#node-introspection-security-considerations)
+- [CLAUDE.md - Error Sanitization](../../CLAUDE.md#error-sanitization)
+- [CLAUDE.md - Node Introspection Security](../../CLAUDE.md#node-introspection-security)
 - [CLAUDE.md - Handler Plugin Loader Security](../../CLAUDE.md#handler-plugin-loader-patterns) - Security model and error codes
 - [ADR: Handler Plugin Loader Security Model](../decisions/adr-handler-plugin-loader-security.md) - Security architecture decisions
 - [MixinNodeIntrospection](../../src/omnibase_infra/mixins/mixin_node_introspection.py) - Security documentation in docstring

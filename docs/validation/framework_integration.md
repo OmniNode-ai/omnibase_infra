@@ -46,7 +46,7 @@ Most validators return `ModelValidationResult[None]`:
 ```python
 from omnibase_core.validation import ModelValidationResult
 
-class ModelValidationResult[T](BaseModel):
+class ModelValidationResult(Generic[T], BaseModel):
     is_valid: bool
     errors: list[str]
     metadata: ModelValidationMetadata | None = None

@@ -23,7 +23,7 @@ infrastructure services. The tests ensure that handlers correctly:
 
 ## Prerequisites
 
-- **Python 3.11+**
+- **Python 3.12+**
 - **Poetry** for dependency management
 - **Access to remote infrastructure** (for DB, Consul, Vault tests) - see `tests/infrastructure_config.py`
 - **pytest-httpserver** (installed via poetry, for HTTP tests only)

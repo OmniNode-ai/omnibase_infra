@@ -2,6 +2,25 @@
 
 Welcome to the ONEX Infrastructure (`omnibase_infra`) documentation.
 
+## Documentation Authority Model
+
+| Source | Purpose | Authority |
+|--------|---------|-----------|
+| **[CLAUDE.md](../CLAUDE.md)** | Coding standards, rules, conventions | **Authoritative** - definitive rules for agents and developers |
+| **docs/** | Explanations, examples, tutorials, runbooks | Supplementary - context and how-to guidance |
+
+**When in conflict, CLAUDE.md takes precedence.** This separation ensures:
+- Rules are concise and enforceable in CLAUDE.md
+- Documentation provides depth without bloating the rules file
+- Agents and developers have a single source of truth for coding standards
+
+**Quick Reference:**
+- Need a rule? Check [CLAUDE.md](../CLAUDE.md)
+- Need an explanation? Check [docs/](.)
+- Need an example? Check [docs/patterns/](patterns/README.md) or [docs/guides/](guides/registration-example.md)
+
+---
+
 ## How to Use These Docs
 
 **New here?** Start with the [Quick Start Guide](getting-started/quickstart.md). It gets you running in 5 minutes.
@@ -141,6 +160,8 @@ Development planning and milestones.
 
 ### The Four Node Archetypes
 
+#### ASCII Diagram
+
 ```
 ┌──────────────┐    events     ┌──────────────┐
 │ ORCHESTRATOR │ ────────────► │   REDUCER    │
@@ -153,6 +174,23 @@ Development planning and milestones.
 │   COMPUTE    │               │    EFFECT    │
 │    (pure)    │               │  (external)  │
 └──────────────┘               └──────────────┘
+```
+
+#### Mermaid Diagram
+
+```mermaid
+flowchart LR
+    accTitle: ONEX Four Node Archetypes
+    accDescr: Diagram showing the four ONEX node archetypes. ORCHESTRATOR coordinates workflows and publishes events, routing to COMPUTE for pure transformations. REDUCER manages state via FSM and emits intents to EFFECT which handles external I/O operations like databases and APIs.
+
+    ORCH[ORCHESTRATOR<br/>workflow] -->|events| RED[REDUCER<br/>state/FSM]
+    ORCH -->|routes| COMP[COMPUTE<br/>pure]
+    RED -->|emits intents| EFF[EFFECT<br/>external]
+
+    style ORCH fill:#e3f2fd
+    style RED fill:#fff3e0
+    style COMP fill:#e8f5e9
+    style EFF fill:#fce4ec
 ```
 
 | Archetype | Purpose | Side Effects |

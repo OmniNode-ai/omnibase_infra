@@ -782,5 +782,5 @@ Exponential backoff formula: `delay = base * (2^attempt) * jitter`
 - [Thread Pool Tuning Runbook](./THREAD_POOL_TUNING_RUNBOOK.md)
 - [Circuit Breaker Implementation](../patterns/circuit_breaker_implementation.md)
 - [Error Recovery Patterns](../patterns/error_recovery_patterns.md)
-- [KafkaEventBus Source](../../src/omnibase_infra/event_bus/kafka_event_bus.py)
+- [KafkaEventBus Source](../../src/omnibase_infra/event_bus/event_bus_kafka.py)
 - [Configuration Model](../../src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py)

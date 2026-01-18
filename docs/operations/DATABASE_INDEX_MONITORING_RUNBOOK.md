@@ -471,4 +471,3 @@ ALTER TABLE registration_projections SET (
 - [Database Migrations](../../docker/migrations/README.md) - Migration versioning and execution
 - [Event Bus Operations](EVENT_BUS_OPERATIONS_RUNBOOK.md) - Related Kafka event handling
 - [Thread Pool Tuning](THREAD_POOL_TUNING_RUNBOOK.md) - Connection pool optimization
-- [ADR-004: Performance Baseline Thresholds](../adr/ADR-004-performance-baseline-thresholds.md) - System-wide performance standards

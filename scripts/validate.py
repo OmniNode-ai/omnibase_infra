@@ -16,6 +16,7 @@ Usage:
     python scripts/validate.py any_types
     python scripts/validate.py localhandler
     python scripts/validate.py imports
+    python scripts/validate.py markdown_links
     python scripts/validate.py all
 """
 
@@ -555,6 +556,68 @@ def run_imports(verbose: bool = False) -> bool:
         return False
 
 
+def run_markdown_links(verbose: bool = False) -> bool:
+    """Run markdown link validation.
+
+    Validates that all internal links in markdown files point to existing
+    files and anchors. External links (http/https) are skipped by default.
+
+    Configuration is loaded from .markdown-link-check.json in the repository root.
+    """
+    import importlib.util
+
+    try:
+        # Load the validator module directly to avoid import path issues
+        validator_path = (
+            Path(__file__).parent / "validation" / "validate_markdown_links.py"
+        )
+
+        if not validator_path.exists():
+            print(f"Markdown Links: SKIP (validator not found: {validator_path})")
+            return True
+
+        spec = importlib.util.spec_from_file_location(
+            "validate_markdown_links", validator_path
+        )
+        if spec is None or spec.loader is None:
+            print("Markdown Links: SKIP (could not load validator module)")
+            return True
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["validate_markdown_links"] = module
+        spec.loader.exec_module(module)
+
+        repo_path = Path(__file__).parent.parent
+        config_path = repo_path / ".markdown-link-check.json"
+        config = module.MarkdownLinkConfig.from_file(config_path)
+
+        result = module.validate_markdown_links(
+            repo_root=repo_path,
+            config=config,
+            verbose=verbose,
+        )
+
+        if verbose or not result.is_valid:
+            report = module.generate_report(result, repo_path)
+            print(report)
+        else:
+            print(
+                f"Markdown Links: PASS "
+                f"({result.files_checked} files, "
+                f"{result.links_checked} links checked)"
+            )
+
+        return result.is_valid
+
+    except Exception as e:
+        print(f"Markdown Links: ERROR ({type(e).__name__}: {e})")
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
+        return False
+
+
 def run_all(verbose: bool = False, quick: bool = False) -> bool:
     """Run all validations.
 
@@ -586,6 +649,7 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
                 ("Any Types", run_any_types),
                 ("LocalHandler", run_localhandler),
                 ("Imports", run_imports),
+                ("Markdown Links", run_markdown_links),
             ]
         )
 
@@ -627,6 +691,7 @@ def main() -> int:
             "any_types",
             "localhandler",
             "imports",
+            "markdown_links",
         ],
         help="Which validator to run (default: all)",
     )
@@ -647,6 +712,7 @@ def main() -> int:
         "any_types": run_any_types,
         "localhandler": run_localhandler,
         "imports": run_imports,
+        "markdown_links": run_markdown_links,
     }
 
     if args.validator == "all":
