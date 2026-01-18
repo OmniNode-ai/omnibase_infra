@@ -252,9 +252,8 @@ class SinkLoggingStructured:
                 operation) are missing. Set to False to suppress these warnings.
 
         Raises:
-            ImportError: If structlog is not installed. Install with:
-                pip install structlog
-            ProtocolConfigurationError: If max_buffer_size is less than 1 or
+            ProtocolConfigurationError: If structlog is not installed (install with:
+                pip install structlog), max_buffer_size is less than 1, or
                 output_format is not recognized. Includes correlation_id for
                 distributed tracing.
 
@@ -267,10 +266,16 @@ class SinkLoggingStructured:
         """
         # Validate dependency is available with clear error message
         if not _STRUCTLOG_AVAILABLE:
-            raise ImportError(
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="initialize_logging_sink",
+            )
+            raise ProtocolConfigurationError(
                 "structlog is required for SinkLoggingStructured but is not installed. "
-                f"Install with: pip install structlog\n"
-                f"Original error: {_STRUCTLOG_IMPORT_ERROR}"
+                f"Install with: pip install structlog. "
+                f"Original error: {_STRUCTLOG_IMPORT_ERROR}",
+                context=context,
+                dependency="structlog",
             )
 
         if max_buffer_size < 1:
@@ -415,7 +420,7 @@ class SinkLoggingStructured:
                 f"all instances, (2) all instances share the same base PrintLogger. "
                 f"This is typically fine but may cause unexpected behavior if you "
                 f"rely on global structlog configuration.",
-                stacklevel=4,  # Point to the caller that created the instance (warn -> _track -> __init__ -> caller)
+                stacklevel=4,  # Stack: 1=warn, 2=_track_instance_creation, 3=__init__, 4=caller
             )
 
     @property

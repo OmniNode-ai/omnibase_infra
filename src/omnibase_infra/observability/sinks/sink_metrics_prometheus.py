@@ -263,10 +263,16 @@ class SinkMetricsPrometheus:
         on first access and cached for subsequent calls.
 
         Thread-Safety:
-            Uses self._lock to ensure exactly-once initialization even under
-            concurrent access. The lock prevents race conditions where multiple
-            threads could attempt to register the same metric simultaneously,
-            which would raise a ValueError from prometheus_client.
+            Uses double-check locking pattern for optimal performance:
+            1. Fast path: Check cache without lock (common case)
+            2. Slow path: Acquire lock and verify before creation
+            This avoids lock contention for the common cache-hit case while
+            ensuring exactly-once initialization under concurrent access.
+
+        Label Drift Protection:
+            If a metric already exists with different label names, a warning
+            is logged and the existing metric is returned. This prevents
+            Prometheus errors from label set mismatches.
 
         Args:
             name: Metric name (without prefix).
@@ -278,17 +284,48 @@ class SinkMetricsPrometheus:
         """
         prefixed_name = self._get_prefixed_name(name)
 
+        # Fast path: check cache without lock (common case)
+        if prefixed_name in self._counters:
+            existing = self._counters[prefixed_name]
+            # Validate label names match (guard against label drift)
+            existing_labels = tuple(existing._labelnames)
+            if existing_labels != label_names:
+                _logger.warning(
+                    "Label set drift detected for counter metric",
+                    extra={
+                        "metric_name": prefixed_name,
+                        "existing_labels": existing_labels,
+                        "requested_labels": label_names,
+                    },
+                )
+            return existing
+
+        # Slow path: acquire lock and double-check before creation
         with self._lock:
-            if prefixed_name not in self._counters:
-                self._counters[prefixed_name] = Counter(
-                    prefixed_name,
-                    documentation or f"Counter metric: {name}",
-                    labelnames=label_names,
-                )
-                _logger.debug(
-                    "Created Prometheus Counter",
-                    extra={"metric_name": prefixed_name, "labels": label_names},
-                )
+            # Double-check after acquiring lock
+            if prefixed_name in self._counters:
+                existing = self._counters[prefixed_name]
+                existing_labels = tuple(existing._labelnames)
+                if existing_labels != label_names:
+                    _logger.warning(
+                        "Label set drift detected for counter metric",
+                        extra={
+                            "metric_name": prefixed_name,
+                            "existing_labels": existing_labels,
+                            "requested_labels": label_names,
+                        },
+                    )
+                return existing
+
+            self._counters[prefixed_name] = Counter(
+                prefixed_name,
+                documentation or f"Counter metric: {name}",
+                labelnames=label_names,
+            )
+            _logger.debug(
+                "Created Prometheus Counter",
+                extra={"metric_name": prefixed_name, "labels": label_names},
+            )
             return self._counters[prefixed_name]
 
     def _get_or_create_gauge(
@@ -303,10 +340,16 @@ class SinkMetricsPrometheus:
         on first access and cached for subsequent calls.
 
         Thread-Safety:
-            Uses self._lock to ensure exactly-once initialization even under
-            concurrent access. The lock prevents race conditions where multiple
-            threads could attempt to register the same metric simultaneously,
-            which would raise a ValueError from prometheus_client.
+            Uses double-check locking pattern for optimal performance:
+            1. Fast path: Check cache without lock (common case)
+            2. Slow path: Acquire lock and verify before creation
+            This avoids lock contention for the common cache-hit case while
+            ensuring exactly-once initialization under concurrent access.
+
+        Label Drift Protection:
+            If a metric already exists with different label names, a warning
+            is logged and the existing metric is returned. This prevents
+            Prometheus errors from label set mismatches.
 
         Args:
             name: Metric name (without prefix).
@@ -318,17 +361,48 @@ class SinkMetricsPrometheus:
         """
         prefixed_name = self._get_prefixed_name(name)
 
+        # Fast path: check cache without lock (common case)
+        if prefixed_name in self._gauges:
+            existing = self._gauges[prefixed_name]
+            # Validate label names match (guard against label drift)
+            existing_labels = tuple(existing._labelnames)
+            if existing_labels != label_names:
+                _logger.warning(
+                    "Label set drift detected for gauge metric",
+                    extra={
+                        "metric_name": prefixed_name,
+                        "existing_labels": existing_labels,
+                        "requested_labels": label_names,
+                    },
+                )
+            return existing
+
+        # Slow path: acquire lock and double-check before creation
         with self._lock:
-            if prefixed_name not in self._gauges:
-                self._gauges[prefixed_name] = Gauge(
-                    prefixed_name,
-                    documentation or f"Gauge metric: {name}",
-                    labelnames=label_names,
-                )
-                _logger.debug(
-                    "Created Prometheus Gauge",
-                    extra={"metric_name": prefixed_name, "labels": label_names},
-                )
+            # Double-check after acquiring lock
+            if prefixed_name in self._gauges:
+                existing = self._gauges[prefixed_name]
+                existing_labels = tuple(existing._labelnames)
+                if existing_labels != label_names:
+                    _logger.warning(
+                        "Label set drift detected for gauge metric",
+                        extra={
+                            "metric_name": prefixed_name,
+                            "existing_labels": existing_labels,
+                            "requested_labels": label_names,
+                        },
+                    )
+                return existing
+
+            self._gauges[prefixed_name] = Gauge(
+                prefixed_name,
+                documentation or f"Gauge metric: {name}",
+                labelnames=label_names,
+            )
+            _logger.debug(
+                "Created Prometheus Gauge",
+                extra={"metric_name": prefixed_name, "labels": label_names},
+            )
             return self._gauges[prefixed_name]
 
     def _get_or_create_histogram(
@@ -343,10 +417,16 @@ class SinkMetricsPrometheus:
         on first access and cached for subsequent calls.
 
         Thread-Safety:
-            Uses self._lock to ensure exactly-once initialization even under
-            concurrent access. The lock prevents race conditions where multiple
-            threads could attempt to register the same metric simultaneously,
-            which would raise a ValueError from prometheus_client.
+            Uses double-check locking pattern for optimal performance:
+            1. Fast path: Check cache without lock (common case)
+            2. Slow path: Acquire lock and verify before creation
+            This avoids lock contention for the common cache-hit case while
+            ensuring exactly-once initialization under concurrent access.
+
+        Label Drift Protection:
+            If a metric already exists with different label names, a warning
+            is logged and the existing metric is returned. This prevents
+            Prometheus errors from label set mismatches.
 
         Args:
             name: Metric name (without prefix).
@@ -358,22 +438,53 @@ class SinkMetricsPrometheus:
         """
         prefixed_name = self._get_prefixed_name(name)
 
-        with self._lock:
-            if prefixed_name not in self._histograms:
-                self._histograms[prefixed_name] = Histogram(
-                    prefixed_name,
-                    documentation or f"Histogram metric: {name}",
-                    labelnames=label_names,
-                    buckets=self._histogram_buckets,
-                )
-                _logger.debug(
-                    "Created Prometheus Histogram",
+        # Fast path: check cache without lock (common case)
+        if prefixed_name in self._histograms:
+            existing = self._histograms[prefixed_name]
+            # Validate label names match (guard against label drift)
+            existing_labels = tuple(existing._labelnames)
+            if existing_labels != label_names:
+                _logger.warning(
+                    "Label set drift detected for histogram metric",
                     extra={
                         "metric_name": prefixed_name,
-                        "labels": label_names,
-                        "buckets": self._histogram_buckets,
+                        "existing_labels": existing_labels,
+                        "requested_labels": label_names,
                     },
                 )
+            return existing
+
+        # Slow path: acquire lock and double-check before creation
+        with self._lock:
+            # Double-check after acquiring lock
+            if prefixed_name in self._histograms:
+                existing = self._histograms[prefixed_name]
+                existing_labels = tuple(existing._labelnames)
+                if existing_labels != label_names:
+                    _logger.warning(
+                        "Label set drift detected for histogram metric",
+                        extra={
+                            "metric_name": prefixed_name,
+                            "existing_labels": existing_labels,
+                            "requested_labels": label_names,
+                        },
+                    )
+                return existing
+
+            self._histograms[prefixed_name] = Histogram(
+                prefixed_name,
+                documentation or f"Histogram metric: {name}",
+                labelnames=label_names,
+                buckets=self._histogram_buckets,
+            )
+            _logger.debug(
+                "Created Prometheus Histogram",
+                extra={
+                    "metric_name": prefixed_name,
+                    "labels": label_names,
+                    "buckets": self._histogram_buckets,
+                },
+            )
             return self._histograms[prefixed_name]
 
     def increment_counter(

@@ -119,6 +119,12 @@ def cleanup_default_registry() -> Generator[None, None, None]:
         This fixture includes version detection to warn when running on untested
         prometheus_client versions. Verified working on: 0.17.x - 0.21.x
 
+        PUBLIC API MONITORING:
+        As of prometheus_client 0.21.x, no public API exists for listing/clearing
+        registered collectors. Monitor prometheus_client releases for a public API
+        (e.g., CollectorRegistry.get_collectors() or CollectorRegistry.clear()).
+        If a public API becomes available, migrate to it immediately.
+
         If this breaks after a prometheus_client upgrade, consider:
         1. Using isolated registries instead (preferred)
         2. Tracking registered collectors manually in a set

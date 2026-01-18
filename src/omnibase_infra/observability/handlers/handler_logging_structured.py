@@ -51,10 +51,8 @@ Reconfiguration Log Loss Prevention:
 Drop Policy:
     The drop_policy configuration field accepts only "drop_oldest", which is the
     sole supported policy. When the buffer is full, the oldest entries are dropped
-    to make room for new ones. This field exists for:
-    - API completeness and documentation
-    - Future extensibility (e.g., "drop_newest", "block" policies)
-    The policy IS applied to the sink during both initialization and reconfiguration.
+    to make room for new ones, preserving recent logs. The policy is applied to
+    the sink during both initialization and reconfiguration.
 
 Envelope-Based Routing:
     This handler uses envelope-based operation routing. See CLAUDE.md section

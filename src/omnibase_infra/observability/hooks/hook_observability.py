@@ -899,6 +899,18 @@ class HookObservability:
                 },
             )
 
+        # CRITICAL: Defense-in-depth guarantee that metrics are NEVER dropped.
+        # The invariant at line 860 ensures "operation" is always present, but this
+        # explicit check provides runtime safety if the invariant is ever violated.
+        # This protects against data loss from unexpected edge cases.
+        if "operation" not in labels:
+            _logger.error(
+                "BUG: operation key missing from labels after filtering; "
+                "restoring to prevent metric data loss",
+                extra={"operation": operation, "labels_keys": list(labels.keys())},
+            )
+            labels["operation"] = operation
+
         return labels
 
 

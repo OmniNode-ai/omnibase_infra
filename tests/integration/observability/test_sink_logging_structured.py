@@ -232,9 +232,20 @@ class TestBufferManagement:
         context["key"] = "mutated"
         context["new_key"] = "new_value"
 
-        # Buffer should have the original values
-        # We verify by checking the buffer size (entry was stored)
+        # Verify entry was stored
         assert sink.buffer_size == 1
+
+        # Verify defensive copy: buffered entry should have original values
+        # Access the internal buffer directly for verification
+        with sink._lock:
+            buffered_entry = sink._buffer[0]
+            # The buffered context should NOT reflect mutations to original dict
+            assert buffered_entry.context.get("key") == "original", (
+                "Defensive copy failed: buffered context was mutated"
+            )
+            assert "new_key" not in buffered_entry.context, (
+                "Defensive copy failed: new key appeared in buffered context"
+            )
 
 
 # =============================================================================
@@ -294,7 +305,11 @@ class TestFlush:
         assert sink.buffer_size == 0
 
     def test_flush_multiple_entries_order_preserved(self) -> None:
-        """Verify flush processes entries in order."""
+        """Verify flush processes entries in FIFO order.
+
+        This test verifies that entries are flushed in the same order they
+        were emitted (first-in-first-out), which is critical for log analysis.
+        """
         sink = SinkLoggingStructured(max_buffer_size=100)
         from omnibase_core.enums import EnumLogLevel
 
@@ -305,11 +320,28 @@ class TestFlush:
         # Verify all entries are in buffer before flush
         assert sink.buffer_size == 5
 
-        # Flush
-        sink.flush()
+        # Capture the order of messages by mocking the logger
+        messages_in_order: list[str] = []
+        with patch.object(sink, "_logger") as mock_logger:
 
-        # Buffer should be empty after flush
+            def capture_message(msg: str, **kwargs: object) -> None:
+                messages_in_order.append(msg)
+
+            mock_logger.info = MagicMock(side_effect=capture_message)
+            sink.flush()
+
+        # Verify buffer was cleared
         assert sink.buffer_size == 0
+
+        # Verify order: messages should be in 0, 1, 2, 3, 4 order
+        assert len(messages_in_order) == 5, (
+            f"Expected 5 messages, got {len(messages_in_order)}"
+        )
+        for i, msg in enumerate(messages_in_order):
+            assert msg == f"Message {i}", (
+                f"Order not preserved: expected 'Message {i}' at position {i}, "
+                f"got '{msg}'"
+            )
 
 
 # =============================================================================
@@ -342,8 +374,9 @@ class TestStderrFallback:
             # Check stderr output - should be valid JSON
             stderr_output = captured_stderr.getvalue()
             assert "Fallback test" in stderr_output
-            # JSON format uses "key": "value" instead of key=value
-            assert '"key": "value"' in stderr_output or '"key":"value"' in stderr_output
+            # JSON format uses "key": "value" (Python's json module always includes
+            # space after colon with default settings)
+            assert '"key": "value"' in stderr_output
 
     def test_stderr_fallback_includes_timestamp(self) -> None:
         """Verify stderr fallback includes timestamp."""
@@ -520,12 +553,14 @@ class TestThreadSafety:
         # values form a valid non-decreasing sequence (drop_count only increases).
         # This guards against flaky test failures due to non-deterministic
         # thread ordering.
+        assert len(drop_counts) > 0, "Should have collected some drop_count values"
         sorted_drop_counts = sorted(drop_counts)
-        for i in range(1, len(sorted_drop_counts)):
-            assert sorted_drop_counts[i] >= sorted_drop_counts[i - 1], (
-                f"drop_count values not monotonic at index {i}: "
-                f"{sorted_drop_counts[i - 1]} > {sorted_drop_counts[i]}"
-            )
+        # Verify monotonicity: all values should form a non-decreasing sequence
+        # when sorted (since drop_count can only increase or stay the same)
+        assert all(
+            sorted_drop_counts[i] >= sorted_drop_counts[i - 1]
+            for i in range(1, len(sorted_drop_counts))
+        ), f"drop_count values not monotonic: {sorted_drop_counts}"
 
     def test_concurrent_buffer_size_read(self) -> None:
         """Verify buffer_size reads are consistent during concurrent operations."""

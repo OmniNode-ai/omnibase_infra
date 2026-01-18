@@ -140,7 +140,9 @@ from omnibase_infra.enums import (
     EnumResponseStatus,
 )
 from omnibase_infra.errors import (
+    InfraTimeoutError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
@@ -953,13 +955,14 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
                 timeout=scrape_timeout,
             )
         except TimeoutError:
-            context = ModelInfraErrorContext.with_correlation(
+            context = ModelTimeoutErrorContext(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="metrics.scrape",
                 target_name="metrics_prometheus_handler",
+                timeout_seconds=scrape_timeout,
             )
-            raise RuntimeHostError(
+            raise InfraTimeoutError(
                 f"Metrics generation timed out after {scrape_timeout}s",
                 context=context,
             ) from None
@@ -1064,15 +1067,16 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             return self._build_response(payload, correlation_id, input_envelope_id)
 
         except TimeoutError:
-            context = ModelInfraErrorContext.with_correlation(
+            timeout_ctx = ModelTimeoutErrorContext(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="metrics.push",
                 target_name="metrics_prometheus_handler",
+                timeout_seconds=_PUSH_GATEWAY_TIMEOUT,
             )
-            raise RuntimeHostError(
+            raise InfraTimeoutError(
                 f"Pushgateway request timed out after {_PUSH_GATEWAY_TIMEOUT}s",
-                context=context,
+                context=timeout_ctx,
             ) from None
 
         except Exception as e:
