@@ -489,6 +489,9 @@ class IOPurityAuditor(ast.NodeVisitor):
 
         Imports inside TYPE_CHECKING blocks are exempt from audit since
         they are only used for type hints and not executed at runtime.
+
+        Note: The `else` branch of `if TYPE_CHECKING:` runs at runtime,
+        so it is NOT exempted. Only the `body` (true branch) is exempted.
         """
         # Check if condition is TYPE_CHECKING
         is_type_checking = (
@@ -501,10 +504,16 @@ class IOPurityAuditor(ast.NodeVisitor):
         )
 
         if is_type_checking:
+            # Visit the body (if-branch) with TYPE_CHECKING exemption
             old_in_type_checking = self.in_type_checking_block
             self.in_type_checking_block = True
-            self.generic_visit(node)
+            for child in node.body:
+                self.visit(child)
             self.in_type_checking_block = old_in_type_checking
+
+            # Visit the else-branch WITHOUT exemption (runs at runtime)
+            for child in node.orelse:
+                self.visit(child)
         else:
             self.generic_visit(node)
 
@@ -1237,6 +1246,292 @@ class TestViolationFormatting:
 
 
 # =============================================================================
+# TYPE_CHECKING Block Tests
+# =============================================================================
+
+
+class TestTypeCheckingBlockHandling:
+    """Test handling of TYPE_CHECKING blocks.
+
+    Imports inside TYPE_CHECKING blocks should be excluded from I/O violation
+    detection since they are only used for type hints at static analysis time,
+    not at runtime. This is a common pattern in Python for avoiding circular
+    imports and reducing runtime import overhead.
+
+    Reference: PEP 484, typing.TYPE_CHECKING
+    """
+
+    def test_type_checking_import_not_flagged(self, temp_dir: Path) -> None:
+        """Direct import inside TYPE_CHECKING block is not flagged."""
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            import httpx
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"TYPE_CHECKING imports should be exempt, found: {violations}"
+        )
+
+    def test_type_checking_from_import_not_flagged(self, temp_dir: Path) -> None:
+        """From-import inside TYPE_CHECKING block is not flagged."""
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            from httpx import AsyncClient, Client
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"TYPE_CHECKING from-imports should be exempt, found: {violations}"
+        )
+
+    def test_typing_module_type_checking_pattern(self, temp_dir: Path) -> None:
+        """typing.TYPE_CHECKING pattern (qualified access) is handled."""
+        code = """
+        from __future__ import annotations
+
+        import typing
+
+        if typing.TYPE_CHECKING:
+            import asyncpg
+            from qdrant_client import QdrantClient
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"typing.TYPE_CHECKING imports should be exempt, found: {violations}"
+        )
+
+    def test_same_import_outside_type_checking_flagged(self, temp_dir: Path) -> None:
+        """Same imports OUTSIDE TYPE_CHECKING block ARE flagged."""
+        code = """
+        from __future__ import annotations
+
+        import httpx  # NOT inside TYPE_CHECKING - should be flagged
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 1, "Import outside TYPE_CHECKING should be flagged"
+        assert violations[0].violation_type == EnumIOViolationType.FORBIDDEN_IMPORT
+        assert "httpx" in violations[0].detail
+
+    def test_mixed_imports_inside_and_outside_type_checking(
+        self, temp_dir: Path
+    ) -> None:
+        """Only imports outside TYPE_CHECKING are flagged."""
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+        import asyncpg  # Outside - should be flagged
+
+        if TYPE_CHECKING:
+            import httpx  # Inside - should NOT be flagged
+            from qdrant_client import QdrantClient  # Inside - should NOT be flagged
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        # Only asyncpg (outside TYPE_CHECKING) should be flagged
+        assert len(violations) == 1, (
+            f"Expected 1 violation (asyncpg), found: {violations}"
+        )
+        assert "asyncpg" in violations[0].detail
+        assert "httpx" not in violations[0].detail
+        assert "qdrant" not in violations[0].detail.lower()
+
+    def test_multiple_type_checking_blocks(self, temp_dir: Path) -> None:
+        """Multiple TYPE_CHECKING blocks are all handled correctly."""
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            import httpx
+
+        # ... other code ...
+
+        if TYPE_CHECKING:
+            from asyncpg import Connection
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"Multiple TYPE_CHECKING blocks should all be exempt, found: {violations}"
+        )
+
+    def test_multiple_forbidden_imports_in_type_checking(self, temp_dir: Path) -> None:
+        """Multiple forbidden imports in single TYPE_CHECKING block all exempt."""
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            import httpx
+            import asyncpg
+            from qdrant_client import QdrantClient
+            from confluent_kafka import Producer, Consumer
+            import neo4j
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"All TYPE_CHECKING imports should be exempt, found: {violations}"
+        )
+
+    def test_type_checking_else_branch_flagged(self, temp_dir: Path) -> None:
+        """Imports in else branch of TYPE_CHECKING ARE flagged.
+
+        The else branch of TYPE_CHECKING executes at runtime, so I/O
+        imports there should be flagged.
+        """
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            import httpx  # Type hint only - NOT flagged
+        else:
+            import asyncpg  # Runtime import - SHOULD be flagged
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        # asyncpg in else branch should be flagged (it runs at runtime)
+        assert len(violations) == 1, (
+            f"Expected 1 violation (asyncpg in else), found: {violations}"
+        )
+        assert "asyncpg" in violations[0].detail
+
+    def test_type_checking_with_other_code_in_block(self, temp_dir: Path) -> None:
+        """TYPE_CHECKING block with non-import code still handles imports."""
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            import httpx
+
+            # Type aliases defined in TYPE_CHECKING block
+            HttpClientType = httpx.AsyncClient
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"TYPE_CHECKING imports with other code should be exempt, found: {violations}"
+        )
+
+    def test_negated_type_checking_not_exempt(self, temp_dir: Path) -> None:
+        """Negated TYPE_CHECKING (if not TYPE_CHECKING) IS flagged.
+
+        `if not TYPE_CHECKING:` means the code runs at runtime, so
+        I/O imports there should be flagged.
+        """
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        if not TYPE_CHECKING:
+            import httpx  # Runtime import - SHOULD be flagged
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        # `if not TYPE_CHECKING:` runs at runtime, so should be flagged
+        assert len(violations) == 1, (
+            f"Negated TYPE_CHECKING imports should be flagged, found: {violations}"
+        )
+        assert "httpx" in violations[0].detail
+
+    def test_real_world_reducer_pattern(self, temp_dir: Path) -> None:
+        """Test realistic ONEX reducer pattern with TYPE_CHECKING imports."""
+        code = '''
+        """Pure reducer node following ONEX patterns."""
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        from omnibase_core.nodes.node_reducer import NodeReducer
+
+        if TYPE_CHECKING:
+            from omnibase_core.models.container import ModelONEXContainer
+            # These would be violations if outside TYPE_CHECKING
+            from httpx import AsyncClient
+            from asyncpg import Connection
+
+        class RegistrationReducer(NodeReducer):
+            """Reducer that processes registration events.
+
+            Note: Uses TYPE_CHECKING imports for type hints only.
+            Actual I/O is delegated to Effect nodes.
+            """
+
+            def __init__(self, container: ModelONEXContainer) -> None:
+                super().__init__(container)
+
+            def reduce(self, state: dict, event: dict) -> dict:
+                """Pure reduction logic - no I/O allowed."""
+                return {**state, "processed": True}
+        '''
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"Real-world reducer pattern should have no violations, found: {violations}"
+        )
+
+
+# =============================================================================
 # Edge Cases
 # =============================================================================
 
@@ -1290,27 +1585,6 @@ class TestEdgeCases:
         violations = scan_file_for_io_violations(filepath)
 
         assert len(violations) == 0
-
-    def test_type_checking_imports_not_flagged(self, temp_dir: Path) -> None:
-        """Imports inside TYPE_CHECKING block are not flagged."""
-        code = """
-        from __future__ import annotations
-
-        from typing import TYPE_CHECKING
-
-        if TYPE_CHECKING:
-            import httpx  # This is only for type hints, not runtime I/O
-
-        def process() -> None:
-            pass
-        """
-        filepath = _create_test_file(temp_dir, code)
-        violations = scan_file_for_io_violations(filepath)
-
-        # TYPE_CHECKING imports should NOT be flagged (they're type hints only)
-        assert len(violations) == 0, (
-            f"TYPE_CHECKING imports should be exempt, but found: {violations}"
-        )
 
 
 # =============================================================================
