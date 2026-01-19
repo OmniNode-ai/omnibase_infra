@@ -477,6 +477,23 @@ class HandlerContractSource(ProtocolContractSource):
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(raw_data)
 
+        # TODO [OMN-XXXX]: Extract handler_class from raw_data
+        #
+        # handler_contract.yaml files include a `handler_class` field for dynamic import
+        # (e.g., "omnibase_infra.handlers.handler_consul.HandlerConsul"), but
+        # ModelHandlerContract from omnibase_core does not have this field yet.
+        #
+        # Once ModelHandlerContract is updated to include handler_class, this code
+        # should be changed from:
+        #     handler_class=raw_data.get("handler_class")
+        # to:
+        #     handler_class=contract.handler_class
+        #
+        # For now, extract directly from raw YAML data to support dynamic handler loading.
+        handler_class = (
+            raw_data.get("handler_class") if isinstance(raw_data, dict) else None
+        )
+
         # Transform to descriptor
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
@@ -486,6 +503,7 @@ class HandlerContractSource(ProtocolContractSource):
             input_model=contract.input_model,
             output_model=contract.output_model,
             description=contract.description,
+            handler_class=handler_class,
             contract_path=str(contract_path),
         )
 

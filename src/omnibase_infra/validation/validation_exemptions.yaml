@@ -1037,6 +1037,11 @@ pattern_exemptions:
   # HandlerBootstrapSource provides hardcoded handler descriptors for core
   # infrastructure handlers. The "Handler" in the name refers to ONEX handler
   # concepts, consistent with HandlerContractSource and HandlerPluginLoader.
+  #
+  # Pattern specificity note: Uses separate class_pattern + violation_pattern
+  # (not combined "Class name .* contains...") for precise targeting. All three
+  # patterns must match: exact filename, exact class name, and violation type.
+  # This is consistent with HandlerContractSource/HandlerPluginLoader exemptions.
   - file_pattern: 'handler_bootstrap_source\.py'
     class_pattern: "Class name 'HandlerBootstrapSource'"
     violation_pattern: "contains anti-pattern 'Handler'"

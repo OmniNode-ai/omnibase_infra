@@ -91,6 +91,7 @@ _HANDLER_TYPE_VAULT = "vault"
 #   name: Human-readable display name
 #   description: Handler purpose description
 #   handler_kind: ONEX handler archetype (all are "effect" for I/O handlers)
+#   handler_class: Fully qualified Python class path for dynamic import
 #   input_model: Fully qualified path to input type (envelope-based handlers use JsonDict)
 #   output_model: Fully qualified path to output type (all handlers return ModelHandlerOutput)
 #
@@ -102,6 +103,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[dict[str, str]] = [
         "name": "Consul Handler",
         "description": "HashiCorp Consul service discovery handler",
         "handler_kind": "effect",
+        "handler_class": "omnibase_infra.handlers.handler_consul.HandlerConsul",
         "input_model": "omnibase_core.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
     },
@@ -110,6 +112,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[dict[str, str]] = [
         "name": "Database Handler",
         "description": "PostgreSQL database handler",
         "handler_kind": "effect",
+        "handler_class": "omnibase_infra.handlers.handler_db.HandlerDb",
         "input_model": "omnibase_core.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
     },
@@ -118,6 +121,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[dict[str, str]] = [
         "name": "HTTP Handler",
         "description": "HTTP REST protocol handler",
         "handler_kind": "effect",
+        "handler_class": "omnibase_infra.handlers.handler_http.HandlerHttpRest",
         "input_model": "omnibase_core.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
     },
@@ -126,6 +130,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[dict[str, str]] = [
         "name": "Vault Handler",
         "description": "HashiCorp Vault secret management handler",
         "handler_kind": "effect",
+        "handler_class": "omnibase_infra.handlers.handler_vault.HandlerVault",
         "input_model": "omnibase_core.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
     },
@@ -151,9 +156,13 @@ class HandlerBootstrapSource(
         source_type property. Protocol compliance is verified at runtime through
         Python's structural subtyping and enforced by type checkers.
 
-    The source supports a graceful_mode parameter for API consistency with
-    HandlerContractSource, though bootstrap handlers rarely fail since they
-    are hardcoded definitions.
+    API Consistency Note:
+        The ``graceful_mode`` parameter is accepted but **currently unused**.
+        Bootstrap handlers are hardcoded definitions that cannot fail validation,
+        so error collection is never needed. The parameter exists solely to
+        maintain interface compatibility with :class:`HandlerContractSource`
+        and :class:`ProtocolContractSource`, enabling callers to use these
+        sources interchangeably without conditional parameter handling.
 
     Attributes:
         source_type: Returns "BOOTSTRAP" as the source type identifier.
@@ -187,10 +196,17 @@ class HandlerBootstrapSource(
         """Initialize the bootstrap handler source.
 
         Args:
-            graceful_mode: If True, collect errors and continue discovery.
-                If False (default), raise on first error. This parameter is
-                provided for API consistency with HandlerContractSource,
-                though bootstrap handlers rarely fail since they are hardcoded.
+            graceful_mode: Error handling mode for API consistency.
+
+                **Note**: This parameter is currently unused. Bootstrap handlers
+                are hardcoded definitions that cannot fail validation, so error
+                collection logic is never invoked. The parameter is retained
+                solely to maintain a consistent interface with
+                :class:`ProtocolContractSource` implementations, enabling
+                interchangeable use with :class:`HandlerContractSource`.
+
+                When True, would collect errors and continue discovery.
+                When False (default), would raise on first error.
         """
         self._graceful_mode = graceful_mode
 
@@ -242,10 +258,15 @@ class HandlerBootstrapSource(
                 handler_id=handler_def["handler_id"],
                 name=handler_def["name"],
                 version=_BOOTSTRAP_HANDLER_VERSION,
-                handler_kind=handler_def["handler_kind"],  # type: ignore[arg-type]  # NOTE: Literal type checked by Pydantic
+                # NOTE: Dict value is str but handler_kind expects LiteralHandlerKind.
+                # Type ignore is safe: (1) values are hardcoded in _BOOTSTRAP_HANDLER_DEFINITIONS
+                # with valid literals only, (2) Pydantic validates against the Literal type at
+                # model instantiation, failing fast if an invalid value is provided.
+                handler_kind=handler_def["handler_kind"],  # type: ignore[arg-type]
                 input_model=handler_def["input_model"],
                 output_model=handler_def["output_model"],
                 description=handler_def["description"],
+                handler_class=handler_def["handler_class"],
                 contract_path=None,  # No contract file for bootstrap handlers
             )
             descriptors.append(descriptor)
