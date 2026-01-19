@@ -747,6 +747,48 @@ class TestHandlerBootstrapSourceEdgeCases:
                 f"{type(descriptor.version).__name__}, expected ModelSemVer"
             )
 
+    @pytest.mark.asyncio
+    async def test_all_handler_classes_are_importable(self) -> None:
+        """Verify all bootstrap handler classes can be dynamically imported.
+
+        This test ensures that handler_class paths are valid and importable,
+        catching refactoring issues (renamed/moved handlers) early.
+        """
+        import importlib
+
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+
+        for descriptor in result.descriptors:
+            handler_class_path = descriptor.handler_class
+            assert handler_class_path is not None, (
+                f"Handler {descriptor.handler_id} missing handler_class"
+            )
+
+            # Split into module and class name
+            module_path, class_name = handler_class_path.rsplit(".", 1)
+
+            # Attempt to import the module
+            try:
+                module = importlib.import_module(module_path)
+            except ImportError as e:
+                pytest.fail(
+                    f"Handler {descriptor.handler_id}: Could not import module "
+                    f"'{module_path}': {e}"
+                )
+
+            # Verify the class exists in the module
+            assert hasattr(module, class_name), (
+                f"Handler {descriptor.handler_id}: Class '{class_name}' not found "
+                f"in module '{module_path}'"
+            )
+
+            # Get the class and verify it's a class
+            handler_cls = getattr(module, class_name)
+            assert isinstance(handler_cls, type), (
+                f"Handler {descriptor.handler_id}: '{class_name}' is not a class"
+            )
+
 
 # =============================================================================
 # Performance Characteristics Tests

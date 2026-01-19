@@ -35,6 +35,7 @@ See Also:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import TypedDict
 
@@ -64,6 +65,10 @@ class BootstrapEffectDefinition(TypedDict):
     output_model: str
 
 
+# Thread-safe initialization for model rebuild
+# Lock ensures only one thread performs the rebuild
+_model_rebuild_lock = threading.Lock()
+
 # Mutable container to track if model_rebuild() has been called
 # Using a list avoids the need for global statement (PLW0603)
 _model_rebuild_state: list[bool] = [False]
@@ -78,20 +83,31 @@ def _ensure_model_rebuilt() -> None:
 
     The rebuild resolves the forward reference to ModelHandlerValidationError
     in the validation_errors field of ModelContractDiscoveryResult.
+
+    Thread Safety:
+        Uses double-checked locking pattern to ensure thread-safe initialization
+        while minimizing lock contention after the first successful rebuild.
     """
+    # Fast path - already rebuilt (no lock needed)
     if _model_rebuild_state[0]:
         return
 
-    # Import ModelHandlerValidationError here to avoid circular import at module load
-    from omnibase_infra.models.errors import ModelHandlerValidationError
+    # Thread-safe initialization with double-checked locking
+    with _model_rebuild_lock:
+        # Re-check after acquiring lock (another thread may have completed rebuild)
+        if _model_rebuild_state[0]:
+            return
 
-    # Rebuild the model to resolve forward references
-    # This needs ModelHandlerValidationError in scope for Pydantic to resolve the type
-    ModelContractDiscoveryResult.model_rebuild()
+        # Import ModelHandlerValidationError here to avoid circular import at module load
+        from omnibase_infra.models.errors import ModelHandlerValidationError
 
-    # Suppress unused variable warning - the import is needed for model_rebuild()
-    _ = ModelHandlerValidationError
-    _model_rebuild_state[0] = True
+        # Rebuild the model to resolve forward references
+        # This needs ModelHandlerValidationError in scope for Pydantic to resolve the type
+        ModelContractDiscoveryResult.model_rebuild()
+
+        # Suppress unused variable warning - the import is needed for model_rebuild()
+        _ = ModelHandlerValidationError
+        _model_rebuild_state[0] = True
 
 
 logger = logging.getLogger(__name__)
