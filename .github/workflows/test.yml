@@ -135,6 +135,13 @@ jobs:
         run: |
           poetry run python scripts/validate.py all --verbose
 
+      - name: Run I/O Purity Audit
+        run: |
+          echo "================================================================"
+          echo "I/O Purity Audit (OMN-325)"
+          echo "================================================================"
+          poetry run pytest tests/audit/test_io_violations.py::TestNoIOViolationsInPureNodes -v
+
       - name: Run markdown link validation
         run: |
           echo "================================================================"

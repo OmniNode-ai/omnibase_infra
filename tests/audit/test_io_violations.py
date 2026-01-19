@@ -65,6 +65,10 @@ FORBIDDEN_IMPORTS: frozenset[str] = frozenset(
         "aiokafka",
         "motor",  # MongoDB async driver
         "pymongo",
+        "requests",  # Synchronous HTTP client
+        "elasticsearch",  # Elasticsearch client
+        "boto3",  # AWS SDK
+        "grpc",  # gRPC library
     }
 )
 
@@ -152,6 +156,9 @@ _ONEX_EXCLUDE_IO_AUDIT = "io_audit"
 
 # Maximum file size to process (1MB)
 _MAX_FILE_SIZE_BYTES: int = 1_000_000
+
+# Number of lines covered by ONEX_EXCLUDE exemption (comment line + following lines)
+_ONEX_EXCLUDE_RANGE: int = 6
 
 
 # =============================================================================
@@ -269,6 +276,7 @@ class IOPurityAuditor(ast.NodeVisitor):
         allowed_lines: Set of line numbers exempted via ONEX_EXCLUDE comment.
         current_function: Name of the current function being visited.
         current_class: Name of the current class being visited.
+        in_type_checking_block: Whether currently inside a TYPE_CHECKING block.
     """
 
     def __init__(self, filepath: str, source_lines: list[str]) -> None:
@@ -284,6 +292,7 @@ class IOPurityAuditor(ast.NodeVisitor):
         self.allowed_lines: set[int] = set()
         self.current_function: str = ""
         self.current_class: str = ""
+        self.in_type_checking_block: bool = False
 
     def _get_context(self) -> str:
         """Get current context string."""
@@ -323,6 +332,11 @@ class IOPurityAuditor(ast.NodeVisitor):
 
     def visit_Import(self, node: ast.Import) -> None:
         """Visit import statement to detect forbidden imports."""
+        # Skip imports inside TYPE_CHECKING blocks (type hints only)
+        if self.in_type_checking_block:
+            self.generic_visit(node)
+            return
+
         for alias in node.names:
             module_name = alias.name.split(".")[0]
             if module_name in FORBIDDEN_IMPORTS:
@@ -336,6 +350,11 @@ class IOPurityAuditor(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """Visit from-import statement to detect forbidden imports."""
+        # Skip imports inside TYPE_CHECKING blocks (type hints only)
+        if self.in_type_checking_block:
+            self.generic_visit(node)
+            return
+
         if node.module:
             root_module = node.module.split(".")[0]
             if root_module in FORBIDDEN_IMPORTS:
@@ -418,6 +437,11 @@ class IOPurityAuditor(ast.NodeVisitor):
     def _is_path_related(self, node: ast.expr) -> bool:
         """Check if a node is related to pathlib.Path.
 
+        NOTE: This uses a heuristic based on variable naming patterns. Variables
+        named with "path" (e.g., file_path, config_path) are detected, but variables
+        with different names (e.g., `file`, `source`) holding Path objects may not be
+        detected. This is a known limitation - users can use ONEX_EXCLUDE for such cases.
+
         Args:
             node: AST expression to check.
 
@@ -460,6 +484,30 @@ class IOPurityAuditor(ast.NodeVisitor):
         self.generic_visit(node)
         self.current_function = old_function
 
+    def visit_If(self, node: ast.If) -> None:
+        """Visit if statement to detect TYPE_CHECKING blocks.
+
+        Imports inside TYPE_CHECKING blocks are exempt from audit since
+        they are only used for type hints and not executed at runtime.
+        """
+        # Check if condition is TYPE_CHECKING
+        is_type_checking = (
+            isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING"
+        ) or (
+            isinstance(node.test, ast.Attribute)
+            and isinstance(node.test.value, ast.Name)
+            and node.test.value.id == "typing"
+            and node.test.attr == "TYPE_CHECKING"
+        )
+
+        if is_type_checking:
+            old_in_type_checking = self.in_type_checking_block
+            self.in_type_checking_block = True
+            self.generic_visit(node)
+            self.in_type_checking_block = old_in_type_checking
+        else:
+            self.generic_visit(node)
+
 
 # =============================================================================
 # Utility Functions
@@ -469,7 +517,8 @@ class IOPurityAuditor(ast.NodeVisitor):
 def _find_onex_exclude_lines(content: str) -> set[int]:
     """Find lines exempted via ONEX_EXCLUDE: io_audit comments.
 
-    The exemption applies to the comment line and the next 5 lines.
+    The exemption applies to the comment line and the next (_ONEX_EXCLUDE_RANGE - 1) lines.
+    Total coverage: _ONEX_EXCLUDE_RANGE lines (default 6).
 
     Args:
         content: Source file content.
@@ -482,8 +531,8 @@ def _find_onex_exclude_lines(content: str) -> set[int]:
 
     for i, line in enumerate(lines, start=1):
         if _ONEX_EXCLUDE_PATTERN in line and _ONEX_EXCLUDE_IO_AUDIT in line:
-            # Exclude this line and the next 5 lines
-            for offset in range(6):
+            # Exclude this line and the following lines up to _ONEX_EXCLUDE_RANGE total
+            for offset in range(_ONEX_EXCLUDE_RANGE):
                 excluded_lines.add(i + offset)
 
     return excluded_lines
@@ -657,6 +706,7 @@ def audit_all_nodes(nodes_dir: Path) -> list[IOAuditViolation]:
                     "error_type": type(e).__name__,
                     "error": str(e),
                 },
+                exc_info=True,  # Include full traceback for debugging
             )
 
     return violations
@@ -1257,12 +1307,10 @@ class TestEdgeCases:
         filepath = _create_test_file(temp_dir, code)
         violations = scan_file_for_io_violations(filepath)
 
-        # TYPE_CHECKING imports are still flagged because they're in the AST
-        # This is actually correct - the import statement exists, even if conditional
-        # For full TYPE_CHECKING support, we would need to track the conditional
-        # For now, we accept this as a limitation
-        # Users can use ONEX_EXCLUDE for TYPE_CHECKING imports if needed
-        assert len(violations) >= 0  # May or may not flag based on implementation
+        # TYPE_CHECKING imports should NOT be flagged (they're type hints only)
+        assert len(violations) == 0, (
+            f"TYPE_CHECKING imports should be exempt, but found: {violations}"
+        )
 
 
 # =============================================================================
