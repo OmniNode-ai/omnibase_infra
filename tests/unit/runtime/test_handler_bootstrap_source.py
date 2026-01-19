@@ -27,6 +27,7 @@ Expected Behavior:
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.models.handlers import (
     ModelContractDiscoveryResult,
@@ -432,7 +433,7 @@ class TestHandlerBootstrapSourceDescriptors:
         )
 
         # Verify it's JsonDict
-        expected_input = "omnibase_core.types.JsonDict"
+        expected_input = "omnibase_infra.models.types.JsonDict"
         assert input_models == {expected_input}, (
             f"Expected input_model '{expected_input}', got {input_models}"
         )
@@ -695,8 +696,8 @@ class TestHandlerBootstrapSourceEdgeCases:
         result = await source.discover_handlers()
 
         for descriptor in result.descriptors:
-            # Attempting to modify a frozen model should raise an error
-            with pytest.raises(Exception):  # ValidationError for frozen models
+            # Attempting to modify a frozen model should raise ValidationError
+            with pytest.raises(ValidationError):
                 descriptor.handler_id = "modified"  # type: ignore[misc]
 
     @pytest.mark.asyncio

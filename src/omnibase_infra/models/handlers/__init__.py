@@ -24,6 +24,7 @@ from omnibase_infra.models.handlers.model_contract_discovery_result import (
     ModelContractDiscoveryResult,
 )
 from omnibase_infra.models.handlers.model_handler_descriptor import (
+    LiteralHandlerKind,
     ModelHandlerDescriptor,
 )
 from omnibase_infra.models.handlers.model_handler_identifier import (
@@ -31,6 +32,7 @@ from omnibase_infra.models.handlers.model_handler_identifier import (
 )
 
 __all__ = [
+    "LiteralHandlerKind",
     "ModelContractDiscoveryResult",
     "ModelHandlerDescriptor",
     "ModelHandlerIdentifier",

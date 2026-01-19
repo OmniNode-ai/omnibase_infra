@@ -36,12 +36,33 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TypedDict
 
 from omnibase_infra.models.handlers import (
+    LiteralHandlerKind,
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
 )
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
+
+
+class BootstrapEffectDefinition(TypedDict):
+    """Type definition for bootstrap effect node configuration entries.
+
+    This TypedDict provides compile-time type safety for the hardcoded effect
+    definitions, ensuring kind values are correctly typed as LiteralHandlerKind
+    rather than generic str. This eliminates the need for type: ignore comments
+    when constructing ModelHandlerDescriptor instances.
+    """
+
+    handler_id: str
+    name: str
+    description: str
+    handler_kind: LiteralHandlerKind
+    handler_class: str
+    input_model: str
+    output_model: str
+
 
 # Mutable container to track if model_rebuild() has been called
 # Using a list avoids the need for global statement (PLW0603)
@@ -95,16 +116,27 @@ _HANDLER_TYPE_VAULT = "vault"
 #   input_model: Fully qualified path to input type (envelope-based handlers use JsonDict)
 #   output_model: Fully qualified path to output type (all handlers return ModelHandlerOutput)
 #
+# Design Note (handler_class vs handler_module):
+#   ModelHandlerDescriptor uses a single handler_class field with the fully qualified
+#   path (e.g., "module.path.ClassName") rather than separate handler_module and
+#   handler_class fields. This follows the standard Python import convention and
+#   avoids redundancy. The runtime extracts module/class via rsplit(".", 1):
+#       module_path, class_name = handler_class.rsplit(".", 1)
+#   See: handler_plugin_loader.py::_import_handler_class() for implementation.
+#
 # These handlers are the core infrastructure handlers that support envelope-based
 # routing patterns for external service integration.
-_BOOTSTRAP_HANDLER_DEFINITIONS: list[dict[str, str]] = [
+#
+# The BootstrapEffectDefinition TypedDict ensures handler_kind is typed as LiteralHandlerKind,
+# providing compile-time type safety for the hardcoded values.
+_BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
     {
         "handler_id": f"bootstrap.{_HANDLER_TYPE_CONSUL}",
         "name": "Consul Handler",
         "description": "HashiCorp Consul service discovery handler",
         "handler_kind": "effect",
         "handler_class": "omnibase_infra.handlers.handler_consul.HandlerConsul",
-        "input_model": "omnibase_core.types.JsonDict",
+        "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
     },
     {
@@ -113,7 +145,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[dict[str, str]] = [
         "description": "PostgreSQL database handler",
         "handler_kind": "effect",
         "handler_class": "omnibase_infra.handlers.handler_db.HandlerDb",
-        "input_model": "omnibase_core.types.JsonDict",
+        "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
     },
     {
@@ -122,7 +154,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[dict[str, str]] = [
         "description": "HTTP REST protocol handler",
         "handler_kind": "effect",
         "handler_class": "omnibase_infra.handlers.handler_http.HandlerHttpRest",
-        "input_model": "omnibase_core.types.JsonDict",
+        "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
     },
     {
@@ -131,7 +163,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[dict[str, str]] = [
         "description": "HashiCorp Vault secret management handler",
         "handler_kind": "effect",
         "handler_class": "omnibase_infra.handlers.handler_vault.HandlerVault",
-        "input_model": "omnibase_core.types.JsonDict",
+        "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
     },
 ]
@@ -258,11 +290,7 @@ class HandlerBootstrapSource(
                 handler_id=handler_def["handler_id"],
                 name=handler_def["name"],
                 version=_BOOTSTRAP_HANDLER_VERSION,
-                # NOTE: Dict value is str but handler_kind expects LiteralHandlerKind.
-                # Type ignore is safe: (1) values are hardcoded in _BOOTSTRAP_HANDLER_DEFINITIONS
-                # with valid literals only, (2) Pydantic validates against the Literal type at
-                # model instantiation, failing fast if an invalid value is provided.
-                handler_kind=handler_def["handler_kind"],  # type: ignore[arg-type]
+                handler_kind=handler_def["handler_kind"],
                 input_model=handler_def["input_model"],
                 output_model=handler_def["output_model"],
                 description=handler_def["description"],
