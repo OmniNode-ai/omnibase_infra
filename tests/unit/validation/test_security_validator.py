@@ -165,6 +165,94 @@ class TestValidatorSecurity:
         assert "password" in issue.message
         assert issue.line_number == 2
 
+    def test_detects_credential_in_kwonly_args(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test detection of sensitive keyword-only parameters."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class DataHandler:
+                def authenticate(self, *, username: str, password: str) -> bool:
+                    """Method with sensitive kwonly parameter."""
+                    return True
+            ''').strip()
+        )
+
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+
+        assert not result.is_valid
+        assert len(result.issues) == 1
+        assert result.issues[0].code == "credential_in_signature"
+        assert "password" in result.issues[0].message
+
+    def test_detects_credential_in_posonly_args(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test detection of sensitive positional-only parameters."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class DataHandler:
+                def authenticate(self, password: str, /) -> bool:
+                    """Method with sensitive posonly parameter."""
+                    return True
+            ''').strip()
+        )
+
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+
+        assert not result.is_valid
+        assert len(result.issues) == 1
+        assert result.issues[0].code == "credential_in_signature"
+        assert "password" in result.issues[0].message
+
+    def test_detects_credential_in_vararg(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test detection of sensitive *args parameter name."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class DataHandler:
+                def collect_secrets(self, *secret) -> list:
+                    """Method with sensitive vararg name."""
+                    return list(secret)
+            ''').strip()
+        )
+
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+
+        assert not result.is_valid
+        assert len(result.issues) == 1
+        assert result.issues[0].code == "credential_in_signature"
+        assert "secret" in result.issues[0].message
+
+    def test_detects_credential_in_kwarg(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test detection of sensitive **kwargs parameter name."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class DataHandler:
+                def process_auth(self, **password) -> dict:
+                    """Method with sensitive kwarg name."""
+                    return dict(password)
+            ''').strip()
+        )
+
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+
+        assert not result.is_valid
+        assert len(result.issues) == 1
+        assert result.issues[0].code == "credential_in_signature"
+        assert "password" in result.issues[0].message
+
     def test_detects_admin_method(
         self, contract: ModelValidatorSubcontract, tmp_path: Path
     ) -> None:
