@@ -77,11 +77,13 @@ class TestInfraValidatorConstants:
         - 96 (2026-01-16): OMN-1181 structured errors merge with main (+1 net)
           - (+2 unions for EnumPolicyType | str in validate_policy_type_value)
           - (-1 union: fix PolicyTypeInput validator coercion)
+        - 98 (2026-01-20): OMN-1277 security validator contract refactoring (+2 unions)
+          - ast.FunctionDef | ast.AsyncFunctionDef for AST method type checking
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 96, (
-            "INFRA_MAX_UNIONS should be 96 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 98, (
+            "INFRA_MAX_UNIONS should be 98 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

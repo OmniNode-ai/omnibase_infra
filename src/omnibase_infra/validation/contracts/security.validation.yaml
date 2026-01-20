@@ -1,0 +1,114 @@
+contract_kind: validation_subcontract
+validation:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  validator_id: security
+  validator_name: ONEX Security Validator
+  validator_description: |
+    Validates Python source files for security concerns in handler implementations.
+    Detects sensitive method names that should be private, credential exposure in
+    method signatures, and admin/internal operations exposed publicly.
+
+    This validator performs static AST analysis to identify:
+    - Public methods with sensitive names (get_password, get_secret, etc.)
+    - Method signatures containing sensitive parameter names
+    - Admin/internal methods exposed without underscore prefix
+    - Decrypt operations exposed publicly
+
+    Part of OMN-1277: Refactor validators to be Handler and contract-driven.
+  target_patterns:
+    - "**/*.py"
+  exclude_patterns:
+    - "**/node_modules/**"
+    - "**/.git/**"
+    - "**/venv/**"
+    - "**/.venv/**"
+    - "**/__pycache__/**"
+    - "**/archived/**"
+    - "**/tests/**"
+    - "**/*_test.py"
+    - "**/test_*.py"
+    - "**/conftest.py"
+  rules:
+    - rule_id: sensitive_method_exposed
+      description: |
+        Detects public methods with sensitive names that should be private.
+        Matches patterns: get_password, get_secret, get_token, get_api_key,
+        get_credential*, fetch_password, fetch_secret, fetch_token,
+        validate_password, check_password, verify_password.
+      severity: error
+      enabled: true
+      parameters:
+        patterns:
+          - "^get_password$"
+          - "^get_secret$"
+          - "^get_token$"
+          - "^get_api_key$"
+          - "^get_credential"
+          - "^fetch_password$"
+          - "^fetch_secret$"
+          - "^fetch_token$"
+          - "^validate_password$"
+          - "^check_password$"
+          - "^verify_password$"
+    - rule_id: credential_in_signature
+      description: |
+        Detects method signatures containing sensitive parameter names.
+        Matches parameters: password, secret, token, api_key, apikey,
+        access_key, private_key, credential, auth_token, bearer_token,
+        decrypt_key, encryption_key.
+      severity: error
+      enabled: true
+      parameters:
+        sensitive_params:
+          - "password"
+          - "secret"
+          - "token"
+          - "api_key"
+          - "apikey"
+          - "access_key"
+          - "private_key"
+          - "credential"
+          - "auth_token"
+          - "bearer_token"
+          - "decrypt_key"
+          - "encryption_key"
+    - rule_id: admin_method_public
+      description: |
+        Detects admin or internal methods exposed without underscore prefix.
+        Matches patterns: admin_*, internal_*.
+      severity: warning
+      enabled: true
+      parameters:
+        patterns:
+          - "^admin_"
+          - "^internal_"
+    - rule_id: decrypt_method_public
+      description: |
+        Detects decrypt operations exposed publicly.
+        Matches patterns: decrypt_*.
+      severity: warning
+      enabled: true
+      parameters:
+        patterns:
+          - "^decrypt_"
+  # ============================================================================
+  # LINE-BASED SUPPRESSION
+  # ============================================================================
+  # If ANY pattern below appears on a source line, ALL security violations
+  # on that line are suppressed.
+  #
+  # Usage example:
+  #   def get_password(self) -> str:  # ONEX_EXCLUDE: security - required for legacy API
+  #   def admin_reset(self) -> None:  # security-ok: admin endpoint with auth guard
+  # ============================================================================
+  suppression_comments:
+    - "# ONEX_EXCLUDE: security"
+    - "# security-ok:"
+  severity_default: error
+  fail_on_error: true
+  fail_on_warning: false
+  max_violations: 0
+  parallel_execution: true

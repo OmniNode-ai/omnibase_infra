@@ -200,17 +200,8 @@ from omnibase_infra.validation.validator_runtime_shape import (
     enforce_execution_shape,
 )
 
-# Security validation for handler introspection and security constraints
-from omnibase_infra.validation.validator_security import (
-    SENSITIVE_METHOD_PATTERNS,
-    SENSITIVE_PARAMETER_NAMES,
-    SecurityRuleId,
-    convert_to_validation_error,
-    has_sensitive_parameters,
-    is_sensitive_method_name,
-    validate_handler_security,
-    validate_method_exposure,
-)
+# Security validation (OMN-1277) - contract-driven validator
+from omnibase_infra.validation.validator_security import ValidatorSecurity
 
 # Topic category validation for execution shape enforcement
 from omnibase_infra.validation.validator_topic_category import (
@@ -229,8 +220,6 @@ __all__: list[str] = [
     "EXECUTION_SHAPE_RULES",  # Runtime shape validation rules
     "INFRA_MAX_UNIONS",  # Infrastructure max union threshold
     "NODE_ARCHETYPE_EXPECTED_CATEGORIES",  # Node archetype categories
-    "SENSITIVE_METHOD_PATTERNS",  # Security validation patterns
-    "SENSITIVE_PARAMETER_NAMES",  # Security validation names
     "TOPIC_CATEGORY_PATTERNS",  # Topic category patterns
     "TOPIC_SUFFIXES",  # Topic suffix constants
     # Errors
@@ -239,7 +228,6 @@ __all__: list[str] = [
     "RoutingCoverageError",  # Routing coverage error (OMN-958)
     # Enums
     "EnumContractViolationSeverity",  # Contract violation severity
-    "SecurityRuleId",  # Security rule identifiers
     # Models
     "ModelAnyTypeValidationResult",  # Any type validation result (OMN-1276)
     "ModelContractLintResult",  # Contract lint result
@@ -261,9 +249,9 @@ __all__: list[str] = [
     "TopicCategoryASTVisitor",  # Topic category AST visitor
     "TopicCategoryValidator",  # Topic category validator
     "ValidationAggregator",  # Validation error aggregation (OMN-1091)
+    "ValidatorSecurity",  # Contract-driven security validator (OMN-1277)
     # Functions
     "check_routing_coverage_ci",  # CI routing coverage check
-    "convert_to_validation_error",  # Error conversion utility
     "detect_message_category",  # Message category detection
     "discover_message_types",  # Message type discovery
     "discover_registered_routes",  # Route discovery
@@ -271,9 +259,7 @@ __all__: list[str] = [
     "enforce_execution_shape",  # Execution shape enforcement
     "get_execution_shape_rules",  # Get shape rules
     "get_validation_summary",  # Get validation summary
-    "has_sensitive_parameters",  # Sensitive parameter check
     "is_isinstance_union",  # Check if union is in isinstance() call
-    "is_sensitive_method_name",  # Sensitive method check
     "lint_contract_file",  # Lint single contract file
     "lint_contracts_ci",  # CI contract linting
     "lint_contracts_in_directory",  # Directory contract linting
@@ -286,7 +272,6 @@ __all__: list[str] = [
     "validate_execution_shapes",  # Execution shape validation
     "validate_execution_shapes_ci",  # CI shape validation
     "validate_handler_registration",  # Handler registration validation (OMN-1098)
-    "validate_handler_security",  # Handler security validation
     "validate_infra_all",  # Infrastructure validation
     "validate_infra_architecture",  # Infrastructure architecture
     "validate_infra_circular_imports",  # Circular import check
@@ -298,7 +283,6 @@ __all__: list[str] = [
     "validate_localhandler_in_file",  # LocalHandler file validation (OMN-743)
     "validate_message_chain",  # Message chain validation
     "validate_message_on_topic",  # Topic message validation
-    "validate_method_exposure",  # Method exposure validation
     "validate_patterns",  # Re-export from omnibase_core
     "validate_routing_coverage_on_startup",  # Startup routing check
     "validate_topic_categories_in_directory",  # Directory topic validation
