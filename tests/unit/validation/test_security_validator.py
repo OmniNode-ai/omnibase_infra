@@ -1,248 +1,363 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Tests for security validation (OMN-1091).
+"""Tests for ValidatorSecurity (OMN-1277).
 
-Tests the integration of ModelHandlerValidationError in security validation paths.
+Tests the contract-driven security validator that extends ValidatorBase.
 """
+
+from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
-from omnibase_infra.enums import EnumHandlerErrorType
-from omnibase_infra.models.errors import ModelHandlerValidationError
-from omnibase_infra.models.handlers import ModelHandlerIdentifier
-from omnibase_infra.validation.validator_security import (
-    SecurityRuleId,
-    has_sensitive_parameters,
-    is_sensitive_method_name,
-    validate_handler_security,
-    validate_method_exposure,
+from omnibase_core.enums import EnumSeverity
+from omnibase_core.models.contracts.subcontracts.model_validator_subcontract import (
+    ModelValidatorSubcontract,
 )
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.validation.validator_security import ValidatorSecurity
 
 
-class TestSensitiveMethodDetection:
-    """Test sensitive method name detection."""
+class TestValidatorSecurity:
+    """Tests for the contract-driven ValidatorSecurity class."""
 
-    @pytest.mark.parametrize(
-        ("method_name", "expected"),
-        [
-            ("get_password", True),
-            ("get_secret", True),
-            ("get_api_key", True),
-            ("decrypt_data", True),
-            ("admin_delete", True),
-            ("process_request", False),
-            ("execute_query", False),
-            ("handle_event", False),
-        ],
-    )
-    def test_is_sensitive_method_name(self, method_name: str, expected: bool) -> None:
-        """Test detection of sensitive method names."""
-        assert is_sensitive_method_name(method_name) == expected
+    @pytest.fixture
+    def contract(self) -> ModelValidatorSubcontract:
+        """Create a test contract with all rules enabled."""
+        return ModelValidatorSubcontract(
+            version=ModelSemVer(major=1, minor=0, patch=0),
+            validator_id="security",
+            validator_name="ONEX Security Validator",
+            validator_description="Test security validator",
+            target_patterns=["**/*.py"],
+            exclude_patterns=[],
+            rules=[
+                {
+                    "rule_id": "sensitive_method_exposed",
+                    "description": "Detects sensitive methods",
+                    "severity": EnumSeverity.ERROR,
+                    "enabled": True,
+                },
+                {
+                    "rule_id": "credential_in_signature",
+                    "description": "Detects credential in signatures",
+                    "severity": EnumSeverity.ERROR,
+                    "enabled": True,
+                },
+                {
+                    "rule_id": "admin_method_public",
+                    "description": "Detects admin methods",
+                    "severity": EnumSeverity.WARNING,
+                    "enabled": True,
+                },
+                {
+                    "rule_id": "decrypt_method_public",
+                    "description": "Detects decrypt methods",
+                    "severity": EnumSeverity.WARNING,
+                    "enabled": True,
+                },
+            ],
+            suppression_comments=["# ONEX_EXCLUDE: security", "# security-ok:"],
+            severity_default=EnumSeverity.ERROR,
+            fail_on_error=True,
+            fail_on_warning=False,
+        )
 
-
-class TestSensitiveParameterDetection:
-    """Test sensitive parameter detection in signatures."""
-
-    @pytest.mark.parametrize(
-        ("signature", "expected_params"),
-        [
-            ("(username: str, password: str)", ["password"]),
-            ("(api_key: str, data: dict)", ["api_key"]),
-            ("(user_id: UUID, token: str)", ["token"]),
-            ("(user_id: UUID, data: dict)", []),
-            ("(secret: str, value: int)", ["secret"]),
-        ],
-    )
-    def test_has_sensitive_parameters(
-        self, signature: str, expected_params: list[str]
+    def test_detects_sensitive_method(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
     ) -> None:
-        """Test detection of sensitive parameters in method signatures."""
-        found_params = has_sensitive_parameters(signature)
-        assert set(found_params) == set(expected_params)
+        """Test that ValidatorSecurity detects sensitive method names."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class DataHandler:
+                def get_password(self) -> str:
+                    """Sensitive method that should be private."""
+                    return "secret"
 
-
-class TestValidateMethodExposure:
-    """Test method exposure validation."""
-
-    def test_sensitive_method_exposed(self) -> None:
-        """Test validation detects exposed sensitive methods."""
-        handler_identity = ModelHandlerIdentifier.from_handler_id("auth-handler")
-
-        errors = validate_method_exposure(
-            method_names=["get_api_key", "process_request"],
-            handler_identity=handler_identity,
+                def process_request(self, data: dict) -> dict:
+                    """Safe method."""
+                    return data
+            ''').strip()
         )
 
-        assert len(errors) == 1
-        error = errors[0]
-        assert error.error_type == EnumHandlerErrorType.SECURITY_VALIDATION_ERROR
-        assert error.rule_id == SecurityRuleId.SENSITIVE_METHOD_EXPOSED
-        assert "get_api_key" in error.message
-        assert "_get_api_key" in error.remediation_hint
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
 
-    def test_admin_method_exposed(self) -> None:
-        """Test validation detects exposed admin methods."""
-        handler_identity = ModelHandlerIdentifier.from_handler_id("admin-handler")
+        assert not result.is_valid
+        assert len(result.issues) == 1
+        issue = result.issues[0]
+        assert issue.code == "sensitive_method_exposed"
+        assert issue.severity == EnumSeverity.ERROR
+        assert issue.file_path == test_file
+        assert issue.line_number == 2
+        assert "get_password" in issue.message
+        assert "DataHandler" in issue.message
 
-        errors = validate_method_exposure(
-            method_names=["admin_delete_user", "process_request"],
-            handler_identity=handler_identity,
+    def test_detects_credential_in_signature(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that ValidatorSecurity detects credentials in method signatures."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class DataHandler:
+                def authenticate(self, username: str, password: str) -> bool:
+                    """Method with sensitive parameter."""
+                    return True
+            ''').strip()
         )
 
-        # admin_delete_user triggers 1 violation:
-        # SECURITY-003 (admin method public) - admin_ pattern maps to this rule
-        assert len(errors) == 1
-        assert errors[0].rule_id == SecurityRuleId.ADMIN_METHOD_PUBLIC
-        assert "admin_delete_user" in errors[0].message
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
 
-    def test_credential_in_signature(self) -> None:
-        """Test validation detects credentials in method signatures."""
-        handler_identity = ModelHandlerIdentifier.from_handler_id("auth-handler")
+        assert not result.is_valid
+        assert len(result.issues) == 1
+        issue = result.issues[0]
+        assert issue.code == "credential_in_signature"
+        assert "password" in issue.message
+        assert issue.line_number == 2
 
-        errors = validate_method_exposure(
-            method_names=["authenticate"],
-            handler_identity=handler_identity,
-            method_signatures={
-                "authenticate": "(username: str, password: str) -> bool"
-            },
+    def test_detects_admin_method(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that ValidatorSecurity detects admin methods."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class AdminHandler:
+                def admin_delete_user(self, user_id: str) -> None:
+                    """Admin method exposed publicly."""
+                    pass
+            ''').strip()
         )
 
-        assert len(errors) == 1
-        error = errors[0]
-        assert error.rule_id == SecurityRuleId.CREDENTIAL_IN_SIGNATURE
-        assert "password" in error.message
-        assert "data" in error.remediation_hint
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
 
-    def test_no_violations(self) -> None:
-        """Test validation passes for safe method exposure."""
-        handler_identity = ModelHandlerIdentifier.from_handler_id("compute-handler")
+        # admin_method_public is WARNING, so result is valid (fail_on_warning=False)
+        assert result.is_valid
+        assert len(result.issues) == 1
+        issue = result.issues[0]
+        assert issue.code == "admin_method_public"
+        assert issue.severity == EnumSeverity.WARNING
 
-        errors = validate_method_exposure(
-            method_names=["process_request", "execute_query"],
-            handler_identity=handler_identity,
-            method_signatures={
-                "process_request": "(data: dict) -> Result",
-                "execute_query": "(query: str) -> list[dict]",
-            },
+    def test_suppression_comment_works(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that suppression comments suppress violations."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class DataHandler:
+                def get_password(self) -> str:  # ONEX_EXCLUDE: security
+                    """Suppressed sensitive method."""
+                    return "secret"
+
+                def get_secret(self) -> str:  # security-ok: required for API
+                    """Also suppressed."""
+                    return "secret"
+
+                def get_token(self) -> str:
+                    """Not suppressed - should be detected."""
+                    return "token"
+            ''').strip()
         )
 
-        assert len(errors) == 0
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
 
+        # Only get_token should be detected (others are suppressed)
+        assert len(result.issues) == 1
+        assert "get_token" in result.issues[0].message
 
-class TestValidateHandlerSecurity:
-    """Test handler security validation."""
-
-    def test_validates_capabilities_dict(self) -> None:
-        """Test validation of handler capabilities."""
-        handler_identity = ModelHandlerIdentifier.from_handler_id("test-handler")
-
-        capabilities = {
-            "operations": ["get_password", "process_data"],
-            "protocols": ["ProtocolDatabaseAdapter"],
-            "has_fsm": False,
-            "method_signatures": {
-                "get_password": "() -> str",
-                "process_data": "(data: dict) -> Result",
-            },
-        }
-
-        errors = validate_handler_security(
-            handler_identity=handler_identity,
-            capabilities=capabilities,
+    def test_fail_on_error_behavior(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that fail_on_error controls result validity."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent("""
+            class DataHandler:
+                def get_password(self) -> str:
+                    return "secret"
+            """).strip()
         )
 
-        assert len(errors) == 1
-        assert errors[0].rule_id == SecurityRuleId.SENSITIVE_METHOD_EXPOSED
-        assert "get_password" in errors[0].message
+        # With fail_on_error=True (default)
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+        assert not result.is_valid
 
+        # With fail_on_error=False
+        contract_no_fail = ModelValidatorSubcontract(
+            version=ModelSemVer(major=1, minor=0, patch=0),
+            validator_id="security",
+            validator_name="ONEX Security Validator",
+            validator_description="Test security validator",
+            rules=[
+                {
+                    "rule_id": "sensitive_method_exposed",
+                    "description": "Detects sensitive methods",
+                    "severity": EnumSeverity.ERROR,
+                    "enabled": True,
+                },
+            ],
+            fail_on_error=False,
+            fail_on_warning=False,
+        )
+        validator_no_fail = ValidatorSecurity(contract=contract_no_fail)
+        result_no_fail = validator_no_fail.validate_file(test_file)
+        # Still finds issues, but result is valid
+        assert result_no_fail.is_valid
+        assert len(result_no_fail.issues) == 1
 
-class TestErrorFormatting:
-    """Test error output formatting."""
+    def test_skips_private_methods(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that private methods (underscore prefix) are skipped."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent('''
+            class DataHandler:
+                def _get_password(self) -> str:
+                    """Private method - should not trigger violation."""
+                    return "secret"
 
-    def test_format_for_logging(self) -> None:
-        """Test structured logging format."""
-        error = ModelHandlerValidationError.from_security_violation(
-            rule_id=SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
-            message="Handler exposes 'get_api_key' method",
-            remediation_hint="Prefix with underscore: '_get_api_key'",
-            handler_identity=ModelHandlerIdentifier.from_handler_id("auth-handler"),
-            file_path="nodes/auth/handlers/handler_authenticate.py",
-            line_number=42,
+                def __internal_token(self) -> str:
+                    """Protected method - should not trigger violation."""
+                    return "token"
+            ''').strip()
         )
 
-        formatted = error.format_for_logging()
-        assert "SECURITY-001" in formatted
-        assert "SECURITY_VALIDATION_ERROR" in formatted
-        assert "STATIC_ANALYSIS" in formatted
-        assert "auth-handler" in formatted
-        assert ":42" in formatted
-        assert "get_api_key" in formatted
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
 
-    def test_format_for_ci(self) -> None:
-        """Test GitHub Actions annotation format."""
-        error = ModelHandlerValidationError.from_security_violation(
-            rule_id=SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
-            message="Handler exposes 'get_api_key' method",
-            remediation_hint="Prefix with underscore: '_get_api_key'",
-            handler_identity=ModelHandlerIdentifier.from_handler_id("auth-handler"),
-            file_path="nodes/auth/handlers/handler_authenticate.py",
-            line_number=42,
+        assert result.is_valid
+        assert len(result.issues) == 0
+
+    def test_disabled_rule_not_reported(self, tmp_path: Path) -> None:
+        """Test that disabled rules don't produce issues."""
+        contract = ModelValidatorSubcontract(
+            version=ModelSemVer(major=1, minor=0, patch=0),
+            validator_id="security",
+            validator_name="ONEX Security Validator",
+            validator_description="Test security validator",
+            rules=[
+                {
+                    "rule_id": "sensitive_method_exposed",
+                    "description": "Detects sensitive methods",
+                    "severity": EnumSeverity.ERROR,
+                    "enabled": False,
+                },
+            ],
         )
 
-        formatted = error.format_for_ci()
-        assert formatted.startswith("::error")
-        assert "file=nodes/auth/handlers/handler_authenticate.py" in formatted
-        assert "line=42" in formatted
-        assert "[SECURITY-001]" in formatted
-
-    def test_to_structured_dict(self) -> None:
-        """Test JSON serialization."""
-        error = ModelHandlerValidationError.from_security_violation(
-            rule_id=SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
-            message="Handler exposes 'get_api_key' method",
-            remediation_hint="Prefix with underscore: '_get_api_key'",
-            handler_identity=ModelHandlerIdentifier.from_handler_id("auth-handler"),
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent("""
+            class DataHandler:
+                def get_password(self) -> str:
+                    return "secret"
+            """).strip()
         )
 
-        structured = error.to_structured_dict()
-        assert structured["error_type"] == "security_validation_error"
-        assert structured["rule_id"] == "SECURITY-001"
-        assert structured["source_type"] == "static_analysis"
-        assert structured["message"] == "Handler exposes 'get_api_key' method"
-        assert structured["severity"] == "error"
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
 
+        assert result.is_valid
+        assert len(result.issues) == 0
 
-class TestSecurityRuleIds:
-    """Test security rule ID definitions."""
+    def test_issue_has_correct_structure(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that issues have all required fields correctly populated."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent("""
+            class DataHandler:
+                def get_password(self) -> str:
+                    return "secret"
+            """).strip()
+        )
 
-    def test_rule_ids_are_unique(self) -> None:
-        """Test all rule IDs are unique."""
-        rule_ids = [
-            SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
-            SecurityRuleId.CREDENTIAL_IN_SIGNATURE,
-            SecurityRuleId.ADMIN_METHOD_PUBLIC,
-            SecurityRuleId.DECRYPT_METHOD_PUBLIC,
-            SecurityRuleId.CREDENTIAL_IN_CONFIG,
-            SecurityRuleId.HARDCODED_SECRET,
-            SecurityRuleId.INSECURE_CONNECTION,
-            SecurityRuleId.INSECURE_PATTERN,
-            SecurityRuleId.MISSING_AUTH_CHECK,
-            SecurityRuleId.MISSING_INPUT_VALIDATION,
-        ]
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
 
-        assert len(rule_ids) == len(set(rule_ids))
+        assert len(result.issues) == 1
+        issue = result.issues[0]
 
-    def test_rule_ids_follow_pattern(self) -> None:
-        """Test rule IDs follow naming convention."""
-        rule_ids = [
-            SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
-            SecurityRuleId.CREDENTIAL_IN_SIGNATURE,
-            SecurityRuleId.ADMIN_METHOD_PUBLIC,
-        ]
+        # Check all required fields
+        assert issue.severity == EnumSeverity.ERROR
+        assert issue.message is not None and len(issue.message) > 0
+        assert issue.code == "sensitive_method_exposed"
+        assert issue.file_path == test_file
+        assert issue.line_number == 2
+        assert issue.rule_name == "sensitive_method_exposed"
+        assert issue.suggestion is not None and "underscore" in issue.suggestion.lower()
+        assert issue.context is not None
+        assert issue.context.get("class_name") == "DataHandler"
+        assert issue.context.get("violation_type") == "sensitive_method_exposed"
 
-        for rule_id in rule_ids:
-            assert rule_id.startswith("SECURITY-")
-            # Verify format: SECURITY-<digits>
-            prefix, _, suffix = rule_id.partition("-")
-            assert prefix == "SECURITY"
-            assert suffix.isdigit(), f"Expected digits after prefix, got: {suffix}"
+    def test_multiple_violations_in_one_file(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test detection of multiple violations in a single file."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent("""
+            class DataHandler:
+                def get_password(self) -> str:
+                    return "secret"
+
+                def authenticate(self, username: str, password: str) -> bool:
+                    return True
+
+                def admin_reset(self) -> None:
+                    pass
+            """).strip()
+        )
+
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+
+        # Should find: sensitive_method_exposed, credential_in_signature, admin_method_public
+        assert len(result.issues) == 3
+
+        codes = {issue.code for issue in result.issues}
+        assert "sensitive_method_exposed" in codes
+        assert "credential_in_signature" in codes
+        assert "admin_method_public" in codes
+
+    def test_syntax_error_file_skipped(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that files with syntax errors are skipped gracefully."""
+        test_file = tmp_path / "bad_syntax.py"
+        test_file.write_text("class Broken(\n    def method self):  # Invalid syntax")
+
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+
+        assert result.is_valid
+        assert len(result.issues) == 0
+
+    def test_decrypt_method_detected(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that decrypt methods are detected."""
+        test_file = tmp_path / "handler.py"
+        test_file.write_text(
+            dedent("""
+            class CryptoHandler:
+                def decrypt_message(self, data: bytes) -> str:
+                    return data.decode()
+            """).strip()
+        )
+
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+
+        assert len(result.issues) == 1
+        assert result.issues[0].code == "decrypt_method_public"
+        assert result.issues[0].severity == EnumSeverity.WARNING

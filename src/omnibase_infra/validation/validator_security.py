@@ -1,410 +1,368 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Security Validation for ONEX Infrastructure.
+"""Security Validator for ONEX Infrastructure.
 
-This module provides security validation utilities for handler introspection,
-method exposure, and security constraint enforcement. Part of OMN-1091:
-Structured Validation & Error Reporting for Handlers.
+Contract-driven AST validator for detecting security concerns in Python code.
+Part of OMN-1277: Refactor validators to be Handler and contract-driven.
 
 Security Validation Scope:
-    - Method exposure via introspection (sensitive method names)
-    - Credential leakage in public method signatures
-    - Insecure patterns in handler code
-    - Missing authentication/authorization decorators
-
-Integration Status:
-    This module is a PLACEHOLDER for future security validation integration.
-    As of implementation, the security validation logic needs to be integrated
-    with the following components:
-
-    1. MixinNodeIntrospection._should_skip_method() - Add validation
-    2. Contract linting - Add security rule checks
-    3. Static analysis - Add AST-based security scanning
-    4. Runtime validation - Add security constraint enforcement
+    - Public methods with sensitive names (get_password, get_secret, etc.)
+    - Method signatures containing sensitive parameter names
+    - Admin/internal methods exposed without underscore prefix
+    - Decrypt operations exposed publicly
 
 Usage:
-    >>> from omnibase_infra.validation.validator_security import (
-    ...     validate_method_exposure,
-    ...     validate_handler_security,
-    ... )
+    >>> from pathlib import Path
+    >>> from omnibase_infra.validation.validator_security import ValidatorSecurity
     >>>
-    >>> # Validate method names for security concerns
-    >>> errors = validate_method_exposure(
-    ...     method_names=["get_credentials", "process_request"],
-    ...     handler_identity=ModelHandlerIdentifier.from_handler_id("auth-handler"),
-    ... )
-    >>>
-    >>> # Check for security violations
-    >>> for error in errors:
-    ...     print(error.format_for_logging())
+    >>> validator = ValidatorSecurity()
+    >>> result = validator.validate(Path("src/"))
+    >>> if not result.is_valid:
+    ...     for issue in result.issues:
+    ...         print(f"{issue.file_path}:{issue.line_number}: {issue.message}")
+
+CLI Usage:
+    python -m omnibase_infra.validation.validator_security src/
 
 See Also:
     - docs/patterns/security_patterns.md - Comprehensive security guide
-    - MixinNodeIntrospection - Node capability discovery with security filtering
-    - ModelHandlerValidationError - Structured error reporting
-    - EnumHandlerErrorType.SECURITY_VALIDATION_ERROR - Error classification
+    - ValidatorBase - Base class for contract-driven validators
 """
 
 from __future__ import annotations
 
+import ast
+import logging
 import re
-from typing import Final
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import ClassVar
 
-from omnibase_infra.models.errors import ModelHandlerValidationError
-from omnibase_infra.models.handlers import ModelHandlerIdentifier
-from omnibase_infra.models.validation import ModelValidationErrorParams
-
-# Security rule IDs for structured error reporting
-# These IDs enable tracking and remediation of specific security violations
-
-
-class SecurityRuleId:
-    """Rule IDs for security validation errors.
-
-    These IDs provide unique identifiers for each type of security validation
-    failure, enabling structured error tracking and remediation guidance.
-    """
-
-    # Method exposure violations (SECURITY-001 to SECURITY-099)
-    SENSITIVE_METHOD_EXPOSED = "SECURITY-001"
-    CREDENTIAL_IN_SIGNATURE = "SECURITY-002"
-    ADMIN_METHOD_PUBLIC = "SECURITY-003"
-    DECRYPT_METHOD_PUBLIC = "SECURITY-004"
-
-    # Configuration violations (SECURITY-100 to SECURITY-199)
-    CREDENTIAL_IN_CONFIG = "SECURITY-100"
-    HARDCODED_SECRET = "SECURITY-101"
-    INSECURE_CONNECTION = "SECURITY-102"
-
-    # Pattern violations (SECURITY-200 to SECURITY-299)
-    INSECURE_PATTERN = "SECURITY-200"
-    MISSING_AUTH_CHECK = "SECURITY-201"
-    MISSING_INPUT_VALIDATION = "SECURITY-202"
-
-
-# Sensitive method name patterns that should be prefixed with underscore
-# These patterns indicate methods that expose sensitive operations
-# Pre-compiled for performance
-_SENSITIVE_METHOD_PATTERN_STRINGS: Final[tuple[str, ...]] = (
-    r"^get_password$",
-    r"^get_secret$",
-    r"^get_token$",
-    r"^get_api_key$",
-    r"^get_credential",
-    r"^fetch_password$",
-    r"^fetch_secret$",
-    r"^fetch_token$",
-    r"^decrypt_",
-    r"^admin_",
-    r"^internal_",
-    r"^validate_password$",
-    r"^check_password$",
-    r"^verify_password$",
+from omnibase_core.models.common.model_validation_issue import ModelValidationIssue
+from omnibase_core.models.contracts.subcontracts.model_validator_subcontract import (
+    ModelValidatorSubcontract,
 )
+from omnibase_core.validation.validator_base import ValidatorBase
 
-# Pre-compiled regex patterns for efficient matching
-SENSITIVE_METHOD_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
-    re.compile(pattern) for pattern in _SENSITIVE_METHOD_PATTERN_STRINGS
-)
-
-# Patterns that should map to ADMIN_METHOD_PUBLIC rule (SECURITY-003)
-_ADMIN_INTERNAL_PATTERN_STRINGS: Final[tuple[str, ...]] = (
-    r"^admin_",
-    r"^internal_",
-)
-
-# Pre-compiled admin/internal patterns
-_ADMIN_INTERNAL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
-    re.compile(pattern) for pattern in _ADMIN_INTERNAL_PATTERN_STRINGS
-)
-
-# Parameter names that indicate sensitive data in method signatures
-SENSITIVE_PARAMETER_NAMES: Final[frozenset[str]] = frozenset(
-    {
-        "password",
-        "secret",
-        "token",
-        "api_key",
-        "apikey",
-        "access_key",
-        "private_key",
-        "credential",
-        "auth_token",
-        "bearer_token",
-        "decrypt_key",
-        "encryption_key",
-    }
-)
+# Configure logger for this module
+logger = logging.getLogger(__name__)
 
 
-def is_sensitive_method_name(method_name: str) -> bool:
-    """Check if method name matches sensitive operation patterns.
+@dataclass(frozen=True, slots=True)
+class MethodContext:
+    """Context for method validation - groups related parameters."""
 
-    Args:
-        method_name: Name of the method to check
-
-    Returns:
-        True if method name indicates a sensitive operation
-
-    Example:
-        >>> is_sensitive_method_name("get_password")
-        True
-        >>> is_sensitive_method_name("process_request")
-        False
-    """
-    method_lower = method_name.lower()
-
-    for pattern in SENSITIVE_METHOD_PATTERNS:
-        if pattern.match(method_lower):
-            return True
-
-    return False
+    method_name: str
+    class_name: str
+    file_path: Path
+    line_number: int
+    contract: ModelValidatorSubcontract
 
 
-def _get_sensitivity_rule_id(method_name: str) -> str | None:
-    """Determine the appropriate security rule ID for a sensitive method.
+class ValidatorSecurity(ValidatorBase):
+    """Contract-driven security validator for Python source files.
 
-    Args:
-        method_name: Name of the method to check
-
-    Returns:
-        Security rule ID if method is sensitive, None otherwise
-
-    Note:
-        - admin_/internal_ methods map to SECURITY-003 (ADMIN_METHOD_PUBLIC)
-        - Other sensitive patterns map to SECURITY-001 (SENSITIVE_METHOD_EXPOSED)
-    """
-    method_lower = method_name.lower()
-
-    # Check admin/internal patterns first (SECURITY-003)
-    for pattern in _ADMIN_INTERNAL_PATTERNS:
-        if pattern.match(method_lower):
-            return SecurityRuleId.ADMIN_METHOD_PUBLIC
-
-    # Check other sensitive patterns (SECURITY-001)
-    for pattern in SENSITIVE_METHOD_PATTERNS:
-        if pattern.match(method_lower):
-            return SecurityRuleId.SENSITIVE_METHOD_EXPOSED
-
-    return None
-
-
-def has_sensitive_parameters(signature: str) -> list[str]:
-    """Extract sensitive parameter names from method signature.
-
-    Args:
-        signature: Method signature string (e.g., "(username: str, password: str)")
-
-    Returns:
-        List of sensitive parameter names found in signature
-
-    Example:
-        >>> has_sensitive_parameters("(username: str, password: str)")
-        ['password']
-        >>> has_sensitive_parameters("(user_id: UUID, data: dict)")
-        []
-    """
-    signature_lower = signature.lower()
-    found_sensitive = []
-
-    for param_name in SENSITIVE_PARAMETER_NAMES:
-        # Match parameter name as word boundary to avoid false positives
-        # e.g., "password" matches but "password_hash" doesn't
-        pattern = rf"\b{param_name}\b"
-        if re.search(pattern, signature_lower):
-            found_sensitive.append(param_name)
-
-    return found_sensitive
-
-
-def validate_method_exposure(
-    method_names: list[str],
-    handler_identity: ModelHandlerIdentifier,
-    method_signatures: dict[str, str] | None = None,
-    file_path: str | None = None,
-) -> list[ModelHandlerValidationError]:
-    """Validate method names and signatures for security concerns.
-
-    Checks for:
-    - Sensitive method names that should be private (prefixed with _)
+    This validator uses AST analysis to detect security concerns in Python code:
+    - Public methods with sensitive names (get_password, get_secret, etc.)
     - Method signatures containing sensitive parameter names
-    - Admin/internal operations exposed publicly
+    - Admin/internal methods exposed without underscore prefix
+    - Decrypt operations exposed publicly
 
-    Args:
-        method_names: List of public method names to validate
-        handler_identity: Handler identification information
-        method_signatures: Optional dict mapping method names to signatures
-        file_path: Optional file path for error context
+    The validator is contract-driven via security.validation.yaml, supporting:
+    - Configurable rules with enable/disable per rule
+    - Per-rule severity overrides
+    - Suppression comments for intentional exceptions
+    - Glob-based file targeting and exclusion
 
-    Returns:
-        List of ModelHandlerValidationError for any violations found
+    Thread Safety:
+        ValidatorSecurity instances are NOT thread-safe due to internal mutable
+        state inherited from ValidatorBase. When using parallel execution
+        (e.g., pytest-xdist), create separate validator instances per worker.
 
-    Example:
-        >>> from omnibase_infra.models.handlers import ModelHandlerIdentifier
-        >>> identity = ModelHandlerIdentifier.from_handler_id("auth-handler")
-        >>> errors = validate_method_exposure(
-        ...     method_names=["get_api_key", "process_request"],
-        ...     handler_identity=identity,
-        ...     method_signatures={"get_api_key": "() -> str"},
-        ... )
-        >>> len(errors)
-        1
-        >>> errors[0].rule_id
-        'SECURITY-001'
+    Attributes:
+        validator_id: Unique identifier for this validator ("security").
+
+    Usage Example:
+        >>> from pathlib import Path
+        >>> from omnibase_infra.validation.validator_security import ValidatorSecurity
+        >>> validator = ValidatorSecurity()
+        >>> result = validator.validate(Path("src/"))
+        >>> print(f"Valid: {result.is_valid}, Issues: {len(result.issues)}")
+
+    CLI Usage:
+        python -m omnibase_infra.validation.validator_security src/
     """
-    errors: list[ModelHandlerValidationError] = []
 
-    for method_name in method_names:
-        # Check for sensitive method names and get appropriate rule ID
-        rule_id = _get_sensitivity_rule_id(method_name)
-        if rule_id is not None:
-            # Customize message and hint based on rule type
-            if rule_id == SecurityRuleId.ADMIN_METHOD_PUBLIC:
-                message = f"Handler exposes admin/internal method '{method_name}'"
-                remediation_hint = f"Prefix method with underscore: '_{method_name}' or move to separate admin module"
-                violation_type = "admin_method_public"
-            else:
-                message = f"Handler exposes sensitive method '{method_name}'"
-                remediation_hint = f"Prefix method with underscore: '_{method_name}' to exclude from introspection"
-                violation_type = "sensitive_method_exposed"
+    # ONEX_EXCLUDE: string_id - human-readable validator identifier
+    validator_id: ClassVar[str] = "security"
 
-            error = ModelHandlerValidationError.from_security_violation(
-                rule_id=rule_id,
-                message=message,
-                remediation_hint=remediation_hint,
-                handler_identity=handler_identity,
-                file_path=file_path,
-                details={
-                    "method_name": method_name,
-                    "violation_type": violation_type,
-                },
+    def _validate_file(
+        self,
+        path: Path,
+        contract: ModelValidatorSubcontract,
+    ) -> tuple[ModelValidationIssue, ...]:
+        """Validate a single Python file for security violations.
+
+        Uses AST analysis to detect:
+        - Sensitive method names in class definitions
+        - Sensitive parameter names in method signatures
+
+        Args:
+            path: Path to the Python file to validate.
+            contract: Validator contract with configuration.
+
+        Returns:
+            Tuple of ModelValidationIssue instances for violations found.
+        """
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError as e:
+            # fallback-ok: log warning and skip file on read errors
+            logger.warning("Cannot read file %s: %s", path, e)
+            return ()
+
+        try:
+            tree = ast.parse(source, filename=str(path))
+        except SyntaxError as e:
+            # fallback-ok: log warning and skip file with syntax errors
+            logger.warning(
+                "Skipping file with syntax error: path=%s, line=%s, error=%s",
+                path,
+                e.lineno,
+                e.msg,
             )
-            errors.append(error)
+            return ()
 
-    # Check method signatures if provided
-    if method_signatures:
-        for method_name, signature in method_signatures.items():
-            sensitive_params = has_sensitive_parameters(signature)
-            if sensitive_params:
-                error = ModelHandlerValidationError.from_security_violation(
-                    rule_id=SecurityRuleId.CREDENTIAL_IN_SIGNATURE,
-                    message=f"Method '{method_name}' has sensitive parameters in signature: {', '.join(sensitive_params)}",
-                    remediation_hint=f"Use generic parameter names (e.g., 'data' instead of '{sensitive_params[0]}') or make method private",
-                    handler_identity=handler_identity,
+        issues: list[ModelValidationIssue] = []
+
+        # Visit all class definitions in the file
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                class_issues = self._check_class_methods(node, path, contract)
+                issues.extend(class_issues)
+
+        return tuple(issues)
+
+    def _check_class_methods(
+        self,
+        class_node: ast.ClassDef,
+        file_path: Path,
+        contract: ModelValidatorSubcontract,
+    ) -> list[ModelValidationIssue]:
+        """Check class methods for security violations."""
+        issues: list[ModelValidationIssue] = []
+
+        for node in class_node.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                method_name = node.name
+
+                # Skip private/protected methods (already safe)
+                if method_name.startswith("_"):
+                    continue
+
+                # Skip dunder methods
+                if method_name.startswith("__") and method_name.endswith("__"):
+                    continue
+
+                ctx = MethodContext(
+                    method_name=method_name,
+                    class_name=class_node.name,
                     file_path=file_path,
-                    details={
-                        "method_name": method_name,
-                        "signature": signature,
-                        "sensitive_parameters": sensitive_params,
+                    line_number=node.lineno,
+                    contract=contract,
+                )
+                method_issues = self._check_method(node, ctx)
+                issues.extend(method_issues)
+
+        return issues
+
+    def _check_method(
+        self,
+        method_node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ctx: MethodContext,
+    ) -> list[ModelValidationIssue]:
+        """Check a single method for security violations."""
+        issues: list[ModelValidationIssue] = []
+
+        # Check for sensitive method names
+        method_issues = self._check_sensitive_method_name(ctx)
+        issues.extend(method_issues)
+
+        # Check for sensitive parameters in signature
+        param_issues = self._check_sensitive_parameters(method_node, ctx)
+        issues.extend(param_issues)
+
+        return issues
+
+    def _check_sensitive_method_name(
+        self,
+        ctx: MethodContext,
+    ) -> list[ModelValidationIssue]:
+        """Check if method name matches sensitive patterns."""
+        issues: list[ModelValidationIssue] = []
+        method_lower = ctx.method_name.lower()
+
+        # Check admin/internal patterns (rule: admin_method_public)
+        admin_patterns = [r"^admin_", r"^internal_"]
+        for pattern in admin_patterns:
+            if re.match(pattern, method_lower):
+                enabled, severity = self._get_rule_config(
+                    "admin_method_public", ctx.contract
+                )
+                if enabled:
+                    issues.append(
+                        ModelValidationIssue(
+                            severity=severity,
+                            message=f"Class '{ctx.class_name}' exposes admin/internal method '{ctx.method_name}'",
+                            code="admin_method_public",
+                            file_path=ctx.file_path,
+                            line_number=ctx.line_number,
+                            rule_name="admin_method_public",
+                            suggestion=f"Prefix method with underscore: '_{ctx.method_name}' or move to separate admin module",
+                            context={
+                                "class_name": ctx.class_name,
+                                "method_name": ctx.method_name,
+                                "violation_type": "admin_method_public",
+                            },
+                        )
+                    )
+                return issues  # Don't double-report
+
+        # Check decrypt patterns (rule: decrypt_method_public)
+        if re.match(r"^decrypt_", method_lower):
+            enabled, severity = self._get_rule_config(
+                "decrypt_method_public", ctx.contract
+            )
+            if enabled:
+                issues.append(
+                    ModelValidationIssue(
+                        severity=severity,
+                        message=f"Class '{ctx.class_name}' exposes decrypt method '{ctx.method_name}'",
+                        code="decrypt_method_public",
+                        file_path=ctx.file_path,
+                        line_number=ctx.line_number,
+                        rule_name="decrypt_method_public",
+                        suggestion=f"Prefix method with underscore: '_{ctx.method_name}' to exclude from public API",
+                        context={
+                            "class_name": ctx.class_name,
+                            "method_name": ctx.method_name,
+                            "violation_type": "decrypt_method_public",
+                        },
+                    )
+                )
+            return issues  # Don't double-report
+
+        # Check other sensitive patterns (rule: sensitive_method_exposed)
+        sensitive_patterns = [
+            r"^get_password$",
+            r"^get_secret$",
+            r"^get_token$",
+            r"^get_api_key$",
+            r"^get_credential",
+            r"^fetch_password$",
+            r"^fetch_secret$",
+            r"^fetch_token$",
+            r"^validate_password$",
+            r"^check_password$",
+            r"^verify_password$",
+        ]
+
+        for pattern in sensitive_patterns:
+            if re.match(pattern, method_lower):
+                enabled, severity = self._get_rule_config(
+                    "sensitive_method_exposed", ctx.contract
+                )
+                if enabled:
+                    issues.append(
+                        ModelValidationIssue(
+                            severity=severity,
+                            message=f"Class '{ctx.class_name}' exposes sensitive method '{ctx.method_name}'",
+                            code="sensitive_method_exposed",
+                            file_path=ctx.file_path,
+                            line_number=ctx.line_number,
+                            rule_name="sensitive_method_exposed",
+                            suggestion=f"Prefix method with underscore: '_{ctx.method_name}' to exclude from introspection",
+                            context={
+                                "class_name": ctx.class_name,
+                                "method_name": ctx.method_name,
+                                "violation_type": "sensitive_method_exposed",
+                            },
+                        )
+                    )
+                break
+
+        return issues
+
+    def _check_sensitive_parameters(
+        self,
+        method_node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ctx: MethodContext,
+    ) -> list[ModelValidationIssue]:
+        """Check method signature for sensitive parameter names."""
+        issues: list[ModelValidationIssue] = []
+
+        # Get rule configuration
+        enabled, severity = self._get_rule_config(
+            "credential_in_signature", ctx.contract
+        )
+        if not enabled:
+            return issues
+
+        # Sensitive parameter names to check
+        sensitive_params = {
+            "password",
+            "secret",
+            "token",
+            "api_key",
+            "apikey",
+            "access_key",
+            "private_key",
+            "credential",
+            "auth_token",
+            "bearer_token",
+            "decrypt_key",
+            "encryption_key",
+        }
+
+        # Extract parameter names from AST
+        found_sensitive: list[str] = []
+        for arg in method_node.args.args:
+            arg_name_lower = arg.arg.lower()
+            if arg_name_lower in sensitive_params:
+                found_sensitive.append(arg.arg)
+
+        # Also check keyword-only args
+        for arg in method_node.args.kwonlyargs:
+            arg_name_lower = arg.arg.lower()
+            if arg_name_lower in sensitive_params:
+                found_sensitive.append(arg.arg)
+
+        if found_sensitive:
+            issues.append(
+                ModelValidationIssue(
+                    severity=severity,
+                    message=f"Method '{ctx.class_name}.{ctx.method_name}' has sensitive parameters: {', '.join(found_sensitive)}",
+                    code="credential_in_signature",
+                    file_path=ctx.file_path,
+                    line_number=ctx.line_number,
+                    rule_name="credential_in_signature",
+                    suggestion=f"Use generic parameter names (e.g., 'data' instead of '{found_sensitive[0]}') or make method private",
+                    context={
+                        "class_name": ctx.class_name,
+                        "method_name": ctx.method_name,
+                        "sensitive_parameters": ", ".join(found_sensitive),
                         "violation_type": "credential_in_signature",
                     },
                 )
-                errors.append(error)
+            )
 
-    return errors
-
-
-def validate_handler_security(
-    handler_identity: ModelHandlerIdentifier,
-    capabilities: dict[str, object],
-    file_path: str | None = None,
-) -> list[ModelHandlerValidationError]:
-    """Validate handler capabilities for security violations.
-
-    This is the main entry point for security validation of a handler's
-    introspection data. It checks:
-    - Method exposure (sensitive method names)
-    - Method signatures (sensitive parameters)
-    - Security best practices
-
-    Args:
-        handler_identity: Handler identification information
-        capabilities: Capabilities dict from MixinNodeIntrospection.get_capabilities()
-        file_path: Optional file path for error context
-
-    Returns:
-        List of ModelHandlerValidationError for any violations found
-
-    Example:
-        >>> capabilities = {
-        ...     "operations": ["get_api_key", "process_request"],
-        ...     "protocols": ["ProtocolDatabaseAdapter"],
-        ...     "has_fsm": False,
-        ...     "method_signatures": {
-        ...         "get_api_key": "() -> str",
-        ...         "process_request": "(data: dict) -> Result",
-        ...     },
-        ... }
-        >>> errors = validate_handler_security(
-        ...     handler_identity=ModelHandlerIdentifier.from_handler_id("auth"),
-        ...     capabilities=capabilities,
-        ... )
-        >>> len(errors) > 0
-        True
-    """
-    operations = capabilities.get("operations", [])
-    if not isinstance(operations, list):
-        operations = []
-
-    method_signatures = capabilities.get("method_signatures", {})
-    if not isinstance(method_signatures, dict):
-        method_signatures = {}
-
-    return validate_method_exposure(
-        method_names=operations,
-        handler_identity=handler_identity,
-        method_signatures=method_signatures,
-        file_path=file_path,
-    )
+        return issues
 
 
-def convert_to_validation_error(
-    params: ModelValidationErrorParams,
-) -> ModelHandlerValidationError:
-    """Convert a security issue to ModelHandlerValidationError.
-
-    This is a convenience function for creating security validation errors
-    with consistent structure. Use this when integrating security checks
-    into existing validation pipelines.
-
-    Args:
-        params: Parameters encapsulating rule_id, message, remediation_hint,
-            handler_identity, and optional file_path, line_number, details.
-
-    Returns:
-        ModelHandlerValidationError configured for security violations
-
-    Example:
-        >>> params = ModelValidationErrorParams(
-        ...     rule_code=SecurityRuleId.SENSITIVE_METHOD_EXPOSED,
-        ...     message="Handler exposes 'get_password' method",
-        ...     remediation_hint="Prefix with underscore: '_get_password'",
-        ...     handler_identity=ModelHandlerIdentifier.from_handler_id("auth"),
-        ...     file_path="nodes/auth/handlers/handler_authenticate.py",
-        ...     line_number=42,
-        ... )
-        >>> error = convert_to_validation_error(params)
-        >>> error.error_type == EnumHandlerErrorType.SECURITY_VALIDATION_ERROR
-        True
-    """
-    return ModelHandlerValidationError.from_security_violation(
-        rule_id=params.rule_code,
-        message=params.message,
-        remediation_hint=params.remediation_hint,
-        handler_identity=params.handler_identity,
-        file_path=params.file_path,
-        line_number=params.line_number,
-        details=params.details,
-    )
+# CLI entry point
+if __name__ == "__main__":
+    sys.exit(ValidatorSecurity.main())
 
 
-__all__ = [
-    "SENSITIVE_METHOD_PATTERNS",
-    "SENSITIVE_PARAMETER_NAMES",
-    "SecurityRuleId",
-    "convert_to_validation_error",
-    "has_sensitive_parameters",
-    "is_sensitive_method_name",
-    "validate_handler_security",
-    "validate_method_exposure",
-]
+__all__ = ["ValidatorSecurity"]
