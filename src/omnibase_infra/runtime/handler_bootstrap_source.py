@@ -256,6 +256,7 @@ class HandlerBootstrapSource(
                 When True, would collect errors and continue discovery.
                 When False (default), would raise on first error.
         """
+        # Stored for API consistency only - bootstrap handlers cannot fail validation
         self._graceful_mode = graceful_mode
 
     @property
@@ -346,7 +347,11 @@ class HandlerBootstrapSource(
             duration_seconds: Total discovery duration in seconds.
         """
         handlers_per_sec = (
-            discovered_count / duration_seconds if duration_seconds > 0 else 0.0
+            discovered_count / duration_seconds
+            if duration_seconds > 0
+            else float("inf")
+            if discovered_count > 0
+            else 0.0
         )
 
         logger.info(
