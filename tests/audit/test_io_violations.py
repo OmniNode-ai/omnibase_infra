@@ -596,6 +596,8 @@ def get_node_type_from_contract(node_dir: Path) -> str | None:
     try:
         with contract_path.open("r", encoding="utf-8") as f:
             contract: dict[str, object] = yaml.safe_load(f)
+        if not isinstance(contract, dict):
+            return None
         node_type = contract.get("node_type")
         return str(node_type) if node_type is not None else None
     except (yaml.YAMLError, OSError):
