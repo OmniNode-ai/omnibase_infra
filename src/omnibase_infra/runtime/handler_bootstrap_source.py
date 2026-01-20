@@ -230,7 +230,8 @@ class HandlerBootstrapSource(
     Performance Characteristics:
         - No filesystem or network I/O required
         - Constant time O(1) discovery (hardcoded definitions)
-        - Typical performance: <1ms for all handlers
+        - Typical performance: <1ms for all handlers (local dev)
+        - Test threshold: 100ms (generous for CI runner variance)
         - Memory: ~500 bytes per handler descriptor
 
     .. versionadded:: 0.6.4
