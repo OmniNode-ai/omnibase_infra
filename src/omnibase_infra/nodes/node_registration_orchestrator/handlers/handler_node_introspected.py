@@ -422,11 +422,19 @@ class HandlerNodeIntrospected:
 
         # Register with Consul for service discovery (dual registration)
         # This happens AFTER PostgreSQL persistence (source of truth)
+        # Pass MCP config from capabilities (if present) for MCP tag generation
+        mcp_config = (
+            event.declared_capabilities.mcp
+            if event.declared_capabilities is not None
+            else None
+        )
         await self._register_with_consul(
             node_id=node_id,
             node_type=event.node_type.value,
             endpoints=event.endpoints,
             correlation_id=correlation_id,
+            mcp_config=mcp_config,
+            node_name=event.metadata.description if event.metadata else None,
         )
 
         logger.info(
@@ -458,6 +466,8 @@ class HandlerNodeIntrospected:
         node_type: str,
         endpoints: dict[str, str] | None,
         correlation_id: UUID,
+        mcp_config: object | None = None,
+        node_name: str | None = None,
     ) -> None:
         """Register node with Consul for service discovery.
 
@@ -465,7 +475,15 @@ class HandlerNodeIntrospected:
         - service_name: `onex-{node_type}` (ONEX convention for service discovery)
         - service_id: `onex-{node_type}-{node_id}` (unique identifier)
         - tags: [`onex`, `node-type:{node_type}`]
+        - MCP tags (orchestrators only): [`mcp-enabled`, `mcp-tool:{tool_name}`]
         - address/port: Extracted from endpoints if available
+
+        MCP Tags:
+            MCP tags are added ONLY when:
+            1. node_type is "orchestrator"
+            2. mcp_config is provided with expose=True
+
+            This ensures only orchestrators can be exposed as MCP tools.
 
         This method is idempotent - re-registering the same service_id updates it.
         Errors are logged but not propagated (PostgreSQL is source of truth).
@@ -475,6 +493,8 @@ class HandlerNodeIntrospected:
             node_type: ONEX node type (effect, compute, reducer, orchestrator).
             endpoints: Optional dict of endpoint URLs from introspection event.
             correlation_id: Correlation ID for tracing.
+            mcp_config: Optional MCP configuration from capabilities.
+            node_name: Optional node name for MCP tool naming.
         """
         if self._consul_handler is None:
             logger.debug(
@@ -554,11 +574,38 @@ class HandlerNodeIntrospected:
                         },
                     )
 
+        # Build base tags
+        tags: list[str] = ["onex", f"node-type:{node_type}"]
+
+        # Add MCP tags for orchestrators with MCP config enabled
+        # MCP tags are ONLY added when:
+        # 1. node_type is "orchestrator" (enforces orchestrator-only rule)
+        # 2. mcp_config exists with expose=True
+        if node_type == "orchestrator" and mcp_config is not None:
+            # Check if mcp_config has expose attribute and it's True
+            mcp_expose = getattr(mcp_config, "expose", False)
+            if mcp_expose:
+                # Get tool name from mcp_config or fall back to node_name
+                mcp_tool_name = getattr(mcp_config, "tool_name", None)
+                if not mcp_tool_name:
+                    # Fall back to node_name, then service_name
+                    mcp_tool_name = node_name or service_name
+                tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
+
+                logger.info(
+                    "Adding MCP tags to Consul registration",
+                    extra={
+                        "node_id": str(node_id),
+                        "tool_name": mcp_tool_name,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
         # Build Consul registration payload
         consul_payload: dict[str, object] = {
             "name": service_name,
             "service_id": service_id,
-            "tags": ["onex", f"node-type:{node_type}"],
+            "tags": tags,
         }
         if address:
             consul_payload["address"] = address

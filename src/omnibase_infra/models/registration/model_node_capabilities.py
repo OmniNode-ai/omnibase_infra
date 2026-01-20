@@ -12,9 +12,12 @@ Note:
     would not correctly handle this distinction.
 """
 
+from __future__ import annotations
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.types import JsonType
+from omnibase_infra.models.mcp.model_mcp_contract_config import ModelMCPContractConfig
 
 
 class ModelNodeCapabilities(BaseModel):
@@ -92,6 +95,14 @@ class ModelNodeCapabilities(BaseModel):
     config: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Nested configuration (JSON-serializable values)",
+    )
+
+    # MCP configuration for exposing node as AI agent tool
+    # Only valid for ORCHESTRATOR nodes - ignored for other node types
+    mcp: ModelMCPContractConfig | None = Field(
+        default=None,
+        description="MCP configuration for exposing node as AI agent tool. "
+        "Only valid for ORCHESTRATOR_GENERIC nodes.",
     )
 
     def __getitem__(self, key: str) -> object:
