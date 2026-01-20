@@ -36,13 +36,23 @@
 
 **ALL changes are breaking changes. NO backwards compatibility is maintained.**
 
-- Breaking changes are **always** acceptable and encouraged
-- Remove old patterns **immediately** - do not leave deprecated code
+**Rationale**: There are no external users of this system yet. This is the optimal time to make breaking changes freely, clean up technical debt aggressively, and evolve the architecture without friction. Once external users exist, this policy will be revisited.
+
+- Breaking changes are **always** acceptable and **strongly encouraged**
+- **ALWAYS** remove deprecated functionality immediately - never leave dead code
+- Remove old patterns **immediately** - do not leave deprecated code lying around
 - **NO** backwards compatibility documentation required
 - **NO** migration guides needed
 - **NO** deprecation periods - old APIs are simply removed
-- Downstream consumers are expected to update immediately
+- **NO** `# TODO: remove in v2` comments - remove it NOW
 - Version bumps may contain any breaking change without warning
+
+**When you see deprecated or unused code: DELETE IT.** Do not:
+- Leave it "for reference"
+- Comment it out
+- Add deprecation warnings
+- Create compatibility shims
+- Keep old function signatures with forwarding
 
 This policy applies to:
 - API changes (function signatures, class interfaces)
@@ -50,6 +60,7 @@ This policy applies to:
 - Import path changes (module reorganization)
 - Type changes (type aliases, generics)
 - Configuration changes (environment variables, settings)
+- Removing entire features or modules that are no longer needed
 
 ### No Versioned Directories
 - **NEVER** create `v1_0_0/`, `v2/` directories
