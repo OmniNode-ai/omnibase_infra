@@ -1250,7 +1250,10 @@ class TestSecretResolverFileSecrets:
             # Mock Path.open to raise PermissionError only for the target file
             # We need a surgical mock that doesn't break pytest's file handling
             original_open = Path.open
-            target_path = str(secret_file)
+            # IMPORTANT: Resolve the target path to handle symlinks (e.g., on macOS
+            # /var -> /private/var). The SecretResolver uses resolved_path.open(),
+            # so we must compare against the resolved path.
+            target_path = str(secret_file.resolve())
 
             def mock_open(self: Path, *args: object, **kwargs: object) -> object:
                 if str(self) == target_path:

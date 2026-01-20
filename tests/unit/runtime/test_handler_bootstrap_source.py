@@ -1019,9 +1019,10 @@ class TestHandlerBootstrapSourcePerformance:
         await source.discover_handlers()
         duration = time.perf_counter() - start
 
-        # Should complete in under 100ms (generous bound for CI variance)
-        assert duration < 0.1, (
-            f"discover_handlers() took {duration:.3f}s, expected < 0.1s"
+        # Should complete in under 50ms (generous bound for CI variance)
+        # Typical execution is <10ms since this is pure in-memory operation
+        assert duration < 0.05, (
+            f"discover_handlers() took {duration:.3f}s, expected < 0.05s"
         )
 
     @pytest.mark.asyncio

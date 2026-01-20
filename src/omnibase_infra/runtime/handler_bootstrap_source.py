@@ -41,6 +41,7 @@ from typing import TypedDict
 
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
+    ModelBootstrapHandlerDescriptor,
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
 )
@@ -53,7 +54,11 @@ class BootstrapEffectDefinition(TypedDict):
     This TypedDict provides compile-time type safety for the hardcoded effect
     definitions, ensuring kind values are correctly typed as LiteralHandlerKind
     rather than generic str. This eliminates the need for type: ignore comments
-    when constructing ModelHandlerDescriptor instances.
+    when constructing ModelBootstrapHandlerDescriptor instances.
+
+    Note that handler_class is a required field here, matching the
+    ModelBootstrapHandlerDescriptor requirement that bootstrap handlers
+    must always specify their implementation class.
     """
 
     handler_id: str
@@ -65,7 +70,40 @@ class BootstrapEffectDefinition(TypedDict):
     output_model: str
 
 
-# Thread-safe initialization for model rebuild
+# =============================================================================
+# Thread-Safe Model Rebuild Pattern (Deferred Execution)
+# =============================================================================
+#
+# This module uses a DEFERRED model_rebuild() pattern with thread-safe
+# double-checked locking. This differs from HandlerContractSource which uses
+# a simpler module-level model_rebuild() call.
+#
+# WHY DEFERRED (runtime) vs IMMEDIATE (module-load):
+#   - HandlerBootstrapSource is imported through runtime.__init__.py during
+#     application bootstrap, BEFORE all model dependencies are fully resolved
+#   - If we called model_rebuild() at module load time (like HandlerContractSource),
+#     it would fail with circular import errors because ModelHandlerValidationError
+#     may not be fully defined yet in the import chain
+#   - HandlerContractSource can use immediate module-level model_rebuild() because
+#     by the time that module is imported (via explicit user code, not runtime init),
+#     all dependencies are already resolved
+#
+# WHY THREAD-SAFE:
+#   - discover_handlers() may be called concurrently from multiple threads
+#   - Unlike module-level code (which Python imports once, thread-safely),
+#     runtime-invoked code needs explicit synchronization
+#   - The double-checked locking pattern minimizes lock contention: after the
+#     first successful rebuild, subsequent calls hit only the fast path check
+#
+# PATTERN COMPARISON:
+#   - HandlerBootstrapSource: Deferred + thread-safe (this file)
+#   - HandlerContractSource: Immediate + module-level (see that file for rationale)
+#
+# See Also:
+#   - handler_contract_source.py lines 49-68 for the immediate pattern rationale
+#   - OMN-1087 for the ticket tracking this design decision
+# =============================================================================
+
 # Lock ensures only one thread performs the rebuild
 _model_rebuild_lock = threading.Lock()
 
@@ -84,9 +122,21 @@ def _ensure_model_rebuilt() -> None:
     The rebuild resolves the forward reference to ModelHandlerValidationError
     in the validation_errors field of ModelContractDiscoveryResult.
 
+    Why Deferred (Not Module-Level):
+        Unlike HandlerContractSource which uses module-level model_rebuild(),
+        this module is imported early in the runtime bootstrap chain before all
+        model dependencies are resolved. Deferring the rebuild to first use
+        avoids circular import failures.
+
     Thread Safety:
         Uses double-checked locking pattern to ensure thread-safe initialization
         while minimizing lock contention after the first successful rebuild.
+        This is necessary because discover_handlers() may be called from multiple
+        threads, unlike module-level code which Python imports once.
+
+    See Also:
+        handler_contract_source.py for the simpler immediate pattern used when
+        import order constraints don't apply.
     """
     # Fast path - already rebuilt (no lock needed)
     if _model_rebuild_state[0]:
@@ -265,6 +315,12 @@ class HandlerBootstrapSource(
         Note:
             This method is idempotent and can be called multiple times safely.
             Each call returns the same set of handler descriptors.
+
+        Implementation Note:
+            Uses ModelBootstrapHandlerDescriptor (which requires handler_class)
+            for construction validation, ensuring all bootstrap handlers have
+            the required handler_class field. The descriptors are instances
+            of ModelHandlerDescriptor due to inheritance.
         """
         # Ensure forward references are resolved before creating result
         _ensure_model_rebuilt()
@@ -281,8 +337,9 @@ class HandlerBootstrapSource(
         )
 
         # Create descriptors from hardcoded definitions
+        # Uses ModelBootstrapHandlerDescriptor to enforce handler_class requirement
         for handler_def in _BOOTSTRAP_HANDLER_DEFINITIONS:
-            descriptor = ModelHandlerDescriptor(
+            descriptor = ModelBootstrapHandlerDescriptor(
                 handler_id=handler_def["handler_id"],
                 name=handler_def["name"],
                 version=_BOOTSTRAP_HANDLER_VERSION,

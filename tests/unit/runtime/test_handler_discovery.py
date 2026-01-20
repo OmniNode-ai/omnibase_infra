@@ -16,10 +16,24 @@ Test Coverage:
 - Empty contracts directory handling
 - Health check no_handlers_registered field
 
+Behavior Note (OMN-1087):
+    With bootstrap handler integration, the runtime NOW registers core
+    infrastructure handlers (consul, db, http, vault) FIRST via
+    HandlerBootstrapSource before contract-based discovery runs.
+
+    This means:
+    - Even when all contracts fail to load, the runtime can start with
+      bootstrap handlers (graceful degradation)
+    - Tests verify that contract errors are logged as warnings while
+      the runtime starts successfully with bootstrap handlers
+    - The no_handlers_registered field will be False as long as bootstrap
+      handlers are successfully registered
+
 Related:
     - src/omnibase_infra/runtime/runtime_host_process.py
     - src/omnibase_infra/runtime/contract_handler_discovery.py
     - src/omnibase_infra/runtime/handler_plugin_loader.py
+    - src/omnibase_infra/runtime/handler_bootstrap_source.py
 
 Note:
     These tests create temporary handler contract YAML files that point to
@@ -505,24 +519,33 @@ class TestInvalidContractYamlHandling:
     These tests verify that various types of invalid contracts
     are handled gracefully with proper error messages.
 
-    Note: When using isolated registries and all contracts are invalid,
-    the runtime will fail fast with ProtocolConfigurationError. These
-    tests verify the logging and error handling behavior.
+    Behavior Note (OMN-1087):
+        With bootstrap handler integration, the runtime NOW registers core
+        infrastructure handlers (consul, db, http, vault) FIRST before contract
+        discovery. This means even when all contract-based discovery fails, the
+        runtime can still start because bootstrap handlers are available.
+
+        Tests verify graceful degradation: contract errors are logged as warnings,
+        but the runtime starts successfully with bootstrap handlers.
     """
 
     @pytest.mark.asyncio
-    async def test_invalid_yaml_syntax_raises_configuration_error(
+    async def test_invalid_yaml_syntax_logs_warning_and_starts_with_bootstrap(
         self,
         invalid_yaml_contract_dir: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Verify invalid YAML syntax is logged and raises ProtocolConfigurationError.
+        """Verify invalid YAML syntax is logged but runtime starts with bootstrap handlers.
 
-        When using an isolated registry and all contracts have invalid YAML,
-        the runtime should fail fast because no handlers can be registered.
+        With bootstrap handler integration (OMN-1087), even when all contracts
+        have invalid YAML, the runtime starts successfully because bootstrap
+        handlers (consul, db, http, vault) are registered FIRST.
+
+        This test verifies graceful degradation behavior:
+        - Contract errors are logged as warnings
+        - Bootstrap handlers ARE registered despite contract failures
+        - Runtime starts successfully
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         event_bus = EventBusInmemory()
         # Use isolated registry
         isolated_registry = RegistryProtocolBinding()
@@ -536,8 +559,8 @@ class TestInvalidContractYamlHandling:
 
         try:
             with caplog.at_level(logging.WARNING):
-                with pytest.raises(ProtocolConfigurationError) as exc_info:
-                    await process.start()
+                # Runtime should start successfully due to bootstrap handlers
+                await process.start()
 
                 # Should have warning about invalid YAML in logs
                 warning_messages = " ".join(
@@ -547,27 +570,41 @@ class TestInvalidContractYamlHandling:
                     "invalid" in warning_messages.lower()
                     or "yaml" in warning_messages.lower()
                     or "error" in warning_messages.lower()
+                ), "Should have warnings about invalid YAML contracts"
+
+                # Runtime should be running with bootstrap handlers
+                assert process.is_running, (
+                    "Runtime should start with bootstrap handlers"
                 )
 
-                # Verify the exception
-                error_message = str(exc_info.value)
-                assert "No handlers registered" in error_message
+                # Verify at least one bootstrap handler is registered
+                # Note: Some bootstrap handlers (consul, db, vault) may fail to
+                # instantiate in test environment due to missing infrastructure,
+                # but HTTP handler should always succeed.
+                health = await process.health_check()
+                assert health["no_handlers_registered"] is False, (
+                    "At least one bootstrap handler should be registered"
+                )
+                # At minimum, HTTP handler should be registered
+                registered = health["registered_handlers"]
+                assert len(registered) >= 1, (
+                    f"Expected at least 1 bootstrap handler, got {len(registered)}"
+                )
         finally:
             await process.stop()
 
     @pytest.mark.asyncio
-    async def test_missing_required_fields_raises_configuration_error(
+    async def test_missing_required_fields_logs_warning_and_starts_with_bootstrap(
         self,
         missing_fields_contract_dir: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Verify contracts with missing required fields raise ProtocolConfigurationError.
+        """Verify contracts with missing fields log warnings but runtime starts.
 
-        When using an isolated registry and all contracts are missing fields,
-        the runtime should fail fast.
+        With bootstrap handler integration (OMN-1087), even when all contracts
+        are missing required fields, the runtime starts successfully because
+        bootstrap handlers are registered FIRST.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         event_bus = EventBusInmemory()
         # Use isolated registry
         isolated_registry = RegistryProtocolBinding()
@@ -581,30 +618,38 @@ class TestInvalidContractYamlHandling:
 
         try:
             with caplog.at_level(logging.WARNING):
-                with pytest.raises(ProtocolConfigurationError):
-                    await process.start()
+                # Runtime should start successfully due to bootstrap handlers
+                await process.start()
 
                 # Should have warnings about missing fields
                 warning_logs = [
                     r for r in caplog.records if r.levelno >= logging.WARNING
                 ]
                 assert len(warning_logs) > 0, "Should have warnings for missing fields"
+
+                # Runtime should be running with bootstrap handlers
+                assert process.is_running, (
+                    "Runtime should start with bootstrap handlers"
+                )
+
+                # Verify bootstrap handlers are registered
+                health = await process.health_check()
+                assert health["no_handlers_registered"] is False
         finally:
             await process.stop()
 
     @pytest.mark.asyncio
-    async def test_nonexistent_handler_module_raises_configuration_error(
+    async def test_nonexistent_handler_module_logs_warning_and_starts_with_bootstrap(
         self,
         nonexistent_handler_contract_dir: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Verify contracts pointing to non-existent modules raise ProtocolConfigurationError.
+        """Verify contracts with non-existent modules log warnings but runtime starts.
 
-        Import errors should be logged and the runtime should fail fast
-        when no handlers can be loaded.
+        With bootstrap handler integration (OMN-1087), import errors are logged
+        as warnings but the runtime starts successfully because bootstrap handlers
+        are registered FIRST.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         event_bus = EventBusInmemory()
         # Use isolated registry
         isolated_registry = RegistryProtocolBinding()
@@ -618,30 +663,34 @@ class TestInvalidContractYamlHandling:
 
         try:
             with caplog.at_level(logging.WARNING):
-                with pytest.raises(ProtocolConfigurationError):
-                    await process.start()
+                # Runtime should start successfully due to bootstrap handlers
+                await process.start()
 
                 # Should have warnings about import failures
                 warning_logs = [
                     r for r in caplog.records if r.levelno >= logging.WARNING
                 ]
                 assert len(warning_logs) > 0, "Should have warnings for import failures"
+
+                # Runtime should be running with bootstrap handlers
+                assert process.is_running, (
+                    "Runtime should start with bootstrap handlers"
+                )
         finally:
             await process.stop()
 
     @pytest.mark.asyncio
-    async def test_empty_yaml_file_raises_configuration_error(
+    async def test_empty_yaml_file_starts_with_bootstrap_handlers(
         self,
         empty_yaml_contract_dir: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Verify empty YAML files cause ProtocolConfigurationError.
+        """Verify empty YAML files are skipped but runtime starts with bootstrap handlers.
 
-        Empty contracts should be skipped, and with an isolated registry,
-        the runtime should fail fast because no handlers can be registered.
+        With bootstrap handler integration (OMN-1087), empty contracts are skipped
+        but the runtime starts successfully because bootstrap handlers are
+        registered FIRST.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         event_bus = EventBusInmemory()
         # Use isolated registry
         isolated_registry = RegistryProtocolBinding()
@@ -655,23 +704,30 @@ class TestInvalidContractYamlHandling:
 
         try:
             with caplog.at_level(logging.WARNING):
-                with pytest.raises(ProtocolConfigurationError):
-                    await process.start()
+                # Runtime should start successfully due to bootstrap handlers
+                await process.start()
+
+                # Runtime should be running with bootstrap handlers
+                assert process.is_running, (
+                    "Runtime should start with bootstrap handlers"
+                )
+
+                # Verify bootstrap handlers are registered
+                health = await process.health_check()
+                assert health["no_handlers_registered"] is False
         finally:
             await process.stop()
 
     @pytest.mark.asyncio
-    async def test_empty_contract_directory_raises_configuration_error(
+    async def test_empty_contract_directory_starts_with_bootstrap_handlers(
         self,
         empty_contract_dir: Path,
     ) -> None:
-        """Verify empty directories raise ProtocolConfigurationError.
+        """Verify empty directories work with bootstrap handlers.
 
-        An empty directory with an isolated registry should cause
-        the runtime to fail fast because no handlers can be registered.
+        With bootstrap handler integration (OMN-1087), an empty contract
+        directory is fine because bootstrap handlers are registered FIRST.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         event_bus = EventBusInmemory()
         # Use isolated registry
         isolated_registry = RegistryProtocolBinding()
@@ -684,27 +740,32 @@ class TestInvalidContractYamlHandling:
         )
 
         try:
-            with pytest.raises(ProtocolConfigurationError) as exc_info:
-                await process.start()
+            # Runtime should start successfully due to bootstrap handlers
+            await process.start()
 
-            error_message = str(exc_info.value)
-            assert "No handlers registered" in error_message
+            # Runtime should be running
+            assert process.is_running, "Runtime should start with bootstrap handlers"
+
+            # Verify bootstrap handlers are registered
+            health = await process.health_check()
+            assert health["no_handlers_registered"] is False, (
+                "Bootstrap handlers should be registered"
+            )
         finally:
             await process.stop()
 
     @pytest.mark.asyncio
-    async def test_nonexistent_contract_path_raises_configuration_error(
+    async def test_nonexistent_contract_path_starts_with_bootstrap_handlers(
         self,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Verify non-existent contract paths raise ProtocolConfigurationError.
+        """Verify non-existent paths log errors but runtime starts with bootstrap handlers.
 
-        A path that doesn't exist with an isolated registry should cause
-        the runtime to fail fast.
+        With bootstrap handler integration (OMN-1087), non-existent contract
+        paths are logged as errors but the runtime starts successfully because
+        bootstrap handlers are registered FIRST.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         nonexistent_path = tmp_path / "does_not_exist"
 
         event_bus = EventBusInmemory()
@@ -720,11 +781,17 @@ class TestInvalidContractYamlHandling:
 
         try:
             with caplog.at_level(logging.WARNING):
-                with pytest.raises(ProtocolConfigurationError):
-                    await process.start()
+                # Runtime should start successfully due to bootstrap handlers
+                await process.start()
 
-                # Should have warning about non-existent path
-                # (logged by discovery service)
+                # Runtime should be running
+                assert process.is_running, (
+                    "Runtime should start with bootstrap handlers"
+                )
+
+                # Verify bootstrap handlers are registered
+                health = await process.health_check()
+                assert health["no_handlers_registered"] is False
         finally:
             await process.stop()
 
@@ -741,24 +808,27 @@ class TestNoHandlersRegisteredHealthCheck:
     A runtime with no handlers is considered unhealthy as it cannot
     process any events.
 
-    Note: RuntimeHostProcess has a FAIL-FAST validation that raises
-    ProtocolConfigurationError if no handlers are registered during start().
-    Therefore, tests for empty/invalid scenarios must expect this exception.
+    Behavior Note (OMN-1087):
+        With bootstrap handler integration, core infrastructure handlers
+        (consul, db, http, vault) are ALWAYS registered FIRST before contract
+        discovery. This means even with empty/invalid contract paths, the
+        runtime will have bootstrap handlers registered and can start.
+
+        The no_handlers_registered field will be False as long as bootstrap
+        handlers are successfully registered (which is the normal case).
     """
 
     @pytest.mark.asyncio
-    async def test_empty_directory_raises_configuration_error(
+    async def test_empty_directory_starts_with_bootstrap_handlers(
         self,
         empty_contract_dir: Path,
     ) -> None:
-        """Verify empty contract directory raises ProtocolConfigurationError.
+        """Verify empty contract directory works with bootstrap handlers.
 
-        When contract_paths points to an empty directory with an isolated
-        registry, no handlers can be registered, and the runtime should
-        fail fast with a configuration error.
+        With bootstrap handler integration (OMN-1087), even when contract_paths
+        points to an empty directory, the runtime starts successfully because
+        bootstrap handlers are registered FIRST.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         event_bus = EventBusInmemory()
         # Use isolated registry to prevent interference from other tests
         isolated_registry = RegistryProtocolBinding()
@@ -771,12 +841,24 @@ class TestNoHandlersRegisteredHealthCheck:
         )
 
         try:
-            with pytest.raises(ProtocolConfigurationError) as exc_info:
-                await process.start()
+            # Runtime should start successfully due to bootstrap handlers
+            await process.start()
 
-            # Verify error message indicates no handlers
-            error_message = str(exc_info.value)
-            assert "No handlers registered" in error_message
+            # Verify runtime is running
+            assert process.is_running, "Runtime should start with bootstrap handlers"
+
+            # Verify at least one bootstrap handler is registered
+            # Note: Some bootstrap handlers (consul, db, vault) may fail to
+            # instantiate in test environment due to missing infrastructure,
+            # but HTTP handler should always succeed.
+            health = await process.health_check()
+            assert health["no_handlers_registered"] is False, (
+                "At least one bootstrap handler should be registered"
+            )
+            # At minimum, HTTP handler should be registered
+            assert len(health["registered_handlers"]) >= 1, (
+                "Expected at least 1 bootstrap handler"
+            )
         finally:
             await process.stop()
 
@@ -816,17 +898,16 @@ class TestNoHandlersRegisteredHealthCheck:
             await process.stop()
 
     @pytest.mark.asyncio
-    async def test_all_invalid_contracts_raises_configuration_error(
+    async def test_all_invalid_contracts_starts_with_bootstrap_handlers(
         self,
         invalid_yaml_contract_dir: Path,
     ) -> None:
-        """Verify all invalid contracts raises ProtocolConfigurationError.
+        """Verify all invalid contracts still works with bootstrap handlers.
 
-        When all provided contracts fail to load with an isolated registry,
-        the runtime should fail fast with a configuration error.
+        With bootstrap handler integration (OMN-1087), even when all contracts
+        fail to load, the runtime starts successfully because bootstrap handlers
+        are registered FIRST.
         """
-        from omnibase_infra.errors import ProtocolConfigurationError
-
         event_bus = EventBusInmemory()
         # Use isolated registry
         isolated_registry = RegistryProtocolBinding()
@@ -839,12 +920,17 @@ class TestNoHandlersRegisteredHealthCheck:
         )
 
         try:
-            with pytest.raises(ProtocolConfigurationError) as exc_info:
-                await process.start()
+            # Runtime should start successfully due to bootstrap handlers
+            await process.start()
 
-            # Verify error message indicates no handlers
-            error_message = str(exc_info.value)
-            assert "No handlers registered" in error_message
+            # Verify runtime is running
+            assert process.is_running, "Runtime should start with bootstrap handlers"
+
+            # Verify bootstrap handlers are registered despite invalid contracts
+            health = await process.health_check()
+            assert health["no_handlers_registered"] is False, (
+                "Bootstrap handlers should be registered"
+            )
         finally:
             await process.stop()
 
@@ -1101,9 +1187,12 @@ class TestHandlerDiscoveryLogging:
         invalid_yaml_contract_dir: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Verify discovery logs error details for failed handlers."""
-        from omnibase_infra.errors import ProtocolConfigurationError
+        """Verify discovery logs error details for failed handlers.
 
+        With bootstrap handler integration (OMN-1087), the runtime starts
+        successfully even when contracts are invalid, but warnings should
+        still be logged about the invalid contracts.
+        """
         event_bus = EventBusInmemory()
         # Use isolated registry
         isolated_registry = RegistryProtocolBinding()
@@ -1117,9 +1206,8 @@ class TestHandlerDiscoveryLogging:
 
         try:
             with caplog.at_level(logging.WARNING):
-                # With isolated registry, this will raise ProtocolConfigurationError
-                with pytest.raises(ProtocolConfigurationError):
-                    await process.start()
+                # Runtime starts successfully due to bootstrap handlers
+                await process.start()
 
                 # Should have warning logs with details about the invalid contract
                 warning_logs = [
@@ -1134,6 +1222,11 @@ class TestHandlerDiscoveryLogging:
                     for term in ["error", "fail", "invalid", "yaml"]
                 )
                 assert has_error_indicator, "Warnings should indicate errors"
+
+                # Verify runtime is running with bootstrap handlers
+                assert process.is_running, (
+                    "Runtime should start with bootstrap handlers"
+                )
         finally:
             await process.stop()
 
