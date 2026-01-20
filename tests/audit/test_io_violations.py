@@ -27,6 +27,13 @@ Usage:
 CI Integration:
     This test should run on every PR to enforce node purity.
     Violations produce clear error messages with file:line references.
+
+Limitations:
+    - The ``_is_path_related()`` function uses naming heuristics to detect Path objects.
+      Variables with "path" in the name (e.g., ``file_path``, ``config_path``) are detected,
+      but variables with different names (e.g., ``file``, ``source``, ``target``) holding
+      Path objects may not be detected.
+    - For such cases, users can add ``ONEX_EXCLUDE: io_audit`` comment to exempt the line.
 """
 
 from __future__ import annotations
@@ -125,7 +132,10 @@ SKIP_DIRECTORIES: frozenset[str] = frozenset(
         "dispatchers",
         "transport",
         "validators",  # Architecture validators do file I/O to analyze code
-        "reducers",  # Reducer implementation helpers (not node.py)
+        # NOTE: "reducers" skips `nodes/reducers/` which contains shared utilities and
+        # helper modules. This does NOT skip actual REDUCER nodes like `nodes/node_foo_reducer/`
+        # which have their own contract.yaml and ARE audited for purity.
+        "reducers",
         "__pycache__",
     }
 )
@@ -565,10 +575,10 @@ def get_node_type_from_contract(node_dir: Path) -> str | None:
             contract: dict[str, object] = yaml.safe_load(f)
         node_type = contract.get("node_type")
         return str(node_type) if node_type is not None else None
-    except (yaml.YAMLError, OSError) as e:
-        logger.warning(
+    except (yaml.YAMLError, OSError):
+        logger.exception(
             "Failed to parse contract.yaml",
-            extra={"path": str(contract_path), "error": str(e)},
+            extra={"path": str(contract_path)},
         )
         return None
 
@@ -692,9 +702,13 @@ def audit_all_nodes(nodes_dir: Path) -> list[IOAuditViolation]:
         try:
             file_size = file_path.stat().st_size
             if file_size > _MAX_FILE_SIZE_BYTES:
-                logger.debug(
-                    "Skipping large file",
-                    extra={"file": str(file_path), "size_bytes": file_size},
+                logger.warning(
+                    "Skipping file exceeding size limit",
+                    extra={
+                        "file": str(file_path),
+                        "size_bytes": file_size,
+                        "limit_bytes": _MAX_FILE_SIZE_BYTES,
+                    },
                 )
                 continue
         except OSError:
@@ -1588,14 +1602,18 @@ class TestEdgeCases:
 
 
 # =============================================================================
-# Main Test
+# CI Gate Test - Main Enforcement Point
 # =============================================================================
 
 
-class TestNoIOViolationsInPureNodes:
-    """Main integration test that validates the actual codebase."""
+class TestCIGateIOPurity:
+    """CI gate test that enforces I/O purity rules across the codebase.
 
-    def test_no_io_violations_in_pure_nodes(self) -> None:
+    This test class contains the main enforcement point that runs in CI on every PR.
+    Failures here block merges until violations are addressed.
+    """
+
+    def test_codebase_has_no_io_violations_in_pure_nodes(self) -> None:
         """Validate that no I/O violations exist in REDUCER and COMPUTE nodes.
 
         This is the main CI gate test. It scans all nodes in the codebase
