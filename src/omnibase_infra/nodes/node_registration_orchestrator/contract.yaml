@@ -36,6 +36,13 @@ node_version: "1.0.0"
 name: "node_registration_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
 description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
+# MCP (Model Context Protocol) Configuration
+# Exposes this orchestrator as an AI-invocable tool via MCP server
+mcp:
+  expose: true
+  tool_name: "register_node"
+  description: "Register a new ONEX node with the cluster. Handles Consul service registration and PostgreSQL metadata storage. Returns registration status and assigned service ID."
+  timeout_seconds: 30
 input_model:
   name: "ModelOrchestratorInput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"

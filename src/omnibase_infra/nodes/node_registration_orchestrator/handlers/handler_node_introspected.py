@@ -53,6 +53,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -236,6 +237,39 @@ class HandlerNodeIntrospected:
     def has_consul_handler(self) -> bool:
         """Check if HandlerConsul is configured for Consul registration."""
         return self._consul_handler is not None
+
+    def _sanitize_tool_name(self, name: str) -> str:
+        """Sanitize tool name for use in Consul tags.
+
+        Converts free-form text (like descriptions) into stable, Consul-safe
+        identifiers. This ensures consistent service discovery matching.
+
+        Transformation rules:
+            1. Convert to lowercase
+            2. Replace non-alphanumeric characters with dashes
+            3. Collapse multiple consecutive dashes into one
+            4. Remove leading/trailing dashes
+            5. Truncate to 63 characters (Consul tag limit)
+
+        Args:
+            name: Raw tool name or description text.
+
+        Returns:
+            Sanitized string suitable for Consul tags (lowercase, alphanumeric
+            with dashes, max 63 chars).
+
+        Example:
+            >>> handler._sanitize_tool_name("My Cool Tool (v2.0)")
+            'my-cool-tool-v2-0'
+            >>> handler._sanitize_tool_name("  Spaces & Special!Chars  ")
+            'spaces-special-chars'
+        """
+        # Replace non-alphanumeric with dash, lowercase
+        sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower())
+        # Remove leading/trailing dashes
+        sanitized = sanitized.strip("-")
+        # Truncate to Consul tag limit (63 chars is common limit for DNS labels)
+        return sanitized[:63]
 
     async def handle(
         self,
@@ -422,11 +456,19 @@ class HandlerNodeIntrospected:
 
         # Register with Consul for service discovery (dual registration)
         # This happens AFTER PostgreSQL persistence (source of truth)
+        # Pass MCP config from capabilities (if present) for MCP tag generation
+        mcp_config = (
+            event.declared_capabilities.mcp
+            if event.declared_capabilities is not None
+            else None
+        )
         await self._register_with_consul(
             node_id=node_id,
             node_type=event.node_type.value,
             endpoints=event.endpoints,
             correlation_id=correlation_id,
+            mcp_config=mcp_config,
+            node_name=event.metadata.description if event.metadata else None,
         )
 
         logger.info(
@@ -458,6 +500,8 @@ class HandlerNodeIntrospected:
         node_type: str,
         endpoints: dict[str, str] | None,
         correlation_id: UUID,
+        mcp_config: object | None = None,
+        node_name: str | None = None,
     ) -> None:
         """Register node with Consul for service discovery.
 
@@ -465,7 +509,15 @@ class HandlerNodeIntrospected:
         - service_name: `onex-{node_type}` (ONEX convention for service discovery)
         - service_id: `onex-{node_type}-{node_id}` (unique identifier)
         - tags: [`onex`, `node-type:{node_type}`]
+        - MCP tags (orchestrators only): [`mcp-enabled`, `mcp-tool:{tool_name}`]
         - address/port: Extracted from endpoints if available
+
+        MCP Tags:
+            MCP tags are added ONLY when:
+            1. node_type is "orchestrator"
+            2. mcp_config is provided with expose=True
+
+            This ensures only orchestrators can be exposed as MCP tools.
 
         This method is idempotent - re-registering the same service_id updates it.
         Errors are logged but not propagated (PostgreSQL is source of truth).
@@ -475,6 +527,8 @@ class HandlerNodeIntrospected:
             node_type: ONEX node type (effect, compute, reducer, orchestrator).
             endpoints: Optional dict of endpoint URLs from introspection event.
             correlation_id: Correlation ID for tracing.
+            mcp_config: Optional MCP configuration from capabilities.
+            node_name: Optional node name for MCP tool naming.
         """
         if self._consul_handler is None:
             logger.debug(
@@ -554,11 +608,42 @@ class HandlerNodeIntrospected:
                         },
                     )
 
+        # Build base tags
+        tags: list[str] = ["onex", f"node-type:{node_type}"]
+
+        # Add MCP tags for orchestrators with MCP config enabled
+        # MCP tags are ONLY added when:
+        # 1. node_type is "orchestrator" (enforces orchestrator-only rule)
+        # 2. mcp_config exists with expose=True
+        if node_type == "orchestrator" and mcp_config is not None:
+            # Check if mcp_config has expose attribute and it's True
+            mcp_expose = getattr(mcp_config, "expose", False)
+            if mcp_expose:
+                # Get tool name from mcp_config or fall back to node_name
+                mcp_tool_name_raw = getattr(mcp_config, "tool_name", None)
+                if not mcp_tool_name_raw:
+                    # Fall back to node_name (description), then service_name
+                    mcp_tool_name_raw = node_name or service_name
+                # Sanitize tool name for Consul tag safety
+                # node_name comes from metadata.description which can be free-form text
+                mcp_tool_name = self._sanitize_tool_name(mcp_tool_name_raw)
+                tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
+
+                logger.info(
+                    "Adding MCP tags to Consul registration",
+                    extra={
+                        "node_id": str(node_id),
+                        "tool_name": mcp_tool_name,
+                        "tool_name_raw": mcp_tool_name_raw,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
         # Build Consul registration payload
         consul_payload: dict[str, object] = {
             "name": service_name,
             "service_id": service_id,
-            "tags": ["onex", f"node-type:{node_type}"],
+            "tags": tags,
         }
         if address:
             consul_payload["address"] = address

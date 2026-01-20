@@ -51,6 +51,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+    from omnibase_infra.adapters.adapter_onex_tool_execution import (
+        AdapterONEXToolExecution,
+    )
+    from omnibase_infra.services.mcp.service_mcp_tool_registry import (
+        ServiceMCPToolRegistry,
+    )
     from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
         ProtocolMCPToolDefinition,
     )
@@ -110,12 +116,23 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         See: TODO(OMN-1288) for dispatcher integration tracking
     """
 
-    def __init__(self, container: ModelONEXContainer) -> None:
+    def __init__(
+        self,
+        container: ModelONEXContainer,
+        registry: ServiceMCPToolRegistry | None = None,
+        executor: AdapterONEXToolExecution | None = None,
+    ) -> None:
         """Initialize HandlerMCP with ONEX container for dependency injection.
 
         Args:
             container: ONEX container providing dependency injection for
                 services, configuration, and runtime context.
+            registry: Optional MCP tool registry for dynamic tool discovery.
+                If provided, tools are looked up from this registry. If not
+                provided, the handler uses its local _tool_registry dict.
+            executor: Optional tool execution adapter for dispatching to
+                ONEX orchestrators. If provided, tool calls are routed through
+                this adapter. If not provided, placeholder execution is used.
 
         Note:
             The container is stored for interface compliance with the standard ONEX
@@ -123,11 +140,23 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             to enable future DI-based service resolution (e.g., dispatcher routing,
             metrics integration). Currently, the handler operates independently but
             the container parameter ensures API consistency across all handlers.
+
+        MCP Integration (OMN-1281):
+            When registry and executor are provided, the handler operates in
+            "integrated mode" with full MCP tool discovery and execution:
+            - Tools are discovered from Consul via ServiceMCPToolDiscovery
+            - Tool list is cached in ServiceMCPToolRegistry
+            - Tool execution routes through AdapterONEXToolExecution
+            - Hot reload updates are received via ServiceMCPToolSync
         """
         self._container = container
         self._config: ModelMcpHandlerConfig | None = None
         self._initialized: bool = False
         self._tool_registry: dict[str, ProtocolMCPToolDefinition] = {}
+
+        # MCP integration components (OMN-1281)
+        self._mcp_registry: ServiceMCPToolRegistry | None = registry
+        self._mcp_executor: AdapterONEXToolExecution | None = executor
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -566,23 +595,23 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
     ) -> dict[str, object]:
         """Execute a registered tool.
 
-        This method delegates to the ONEX node that provides this tool.
-        The actual implementation will route through the ONEX dispatcher.
+        This method delegates to the ONEX orchestrator that provides this tool.
+        When operating in integrated mode (with registry and executor), the tool
+        is looked up from the MCP registry and executed via the execution adapter.
 
         Circuit breaker protection is applied to prevent cascading failures
         when tool execution repeatedly fails.
 
-        Timeout Enforcement:
-            The tool execution timeout (config.timeout_seconds, default: 30.0s)
-            will be enforced when dispatcher integration is complete. The timeout
-            will be applied using asyncio.wait_for() around the dispatcher call.
+        Integration Mode (OMN-1281):
+            When _mcp_registry and _mcp_executor are configured:
+            1. Look up the tool definition from the MCP registry
+            2. Delegate execution to AdapterONEXToolExecution
+            3. The adapter dispatches to the orchestrator endpoint
+            4. Timeout is enforced by the adapter using the tool's timeout_seconds
 
-            Currently, timeout enforcement is handled at the protocol level by:
-            - uvicorn request timeout settings
-            - MCP SDK's internal timeout handling
-            - HTTP client timeouts on the caller side
-
-            See: TODO(OMN-1288) for dispatcher timeout integration
+        Legacy Mode:
+            When registry/executor are not configured, returns placeholder response
+            for backward compatibility.
 
         Args:
             tool_name: Name of the tool to execute.
@@ -593,26 +622,54 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             Tool execution result.
 
         Raises:
-            InfraUnavailableError: If tool execution fails or circuit is open.
+            InfraUnavailableError: If tool not found or execution fails.
         """
         # Check circuit breaker before tool execution
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("execute_tool", correlation_id)
 
         try:
-            # TODO(OMN-1288): Implement actual tool execution via ONEX dispatcher
-            # Integration plan:
-            # 1. Look up the ONEX node that provides this tool from container registry
-            # 2. Build a ModelEventEnvelope for the node with proper correlation ID
-            # 3. Dispatch to the node via the ONEX runtime dispatcher
-            # 4. Apply timeout enforcement via asyncio.wait_for(dispatch(), timeout)
-            #    using self._config.timeout_seconds (default: 30.0s)
-            # 5. Transform the node response to MCP-compatible format
-            # 6. Handle dispatcher errors (timeout, node not found, execution failure)
-            #
-            # For now, return a placeholder response
+            # Integrated mode: use MCP registry and executor (OMN-1281)
+            if self._mcp_registry is not None and self._mcp_executor is not None:
+                # Look up tool from registry
+                tool = await self._mcp_registry.get_tool(tool_name)
+                if tool is None:
+                    ctx = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=self.transport_type,
+                        operation="execute_tool",
+                        target_name=tool_name,
+                    )
+                    raise InfraUnavailableError(
+                        f"Tool not found: {tool_name}",
+                        context=ctx,
+                    )
+
+                logger.info(
+                    "Executing MCP tool via adapter",
+                    extra={
+                        "tool_name": tool_name,
+                        "argument_count": len(arguments),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+                # Execute via adapter
+                result = await self._mcp_executor.execute(
+                    tool=tool,
+                    arguments=arguments,
+                    correlation_id=correlation_id,
+                )
+
+                # Reset circuit breaker on success
+                async with self._circuit_breaker_lock:
+                    await self._reset_circuit_breaker()
+
+                return result
+
+            # Legacy mode: placeholder response for backward compatibility
             logger.info(
-                "Tool execution requested",
+                "Tool execution requested (placeholder mode)",
                 extra={
                     "tool_name": tool_name,
                     "argument_count": len(arguments),
@@ -620,7 +677,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 },
             )
 
-            result: dict[str, object] = {
+            placeholder_result: dict[str, object] = {
                 "message": f"Tool '{tool_name}' executed successfully",
                 "arguments_received": list(arguments.keys()),
             }
@@ -629,7 +686,13 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            return result
+            return placeholder_result
+
+        except InfraUnavailableError:
+            # Record failure in circuit breaker and re-raise
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("execute_tool", correlation_id)
+            raise
 
         except Exception:
             # Record failure in circuit breaker
