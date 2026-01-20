@@ -515,93 +515,6 @@ class TestHandlerBootstrapSourceDescriptors:
 
 
 # =============================================================================
-# Graceful Mode Tests
-# =============================================================================
-
-
-class TestHandlerBootstrapSourceGracefulMode:
-    """Tests for graceful_mode parameter behavior.
-
-    The graceful_mode parameter is provided for API consistency with
-    HandlerContractSource, though bootstrap handlers rarely fail since
-    they are hardcoded definitions.
-    """
-
-    def test_graceful_mode_default_is_false(self) -> None:
-        """graceful_mode should default to False."""
-        source = HandlerBootstrapSource()
-
-        # Access the private attribute to verify default
-        assert source._graceful_mode is False
-
-    def test_graceful_mode_can_be_set_to_true(self) -> None:
-        """graceful_mode=True should be accepted."""
-        source = HandlerBootstrapSource(graceful_mode=True)
-
-        assert source._graceful_mode is True
-
-    def test_graceful_mode_can_be_set_to_false(self) -> None:
-        """graceful_mode=False should be accepted."""
-        source = HandlerBootstrapSource(graceful_mode=False)
-
-        assert source._graceful_mode is False
-
-    @pytest.mark.asyncio
-    async def test_graceful_mode_false_returns_same_result(self) -> None:
-        """graceful_mode=False should return the same handlers as default."""
-        source_default = HandlerBootstrapSource()
-        source_strict = HandlerBootstrapSource(graceful_mode=False)
-
-        result_default = await source_default.discover_handlers()
-        result_strict = await source_strict.discover_handlers()
-
-        assert len(result_default.descriptors) == len(result_strict.descriptors)
-        assert result_default.validation_errors == result_strict.validation_errors
-
-        # Verify same handler IDs
-        default_ids = {d.handler_id for d in result_default.descriptors}
-        strict_ids = {d.handler_id for d in result_strict.descriptors}
-        assert default_ids == strict_ids
-
-    @pytest.mark.asyncio
-    async def test_graceful_mode_true_returns_same_result(self) -> None:
-        """graceful_mode=True should return the same handlers.
-
-        Since bootstrap handlers are hardcoded and don't fail, graceful_mode
-        should not affect the result.
-        """
-        source_default = HandlerBootstrapSource()
-        source_graceful = HandlerBootstrapSource(graceful_mode=True)
-
-        result_default = await source_default.discover_handlers()
-        result_graceful = await source_graceful.discover_handlers()
-
-        assert len(result_default.descriptors) == len(result_graceful.descriptors)
-        assert result_default.validation_errors == result_graceful.validation_errors
-
-        # Verify same handler IDs
-        default_ids = {d.handler_id for d in result_default.descriptors}
-        graceful_ids = {d.handler_id for d in result_graceful.descriptors}
-        assert default_ids == graceful_ids
-
-    @pytest.mark.asyncio
-    async def test_validation_errors_empty_regardless_of_graceful_mode(self) -> None:
-        """validation_errors should be empty regardless of graceful_mode.
-
-        Bootstrap handlers are hardcoded and validated at development time,
-        so there should never be validation errors in either mode.
-        """
-        source_strict = HandlerBootstrapSource(graceful_mode=False)
-        source_graceful = HandlerBootstrapSource(graceful_mode=True)
-
-        result_strict = await source_strict.discover_handlers()
-        result_graceful = await source_graceful.discover_handlers()
-
-        assert result_strict.validation_errors == []
-        assert result_graceful.validation_errors == []
-
-
-# =============================================================================
 # Idempotency Tests
 # =============================================================================
 
@@ -1136,7 +1049,6 @@ __all__ = [
     "TestHandlerBootstrapSourceDescriptors",
     "TestHandlerBootstrapSourceDiscovery",
     "TestHandlerBootstrapSourceEdgeCases",
-    "TestHandlerBootstrapSourceGracefulMode",
     "TestHandlerBootstrapSourceIdempotency",
     "TestHandlerBootstrapSourceModelImportability",
     "TestHandlerBootstrapSourcePerformance",

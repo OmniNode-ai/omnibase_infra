@@ -213,14 +213,6 @@ class HandlerBootstrapSource(
         source_type property. Protocol compliance is verified at runtime through
         Python's structural subtyping and enforced by type checkers.
 
-    API Consistency Note:
-        The ``graceful_mode`` parameter is accepted but **currently unused**.
-        Bootstrap handlers are hardcoded definitions that cannot fail validation,
-        so error collection is never needed. The parameter exists solely to
-        maintain interface compatibility with :class:`HandlerContractSource`
-        and :class:`ProtocolContractSource`, enabling callers to use these
-        sources interchangeably without conditional parameter handling.
-
     Attributes:
         source_type: Returns "BOOTSTRAP" as the source type identifier.
 
@@ -246,28 +238,6 @@ class HandlerBootstrapSource(
     .. versionadded:: 0.6.4
         Created as part of OMN-1087 bootstrap handler registration.
     """
-
-    def __init__(
-        self,
-        graceful_mode: bool = False,
-    ) -> None:
-        """Initialize the bootstrap handler source.
-
-        Args:
-            graceful_mode: Error handling mode for API consistency.
-
-                **Note**: This parameter is currently unused. Bootstrap handlers
-                are hardcoded definitions that cannot fail validation, so error
-                collection logic is never invoked. The parameter is retained
-                solely to maintain a consistent interface with
-                :class:`ProtocolContractSource` implementations, enabling
-                interchangeable use with :class:`HandlerContractSource`.
-
-                When True, would collect errors and continue discovery.
-                When False (default), would raise on first error.
-        """
-        # Stored for API consistency only - bootstrap handlers cannot fail validation
-        self._graceful_mode = graceful_mode
 
     @property
     def source_type(self) -> str:
@@ -306,7 +276,6 @@ class HandlerBootstrapSource(
             "Starting bootstrap handler discovery",
             extra={
                 "source_type": SOURCE_TYPE_BOOTSTRAP,
-                "graceful_mode": self._graceful_mode,
                 "expected_handler_count": len(_BOOTSTRAP_HANDLER_DEFINITIONS),
             },
         )
@@ -375,7 +344,6 @@ class HandlerBootstrapSource(
                 "discovered_handler_count": discovered_count,
                 "validation_failure_count": 0,
                 "source_type": SOURCE_TYPE_BOOTSTRAP,
-                "graceful_mode": self._graceful_mode,
                 "duration_seconds": duration_seconds,
                 "handlers_per_second": handlers_per_sec,
             },
