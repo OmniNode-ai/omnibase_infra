@@ -647,25 +647,32 @@ class TestRuntimeHostProcessLifecycle:
             await process.stop()
 
     @pytest.mark.asyncio
-    async def test_start_wires_handlers(self) -> None:
-        """Test that start() wires handlers via the wiring module.
+    async def test_start_registers_bootstrap_handlers(self) -> None:
+        """Test that start() registers bootstrap handlers.
 
-        The RuntimeHostProcess should use the wiring module to register
-        all configured handlers when started.
+        The RuntimeHostProcess should register bootstrap handlers (consul, db,
+        http, vault) via HandlerBootstrapSource when started.
         """
+        from omnibase_infra.runtime.handler_registry import (
+            HANDLER_TYPE_CONSUL,
+            HANDLER_TYPE_DATABASE,
+            HANDLER_TYPE_HTTP,
+            HANDLER_TYPE_VAULT,
+            get_handler_registry,
+        )
 
         process = RuntimeHostProcess()
+        await process.start()
 
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
-        ) as mock_wire:
-            mock_wire.return_value = {}
-            await process.start()
-
-            try:
-                mock_wire.assert_called_once()
-            finally:
-                await process.stop()
+        try:
+            # Verify bootstrap handlers are registered
+            registry = get_handler_registry()
+            assert registry.is_registered(HANDLER_TYPE_CONSUL)
+            assert registry.is_registered(HANDLER_TYPE_DATABASE)
+            assert registry.is_registered(HANDLER_TYPE_HTTP)
+            assert registry.is_registered(HANDLER_TYPE_VAULT)
+        finally:
+            await process.stop()
 
     @pytest.mark.asyncio
     async def test_start_subscribes_to_input_topic(self) -> None:

@@ -968,10 +968,10 @@ class RuntimeHostProcess:
         logger.info("RuntimeHostProcess stopped successfully")
 
     async def _discover_or_wire_handlers(self) -> None:
-        """Discover handlers from contracts or wire default handlers.
+        """Discover and register handlers for the runtime.
 
         This method implements the handler discovery/wiring step (Step 3) of the
-        start() sequence. It supports two modes:
+        start() sequence.
 
         Bootstrap Handlers (OMN-1087):
             Bootstrap handlers (Consul, DB, HTTP, Vault) are ALWAYS registered first
@@ -981,23 +981,17 @@ class RuntimeHostProcess:
 
         Contract-Based Discovery (OMN-1133):
             If contract_paths were provided at init, uses ContractHandlerDiscovery
-            to auto-discover and register handlers from the specified paths.
+            to auto-discover and register additional handlers from the specified paths.
 
             Discovery errors are logged but do not block startup, enabling
             graceful degradation where some handlers can be registered even
             if others fail to load.
 
-        Default Handler Wiring (Fallback):
-            If no contract_paths were provided, falls back to wire_default_handlers()
-            which registers the standard set of handlers (HTTP, DB, Consul, Vault).
-            Note: With bootstrap handlers now registered first, this fallback may
-            be redundant but is kept for backward compatibility.
-
         The discovery/wiring step registers handler CLASSES with the handler registry.
         The subsequent _populate_handlers_from_registry() step instantiates and
         initializes these handler classes.
         """
-        # Step 3a: Register bootstrap handlers FIRST (OMN-1087)
+        # Register bootstrap handlers FIRST (OMN-1087)
         # Bootstrap handlers are core infrastructure handlers that are always
         # available, loaded from HandlerBootstrapSource descriptors.
         await self._register_bootstrap_handlers()
@@ -1005,11 +999,6 @@ class RuntimeHostProcess:
         if self._contract_paths:
             # Contract-based handler discovery (OMN-1133)
             await self._discover_handlers_from_contracts()
-        else:
-            # Fallback to default handler wiring (existing behavior)
-            # Note: Bootstrap handlers already registered above, so this may
-            # register duplicates which is safe (overwrites previous)
-            wire_handlers()
 
     async def _discover_handlers_from_contracts(self) -> None:
         """Discover and register handlers from contract files.

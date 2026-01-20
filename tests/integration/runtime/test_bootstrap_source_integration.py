@@ -155,7 +155,7 @@ class TestBootstrapSourceRuntimeIntegration:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
-            # No contract_paths - uses wire_default_handlers fallback
+            # No contract_paths - bootstrap handlers provide core infrastructure
         )
 
         try:
@@ -359,7 +359,7 @@ class TestBootstrapSourceErrorHandling:
         """Runtime continues if bootstrap source returns empty descriptors.
 
         Verifies that if HandlerBootstrapSource somehow returns no descriptors,
-        the runtime still continues (using fallback wiring).
+        the runtime still starts (graceful degradation).
         """
         event_bus = EventBusInmemory()
 
@@ -384,7 +384,7 @@ class TestBootstrapSourceErrorHandling:
             try:
                 await process.start()
 
-                # Process should still start (wire_default_handlers fallback)
+                # Process should still start (graceful degradation)
                 assert process.is_running
 
             finally:
