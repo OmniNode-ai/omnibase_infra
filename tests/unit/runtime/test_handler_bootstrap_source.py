@@ -791,6 +791,293 @@ class TestHandlerBootstrapSourceEdgeCases:
 
 
 # =============================================================================
+# Model Path Importability Tests (OMN-1087 Review Feedback)
+# =============================================================================
+
+
+class TestHandlerBootstrapSourceModelImportability:
+    """Tests for input_model and output_model path importability.
+
+    These tests verify that all model paths specified in bootstrap handlers
+    can be dynamically imported, catching path errors or refactoring issues early.
+
+    Added per OMN-1087 PR review recommendation to add test coverage for
+    input_model and output_model importability.
+    """
+
+    @pytest.mark.asyncio
+    async def test_all_input_models_are_importable(self) -> None:
+        """Verify all bootstrap handler input_model paths can be dynamically imported.
+
+        This test ensures that input_model paths are valid and importable,
+        catching issues like:
+        - Wrong module path (e.g., omnibase_core.types.JsonDict vs omnibase_infra.models.types.JsonDict)
+        - Missing types after refactoring
+        - Typos in module paths
+        """
+        import importlib
+
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+
+        for descriptor in result.descriptors:
+            input_model_path = descriptor.input_model
+            assert input_model_path, (
+                f"Handler {descriptor.handler_id} missing input_model"
+            )
+
+            # Split into module and type name
+            module_path, type_name = input_model_path.rsplit(".", 1)
+
+            # Attempt to import the module
+            try:
+                module = importlib.import_module(module_path)
+            except ImportError as e:
+                pytest.fail(
+                    f"Handler {descriptor.handler_id}: Could not import input_model "
+                    f"module '{module_path}': {e}"
+                )
+
+            # Verify the type exists in the module
+            assert hasattr(module, type_name), (
+                f"Handler {descriptor.handler_id}: input_model type '{type_name}' "
+                f"not found in module '{module_path}'"
+            )
+
+    @pytest.mark.asyncio
+    async def test_all_output_models_are_importable(self) -> None:
+        """Verify all bootstrap handler output_model paths can be dynamically imported.
+
+        This test ensures that output_model paths are valid and importable,
+        catching refactoring issues (renamed/moved models) early.
+        """
+        import importlib
+
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+
+        for descriptor in result.descriptors:
+            output_model_path = descriptor.output_model
+            assert output_model_path, (
+                f"Handler {descriptor.handler_id} missing output_model"
+            )
+
+            # Split into module and type name
+            module_path, type_name = output_model_path.rsplit(".", 1)
+
+            # Attempt to import the module
+            try:
+                module = importlib.import_module(module_path)
+            except ImportError as e:
+                pytest.fail(
+                    f"Handler {descriptor.handler_id}: Could not import output_model "
+                    f"module '{module_path}': {e}"
+                )
+
+            # Verify the type exists in the module
+            assert hasattr(module, type_name), (
+                f"Handler {descriptor.handler_id}: output_model type '{type_name}' "
+                f"not found in module '{module_path}'"
+            )
+
+            # Verify it's a class (Pydantic model)
+            model_cls = getattr(module, type_name)
+            assert isinstance(model_cls, type), (
+                f"Handler {descriptor.handler_id}: output_model '{type_name}' is not a class"
+            )
+
+    @pytest.mark.asyncio
+    async def test_input_model_jsondict_is_correct_type(self) -> None:
+        """Verify JsonDict input_model is the correct type alias.
+
+        JsonDict should be dict[str, object] from omnibase_infra.models.types.
+        This test catches path confusion between omnibase_core and omnibase_infra.
+        """
+        from omnibase_infra.models.types import JsonDict
+
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+
+        # All bootstrap handlers should use JsonDict from omnibase_infra
+        expected_path = "omnibase_infra.models.types.JsonDict"
+        for descriptor in result.descriptors:
+            assert descriptor.input_model == expected_path, (
+                f"Handler {descriptor.handler_id} uses '{descriptor.input_model}', "
+                f"expected '{expected_path}'"
+            )
+
+        # Verify JsonDict is the correct type alias
+        # JsonDict is dict[str, object] per CLAUDE.md guidelines
+        assert JsonDict is not None
+
+    @pytest.mark.asyncio
+    async def test_output_model_handler_output_is_pydantic_model(self) -> None:
+        """Verify ModelHandlerOutput output_model is a valid Pydantic model.
+
+        This ensures the output model path points to a proper Pydantic BaseModel
+        that can be used for response serialization.
+        """
+        from pydantic import BaseModel
+
+        from omnibase_core.models.dispatch import ModelHandlerOutput
+
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+
+        # All bootstrap handlers should use ModelHandlerOutput
+        expected_path = "omnibase_core.models.dispatch.ModelHandlerOutput"
+        for descriptor in result.descriptors:
+            assert descriptor.output_model == expected_path, (
+                f"Handler {descriptor.handler_id} uses '{descriptor.output_model}', "
+                f"expected '{expected_path}'"
+            )
+
+        # Verify ModelHandlerOutput is a Pydantic model
+        assert issubclass(ModelHandlerOutput, BaseModel), (
+            "ModelHandlerOutput should be a Pydantic BaseModel"
+        )
+
+
+# =============================================================================
+# Concurrent Discovery Thread Safety Tests (OMN-1087 Review Feedback)
+# =============================================================================
+
+
+class TestHandlerBootstrapSourceThreadSafety:
+    """Tests for concurrent discovery thread safety.
+
+    These tests verify that HandlerBootstrapSource.discover_handlers() is
+    thread-safe and can be called concurrently without race conditions.
+
+    Added per OMN-1087 PR review recommendation for concurrent discovery tests.
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_discovery_returns_consistent_results(self) -> None:
+        """Multiple concurrent discover_handlers() calls should return consistent results.
+
+        This tests that the double-checked locking pattern in _ensure_model_rebuilt()
+        works correctly under concurrent access.
+        """
+        import asyncio
+
+        source = HandlerBootstrapSource()
+        concurrent_count = 10
+
+        # Run multiple discover_handlers() calls concurrently
+        tasks = [source.discover_handlers() for _ in range(concurrent_count)]
+        results = await asyncio.gather(*tasks)
+
+        # All results should have the same handler count
+        handler_counts = [len(r.descriptors) for r in results]
+        assert all(count == handler_counts[0] for count in handler_counts), (
+            f"Inconsistent handler counts from concurrent calls: {handler_counts}"
+        )
+
+        # All results should have the same handler IDs
+        reference_ids = {d.handler_id for d in results[0].descriptors}
+        for i, result in enumerate(results[1:], start=2):
+            result_ids = {d.handler_id for d in result.descriptors}
+            assert result_ids == reference_ids, (
+                f"Result {i} has different handler IDs than result 1"
+            )
+
+    @pytest.mark.asyncio
+    async def test_concurrent_discovery_with_multiple_sources(self) -> None:
+        """Multiple HandlerBootstrapSource instances accessed concurrently.
+
+        This tests that multiple independent sources work correctly when
+        their discover_handlers() methods are called concurrently.
+        """
+        import asyncio
+
+        source_count = 5
+
+        async def discover_from_new_source() -> set[str]:
+            source = HandlerBootstrapSource()
+            result = await source.discover_handlers()
+            return {d.handler_id for d in result.descriptors}
+
+        # Run discovery on multiple source instances concurrently
+        tasks = [discover_from_new_source() for _ in range(source_count)]
+        results = await asyncio.gather(*tasks)
+
+        # All results should have the same handler IDs
+        reference_ids = results[0]
+        for i, result_ids in enumerate(results[1:], start=2):
+            assert result_ids == reference_ids, (
+                f"Source {i} returned different handler IDs"
+            )
+
+    def test_model_rebuild_lock_is_thread_safe(self) -> None:
+        """The _ensure_model_rebuilt() function should be thread-safe.
+
+        This tests the thread safety of the model rebuild initialization
+        using actual threads (not asyncio).
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        from omnibase_infra.runtime.handler_bootstrap_source import (
+            _ensure_model_rebuilt,
+        )
+
+        thread_count = 20
+        results: list[bool] = []
+        exceptions: list[Exception] = []
+        lock = threading.Lock()
+
+        def call_ensure_rebuild() -> bool:
+            try:
+                _ensure_model_rebuilt()
+                return True
+            except Exception as e:
+                with lock:
+                    exceptions.append(e)
+                return False
+
+        # Call _ensure_model_rebuilt from multiple threads simultaneously
+        with ThreadPoolExecutor(max_workers=thread_count) as executor:
+            futures = [
+                executor.submit(call_ensure_rebuild) for _ in range(thread_count)
+            ]
+            for future in as_completed(futures):
+                with lock:
+                    results.append(future.result())
+
+        # All calls should succeed
+        assert all(results), f"Some threads failed: {exceptions}"
+        assert len(exceptions) == 0, (
+            f"Exceptions during concurrent rebuild: {exceptions}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rapid_concurrent_discovery_stress(self) -> None:
+        """Stress test with many rapid concurrent discovery calls.
+
+        This tests behavior under high concurrency to catch subtle
+        race conditions in the discovery process.
+        """
+        import asyncio
+
+        source = HandlerBootstrapSource()
+        concurrent_count = 50
+
+        # Run many discover_handlers() calls concurrently
+        tasks = [source.discover_handlers() for _ in range(concurrent_count)]
+        results = await asyncio.gather(*tasks)
+
+        # Verify all results are valid
+        for i, result in enumerate(results):
+            assert len(result.descriptors) == 4, (
+                f"Result {i + 1} has wrong handler count: {len(result.descriptors)}"
+            )
+            assert result.validation_errors == [], (
+                f"Result {i + 1} has validation errors"
+            )
+
+
+# =============================================================================
 # Performance Characteristics Tests
 # =============================================================================
 
@@ -851,6 +1138,8 @@ __all__ = [
     "TestHandlerBootstrapSourceEdgeCases",
     "TestHandlerBootstrapSourceGracefulMode",
     "TestHandlerBootstrapSourceIdempotency",
+    "TestHandlerBootstrapSourceModelImportability",
     "TestHandlerBootstrapSourcePerformance",
     "TestHandlerBootstrapSourceProtocolCompliance",
+    "TestHandlerBootstrapSourceThreadSafety",
 ]
