@@ -1136,12 +1136,8 @@ class RuntimeHostProcess:
                 # Extract protocol type from handler_id
                 # Handler IDs are formatted as "bootstrap.{protocol_type}"
                 # e.g., "bootstrap.consul" -> "consul"
-                handler_id = descriptor.handler_id
-                if handler_id.startswith("bootstrap."):
-                    protocol_type = handler_id[len("bootstrap.") :]
-                else:
-                    # Fallback: use full handler_id as protocol type
-                    protocol_type = handler_id
+                # removeprefix returns original string if prefix not found
+                protocol_type = descriptor.handler_id.removeprefix("bootstrap.")
 
                 # Import the handler class from fully qualified path
                 handler_class_path = descriptor.handler_class
@@ -1149,7 +1145,7 @@ class RuntimeHostProcess:
                     logger.warning(
                         "Bootstrap handler missing handler_class, skipping",
                         extra={
-                            "handler_id": handler_id,
+                            "handler_id": descriptor.handler_id,
                             "handler_name": descriptor.name,
                         },
                     )
@@ -1161,7 +1157,7 @@ class RuntimeHostProcess:
                     logger.error(
                         "Invalid handler class path (must be fully qualified): %s",
                         handler_class_path,
-                        extra={"handler_id": handler_id},
+                        extra={"handler_id": descriptor.handler_id},
                     )
                     error_count += 1
                     continue
@@ -1176,7 +1172,7 @@ class RuntimeHostProcess:
                         "Handler path does not resolve to a class: %s",
                         handler_class_path,
                         extra={
-                            "handler_id": handler_id,
+                            "handler_id": descriptor.handler_id,
                             "resolved_type": type(handler_cls).__name__,
                         },
                     )
@@ -1192,7 +1188,7 @@ class RuntimeHostProcess:
                     protocol_type,
                     handler_class_path,
                     extra={
-                        "handler_id": handler_id,
+                        "handler_id": descriptor.handler_id,
                         "protocol_type": protocol_type,
                         "handler_class": handler_class_path,
                         "source_type": SOURCE_TYPE_BOOTSTRAP,

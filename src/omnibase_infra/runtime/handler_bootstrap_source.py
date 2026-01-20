@@ -386,13 +386,12 @@ class HandlerBootstrapSource(
         # Cap handlers_per_sec at 1M to avoid float("inf") which can cause issues
         # in downstream logging/monitoring systems expecting finite numbers.
         # A value of 1M represents "effectively instant" discovery.
-        handlers_per_sec = (
-            discovered_count / duration_seconds
-            if duration_seconds > 0
-            else 1_000_000.0
-            if discovered_count > 0
-            else 0.0
-        )
+        if duration_seconds > 0:
+            handlers_per_sec = discovered_count / duration_seconds
+        elif discovered_count > 0:
+            handlers_per_sec = 1_000_000.0  # Cap for instant discovery
+        else:
+            handlers_per_sec = 0.0
 
         logger.info(
             "Bootstrap handler discovery completed: "
