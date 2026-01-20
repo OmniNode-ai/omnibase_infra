@@ -893,7 +893,7 @@ def enforce_execution_shape(node_archetype: EnumNodeArchetype) -> Callable[[F], 
 
         # Cast wrapper to F - functools.wraps preserves the signature at runtime,
         # and mypy cannot prove the equivalence, so we use an explicit cast.
-        return cast(F, wrapper)
+        return cast("F", wrapper)
 
     return decorator
 

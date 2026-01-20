@@ -80,14 +80,14 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
 
         try:
             # Retrieve JSON data with safe default
-            json_data = cast(object, input_data.get("json", {}))
+            json_data = cast("object", input_data.get("json", {}))
 
             # Perform pure deterministic computation
             normalized = self._sort_keys_recursively(json_data)
 
             # Return result with correlation_id for tracing
             return cast(
-                ModelPluginOutputData,
+                "ModelPluginOutputData",
                 {
                     "normalized": normalized,
                     "correlation_id": correlation_id,

@@ -176,7 +176,7 @@ class MixinConsulKV:
             get_func,
             correlation_id,
         )
-        index, data = cast(KVGetResult, result)
+        index, data = cast("KVGetResult", result)
 
         # Handle response - data can be None if key doesn't exist
         if data is None:
@@ -325,7 +325,7 @@ class MixinConsulKV:
             put_func,
             correlation_id,
         )
-        success = cast(bool, result)
+        success = cast("bool", result)
 
         typed_payload = ModelConsulKVPutPayload(
             success=success,

@@ -562,7 +562,7 @@ class PerformanceCollector:
         print(f"Passed: {summary['passed_count']}, Failed: {summary['failed_count']}")
         print(f"Total time: {summary['total_time_ms']:.2f}ms")
 
-        if cast(int, summary["total_operations"]) > 1:
+        if cast("int", summary["total_operations"]) > 1:
             print(
                 f"Range: {summary['min_time_ms']:.2f}ms - {summary['max_time_ms']:.2f}ms"
             )

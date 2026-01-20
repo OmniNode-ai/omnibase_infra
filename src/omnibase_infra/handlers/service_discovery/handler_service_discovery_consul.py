@@ -567,15 +567,15 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
             service_infos: list[ModelServiceInfo] = []
             for svc in services:
                 # Cast nested dicts for type safety
-                svc_data = cast(dict[str, object], svc.get("Service", {}))
-                node_data = cast(dict[str, object], svc.get("Node", {}))
+                svc_data = cast("dict[str, object]", svc.get("Service", {}))
+                node_data = cast("dict[str, object]", svc.get("Node", {}))
                 svc_id_str = str(svc_data.get("ID", ""))
                 svc_name = svc_data.get("Service", "")
                 address = svc_data.get("Address", "") or node_data.get("Address", "")
                 port_raw = svc_data.get("Port", 0)
                 port = int(port_raw) if isinstance(port_raw, int | float | str) else 0
-                svc_tags = cast(list[str], svc_data.get("Tags", []))
-                svc_meta = cast(dict[str, str], svc_data.get("Meta", {}))
+                svc_tags = cast("list[str]", svc_data.get("Tags", []))
+                svc_meta = cast("dict[str, str]", svc_data.get("Meta", {}))
 
                 if svc_id_str and svc_name and address and port:
                     # Convert Consul service ID string to UUID

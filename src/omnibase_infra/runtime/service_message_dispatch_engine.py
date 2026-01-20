@@ -1512,7 +1512,9 @@ class MessageDispatchEngine:
 
             if context is not None:
                 # Context-aware sync dispatcher
-                sync_ctx_dispatcher = cast(_SyncContextAwareDispatcherFunc, dispatcher)
+                sync_ctx_dispatcher = cast(
+                    "_SyncContextAwareDispatcherFunc", dispatcher
+                )
                 return await loop.run_in_executor(
                     None,
                     sync_ctx_dispatcher,
@@ -1524,7 +1526,7 @@ class MessageDispatchEngine:
             else:
                 # Cast to sync-only type - safe because iscoroutinefunction check above
                 # guarantees this branch only executes for non-async callables
-                sync_dispatcher = cast(_SyncDispatcherFunc, dispatcher)
+                sync_dispatcher = cast("_SyncDispatcherFunc", dispatcher)
                 return await loop.run_in_executor(
                     None,
                     sync_dispatcher,

@@ -654,9 +654,9 @@ class TestDLQPreservesOriginal:
         # Verify complex structure is preserved
         assert preserved == complex_message
         # Use nested access via cast for type-safe deep value verification
-        nested = cast(dict[str, object], preserved["nested"])
-        level1 = cast(dict[str, object], nested["level1"])
-        level2 = cast(dict[str, str], level1["level2"])
+        nested = cast("dict[str, object]", preserved["nested"])
+        level1 = cast("dict[str, object]", nested["level1"])
+        level2 = cast("dict[str, str]", level1["level2"])
         assert level2["value"] == "deep"
         assert preserved["array"] == [1, 2, 3, {"key": "value"}]
 
