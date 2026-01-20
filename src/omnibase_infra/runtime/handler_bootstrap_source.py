@@ -98,14 +98,23 @@ def _ensure_model_rebuilt() -> None:
         if _model_rebuild_state[0]:
             return
 
-        # Import ModelHandlerValidationError here to avoid circular import at module load
+        # Import ModelHandlerValidationError here to avoid circular import at module load.
+        # This import MUST be in scope when model_rebuild() is called, as Pydantic uses
+        # the local namespace to resolve forward references in the validation_errors field.
         from omnibase_infra.models.errors import ModelHandlerValidationError
 
-        # Rebuild the model to resolve forward references
-        # This needs ModelHandlerValidationError in scope for Pydantic to resolve the type
-        ModelContractDiscoveryResult.model_rebuild()
+        # Rebuild the model to resolve forward references.
+        # If this fails, provide a clear error message rather than obscure Pydantic errors.
+        try:
+            ModelContractDiscoveryResult.model_rebuild()
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to rebuild ModelContractDiscoveryResult during bootstrap "
+                f"initialization. This typically indicates a circular import or missing "
+                f"type definition: {e}"
+            ) from e
 
-        # Suppress unused variable warning - the import is needed for model_rebuild()
+        # Keep import reference in scope - required for Pydantic forward reference resolution
         _ = ModelHandlerValidationError
         _model_rebuild_state[0] = True
 
