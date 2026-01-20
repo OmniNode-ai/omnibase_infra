@@ -26,9 +26,7 @@ from __future__ import annotations
 from pydantic import ConfigDict, Field
 
 from omnibase_infra.models.handlers.model_handler_descriptor import (
-    LiteralHandlerKind,
     ModelHandlerDescriptor,
-    _VersionField,
 )
 
 
