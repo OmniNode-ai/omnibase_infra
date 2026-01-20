@@ -23,7 +23,12 @@ class TestValidatorSecurity:
 
     @pytest.fixture
     def contract(self) -> ModelValidatorSubcontract:
-        """Create a test contract with all rules enabled."""
+        """Create a test contract with all rules enabled.
+
+        NOTE: Patterns are now read from contract.rules[].parameters instead of
+        being hardcoded in the validator (OMN-1277). All rules must include their
+        patterns in the parameters field.
+        """
         return ModelValidatorSubcontract(
             version=ModelSemVer(major=1, minor=0, patch=0),
             validator_id="security",
@@ -37,24 +42,66 @@ class TestValidatorSecurity:
                     "description": "Detects sensitive methods",
                     "severity": EnumSeverity.ERROR,
                     "enabled": True,
+                    "parameters": {
+                        "patterns": [
+                            "^get_password$",
+                            "^get_secret$",
+                            "^get_token$",
+                            "^get_api_key$",
+                            "^get_credential",
+                            "^fetch_password$",
+                            "^fetch_secret$",
+                            "^fetch_token$",
+                            "^validate_password$",
+                            "^check_password$",
+                            "^verify_password$",
+                        ],
+                    },
                 },
                 {
                     "rule_id": "credential_in_signature",
                     "description": "Detects credential in signatures",
                     "severity": EnumSeverity.ERROR,
                     "enabled": True,
+                    "parameters": {
+                        "sensitive_params": [
+                            "password",
+                            "secret",
+                            "token",
+                            "api_key",
+                            "apikey",
+                            "access_key",
+                            "private_key",
+                            "credential",
+                            "auth_token",
+                            "bearer_token",
+                            "decrypt_key",
+                            "encryption_key",
+                        ],
+                    },
                 },
                 {
                     "rule_id": "admin_method_public",
                     "description": "Detects admin methods",
                     "severity": EnumSeverity.WARNING,
                     "enabled": True,
+                    "parameters": {
+                        "patterns": [
+                            "^admin_",
+                            "^internal_",
+                        ],
+                    },
                 },
                 {
                     "rule_id": "decrypt_method_public",
                     "description": "Detects decrypt methods",
                     "severity": EnumSeverity.WARNING,
                     "enabled": True,
+                    "parameters": {
+                        "patterns": [
+                            "^decrypt_",
+                        ],
+                    },
                 },
             ],
             suppression_comments=["# ONEX_EXCLUDE: security", "# security-ok:"],
@@ -201,6 +248,13 @@ class TestValidatorSecurity:
                     "description": "Detects sensitive methods",
                     "severity": EnumSeverity.ERROR,
                     "enabled": True,
+                    "parameters": {
+                        "patterns": [
+                            "^get_password$",
+                            "^get_secret$",
+                            "^get_token$",
+                        ],
+                    },
                 },
             ],
             fail_on_error=False,
@@ -249,6 +303,13 @@ class TestValidatorSecurity:
                     "description": "Detects sensitive methods",
                     "severity": EnumSeverity.ERROR,
                     "enabled": False,
+                    "parameters": {
+                        "patterns": [
+                            "^get_password$",
+                            "^get_secret$",
+                            "^get_token$",
+                        ],
+                    },
                 },
             ],
         )

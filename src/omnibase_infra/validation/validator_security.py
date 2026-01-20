@@ -97,6 +97,56 @@ class ValidatorSecurity(ValidatorBase):
     # ONEX_EXCLUDE: string_id - human-readable validator identifier
     validator_id: ClassVar[str] = "security"
 
+    def _get_rule_patterns(
+        self,
+        rule_id: str,
+        param_key: str,
+        contract: ModelValidatorSubcontract,
+    ) -> list[str]:
+        """Extract patterns from a rule's parameters in the contract.
+
+        Searches the contract's rules for the specified rule_id and extracts
+        the list of patterns from the specified parameter key.
+
+        Args:
+            rule_id: The rule identifier to look up (e.g., "sensitive_method_exposed").
+            param_key: The parameter key containing the patterns (e.g., "patterns").
+            contract: Validator contract with rule configurations.
+
+        Returns:
+            List of pattern strings from the rule's parameters. Returns an empty
+            list if the rule is not found, has no parameters, or the param_key
+            is missing/invalid (fail-safe behavior).
+        """
+        for rule in contract.rules:
+            if rule.rule_id == rule_id:
+                if rule.parameters is None:
+                    logger.debug(
+                        "Rule %s has no parameters, returning empty list",
+                        rule_id,
+                    )
+                    return []
+                patterns = rule.parameters.get(param_key)
+                if patterns is None:
+                    logger.debug(
+                        "Rule %s missing param_key %s, returning empty list",
+                        rule_id,
+                        param_key,
+                    )
+                    return []
+                if isinstance(patterns, list):
+                    # Ensure all items are strings
+                    return [str(p) for p in patterns]
+                logger.warning(
+                    "Rule %s param_key %s is not a list: %s",
+                    rule_id,
+                    param_key,
+                    type(patterns).__name__,
+                )
+                return []
+        logger.debug("Rule %s not found in contract, returning empty list", rule_id)
+        return []
+
     def _validate_file(
         self,
         path: Path,
@@ -199,12 +249,19 @@ class ValidatorSecurity(ValidatorBase):
         self,
         ctx: MethodContext,
     ) -> list[ModelValidationIssue]:
-        """Check if method name matches sensitive patterns."""
+        """Check if method name matches sensitive patterns.
+
+        Patterns are read from contract.rules[].parameters instead of being
+        hardcoded, allowing configuration via YAML contracts.
+        """
         issues: list[ModelValidationIssue] = []
         method_lower = ctx.method_name.lower()
 
         # Check admin/internal patterns (rule: admin_method_public)
-        admin_patterns = [r"^admin_", r"^internal_"]
+        # Read patterns from contract parameters
+        admin_patterns = self._get_rule_patterns(
+            "admin_method_public", "patterns", ctx.contract
+        )
         for pattern in admin_patterns:
             if re.match(pattern, method_lower):
                 enabled, severity = self._get_rule_config(
@@ -230,43 +287,39 @@ class ValidatorSecurity(ValidatorBase):
                 return issues  # Don't double-report
 
         # Check decrypt patterns (rule: decrypt_method_public)
-        if re.match(r"^decrypt_", method_lower):
-            enabled, severity = self._get_rule_config(
-                "decrypt_method_public", ctx.contract
-            )
-            if enabled:
-                issues.append(
-                    ModelValidationIssue(
-                        severity=severity,
-                        message=f"Class '{ctx.class_name}' exposes decrypt method '{ctx.method_name}'",
-                        code="decrypt_method_public",
-                        file_path=ctx.file_path,
-                        line_number=ctx.line_number,
-                        rule_name="decrypt_method_public",
-                        suggestion=f"Prefix method with underscore: '_{ctx.method_name}' to exclude from public API",
-                        context={
-                            "class_name": ctx.class_name,
-                            "method_name": ctx.method_name,
-                            "violation_type": "decrypt_method_public",
-                        },
-                    )
+        # Read patterns from contract parameters
+        decrypt_patterns = self._get_rule_patterns(
+            "decrypt_method_public", "patterns", ctx.contract
+        )
+        for pattern in decrypt_patterns:
+            if re.match(pattern, method_lower):
+                enabled, severity = self._get_rule_config(
+                    "decrypt_method_public", ctx.contract
                 )
-            return issues  # Don't double-report
+                if enabled:
+                    issues.append(
+                        ModelValidationIssue(
+                            severity=severity,
+                            message=f"Class '{ctx.class_name}' exposes decrypt method '{ctx.method_name}'",
+                            code="decrypt_method_public",
+                            file_path=ctx.file_path,
+                            line_number=ctx.line_number,
+                            rule_name="decrypt_method_public",
+                            suggestion=f"Prefix method with underscore: '_{ctx.method_name}' to exclude from public API",
+                            context={
+                                "class_name": ctx.class_name,
+                                "method_name": ctx.method_name,
+                                "violation_type": "decrypt_method_public",
+                            },
+                        )
+                    )
+                return issues  # Don't double-report
 
         # Check other sensitive patterns (rule: sensitive_method_exposed)
-        sensitive_patterns = [
-            r"^get_password$",
-            r"^get_secret$",
-            r"^get_token$",
-            r"^get_api_key$",
-            r"^get_credential",
-            r"^fetch_password$",
-            r"^fetch_secret$",
-            r"^fetch_token$",
-            r"^validate_password$",
-            r"^check_password$",
-            r"^verify_password$",
-        ]
+        # Read patterns from contract parameters
+        sensitive_patterns = self._get_rule_patterns(
+            "sensitive_method_exposed", "patterns", ctx.contract
+        )
 
         for pattern in sensitive_patterns:
             if re.match(pattern, method_lower):
@@ -299,7 +352,11 @@ class ValidatorSecurity(ValidatorBase):
         method_node: ast.FunctionDef | ast.AsyncFunctionDef,
         ctx: MethodContext,
     ) -> list[ModelValidationIssue]:
-        """Check method signature for sensitive parameter names."""
+        """Check method signature for sensitive parameter names.
+
+        Sensitive parameter names are read from contract.rules[].parameters
+        instead of being hardcoded, allowing configuration via YAML contracts.
+        """
         issues: list[ModelValidationIssue] = []
 
         # Get rule configuration
@@ -309,21 +366,16 @@ class ValidatorSecurity(ValidatorBase):
         if not enabled:
             return issues
 
-        # Sensitive parameter names to check
-        sensitive_params = {
-            "password",
-            "secret",
-            "token",
-            "api_key",
-            "apikey",
-            "access_key",
-            "private_key",
-            "credential",
-            "auth_token",
-            "bearer_token",
-            "decrypt_key",
-            "encryption_key",
-        }
+        # Read sensitive parameter names from contract parameters
+        sensitive_params_list = self._get_rule_patterns(
+            "credential_in_signature", "sensitive_params", ctx.contract
+        )
+        # Convert to set for O(1) lookup (patterns are exact strings, not regex)
+        sensitive_params = {p.lower() for p in sensitive_params_list}
+
+        # If no patterns defined in contract, return early (fail-safe)
+        if not sensitive_params:
+            return issues
 
         # Extract parameter names from AST
         found_sensitive: list[str] = []
@@ -332,8 +384,16 @@ class ValidatorSecurity(ValidatorBase):
             if arg_name_lower in sensitive_params:
                 found_sensitive.append(arg.arg)
 
-        # Also check keyword-only args
+        # Also check keyword-only args (parameters after * in signature)
         for arg in method_node.args.kwonlyargs:
+            arg_name_lower = arg.arg.lower()
+            if arg_name_lower in sensitive_params:
+                found_sensitive.append(arg.arg)
+
+        # Also check positional-only args (Python 3.8+, parameters before / in signature)
+        # Example: def authenticate(username, /, password): ...
+        # Here 'username' is positional-only and would be in posonlyargs
+        for arg in method_node.args.posonlyargs:
             arg_name_lower = arg.arg.lower()
             if arg_name_lower in sensitive_params:
                 found_sensitive.append(arg.arg)
