@@ -36,6 +36,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ModelTimeoutErrorContext,
 )
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 if TYPE_CHECKING:
     from omnibase_infra.models.mcp.model_mcp_tool_definition import (
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AdapterONEXToolExecution:
+class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
     """Bridges MCP tool calls to ONEX orchestrator execution.
 
     This adapter handles the dispatch of MCP tool invocations to the
@@ -54,6 +55,7 @@ class AdapterONEXToolExecution:
     - Input validation against JSON Schema
     - Timeout enforcement
     - Error transformation to MCP format
+    - Circuit breaker protection for external HTTP calls
 
     Attributes:
         _http_client: HTTP client for orchestrator dispatch.
@@ -74,6 +76,8 @@ class AdapterONEXToolExecution:
         self,
         http_client: httpx.AsyncClient | None = None,
         default_timeout: float = 30.0,
+        circuit_breaker_threshold: int = 5,
+        circuit_breaker_reset_timeout: float = 60.0,
     ) -> None:
         """Initialize the execution adapter.
 
@@ -81,14 +85,28 @@ class AdapterONEXToolExecution:
             http_client: Optional HTTP client. If not provided, one will be
                 created during execute() calls.
             default_timeout: Default timeout in seconds for orchestrator calls.
+            circuit_breaker_threshold: Max failures before opening circuit (default: 5).
+            circuit_breaker_reset_timeout: Seconds before automatic reset (default: 60.0).
         """
         self._http_client = http_client
         self._default_timeout = default_timeout
         self._owns_client = http_client is None
 
+        # Initialize circuit breaker for HTTP dispatch resilience
+        self._init_circuit_breaker(
+            threshold=circuit_breaker_threshold,
+            reset_timeout=circuit_breaker_reset_timeout,
+            service_name="onex-tool-execution",
+            transport_type=EnumInfraTransportType.HTTP,
+        )
+
         logger.debug(
             "AdapterONEXToolExecution initialized",
-            extra={"default_timeout": default_timeout},
+            extra={
+                "default_timeout": default_timeout,
+                "circuit_breaker_threshold": circuit_breaker_threshold,
+                "circuit_breaker_reset_timeout": circuit_breaker_reset_timeout,
+            },
         )
 
     async def execute(
@@ -143,6 +161,26 @@ class AdapterONEXToolExecution:
         # Determine timeout
         timeout = tool.timeout_seconds or self._default_timeout
 
+        # Check circuit breaker before dispatch
+        try:
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker(
+                    operation="execute_tool",
+                    correlation_id=correlation_id,
+                )
+        except InfraUnavailableError:
+            logger.warning(
+                "MCP tool execution blocked - circuit breaker open",
+                extra={
+                    "tool_name": tool.name,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return {
+                "success": False,
+                "error": "Service temporarily unavailable - circuit breaker open",
+            }
+
         # Dispatch to orchestrator
         try:
             result = await self._http_dispatch(
@@ -151,6 +189,10 @@ class AdapterONEXToolExecution:
                 timeout=timeout,
                 correlation_id=correlation_id,
             )
+
+            # Record success to reset circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
             logger.info(
                 "MCP tool execution succeeded",
@@ -166,6 +208,12 @@ class AdapterONEXToolExecution:
             }
 
         except InfraTimeoutError:
+            # Record failure to potentially open circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="execute_tool",
+                    correlation_id=correlation_id,
+                )
             logger.warning(
                 "MCP tool execution timed out",
                 extra={
@@ -180,6 +228,12 @@ class AdapterONEXToolExecution:
             }
 
         except InfraConnectionError as e:
+            # Record failure to potentially open circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="execute_tool",
+                    correlation_id=correlation_id,
+                )
             logger.warning(
                 "MCP tool execution failed - connection error",
                 extra={
@@ -194,6 +248,12 @@ class AdapterONEXToolExecution:
             }
 
         except Exception as e:
+            # Record failure to potentially open circuit breaker
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="execute_tool",
+                    correlation_id=correlation_id,
+                )
             logger.exception(
                 "MCP tool execution failed - unexpected error",
                 extra={
@@ -309,6 +369,7 @@ class AdapterONEXToolExecution:
                         "X-Correlation-ID": str(correlation_id),
                         "Content-Type": "application/json",
                     },
+                    timeout=timeout,
                 ),
                 timeout=timeout,
             )
@@ -378,6 +439,7 @@ class AdapterONEXToolExecution:
             "adapter_name": "AdapterONEXToolExecution",
             "default_timeout": self._default_timeout,
             "owns_client": self._owns_client,
+            "circuit_breaker": self._get_circuit_breaker_state(),
         }
 
 

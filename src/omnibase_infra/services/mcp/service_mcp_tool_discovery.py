@@ -21,23 +21,22 @@ Tag Schema:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import consul
 import requests
 
+from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     ModelInfraErrorContext,
 )
-from omnibase_infra.models.mcp.model_mcp_tool_definition import (
-    ModelMCPToolDefinition,
-    ModelMCPToolParameter,
-)
+from omnibase_infra.models.mcp.model_mcp_tool_definition import ModelMCPToolDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -50,16 +49,18 @@ class ServiceMCPToolDiscovery:
     2. discover_by_service_id(): Re-fetch single service (Kafka fallback)
 
     Attributes:
+        _container: The ONEX dependency injection container.
         _consul_host: Consul server hostname.
         _consul_port: Consul server port.
         _consul_scheme: HTTP scheme (http/https).
         _consul_token: Optional ACL token for authentication.
 
     Example:
-        >>> discovery = ServiceMCPToolDiscovery(
-        ...     consul_host="localhost",
-        ...     consul_port=8500,
+        >>> from omnibase_core.models.container.model_onex_container import (
+        ...     create_model_onex_container,
         ... )
+        >>> container = await create_model_onex_container()
+        >>> discovery = ServiceMCPToolDiscovery(container)
         >>> tools = await discovery.discover_all()
         >>> for tool in tools:
         ...     print(f"{tool.name}: {tool.description}")
@@ -72,6 +73,8 @@ class ServiceMCPToolDiscovery:
 
     def __init__(
         self,
+        container: ModelONEXContainer | None = None,
+        *,
         consul_host: str = "localhost",
         consul_port: int = 8500,
         consul_scheme: str = "http",
@@ -79,23 +82,44 @@ class ServiceMCPToolDiscovery:
     ) -> None:
         """Initialize the discovery service.
 
+        Supports two initialization patterns:
+        1. Container-based DI: Pass a ModelONEXContainer to resolve config
+        2. Direct injection: Pass individual Consul parameters
+
         Args:
-            consul_host: Consul server hostname.
-            consul_port: Consul server port.
-            consul_scheme: HTTP scheme (http/https).
-            consul_token: Optional ACL token for authentication.
+            container: Optional ONEX dependency injection container. If provided,
+                Consul configuration is resolved from container.config.
+            consul_host: Consul host (used if container not provided)
+            consul_port: Consul port (used if container not provided)
+            consul_scheme: Consul scheme (used if container not provided)
+            consul_token: Consul ACL token (used if container not provided)
         """
-        self._consul_host = consul_host
-        self._consul_port = consul_port
-        self._consul_scheme = consul_scheme
-        self._consul_token = consul_token
+        self._container = container
+
+        if container is not None:
+            # Resolve Consul configuration from container
+            consul_config = container.config.get("consul", {})
+            agent_url = consul_config.get("agent_url", "http://localhost:8500")
+
+            # Parse the agent_url to extract host, port, and scheme
+            parsed = urlparse(agent_url)
+            self._consul_host = parsed.hostname or "localhost"
+            self._consul_port = parsed.port or 8500
+            self._consul_scheme = parsed.scheme or "http"
+            self._consul_token = consul_config.get("token")
+        else:
+            # Use directly provided parameters
+            self._consul_host = consul_host
+            self._consul_port = consul_port
+            self._consul_scheme = consul_scheme
+            self._consul_token = consul_token
 
         logger.debug(
             "ServiceMCPToolDiscovery initialized",
             extra={
-                "consul_host": consul_host,
-                "consul_port": consul_port,
-                "consul_scheme": consul_scheme,
+                "consul_host": self._consul_host,
+                "consul_port": self._consul_port,
+                "consul_scheme": self._consul_scheme,
             },
         )
 
@@ -130,8 +154,8 @@ class ServiceMCPToolDiscovery:
         try:
             client = self._create_consul_client()
 
-            # Get all services from catalog
-            _, services = client.catalog.services()
+            # Get all services from catalog (blocking call wrapped with to_thread)
+            _, services = await asyncio.to_thread(client.catalog.services)
 
             tools: list[ModelMCPToolDefinition] = []
 
@@ -153,8 +177,10 @@ class ServiceMCPToolDiscovery:
                     )
                     continue
 
-                # Get service instances for endpoint info
-                _, service_instances = client.health.service(service_name, passing=True)
+                # Get service instances for endpoint info (blocking call wrapped with to_thread)
+                _, service_instances = await asyncio.to_thread(
+                    client.health.service, service_name, passing=True
+                )
 
                 # Use first healthy instance for endpoint
                 endpoint = None
@@ -251,14 +277,17 @@ class ServiceMCPToolDiscovery:
             # Get all services and find the one matching our service_id
             # Note: Consul catalog doesn't directly support service_id lookup,
             # so we need to iterate through service instances
-            _, services = client.catalog.services()
+            # (blocking call wrapped with to_thread)
+            _, services = await asyncio.to_thread(client.catalog.services)
 
             for service_name, tags in services.items():
                 if not self._is_mcp_orchestrator(tags):
                     continue
 
-                # Get instances for this service
-                _, instances = client.health.service(service_name, passing=True)
+                # Get instances for this service (blocking call wrapped with to_thread)
+                _, instances = await asyncio.to_thread(
+                    client.health.service, service_name, passing=True
+                )
 
                 for instance in instances:
                     svc = instance.get("Service", {})

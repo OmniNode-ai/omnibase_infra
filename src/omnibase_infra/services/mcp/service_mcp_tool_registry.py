@@ -23,9 +23,6 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext
-
 if TYPE_CHECKING:
     from omnibase_infra.models.mcp.model_mcp_tool_definition import (
         ModelMCPToolDefinition,
@@ -66,10 +63,35 @@ class ServiceMCPToolRegistry:
     def __init__(self) -> None:
         """Initialize the tool registry with empty state."""
         self._tools: dict[str, ModelMCPToolDefinition] = {}
-        self._versions: dict[str, str] = {}  # tool_name → last_event_id
+        self._versions: dict[str, str] = {}  # tool_name → last_event_id (normalized)
         self._lock: asyncio.Lock = asyncio.Lock()
 
         logger.debug("ServiceMCPToolRegistry initialized")
+
+    def _normalize_event_id(self, event_id: str) -> str:
+        """Normalize event_id for correct lexicographic comparison.
+
+        Numeric IDs (e.g., Kafka offsets) are zero-padded to 20 digits to ensure
+        correct lexicographic ordering. Non-numeric IDs are returned unchanged.
+
+        Args:
+            event_id: The event identifier to normalize.
+
+        Returns:
+            Normalized event_id suitable for lexicographic comparison.
+
+        Example:
+            >>> registry = ServiceMCPToolRegistry()
+            >>> registry._normalize_event_id("9")
+            '00000000000000000009'
+            >>> registry._normalize_event_id("10")
+            '00000000000000000010'
+            >>> registry._normalize_event_id("event-001")
+            'event-001'
+        """
+        if event_id.isdigit():
+            return event_id.zfill(20)
+        return event_id
 
     @property
     def tool_count(self) -> int:
@@ -108,32 +130,35 @@ class ServiceMCPToolRegistry:
             False
         """
         correlation_id = uuid4()
+        normalized_event_id = self._normalize_event_id(event_id)
 
         async with self._lock:
             existing_version = self._versions.get(tool.name)
 
-            # Stale event check: ignore if event_id <= existing version
-            if existing_version and event_id <= existing_version:
+            # Stale event check: ignore if normalized event_id <= existing version
+            if existing_version and normalized_event_id <= existing_version:
                 logger.debug(
                     "Ignoring stale event for tool",
                     extra={
                         "tool_name": tool.name,
                         "event_id": event_id,
+                        "normalized_event_id": normalized_event_id,
                         "existing_version": existing_version,
                         "correlation_id": str(correlation_id),
                     },
                 )
                 return False
 
-            # Update tool and version
+            # Update tool and version (store normalized form)
             self._tools[tool.name] = tool
-            self._versions[tool.name] = event_id
+            self._versions[tool.name] = normalized_event_id
 
             logger.info(
                 "Tool upserted in registry",
                 extra={
                     "tool_name": tool.name,
                     "event_id": event_id,
+                    "normalized_event_id": normalized_event_id,
                     "previous_version": existing_version,
                     "correlation_id": str(correlation_id),
                 },
@@ -163,17 +188,19 @@ class ServiceMCPToolRegistry:
             False
         """
         correlation_id = uuid4()
+        normalized_event_id = self._normalize_event_id(event_id)
 
         async with self._lock:
             existing_version = self._versions.get(tool_name)
 
-            # Stale event check: ignore if event_id <= existing version
-            if existing_version and event_id <= existing_version:
+            # Stale event check: ignore if normalized event_id <= existing version
+            if existing_version and normalized_event_id <= existing_version:
                 logger.debug(
                     "Ignoring stale remove event for tool",
                     extra={
                         "tool_name": tool_name,
                         "event_id": event_id,
+                        "normalized_event_id": normalized_event_id,
                         "existing_version": existing_version,
                         "correlation_id": str(correlation_id),
                     },
@@ -182,8 +209,8 @@ class ServiceMCPToolRegistry:
 
             # Remove tool if it exists
             removed = self._tools.pop(tool_name, None) is not None
-            # Always update version to prevent re-adding with older event
-            self._versions[tool_name] = event_id
+            # Always update version to prevent re-adding with older event (store normalized form)
+            self._versions[tool_name] = normalized_event_id
 
             if removed:
                 logger.info(
@@ -280,7 +307,8 @@ class ServiceMCPToolRegistry:
             tool_name: Name of the tool.
 
         Returns:
-            The last event_id if found, None otherwise.
+            The last event_id (normalized) if found, None otherwise.
+            Numeric IDs are zero-padded to 20 digits.
         """
         async with self._lock:
             return self._versions.get(tool_name)

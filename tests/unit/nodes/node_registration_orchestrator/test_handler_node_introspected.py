@@ -933,3 +933,92 @@ class TestHandlerNodeIntrospectedConsulRegistration:
         # Both PostgreSQL and Consul should be called
         mock_projector.upsert_partial.assert_called_once()
         mock_consul.execute.assert_called_once()
+
+
+class TestSanitizeToolName:
+    """Test MCP tool name sanitization for Consul tags."""
+
+    def test_sanitize_simple_name(self) -> None:
+        """Test that simple names pass through with lowercase."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        result = handler._sanitize_tool_name("MyTool")
+        assert result == "mytool"
+
+    def test_sanitize_spaces_become_dashes(self) -> None:
+        """Test that spaces are replaced with dashes."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        result = handler._sanitize_tool_name("My Cool Tool")
+        assert result == "my-cool-tool"
+
+    def test_sanitize_special_chars_become_dashes(self) -> None:
+        """Test that special characters are replaced with dashes."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        result = handler._sanitize_tool_name("Tool (v2.0) - Beta!")
+        assert result == "tool-v2-0-beta"
+
+    def test_sanitize_multiple_special_chars_collapse(self) -> None:
+        """Test that multiple consecutive special chars become single dash."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        result = handler._sanitize_tool_name("Tool   &&&   Name")
+        assert result == "tool-name"
+
+    def test_sanitize_leading_trailing_dashes_removed(self) -> None:
+        """Test that leading/trailing dashes are removed."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        result = handler._sanitize_tool_name("  @@@Tool Name###  ")
+        assert result == "tool-name"
+
+    def test_sanitize_preserves_alphanumeric(self) -> None:
+        """Test that alphanumeric characters are preserved."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        result = handler._sanitize_tool_name("Tool123Name456")
+        assert result == "tool123name456"
+
+    def test_sanitize_truncates_to_63_chars(self) -> None:
+        """Test that result is truncated to 63 characters (DNS label limit)."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        long_name = "a" * 100  # 100 characters
+        result = handler._sanitize_tool_name(long_name)
+        assert len(result) == 63
+        assert result == "a" * 63
+
+    def test_sanitize_free_form_description(self) -> None:
+        """Test sanitization of typical free-form description text."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        # Typical description that might come from metadata.description
+        description = "Node Registration Orchestrator (handles service discovery)"
+        result = handler._sanitize_tool_name(description)
+        assert result == "node-registration-orchestrator-handles-service-discovery"
+
+    def test_sanitize_unicode_chars(self) -> None:
+        """Test that unicode characters are replaced with dashes."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        result = handler._sanitize_tool_name("Tool\u2019s Name")  # Smart apostrophe
+        assert result == "tool-s-name"
+
+    def test_sanitize_empty_after_sanitization(self) -> None:
+        """Test handling of names that become empty after sanitization."""
+        mock_reader = create_mock_projection_reader()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+
+        # All special characters
+        result = handler._sanitize_tool_name("@#$%^&*()")
+        assert result == ""

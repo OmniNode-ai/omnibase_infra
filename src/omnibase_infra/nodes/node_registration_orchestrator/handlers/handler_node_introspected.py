@@ -53,6 +53,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -236,6 +237,39 @@ class HandlerNodeIntrospected:
     def has_consul_handler(self) -> bool:
         """Check if HandlerConsul is configured for Consul registration."""
         return self._consul_handler is not None
+
+    def _sanitize_tool_name(self, name: str) -> str:
+        """Sanitize tool name for use in Consul tags.
+
+        Converts free-form text (like descriptions) into stable, Consul-safe
+        identifiers. This ensures consistent service discovery matching.
+
+        Transformation rules:
+            1. Convert to lowercase
+            2. Replace non-alphanumeric characters with dashes
+            3. Collapse multiple consecutive dashes into one
+            4. Remove leading/trailing dashes
+            5. Truncate to 63 characters (Consul tag limit)
+
+        Args:
+            name: Raw tool name or description text.
+
+        Returns:
+            Sanitized string suitable for Consul tags (lowercase, alphanumeric
+            with dashes, max 63 chars).
+
+        Example:
+            >>> handler._sanitize_tool_name("My Cool Tool (v2.0)")
+            'my-cool-tool-v2-0'
+            >>> handler._sanitize_tool_name("  Spaces & Special!Chars  ")
+            'spaces-special-chars'
+        """
+        # Replace non-alphanumeric with dash, lowercase
+        sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower())
+        # Remove leading/trailing dashes
+        sanitized = sanitized.strip("-")
+        # Truncate to Consul tag limit (63 chars is common limit for DNS labels)
+        return sanitized[:63]
 
     async def handle(
         self,
@@ -586,10 +620,13 @@ class HandlerNodeIntrospected:
             mcp_expose = getattr(mcp_config, "expose", False)
             if mcp_expose:
                 # Get tool name from mcp_config or fall back to node_name
-                mcp_tool_name = getattr(mcp_config, "tool_name", None)
-                if not mcp_tool_name:
-                    # Fall back to node_name, then service_name
-                    mcp_tool_name = node_name or service_name
+                mcp_tool_name_raw = getattr(mcp_config, "tool_name", None)
+                if not mcp_tool_name_raw:
+                    # Fall back to node_name (description), then service_name
+                    mcp_tool_name_raw = node_name or service_name
+                # Sanitize tool name for Consul tag safety
+                # node_name comes from metadata.description which can be free-form text
+                mcp_tool_name = self._sanitize_tool_name(mcp_tool_name_raw)
                 tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
 
                 logger.info(
@@ -597,6 +634,7 @@ class HandlerNodeIntrospected:
                     extra={
                         "node_id": str(node_id),
                         "tool_name": mcp_tool_name,
+                        "tool_name_raw": mcp_tool_name_raw,
                         "correlation_id": str(correlation_id),
                     },
                 )

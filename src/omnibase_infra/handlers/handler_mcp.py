@@ -636,7 +636,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 if tool is None:
                     ctx = ModelInfraErrorContext.with_correlation(
                         correlation_id=correlation_id,
-                        transport_type=EnumInfraTransportType.HTTP,
+                        transport_type=self.transport_type,
                         operation="execute_tool",
                         target_name=tool_name,
                     )

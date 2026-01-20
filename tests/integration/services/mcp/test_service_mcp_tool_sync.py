@@ -2,9 +2,8 @@
 # Copyright (c) 2025 OmniNode Team
 """Integration tests for ServiceMCPToolSync with real Kafka/Redpanda.
 
-These tests validate ServiceMCPToolSync behavior against actual Kafka infrastructure
-(Redpanda at 192.168.86.200:29092). They test the Kafka subscription lifecycle and
-event processing for MCP tool hot reload.
+These tests validate ServiceMCPToolSync behavior against actual Kafka infrastructure.
+They test the Kafka subscription lifecycle and event processing for MCP tool hot reload.
 
 Test Categories:
     - Lifecycle Tests: Start/stop subscription, idempotent operations
@@ -12,10 +11,11 @@ Test Categories:
     - Error Handling Tests: Invalid events, graceful error handling
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (default: "192.168.86.200:29092")
+    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:9092" or
+        "192.168.86.200:29092"). Required for tests to run.
 
 Note:
-    Tests will skip gracefully if Kafka is not available.
+    Tests will skip gracefully if KAFKA_BOOTSTRAP_SERVERS is not set.
 """
 
 from __future__ import annotations
@@ -47,18 +47,31 @@ logger = logging.getLogger(__name__)
 # Test Configuration and Skip Conditions
 # =============================================================================
 
-# Default to the documented Kafka/Redpanda address per infrastructure topology
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:29092")
+# Check if Kafka is available based on environment variable.
+# NOTE: We intentionally do NOT provide a default value. Tests should only run
+# when KAFKA_BOOTSTRAP_SERVERS is explicitly set, not when assuming a default
+# infrastructure address (which won't be available in CI).
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+KAFKA_AVAILABLE = KAFKA_BOOTSTRAP_SERVERS is not None
 
-# Validate configuration at module load time
-_kafka_config_validation = validate_bootstrap_servers(KAFKA_BOOTSTRAP_SERVERS)
-KAFKA_AVAILABLE = _kafka_config_validation.is_valid
+# Validate configuration only if environment variable is set
+# This provides detailed validation for local development
+if KAFKA_AVAILABLE:
+    _kafka_config_validation = validate_bootstrap_servers(KAFKA_BOOTSTRAP_SERVERS)
+    # Override KAFKA_AVAILABLE if format validation fails
+    if not _kafka_config_validation.is_valid:
+        KAFKA_AVAILABLE = False
+        _skip_reason = _kafka_config_validation.skip_reason
+    else:
+        _skip_reason = None
+else:
+    _skip_reason = "Kafka not available (KAFKA_BOOTSTRAP_SERVERS not set)"
 
 # Module-level markers - skip all tests if Kafka is not available
 pytestmark = [
     pytest.mark.skipif(
         not KAFKA_AVAILABLE,
-        reason=_kafka_config_validation.skip_reason
+        reason=_skip_reason
         or "Kafka not available (KAFKA_BOOTSTRAP_SERVERS not configured)",
     ),
     pytest.mark.integration,
@@ -250,8 +263,13 @@ async def wait_for_registry_update(
 
 @pytest.fixture
 def kafka_bootstrap_servers() -> str:
-    """Get Kafka bootstrap servers from environment or default."""
-    return KAFKA_BOOTSTRAP_SERVERS
+    """Get Kafka bootstrap servers from environment.
+
+    Note: Tests are skipped if KAFKA_BOOTSTRAP_SERVERS is not set (via pytestmark),
+    so this fixture will only be called when the env var is available.
+    The fallback is defensive and ensures type safety.
+    """
+    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
 
 @pytest.fixture

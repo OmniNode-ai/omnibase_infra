@@ -24,6 +24,8 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from omnibase_core.container import ModelONEXContainer
+from omnibase_core.types import JsonType
 from omnibase_infra.models.mcp.model_mcp_tool_definition import (
     ModelMCPToolDefinition,
 )
@@ -65,11 +67,10 @@ class ServiceMCPToolSync:
         _unsubscribe: Callback to unsubscribe from topic.
 
     Example:
-        >>> sync = ServiceMCPToolSync(
-        ...     registry=registry,
-        ...     discovery=discovery,
-        ...     bus=bus,
-        ... )
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> container = ModelONEXContainer()
+        >>> # Ensure services are registered in container first
+        >>> sync = ServiceMCPToolSync(container)
         >>> await sync.start()
         >>> # ... process events ...
         >>> await sync.stop()
@@ -92,20 +93,56 @@ class ServiceMCPToolSync:
 
     def __init__(
         self,
-        registry: ServiceMCPToolRegistry,
-        discovery: ServiceMCPToolDiscovery,
-        bus: EventBusKafka,
+        container: ModelONEXContainer | None = None,
+        *,
+        registry: ServiceMCPToolRegistry | None = None,
+        discovery: ServiceMCPToolDiscovery | None = None,
+        bus: EventBusKafka | None = None,
     ) -> None:
         """Initialize the sync service.
 
+        Supports two initialization patterns:
+        1. Container-based DI: Pass a ModelONEXContainer to resolve dependencies
+        2. Direct injection: Pass registry, discovery, and bus directly
+
         Args:
-            registry: Tool registry for storing tool definitions.
-            discovery: Consul discovery service for fallback lookups.
-            bus: Kafka event bus for subscriptions.
+            container: Optional ONEX container for dependency injection.
+            registry: Tool registry (used if container not provided)
+            discovery: Discovery service for Consul fallback (used if container not provided)
+            bus: Kafka event bus (used if container not provided)
+
+        Raises:
+            ValueError: If neither container nor all direct dependencies are provided.
         """
-        self._registry = registry
-        self._discovery = discovery
-        self._bus = bus
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+        from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
+            ServiceMCPToolDiscovery,
+        )
+        from omnibase_infra.services.mcp.service_mcp_tool_registry import (
+            ServiceMCPToolRegistry,
+        )
+
+        self._container = container
+
+        if container is not None:
+            # Resolve from container
+            self._registry: ServiceMCPToolRegistry = container.get_service(
+                ServiceMCPToolRegistry
+            )
+            self._discovery: ServiceMCPToolDiscovery = container.get_service(
+                ServiceMCPToolDiscovery
+            )
+            self._bus: EventBusKafka = container.get_service(EventBusKafka)
+        elif registry is not None and discovery is not None and bus is not None:
+            # Use directly provided dependencies
+            self._registry = registry
+            self._discovery = discovery
+            self._bus = bus
+        else:
+            raise ValueError(
+                "Must provide either container or all of: registry, discovery, bus"
+            )
+
         self._unsubscribe: Callable[[], Awaitable[None]] | None = None
         self._started = False
 
@@ -220,10 +257,15 @@ class ServiceMCPToolSync:
             service_id = event.get("service_id")
 
             # Use event_id from payload or fall back to Kafka offset
+            # Numeric offsets are zero-padded to 20 digits for lexicographic ordering
             event_id_raw = event.get("event_id") or msg.offset
-            event_id: str = (
-                str(event_id_raw) if event_id_raw is not None else str(uuid4())
-            )
+            if event_id_raw is None:
+                event_id = str(uuid4())
+            else:
+                event_id_str = str(event_id_raw)
+                event_id = (
+                    event_id_str.zfill(20) if event_id_str.isdigit() else event_id_str
+                )
 
             # Check if this is an MCP-enabled orchestrator
             if not self._is_mcp_orchestrator(tags):
@@ -260,7 +302,7 @@ class ServiceMCPToolSync:
                 },
             )
 
-    def _parse_event(self, msg: ModelEventMessage) -> dict[str, object] | None:
+    def _parse_event(self, msg: ModelEventMessage) -> dict[str, JsonType] | None:
         """Parse event payload from message.
 
         Args:
@@ -280,7 +322,7 @@ class ServiceMCPToolSync:
                 value_str = value
             else:
                 return None
-            parsed: dict[str, object] = json.loads(value_str)
+            parsed: dict[str, JsonType] = json.loads(value_str)
             return parsed
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
@@ -325,14 +367,14 @@ class ServiceMCPToolSync:
 
     async def _handle_upsert_event(
         self,
-        event: dict[str, object],
+        event: dict[str, JsonType],
         event_id: str,
         correlation_id: object,
     ) -> None:
         """Handle registered/updated events by upserting tool.
 
         Args:
-            event: Parsed event payload.
+            event: Parsed event payload (JSON-compatible values).
             event_id: Unique event identifier for idempotency.
             correlation_id: Correlation ID for tracing.
         """
@@ -445,13 +487,13 @@ class ServiceMCPToolSync:
 
     def _build_tool_from_event(
         self,
-        event: dict[str, object],
+        event: dict[str, JsonType],
         tool_name: str,
     ) -> ModelMCPToolDefinition | None:
         """Build a tool definition from event data.
 
         Args:
-            event: Parsed event payload.
+            event: Parsed event payload (JSON-compatible values).
             tool_name: Extracted tool name.
 
         Returns:

@@ -134,11 +134,17 @@ def serve(ctx: click.Context, **kwargs: object) -> None:
         if consul_host is not None
         else os.getenv("CONSUL_HOST", "localhost")
     )
-    effective_consul_port: int = (
-        consul_port
-        if consul_port is not None
-        else int(os.getenv("CONSUL_PORT", "8500"))
-    )
+    if consul_port is not None:
+        effective_consul_port: int = consul_port
+    else:
+        port_env = os.getenv("CONSUL_PORT", "8500")
+        try:
+            effective_consul_port = int(port_env)
+        except ValueError:
+            console.print(
+                f"[red]Invalid CONSUL_PORT: '{port_env}' is not a number[/red]"
+            )
+            sys.exit(1)
 
     console.print("[bold blue]Starting MCP Server[/bold blue]")
     console.print(f"  Host: {host}:{port}")
@@ -248,8 +254,12 @@ async def _run_server(
         shutdown_event.set()
 
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, signal_handler)
+    try:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, signal_handler)
+    except NotImplementedError:
+        # Signal handlers not supported on Windows
+        pass
 
     try:
         # Run uvicorn server

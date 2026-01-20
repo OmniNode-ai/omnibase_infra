@@ -25,13 +25,13 @@ Usage:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_infra.adapters.adapter_onex_tool_execution import (
     AdapterONEXToolExecution,
 )
+from omnibase_infra.models.mcp.model_mcp_server_config import ModelMCPServerConfig
 from omnibase_infra.services.mcp.service_mcp_tool_discovery import (
     ServiceMCPToolDiscovery,
 )
@@ -48,33 +48,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ModelMCPServerConfig:
-    """Configuration for the MCP server lifecycle.
-
-    Attributes:
-        consul_host: Consul server hostname for service discovery.
-        consul_port: Consul server port.
-        consul_scheme: HTTP scheme for Consul (http/https).
-        consul_token: Optional ACL token for Consul authentication.
-        kafka_enabled: Whether to enable Kafka for hot reload.
-        http_host: Host to bind the MCP HTTP server.
-        http_port: Port for the MCP HTTP server.
-        default_timeout: Default execution timeout for tools.
-    """
-
-    consul_host: str = "localhost"
-    consul_port: int = 8500
-    consul_scheme: str = "http"
-    consul_token: str | None = None
-    kafka_enabled: bool = True
-    http_host: str = "0.0.0.0"  # noqa: S104 - Intentional bind-all for server
-    http_port: int = 8090
-    default_timeout: float = 30.0
-    dev_mode: bool = False
-    contracts_dir: str | None = None
 
 
 class MCPServerLifecycle:
@@ -230,8 +203,9 @@ class MCPServerLifecycle:
 
                 # Populate registry
                 for tool in tools:
-                    # Use "cold-start" as event_id to ensure any future updates take precedence
-                    await self._registry.upsert_tool(tool, "cold-start")
+                    # Use "0" as event_id to ensure any future Kafka updates take precedence
+                    # (numeric offsets like "1", "2" sort after "0" alphabetically)
+                    await self._registry.upsert_tool(tool, "0")
 
                 logger.info(
                     "Cold start complete",
