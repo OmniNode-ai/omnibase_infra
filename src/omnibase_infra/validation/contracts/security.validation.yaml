@@ -107,7 +107,6 @@ validation:
   suppression_comments:
     - "# ONEX_EXCLUDE: security"
     - "# security-ok:"
-    - "# type: ignore"
   severity_default: error
   fail_on_error: true
   fail_on_warning: false
