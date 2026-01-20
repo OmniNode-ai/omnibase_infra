@@ -35,7 +35,7 @@ import ast
 import logging
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
@@ -50,6 +50,27 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
+class CompiledPatterns:
+    """Pre-compiled regex patterns for security validation.
+
+    Patterns are compiled once per contract/file validation, not per method.
+    This significantly improves performance for large codebases by avoiding
+    repeated pattern extraction from contract rules and regex compilation.
+
+    Attributes:
+        admin_patterns: Compiled patterns for admin_method_public rule.
+        decrypt_patterns: Compiled patterns for decrypt_method_public rule.
+        sensitive_patterns: Compiled patterns for sensitive_method_exposed rule.
+        sensitive_params: Lowercase sensitive parameter names (exact match, no regex).
+    """
+
+    admin_patterns: tuple[re.Pattern[str], ...] = field(default_factory=tuple)
+    decrypt_patterns: tuple[re.Pattern[str], ...] = field(default_factory=tuple)
+    sensitive_patterns: tuple[re.Pattern[str], ...] = field(default_factory=tuple)
+    sensitive_params: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True, slots=True)
 class MethodContext:
     """Context for method validation - groups related parameters."""
 
@@ -58,6 +79,7 @@ class MethodContext:
     file_path: Path
     line_number: int
     contract: ModelValidatorSubcontract
+    compiled_patterns: CompiledPatterns
 
 
 class ValidatorSecurity(ValidatorBase):
@@ -147,6 +169,61 @@ class ValidatorSecurity(ValidatorBase):
         logger.debug("Rule %s not found in contract, returning empty list", rule_id)
         return []
 
+    def _compile_patterns(
+        self,
+        contract: ModelValidatorSubcontract,
+    ) -> CompiledPatterns:
+        """Compile and cache all regex patterns from contract rules.
+
+        This method extracts patterns from the contract once per file validation,
+        compiles them into re.Pattern objects, and returns a frozen dataclass.
+        This avoids repeated pattern extraction and compilation for every method.
+
+        Args:
+            contract: Validator contract with rule configurations.
+
+        Returns:
+            CompiledPatterns instance with pre-compiled patterns.
+        """
+
+        def compile_pattern_list(patterns: list[str]) -> tuple[re.Pattern[str], ...]:
+            """Compile a list of pattern strings into regex Pattern objects."""
+            compiled: list[re.Pattern[str]] = []
+            for pattern in patterns:
+                try:
+                    compiled.append(re.compile(pattern))
+                except re.error as e:
+                    logger.warning(
+                        "Invalid regex pattern '%s': %s - skipping",
+                        pattern,
+                        e,
+                    )
+            return tuple(compiled)
+
+        # Extract and compile patterns for each rule
+        admin_patterns = compile_pattern_list(
+            self._get_rule_patterns("admin_method_public", "patterns", contract)
+        )
+        decrypt_patterns = compile_pattern_list(
+            self._get_rule_patterns("decrypt_method_public", "patterns", contract)
+        )
+        sensitive_patterns = compile_pattern_list(
+            self._get_rule_patterns("sensitive_method_exposed", "patterns", contract)
+        )
+
+        # Extract sensitive parameter names (exact match, no regex compilation needed)
+        sensitive_params_list = self._get_rule_patterns(
+            "credential_in_signature", "sensitive_params", contract
+        )
+        sensitive_params = frozenset(p.lower() for p in sensitive_params_list)
+
+        return CompiledPatterns(
+            admin_patterns=admin_patterns,
+            decrypt_patterns=decrypt_patterns,
+            sensitive_patterns=sensitive_patterns,
+            sensitive_params=sensitive_params,
+        )
+
     def _validate_file(
         self,
         path: Path,
@@ -186,10 +263,16 @@ class ValidatorSecurity(ValidatorBase):
 
         issues: list[ModelValidationIssue] = []
 
+        # Compile patterns once for the entire file validation
+        # This avoids repeated pattern extraction and regex compilation per method
+        compiled_patterns = self._compile_patterns(contract)
+
         # Visit all class definitions in the file
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
-                class_issues = self._check_class_methods(node, path, contract)
+                class_issues = self._check_class_methods(
+                    node, path, contract, compiled_patterns
+                )
                 issues.extend(class_issues)
 
         return tuple(issues)
@@ -199,6 +282,7 @@ class ValidatorSecurity(ValidatorBase):
         class_node: ast.ClassDef,
         file_path: Path,
         contract: ModelValidatorSubcontract,
+        compiled_patterns: CompiledPatterns,
     ) -> list[ModelValidationIssue]:
         """Check class methods for security violations."""
         issues: list[ModelValidationIssue] = []
@@ -221,6 +305,7 @@ class ValidatorSecurity(ValidatorBase):
                     file_path=file_path,
                     line_number=node.lineno,
                     contract=contract,
+                    compiled_patterns=compiled_patterns,
                 )
                 method_issues = self._check_method(node, ctx)
                 issues.extend(method_issues)
@@ -251,19 +336,16 @@ class ValidatorSecurity(ValidatorBase):
     ) -> list[ModelValidationIssue]:
         """Check if method name matches sensitive patterns.
 
-        Patterns are read from contract.rules[].parameters instead of being
-        hardcoded, allowing configuration via YAML contracts.
+        Uses pre-compiled patterns from ctx.compiled_patterns for efficiency.
+        Patterns are originally read from contract.rules[].parameters.
         """
         issues: list[ModelValidationIssue] = []
         method_lower = ctx.method_name.lower()
 
         # Check admin/internal patterns (rule: admin_method_public)
-        # Read patterns from contract parameters
-        admin_patterns = self._get_rule_patterns(
-            "admin_method_public", "patterns", ctx.contract
-        )
-        for pattern in admin_patterns:
-            if re.match(pattern, method_lower):
+        # Uses pre-compiled patterns from ctx.compiled_patterns
+        for pattern in ctx.compiled_patterns.admin_patterns:
+            if pattern.match(method_lower):
                 enabled, severity = self._get_rule_config(
                     "admin_method_public", ctx.contract
                 )
@@ -287,12 +369,9 @@ class ValidatorSecurity(ValidatorBase):
                 return issues  # Don't double-report
 
         # Check decrypt patterns (rule: decrypt_method_public)
-        # Read patterns from contract parameters
-        decrypt_patterns = self._get_rule_patterns(
-            "decrypt_method_public", "patterns", ctx.contract
-        )
-        for pattern in decrypt_patterns:
-            if re.match(pattern, method_lower):
+        # Uses pre-compiled patterns from ctx.compiled_patterns
+        for pattern in ctx.compiled_patterns.decrypt_patterns:
+            if pattern.match(method_lower):
                 enabled, severity = self._get_rule_config(
                     "decrypt_method_public", ctx.contract
                 )
@@ -316,13 +395,9 @@ class ValidatorSecurity(ValidatorBase):
                 return issues  # Don't double-report
 
         # Check other sensitive patterns (rule: sensitive_method_exposed)
-        # Read patterns from contract parameters
-        sensitive_patterns = self._get_rule_patterns(
-            "sensitive_method_exposed", "patterns", ctx.contract
-        )
-
-        for pattern in sensitive_patterns:
-            if re.match(pattern, method_lower):
+        # Uses pre-compiled patterns from ctx.compiled_patterns
+        for pattern in ctx.compiled_patterns.sensitive_patterns:
+            if pattern.match(method_lower):
                 enabled, severity = self._get_rule_config(
                     "sensitive_method_exposed", ctx.contract
                 )
@@ -354,8 +429,8 @@ class ValidatorSecurity(ValidatorBase):
     ) -> list[ModelValidationIssue]:
         """Check method signature for sensitive parameter names.
 
-        Sensitive parameter names are read from contract.rules[].parameters
-        instead of being hardcoded, allowing configuration via YAML contracts.
+        Uses pre-compiled sensitive_params frozenset from ctx.compiled_patterns.
+        Patterns are originally read from contract.rules[].parameters.
         """
         issues: list[ModelValidationIssue] = []
 
@@ -366,12 +441,8 @@ class ValidatorSecurity(ValidatorBase):
         if not enabled:
             return issues
 
-        # Read sensitive parameter names from contract parameters
-        sensitive_params_list = self._get_rule_patterns(
-            "credential_in_signature", "sensitive_params", ctx.contract
-        )
-        # Convert to set for O(1) lookup (patterns are exact strings, not regex)
-        sensitive_params = {p.lower() for p in sensitive_params_list}
+        # Use pre-compiled sensitive params (already lowercase frozenset)
+        sensitive_params = ctx.compiled_patterns.sensitive_params
 
         # If no patterns defined in contract, return early (fail-safe)
         if not sensitive_params:
@@ -397,6 +468,20 @@ class ValidatorSecurity(ValidatorBase):
             arg_name_lower = arg.arg.lower()
             if arg_name_lower in sensitive_params:
                 found_sensitive.append(arg.arg)
+
+        # Check vararg (*args parameter)
+        # Example: def process(*passwords): ... would expose sensitive vararg name
+        if method_node.args.vararg:
+            vararg_name_lower = method_node.args.vararg.arg.lower()
+            if vararg_name_lower in sensitive_params:
+                found_sensitive.append(method_node.args.vararg.arg)
+
+        # Check kwarg (**kwargs parameter)
+        # Example: def process(**secrets): ... would expose sensitive kwarg name
+        if method_node.args.kwarg:
+            kwarg_name_lower = method_node.args.kwarg.arg.lower()
+            if kwarg_name_lower in sensitive_params:
+                found_sensitive.append(method_node.args.kwarg.arg)
 
         if found_sensitive:
             issues.append(

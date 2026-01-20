@@ -422,3 +422,31 @@ class TestValidatorSecurity:
         assert len(result.issues) == 1
         assert result.issues[0].code == "decrypt_method_public"
         assert result.issues[0].severity == EnumSeverity.WARNING
+
+    def test_file_with_no_classes(
+        self, contract: ModelValidatorSubcontract, tmp_path: Path
+    ) -> None:
+        """Test that files with only module-level functions are handled gracefully.
+
+        ValidatorSecurity only checks class methods, so module-level functions
+        should not trigger violations even if they have sensitive names.
+        """
+        test_file = tmp_path / "module_only.py"
+        test_file.write_text(
+            dedent('''
+            def get_password() -> str:
+                """Module-level function - not checked by validator."""
+                return "secret"
+
+            def process_data(data: dict) -> dict:
+                """Another module-level function."""
+                return data
+            ''').strip()
+        )
+
+        validator = ValidatorSecurity(contract=contract)
+        result = validator.validate_file(test_file)
+
+        # Module-level functions are not checked (only class methods)
+        assert result.is_valid
+        assert len(result.issues) == 0
