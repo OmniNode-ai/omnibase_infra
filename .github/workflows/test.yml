@@ -140,7 +140,7 @@ jobs:
           echo "================================================================"
           echo "I/O Purity Audit (OMN-325)"
           echo "================================================================"
-          poetry run pytest tests/audit/test_io_violations.py::TestCIGateIOPurity -v
+          poetry run pytest tests/audit/test_io_violations.py::TestCIGateIOPurity -v --tb=short
 
       - name: Run markdown link validation
         run: |

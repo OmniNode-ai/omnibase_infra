@@ -56,7 +56,16 @@ logger = logging.getLogger(__name__)
 # Constants
 # =============================================================================
 
-# Forbidden import modules for pure nodes
+# Forbidden import modules for pure nodes.
+#
+# NOTE: `pathlib` is intentionally NOT in FORBIDDEN_IMPORTS.
+# Path construction (e.g., `Path("config.yaml")`, `path / "subdir"`) is allowed
+# in pure nodes because it is a pure operation that does not perform I/O.
+# Only Path I/O METHODS (read_text, write_bytes, open, etc.) are forbidden.
+# This distinction allows reducers to construct paths and pass them as data
+# to EFFECT nodes for actual I/O operations.
+#
+# See PATH_IO_METHODS below for the specific methods that ARE forbidden.
 FORBIDDEN_IMPORTS: frozenset[str] = frozenset(
     {
         "confluent_kafka",
@@ -167,7 +176,21 @@ _ONEX_EXCLUDE_IO_AUDIT = "io_audit"
 # Maximum file size to process (1MB)
 _MAX_FILE_SIZE_BYTES: int = 1_000_000
 
-# Number of lines covered by ONEX_EXCLUDE exemption (comment line + following lines)
+# Number of lines covered by ONEX_EXCLUDE: io_audit exemption.
+# This covers the comment line itself plus the next 5 lines (total of 6 lines).
+#
+# Rationale: Typical import statements span 1-3 lines (single import, from-import,
+# or multi-line from-import with parentheses). The 6-line range provides headroom
+# for grouped imports and multiline statements while preventing overly broad exemptions
+# that could accidentally exempt unrelated code further down in the file.
+#
+# Example usage:
+#   # ONEX_EXCLUDE: io_audit - Required for type hints
+#   from httpx import (    # Line 2 - exempted
+#       AsyncClient,       # Line 3 - exempted
+#       Client,            # Line 4 - exempted
+#   )                      # Line 5 - exempted
+#   # Line 6 - still exempted (last line of range)
 _ONEX_EXCLUDE_RANGE: int = 6
 
 
@@ -1544,6 +1567,103 @@ class TestTypeCheckingBlockHandling:
             f"Real-world reducer pattern should have no violations, found: {violations}"
         )
 
+    def test_nested_type_checking_blocks(self, temp_dir: Path) -> None:
+        """Nested conditionals inside TYPE_CHECKING are handled correctly.
+
+        This tests that the TYPE_CHECKING exemption properly propagates to nested
+        if/elif/else blocks within the TYPE_CHECKING guard. All imports in nested
+        conditions inside TYPE_CHECKING should be exempt since the entire outer
+        block only executes during static type analysis.
+        """
+        code = """
+        from __future__ import annotations
+
+        import sys
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            # Nested conditional based on Python version
+            if sys.version_info >= (3, 11):
+                import httpx
+                from asyncpg import Connection
+            else:
+                import aiohttp
+                from neo4j import Driver
+
+            # Another nested conditional
+            if True:
+                from qdrant_client import QdrantClient
+                import confluent_kafka
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"Nested TYPE_CHECKING imports should be exempt: {violations}"
+        )
+
+    def test_deeply_nested_type_checking_blocks(self, temp_dir: Path) -> None:
+        """Deeply nested conditionals inside TYPE_CHECKING are handled correctly.
+
+        Tests multiple levels of nesting (3+ levels deep) to ensure the exemption
+        flag propagates through all nested scopes.
+        """
+        code = """
+        from __future__ import annotations
+
+        import sys
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            if sys.version_info >= (3, 10):
+                if sys.platform == "linux":
+                    import httpx  # 3 levels deep
+                    if True:
+                        from asyncpg import Connection  # 4 levels deep
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"Deeply nested TYPE_CHECKING imports should be exempt: {violations}"
+        )
+
+    def test_nested_type_checking_with_else_branches(self, temp_dir: Path) -> None:
+        """Nested else branches within TYPE_CHECKING are still exempt.
+
+        Unlike the outer TYPE_CHECKING else branch (which runs at runtime),
+        nested else branches INSIDE the TYPE_CHECKING block are still only
+        executed during type checking, so they should be exempt.
+        """
+        code = """
+        from __future__ import annotations
+
+        import sys
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            if sys.version_info >= (3, 11):
+                import httpx
+            else:
+                # This else is INSIDE TYPE_CHECKING, so still exempt
+                import aiohttp
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        assert len(violations) == 0, (
+            f"Nested else within TYPE_CHECKING should be exempt: {violations}"
+        )
+
 
 # =============================================================================
 # Edge Cases
@@ -1599,6 +1719,133 @@ class TestEdgeCases:
         violations = scan_file_for_io_violations(filepath)
 
         assert len(violations) == 0
+
+    def test_large_file_near_limit_is_scanned(self, temp_dir: Path) -> None:
+        """Files just under the 1MB limit are still scanned.
+
+        Validates that files near but under _MAX_FILE_SIZE_BYTES (1MB)
+        are processed correctly by audit_all_nodes.
+        """
+        # Create a file just under the 1MB limit with a violation
+        # _MAX_FILE_SIZE_BYTES = 1_000_000 (1MB)
+        base_code = '''
+"""Large file test."""
+import httpx  # This should be detected
+
+def process() -> None:
+    pass
+'''
+        # Pad with comments to reach ~999KB (just under 1MB)
+        padding_size = 999_000 - len(base_code)
+        padding = "\n# padding" * (padding_size // 10)
+        large_code = base_code + padding
+
+        # Verify we're under the limit
+        assert len(large_code.encode("utf-8")) < _MAX_FILE_SIZE_BYTES
+
+        filepath = _create_test_file(temp_dir, large_code)
+        violations = scan_file_for_io_violations(filepath)
+
+        # The httpx import should still be detected
+        assert len(violations) == 1, (
+            f"Large file under limit should be scanned: {violations}"
+        )
+        assert violations[0].violation_type == EnumIOViolationType.FORBIDDEN_IMPORT
+        assert "httpx" in violations[0].detail
+
+    def test_large_file_over_limit_is_skipped(self, temp_dir: Path) -> None:
+        """Files exceeding the 1MB limit are skipped by audit_all_nodes.
+
+        The audit_all_nodes function should skip files larger than
+        _MAX_FILE_SIZE_BYTES to prevent memory issues.
+        """
+        # Create a file over the 1MB limit
+        base_code = '''
+"""Over-limit file test."""
+import httpx  # Would be a violation if scanned
+
+def process() -> None:
+    pass
+'''
+        # Pad to exceed 1MB
+        padding_size = 1_001_000 - len(base_code)
+        padding = "\n# padding" * (padding_size // 10)
+        large_code = base_code + padding
+
+        # Verify we're over the limit
+        assert len(large_code.encode("utf-8")) > _MAX_FILE_SIZE_BYTES
+
+        # Create node directory structure
+        node_dir = temp_dir / "test_node"
+        node_dir.mkdir()
+        _create_contract(node_dir, "REDUCER_GENERIC")
+        filepath = node_dir / "node.py"
+        filepath.write_text(large_code)
+
+        # audit_all_nodes should skip this file
+        violations = audit_all_nodes(temp_dir)
+
+        # No violations should be returned because file was skipped
+        assert len(violations) == 0, (
+            f"Files over 1MB limit should be skipped, found: {violations}"
+        )
+
+    def test_syntax_error_inside_type_checking_block(self, temp_dir: Path) -> None:
+        """Syntax error inside TYPE_CHECKING block returns SYNTAX_ERROR violation.
+
+        Even when a syntax error occurs inside a TYPE_CHECKING block,
+        the file should be reported as having a syntax error. The AST
+        parser fails before the auditor can determine TYPE_CHECKING context.
+        """
+        code = """
+        from __future__ import annotations
+
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            import httpx
+            # Syntax error: missing closing parenthesis
+            def broken_type_hint(x: list[
+                pass
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        # Should return a syntax error violation
+        assert len(violations) == 1, f"Expected syntax error violation: {violations}"
+        assert violations[0].violation_type == EnumIOViolationType.SYNTAX_ERROR
+        assert "Syntax error" in violations[0].detail
+
+    def test_syntax_error_only_in_type_checking_content(self, temp_dir: Path) -> None:
+        """Syntax error in TYPE_CHECKING block still prevents full audit.
+
+        When the file has a syntax error, Python's ast.parse() fails entirely,
+        so no I/O violations (even those outside TYPE_CHECKING) can be detected.
+        The auditor correctly reports the syntax error as the primary issue.
+        """
+        code = """
+        from __future__ import annotations
+
+        import httpx  # Would be a violation if file could be parsed
+
+        from typing import TYPE_CHECKING
+
+        if TYPE_CHECKING:
+            # Malformed code: invalid syntax
+            from asyncpg import [Connection
+
+        def process() -> None:
+            pass
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        # Should return a syntax error, not the httpx import violation
+        assert len(violations) == 1
+        assert violations[0].violation_type == EnumIOViolationType.SYNTAX_ERROR
 
 
 # =============================================================================
