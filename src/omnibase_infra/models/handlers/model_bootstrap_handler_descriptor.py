@@ -137,17 +137,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
             >>> isinstance(base_desc, ModelHandlerDescriptor)
             True
         """
-        return ModelHandlerDescriptor(
-            handler_id=self.handler_id,
-            name=self.name,
-            version=self.version,
-            handler_kind=self.handler_kind,
-            input_model=self.input_model,
-            output_model=self.output_model,
-            description=self.description,
-            handler_class=self.handler_class,
-            contract_path=self.contract_path,
-        )
+        return ModelHandlerDescriptor(**self.model_dump())
 
 
 __all__ = ["ModelBootstrapHandlerDescriptor"]
