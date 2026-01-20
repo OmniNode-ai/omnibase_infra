@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TypedDict
+from typing import TypedDict, final
 
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
@@ -247,6 +247,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
 _BOOTSTRAP_HANDLER_VERSION = "1.0.0"
 
 
+@final
 class HandlerBootstrapSource(
     ProtocolContractSource
 ):  # naming-ok: Handler prefix required by ProtocolHandlerSource convention
@@ -382,10 +383,13 @@ class HandlerBootstrapSource(
             discovered_count: Number of successfully discovered handlers.
             duration_seconds: Total discovery duration in seconds.
         """
+        # Cap handlers_per_sec at 1M to avoid float("inf") which can cause issues
+        # in downstream logging/monitoring systems expecting finite numbers.
+        # A value of 1M represents "effectively instant" discovery.
         handlers_per_sec = (
             discovered_count / duration_seconds
             if duration_seconds > 0
-            else float("inf")
+            else 1_000_000.0
             if discovered_count > 0
             else 0.0
         )

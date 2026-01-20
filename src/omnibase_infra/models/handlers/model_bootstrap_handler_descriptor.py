@@ -120,6 +120,25 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
         ModelHandlerDescriptor type is expected, while maintaining the
         validation benefits of the bootstrap-specific model.
 
+        Implementation Notes:
+            Uses ``model_dump()`` without ``exclude_unset=True`` because:
+
+            1. **Field parity**: This child class has NO extra fields beyond the
+               parent. The only difference is ``handler_class`` type constraint
+               (required ``str`` vs optional ``str | None``).
+
+            2. **Type compatibility**: A ``str`` value from child is valid where
+               parent expects ``str | None``.
+
+            3. **Complete copy**: ``model_dump()`` ensures all fields are copied,
+               including those set to their default values.
+
+            Using ``exclude_unset=True`` would risk excluding fields that have
+            defaults but were explicitly set to those defaults during construction.
+
+            If future versions add child-specific fields not in parent, this
+            method MUST be updated to use ``exclude={'new_field'}`` or refactored.
+
         Returns:
             ModelHandlerDescriptor instance with all fields copied.
 
