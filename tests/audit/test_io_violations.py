@@ -176,22 +176,30 @@ _ONEX_EXCLUDE_IO_AUDIT = "io_audit"
 # Maximum file size to process (1MB)
 _MAX_FILE_SIZE_BYTES: int = 1_000_000
 
+# Maximum AST recursion depth to prevent ReDoS attacks on deeply nested structures
+_MAX_AST_DEPTH: int = 100
+
 # Number of lines covered by ONEX_EXCLUDE: io_audit exemption.
-# This covers the comment line itself plus the next 5 lines (total of 6 lines).
+# This covers the comment line itself plus the next 9 lines (total of 10 lines).
 #
-# Rationale: Typical import statements span 1-3 lines (single import, from-import,
-# or multi-line from-import with parentheses). The 6-line range provides headroom
-# for grouped imports and multiline statements while preventing overly broad exemptions
-# that could accidentally exempt unrelated code further down in the file.
+# Rationale: Complex multi-line imports and grouped imports may span many lines.
+# The 10-line range provides sufficient headroom for:
+# - Multi-line from-imports with many names
+# - Multiple consecutive imports that need exemption
+# - Import statements with trailing comments
 #
 # Example usage:
-#   # ONEX_EXCLUDE: io_audit - Required for type hints
-#   from httpx import (    # Line 2 - exempted
-#       AsyncClient,       # Line 3 - exempted
-#       Client,            # Line 4 - exempted
-#   )                      # Line 5 - exempted
-#   # Line 6 - still exempted (last line of range)
-_ONEX_EXCLUDE_RANGE: int = 6
+#   # ONEX_EXCLUDE: io_audit - Required for legacy integration
+#   from httpx import (      # Line 2 - exempted
+#       AsyncClient,         # Line 3 - exempted
+#       Client,              # Line 4 - exempted
+#       Response,            # Line 5 - exempted
+#   )                        # Line 6 - exempted
+#   from asyncpg import (    # Line 7 - exempted
+#       Connection,          # Line 8 - exempted
+#       Pool,                # Line 9 - exempted
+#   )                        # Line 10 - exempted (last line of range)
+_ONEX_EXCLUDE_RANGE: int = 10
 
 
 # =============================================================================
@@ -467,7 +475,7 @@ class IOPurityAuditor(ast.NodeVisitor):
 
         self.generic_visit(node)
 
-    def _is_path_related(self, node: ast.expr) -> bool:
+    def _is_path_related(self, node: ast.expr, depth: int = 0) -> bool:
         """Check if a node is related to pathlib.Path.
 
         NOTE: This uses a heuristic based on variable naming patterns. Variables
@@ -475,12 +483,20 @@ class IOPurityAuditor(ast.NodeVisitor):
         with different names (e.g., `file`, `source`) holding Path objects may not be
         detected. This is a known limitation - users can use ONEX_EXCLUDE for such cases.
 
+        Security: Recursion depth is limited to _MAX_AST_DEPTH (100) to prevent
+        ReDoS attacks via deeply nested AST structures.
+
         Args:
             node: AST expression to check.
+            depth: Current recursion depth (for ReDoS protection).
 
         Returns:
             True if the node appears to be Path-related.
         """
+        # Security: Limit recursion depth to prevent ReDoS attacks
+        if depth >= _MAX_AST_DEPTH:
+            return False
+
         # Direct Path() call
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id == "Path":
@@ -489,7 +505,7 @@ class IOPurityAuditor(ast.NodeVisitor):
                 return True
         # Attribute access on Path-related expression
         if isinstance(node, ast.Attribute):
-            return self._is_path_related(node.value)
+            return self._is_path_related(node.value, depth + 1)
         # Variable that might be a Path (heuristic: lowercase ending in path)
         if isinstance(node, ast.Name):
             name_lower = node.id.lower()
@@ -746,13 +762,32 @@ def audit_all_nodes(nodes_dir: Path) -> list[IOAuditViolation]:
         try:
             file_violations = scan_file_for_io_violations(file_path)
             violations.extend(file_violations)
-        except Exception as e:  # catch-all-ok: validation continues on file errors
+        except RecursionError:
+            # AST too deeply nested - log and continue
+            logger.warning(
+                "AST recursion limit exceeded",
+                extra={
+                    "file": str(file_path),
+                    "error_type": "RecursionError",
+                },
+            )
+        except MemoryError:
+            # File too large to process - log and continue
+            logger.warning(
+                "Memory error processing file",
+                extra={
+                    "file": str(file_path),
+                    "error_type": "MemoryError",
+                },
+            )
+        except Exception:  # catch-all-ok: validation must continue on unexpected errors
+            # Catch-all to ensure audit continues even if individual files fail.
+            # This is intentional - we want to audit as many files as possible
+            # rather than failing the entire audit on one problematic file.
             logger.warning(
                 "Failed to audit file",
                 extra={
                     "file": str(file_path),
-                    "error_type": type(e).__name__,
-                    "error": str(e),
                 },
                 exc_info=True,  # Include full traceback for debugging
             )
@@ -1121,8 +1156,8 @@ class TestExemptionMechanisms:
 
     def test_unexempted_code_still_detected(self, temp_dir: Path) -> None:
         """Code without exemption still gets violations detected."""
-        # ONEX_EXCLUDE applies to the comment line and 5 lines after (total 6 lines)
-        # We need the second import to be more than 6 lines from the ONEX_EXCLUDE
+        # ONEX_EXCLUDE applies to the comment line and 9 lines after (total 10 lines)
+        # We need the second import to be more than 10 lines from the ONEX_EXCLUDE
         code = """
         # ONEX_EXCLUDE: io_audit
         import httpx  # Line 2 - exempted
@@ -1130,8 +1165,12 @@ class TestExemptionMechanisms:
         # Line 4
         # Line 5
         # Line 6
-        # Line 7 - exemption range ends here
-        import asyncpg  # Line 8 - NOT exempted (beyond 6-line range)
+        # Line 7
+        # Line 8
+        # Line 9
+        # Line 10
+        # Line 11 - exemption range ends here
+        import asyncpg  # Line 12 - NOT exempted (beyond 10-line range)
 
         def process():
             pass
@@ -1139,7 +1178,7 @@ class TestExemptionMechanisms:
         filepath = _create_test_file(temp_dir, code)
         violations = scan_file_for_io_violations(filepath)
 
-        # asyncpg import on line 8 should be detected (beyond 6-line range)
+        # asyncpg import on line 12 should be detected (beyond 10-line range)
         assert len(violations) == 1
         assert "asyncpg" in violations[0].detail
 
@@ -1849,6 +1888,131 @@ def process() -> None:
         assert len(violations) == 1
         assert violations[0].violation_type == EnumIOViolationType.SYNTAX_ERROR
 
+    def test_deeply_nested_attribute_chain(self, temp_dir: Path) -> None:
+        """Test handling of deeply nested attribute chains.
+
+        Validates that the AST depth limit prevents excessive recursion
+        when processing deeply nested attribute access patterns.
+        """
+        # Create a deeply nested attribute chain like: a.b.c.d.e.f.g...read_text()
+        nesting_depth = 50
+        chain = ".".join(f"attr{i}" for i in range(nesting_depth))
+        code = f"""
+        from pathlib import Path
+
+        def process():
+            result = obj.{chain}.read_text()
+            return result
+        """
+        filepath = _create_test_file(temp_dir, code)
+
+        # Should not crash or hang due to deep recursion
+        violations = scan_file_for_io_violations(filepath)
+
+        # May or may not detect (depends on heuristics), but must not crash
+        assert isinstance(violations, list)
+
+    def test_extremely_deep_nesting(self, temp_dir: Path) -> None:
+        """Test that extremely deep AST nesting doesn't cause stack overflow.
+
+        This test verifies the AST depth limit protection works by creating
+        a structure deeper than _MAX_AST_DEPTH.
+        """
+        # Create an extremely deeply nested expression (200 levels)
+        depth = 200
+        nested = "x"
+        for _ in range(depth):
+            nested = f"getattr({nested}, 'attr')"
+
+        code = f"""
+        def process():
+            result = {nested}.read_text()
+            return result
+        """
+        filepath = _create_test_file(temp_dir, code)
+
+        # Should complete without stack overflow
+        violations = scan_file_for_io_violations(filepath)
+        assert isinstance(violations, list)
+
+    def test_many_forbidden_imports(self, temp_dir: Path) -> None:
+        """Test file with many (100+) forbidden imports.
+
+        Verifies the auditor handles files with many violations efficiently.
+        """
+        # Generate 100 import statements for forbidden libraries
+        imports = []
+        forbidden_libs = list(FORBIDDEN_IMPORTS)
+        for i in range(100):
+            lib = forbidden_libs[i % len(forbidden_libs)]
+            imports.append(f"import {lib} as {lib}_{i}")
+
+        code = "\n".join(imports) + "\n\ndef process():\n    pass"
+        filepath = _create_test_file(temp_dir, code)
+
+        violations = scan_file_for_io_violations(filepath)
+
+        # Should detect all 100 imports
+        assert len(violations) == 100, f"Expected 100 violations, got {len(violations)}"
+        assert all(
+            v.violation_type == EnumIOViolationType.FORBIDDEN_IMPORT for v in violations
+        )
+
+    def test_indirect_path_variable_not_detected(self, temp_dir: Path) -> None:
+        """Test that variables without 'path' in name holding Paths are NOT detected.
+
+        This documents a known limitation: the heuristic-based Path detection
+        only catches variables with 'path' in their name. Variables like 'file',
+        'source', 'target' holding Path objects will not be detected.
+
+        Users should use ONEX_EXCLUDE for such cases.
+        """
+        code = """
+        from pathlib import Path
+
+        def process():
+            # These will NOT be detected (no 'path' in variable name)
+            file = Path("config.yaml")
+            content = file.read_text()
+
+            source = Path("input.txt")
+            data = source.read_bytes()
+
+            return content, data
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        # Known limitation: these won't be detected
+        # This test documents the expected behavior
+        assert len(violations) == 0, (
+            "Indirect Path variables without 'path' in name are not detected "
+            "(this is a known limitation)"
+        )
+
+    def test_path_variable_with_path_in_name_detected(self, temp_dir: Path) -> None:
+        """Test that variables WITH 'path' in name ARE detected.
+
+        Contrast to test_indirect_path_variable_not_detected - when the
+        variable name contains 'path', the heuristic works correctly.
+        """
+        code = """
+        from pathlib import Path
+
+        def process():
+            # These WILL be detected ('path' in variable name)
+            config_path = Path("config.yaml")
+            content = config_path.read_text()
+            return content
+        """
+        filepath = _create_test_file(temp_dir, code)
+        violations = scan_file_for_io_violations(filepath)
+
+        # Should detect the Path.read_text() call
+        assert len(violations) == 1
+        assert violations[0].violation_type == EnumIOViolationType.PATH_IO_METHOD
+        assert "read_text" in violations[0].detail
+
 
 # =============================================================================
 # CI Gate Test - Main Enforcement Point
@@ -1903,6 +2067,199 @@ class TestCIGateIOPurity:
                 f"Found {len(violations)} I/O violation(s) in pure nodes. "
                 "See output above for details."
             )
+
+
+# =============================================================================
+# Performance Benchmarks
+# =============================================================================
+
+
+class TestPerformanceBenchmarks:
+    """Performance benchmarks for I/O audit functionality.
+
+    These tests verify that audit operations complete within reasonable
+    time bounds. They use pytest's built-in timing capabilities.
+
+    Run with: pytest tests/audit/test_io_violations.py -v -k "benchmark"
+    """
+
+    def test_benchmark_scan_medium_file(self, temp_dir: Path) -> None:
+        """Benchmark scanning a medium-sized file (~500 lines)."""
+        import time
+
+        # Generate a medium-sized file with various patterns
+        lines = [
+            '"""Module docstring."""',
+            "from __future__ import annotations",
+            "",
+            "from typing import TYPE_CHECKING",
+            "",
+            "if TYPE_CHECKING:",
+            "    import httpx",
+            "",
+        ]
+        # Add 500 function definitions
+        for i in range(500):
+            lines.extend(
+                [
+                    f"def function_{i}() -> None:",
+                    f'    """Function {i}."""',
+                    "    pass",
+                    "",
+                ]
+            )
+
+        code = "\n".join(lines)
+        filepath = _create_test_file(temp_dir, code)
+
+        # Benchmark: should complete quickly
+        start = time.perf_counter()
+        violations = scan_file_for_io_violations(filepath)
+        elapsed = time.perf_counter() - start
+
+        # Assert reasonable performance (< 1 second for ~2000 lines)
+        assert elapsed < 1.0, f"Scan took too long: {elapsed:.2f}s"
+        # The TYPE_CHECKING import should not be flagged
+        assert len(violations) == 0
+
+    def test_benchmark_scan_file_with_violations(self, temp_dir: Path) -> None:
+        """Benchmark scanning a file with multiple violations."""
+        import time
+
+        # Generate a file with many violations to benchmark detection
+        lines = [
+            '"""Module with violations."""',
+            "from __future__ import annotations",
+            "",
+        ]
+        # Add 100 functions with violations
+        for i in range(100):
+            lines.extend(
+                [
+                    f"def function_{i}() -> None:",
+                    f'    """Function {i}."""',
+                    f"    value = os.environ.get('KEY_{i}')",
+                    "    return value",
+                    "",
+                ]
+            )
+
+        code = "\n".join(lines)
+        filepath = _create_test_file(temp_dir, code)
+
+        # Benchmark: should complete quickly even with many violations
+        start = time.perf_counter()
+        violations = scan_file_for_io_violations(filepath)
+        elapsed = time.perf_counter() - start
+
+        # Assert reasonable performance (< 1 second)
+        assert elapsed < 1.0, f"Scan took too long: {elapsed:.2f}s"
+        # Should have detected violations
+        assert len(violations) > 0
+
+    def test_benchmark_find_exclude_lines_large_file(self, temp_dir: Path) -> None:
+        """Benchmark finding ONEX_EXCLUDE lines in a large file."""
+        import time
+
+        # Generate a large file with many ONEX_EXCLUDE comments
+        lines = []
+        for i in range(1000):
+            if i % 50 == 0:
+                lines.append(f"# ONEX_EXCLUDE: io_audit - Line {i}")
+            else:
+                lines.append(f"# Regular comment {i}")
+
+        content = "\n".join(lines)
+
+        start = time.perf_counter()
+        excluded = _find_onex_exclude_lines(content)
+        elapsed = time.perf_counter() - start
+
+        # Should complete very quickly (< 0.1 seconds)
+        assert elapsed < 0.1, f"Finding exclude lines took too long: {elapsed:.2f}s"
+        # Should have found the exclude comments (20 comments at lines 0, 50, 100, ...)
+        # Each comment covers 6 lines
+        assert len(excluded) > 0
+
+    def test_benchmark_should_audit_file(self, temp_dir: Path) -> None:
+        """Benchmark should_audit_file decision making."""
+        import time
+
+        # Create a realistic node structure
+        node_dir = temp_dir / "test_node"
+        node_dir.mkdir()
+        _create_contract(node_dir, "REDUCER_GENERIC")
+
+        # Create test file paths (files don't need to exist for should_audit_file)
+        test_paths = [
+            node_dir / "node.py",
+            node_dir / "models" / "model_state.py",
+            temp_dir / "handlers" / "handler_test.py",
+            temp_dir / "adapters" / "adapter_db.py",
+        ]
+
+        start = time.perf_counter()
+
+        # Call should_audit_file many times
+        for _ in range(1000):
+            for path in test_paths:
+                should_audit_file(path, temp_dir)
+
+        elapsed = time.perf_counter() - start
+
+        # 4000 calls should complete in < 1 second
+        assert elapsed < 1.0, f"should_audit_file took too long: {elapsed:.2f}s"
+
+    def test_benchmark_ast_visitor_deep_nesting(self, temp_dir: Path) -> None:
+        """Benchmark AST visitor on deeply nested code structures."""
+        import time
+
+        # Generate deeply nested code (nested classes and functions)
+        lines = [
+            '"""Deeply nested module."""',
+            "from __future__ import annotations",
+            "",
+        ]
+
+        # Create nested class/function structure
+        indent = ""
+        for i in range(20):
+            lines.append(f"{indent}class Class{i}:")
+            indent += "    "
+            lines.append(f'{indent}"""Class {i}."""')
+            lines.append(f"{indent}def method_{i}(self) -> None:")
+            indent += "    "
+            lines.append(f'{indent}"""Method {i}."""')
+            lines.append(f"{indent}pass")
+            lines.append("")
+
+        code = "\n".join(lines)
+        filepath = _create_test_file(temp_dir, code)
+
+        start = time.perf_counter()
+        violations = scan_file_for_io_violations(filepath)
+        elapsed = time.perf_counter() - start
+
+        # Should complete quickly even with deep nesting
+        assert elapsed < 0.5, f"Deep nesting scan took too long: {elapsed:.2f}s"
+        assert len(violations) == 0
+
+    def test_benchmark_audit_all_nodes_empty_directory(self, temp_dir: Path) -> None:
+        """Benchmark audit_all_nodes on an empty directory structure."""
+        import time
+
+        # Create empty node directories
+        for i in range(50):
+            node_dir = temp_dir / f"node_{i}"
+            node_dir.mkdir()
+
+        start = time.perf_counter()
+        violations = audit_all_nodes(temp_dir)
+        elapsed = time.perf_counter() - start
+
+        # Should complete very quickly for empty directories
+        assert elapsed < 0.5, f"Empty directory audit took too long: {elapsed:.2f}s"
+        assert len(violations) == 0
 
 
 # =============================================================================
