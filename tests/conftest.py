@@ -64,11 +64,22 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from dotenv import load_dotenv
+
+# Load environment variables from .env file at test session start
+# This enables tests to use infrastructure config (CONSUL_HOST, KAFKA_BOOTSTRAP_SERVERS, etc.)
+# without needing to set env vars on command line
+_env_file = Path(__file__).parent.parent / ".env"
+if _env_file.exists():
+    load_dotenv(_env_file)
+    logging.getLogger(__name__).debug(f"Loaded environment from {_env_file}")
 
 from omnibase_infra.utils import sanitize_error_message
 
@@ -706,7 +717,6 @@ async def cleanup_consul_test_services() -> AsyncGenerator[None, None]:
         This fixture requires Consul to be available. It skips cleanup
         gracefully if Consul is not reachable or not configured.
     """
-    import os
     import socket
 
     yield  # Let the test run
@@ -865,7 +875,6 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
         The query intentionally uses restrictive WHERE clauses to minimize
         risk of accidental production data deletion.
     """
-    import os
 
     yield  # Let the test run
 
@@ -953,7 +962,6 @@ async def cleanup_kafka_test_consumer_groups() -> AsyncGenerator[None, None]:
         gracefully if Kafka is not reachable or not configured.
         Consumer groups are deleted using the Kafka admin client.
     """
-    import os
 
     yield  # Let the test run
 

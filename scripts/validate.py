@@ -15,6 +15,7 @@ Usage:
     python scripts/validate.py unions
     python scripts/validate.py any_types
     python scripts/validate.py localhandler
+    python scripts/validate.py io_audit
     python scripts/validate.py imports
     python scripts/validate.py markdown_links
     python scripts/validate.py markdown_links file1.md file2.md  # validate specific files
@@ -401,6 +402,39 @@ def run_localhandler(verbose: bool = False) -> bool:
         return True
 
 
+def run_io_audit(verbose: bool = False) -> bool:
+    """Run I/O purity audit for REDUCER and COMPUTE nodes.
+
+    Validates that pure nodes (REDUCER_GENERIC, COMPUTE_GENERIC) do not contain
+    direct I/O operations (forbidden imports, os.environ access, file I/O).
+    EFFECT_GENERIC nodes are exempt as I/O is their purpose.
+    """
+    nodes_dir = Path("src/omnibase_infra/nodes")
+    if not nodes_dir.exists():
+        if verbose:
+            print("I/O Audit: SKIP (no src/omnibase_infra/nodes directory)")
+        return True
+
+    try:
+        from tests.audit.test_io_violations import audit_all_nodes
+
+        violations = audit_all_nodes(nodes_dir)
+
+        if verbose or violations:
+            print(f"I/O Audit: {'PASS' if not violations else 'FAIL'}")
+            print(f"  Pure nodes scanned in: {nodes_dir}")
+            if violations:
+                print(f"  Violations found: {len(violations)}")
+                for v in violations:
+                    print(f"  - {v.file_path}:{v.line_number}: {v.detail}")
+
+        return len(violations) == 0
+
+    except ImportError as e:
+        print(f"I/O Audit: SKIP (test module not available: {e})")
+        return True
+
+
 def run_clean_root(verbose: bool = False) -> bool:
     """Run root directory cleanliness validation.
 
@@ -711,6 +745,7 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
                 ("Unions", run_unions),
                 ("Any Types", run_any_types),
                 ("LocalHandler", run_localhandler),
+                ("I/O Audit", run_io_audit),
                 ("Imports", run_imports),
                 ("Markdown Links", run_markdown_links),
             ]
@@ -753,6 +788,7 @@ def main() -> int:
             "unions",
             "any_types",
             "localhandler",
+            "io_audit",
             "imports",
             "markdown_links",
         ],
@@ -779,6 +815,7 @@ def main() -> int:
         "unions": run_unions,
         "any_types": run_any_types,
         "localhandler": run_localhandler,
+        "io_audit": run_io_audit,
         "imports": run_imports,
         "markdown_links": run_markdown_links,
     }

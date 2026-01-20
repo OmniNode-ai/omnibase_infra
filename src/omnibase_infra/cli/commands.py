@@ -16,6 +16,12 @@ def cli() -> None:
     """ONEX Infrastructure CLI."""
 
 
+# Register MCP CLI group
+from omnibase_infra.cli.cli_mcp import mcp_cli
+
+cli.add_command(mcp_cli)
+
+
 @cli.group()
 def validate() -> None:
     """Validation commands for infrastructure code."""
