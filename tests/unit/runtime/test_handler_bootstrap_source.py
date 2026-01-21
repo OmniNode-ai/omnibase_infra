@@ -63,6 +63,17 @@ EXPECTED_VERSION = "1.0.0"
 # Expected count of bootstrap handlers
 EXPECTED_HANDLER_COUNT = 5
 
+# Performance threshold: 20ms allows for contract YAML file I/O during handler
+# discovery. Pre-OMN-1282 threshold was 10ms when no contract files were loaded.
+# Current overhead comes from:
+# - Reading handler_contract.yaml for each bootstrap handler (5 handlers)
+# - YAML parsing via yaml.safe_load()
+# - Path resolution and symlink handling
+# - CI environment disk I/O variance
+# See: OMN-1282 for contract-driven handler configuration migration
+PERFORMANCE_THRESHOLD_MS = 20.0
+PERFORMANCE_THRESHOLD_SECONDS = PERFORMANCE_THRESHOLD_MS / 1000.0
+
 
 # =============================================================================
 # Protocol Compliance Tests
@@ -1039,18 +1050,32 @@ class TestHandlerBootstrapSourceThreadSafety:
 class TestHandlerBootstrapSourcePerformance:
     """Tests for performance characteristics.
 
-    These tests verify the documented performance guarantees:
-    - No filesystem or network I/O required
-    - Constant time O(1) discovery
-    - Typical performance: <1ms for all handlers
+    These tests verify performance guarantees for handler discovery:
+    - No network I/O required (all local file operations)
+    - Constant time O(1) discovery (fixed set of 5 handlers)
+    - Typical performance: <20ms for all handlers
+
+    Note on I/O overhead (OMN-1282):
+        Since OMN-1282, bootstrap handlers load configuration from contract
+        YAML files rather than using hardcoded values. This adds file I/O
+        overhead but enables contract-driven configuration. The threshold
+        was increased from 10ms to 20ms to accommodate:
+        - Reading handler_contract.yaml for each bootstrap handler
+        - YAML parsing via yaml.safe_load()
+        - Path resolution and symlink handling
+        - CI environment disk I/O variance
     """
 
     @pytest.mark.asyncio
     async def test_discovery_is_fast(self) -> None:
-        """discover_handlers() should complete quickly.
+        """discover_handlers() should complete quickly even with contract I/O.
 
-        The bootstrap source should be fast. Since OMN-1282, contract
-        YAML files are loaded during discovery, adding minimal file I/O.
+        Since OMN-1282, contract YAML files are loaded during discovery,
+        adding file I/O. This test uses a generous 50ms bound to account
+        for CI environment variance and cold cache scenarios.
+
+        See test_multiple_rapid_calls_are_fast() and PERFORMANCE_THRESHOLD_MS
+        for more detailed performance expectations.
         """
         import time
 
@@ -1068,11 +1093,24 @@ class TestHandlerBootstrapSourcePerformance:
 
     @pytest.mark.asyncio
     async def test_multiple_rapid_calls_are_fast(self) -> None:
-        """Multiple rapid calls should all be fast.
+        """Multiple rapid calls should all be fast despite contract I/O.
 
-        Note: Since OMN-1282, bootstrap handlers load contract YAML files
-        during discovery, adding file I/O. The threshold is set to 20ms
-        to account for contract loading and CI environment variance.
+        Performance threshold: 20ms (PERFORMANCE_THRESHOLD_MS)
+
+        Since OMN-1282, bootstrap handlers load configuration from contract
+        YAML files during discovery. This adds file I/O overhead compared to
+        the previous hardcoded approach (pre-OMN-1282 threshold was 10ms).
+
+        I/O operations contributing to overhead:
+        - Reading 5 handler_contract.yaml files (one per bootstrap handler)
+        - YAML parsing via yaml.safe_load() for each contract
+        - Path resolution and symlink handling for contract paths
+        - OS-level file system caching (first call slower than subsequent)
+
+        The 20ms threshold accommodates:
+        - Contract file loading overhead (~5-10ms typical)
+        - CI environment disk I/O variance
+        - Cold cache scenarios on first discovery
         """
         import time
 
@@ -1086,10 +1124,11 @@ class TestHandlerBootstrapSourcePerformance:
 
         avg_duration = total_duration / call_count
 
-        # Average should be under 20ms per call (includes contract YAML loading)
-        # CI environments may have variable I/O performance
-        assert avg_duration < 0.02, (
-            f"Average call took {avg_duration * 1000:.2f}ms, expected < 20ms"
+        # Use constant from module top for threshold documentation
+        assert avg_duration < PERFORMANCE_THRESHOLD_SECONDS, (
+            f"Average call took {avg_duration * 1000:.2f}ms, "
+            f"expected < {PERFORMANCE_THRESHOLD_MS}ms. "
+            "See PERFORMANCE_THRESHOLD_MS comment for OMN-1282 context."
         )
 
 

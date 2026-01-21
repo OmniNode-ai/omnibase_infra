@@ -106,6 +106,7 @@ class ServiceRegistryDiscovery:
         self._consul_handler = consul_handler
         self._widget_mapping_path = widget_mapping_path or DEFAULT_WIDGET_MAPPING_PATH
         self._widget_mapping_cache: ModelWidgetMapping | None = None
+        self._widget_mapping_mtime: float | None = None
 
         logger.info(
             "ServiceRegistryDiscovery initialized",
@@ -114,6 +115,24 @@ class ServiceRegistryDiscovery:
                 "has_consul_handler": consul_handler is not None,
                 "widget_mapping_path": str(self._widget_mapping_path),
             },
+        )
+
+    def invalidate_widget_mapping_cache(self) -> None:
+        """Clear widget mapping cache, forcing reload on next access.
+
+        Use this method when you know the widget mapping file has changed
+        and want to force an immediate reload, rather than waiting for
+        file modification time detection.
+
+        Example:
+            >>> service.invalidate_widget_mapping_cache()
+            >>> mapping, warnings = service.get_widget_mapping()  # Fresh load
+        """
+        self._widget_mapping_cache = None
+        self._widget_mapping_mtime = None
+        logger.debug(
+            "Widget mapping cache invalidated",
+            extra={"widget_mapping_path": str(self._widget_mapping_path)},
         )
 
     async def list_nodes(
@@ -514,15 +533,29 @@ class ServiceRegistryDiscovery:
     ) -> tuple[ModelWidgetMapping | None, list[ModelWarning]]:
         """Load and return widget mapping configuration.
 
-        Returns cached mapping if available, otherwise loads from YAML file.
+        Returns cached mapping if available and file unchanged, otherwise
+        loads from YAML file.
+
+        The cache is automatically invalidated when the file's modification
+        time changes, enabling hot-reload of widget mappings without restart.
 
         Returns:
             Tuple of (widget_mapping or None, warnings).
         """
         warnings: list[ModelWarning] = []
 
-        if self._widget_mapping_cache is not None:
-            return self._widget_mapping_cache, warnings
+        # Check if file has been modified since last cache
+        current_mtime: float | None = None
+        try:
+            current_mtime = self._widget_mapping_path.stat().st_mtime
+            if (
+                self._widget_mapping_cache is not None
+                and self._widget_mapping_mtime == current_mtime
+            ):
+                return self._widget_mapping_cache, warnings
+        except OSError:
+            # File doesn't exist or can't be accessed - will be handled below
+            pass
 
         if not self._widget_mapping_path.exists():
             warnings.append(
@@ -567,6 +600,16 @@ class ServiceRegistryDiscovery:
                 capability_mappings=capability_mappings,
                 semantic_mappings=semantic_mappings,
                 fallback=fallback,
+            )
+            self._widget_mapping_mtime = current_mtime
+
+            logger.debug(
+                "Widget mapping loaded",
+                extra={
+                    "widget_mapping_path": str(self._widget_mapping_path),
+                    "mtime": current_mtime,
+                    "version": data.get("version", "1.0.0"),
+                },
             )
 
             return self._widget_mapping_cache, warnings

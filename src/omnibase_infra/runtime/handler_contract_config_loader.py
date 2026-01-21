@@ -242,11 +242,16 @@ def _resolve_contract_path(relative_path: Path) -> Path | None:
         relative_path: Relative path to the contract file.
 
     Returns:
-        Resolved absolute path if found, None otherwise.
+        Resolved absolute path if the file exists in any of the searched
+        directories. Returns None if:
+        - The file does not exist in any searched directory
+        - Permission errors prevent checking all directories
+        - OS errors (path too long, invalid characters) occur for all paths
 
     Note:
         Permission errors and symlink resolution issues are logged but do not
-        cause failures - the function continues to the next base path.
+        cause failures - the function continues to the next base path. Only
+        returns None after exhausting all possible base directories.
     """
     # Calculate paths with clear semantics based on this file's location:
     # This file: src/omnibase_infra/runtime/handler_contract_config_loader.py

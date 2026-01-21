@@ -1653,6 +1653,24 @@ pattern_exemptions:
       - docs/patterns/binding_config_resolver.md
     ticket: OMN-765
   # ==========================================================================
+  # HandlerMCP Method Count Exemption (OMN-1282)
+  # ==========================================================================
+  # MCP handler is a complex infrastructure component requiring many methods:
+  # - 4 ProtocolHandler methods (initialize, shutdown, execute, health_check)
+  # - 2 factory methods for route handlers (_create_health_endpoint, _create_tools_list_endpoint)
+  # - 2 server lifecycle methods (_start_http_server, _stop_http_server)
+  # - 3 execution/operation methods (_run_server, _execute_tool_operation, _execute_describe)
+  # Complexity is inherent to MCP protocol requirements and uvicorn server management.
+  - file_pattern: 'handler_mcp\.py'
+    class_pattern: "Class 'HandlerMCP'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      HandlerMCP is a complex infrastructure handler implementing MCP protocol with internal uvicorn server lifecycle. The 11 methods are cohesive: 4 ProtocolHandler interface methods, 2 factory methods for Starlette route handlers (explicit closure capture), 2 server lifecycle methods (start/stop), and 3 operation methods. Splitting would fragment the unified MCP server abstraction.
+
+    documentation:
+      - CLAUDE.md (Handler Plugin Loader Patterns)
+    ticket: OMN-1282
+  # ==========================================================================
   # Registry API Models - service_name Exemptions (OMN-1278)
   # ==========================================================================
   # service_name in registry API models is the Consul service name for discovery,

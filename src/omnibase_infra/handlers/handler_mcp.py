@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import uvicorn
@@ -56,7 +56,7 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtract
 from omnibase_infra.services.mcp import MCPServerLifecycle, ModelMCPServerConfig
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Coroutine, Sequence
 
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_infra.adapters.adapter_onex_tool_execution import (
@@ -74,13 +74,20 @@ logger = logging.getLogger(__name__)
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_MCP: str = "mcp-handler"
 
+# Shutdown timeout constants (can be overridden via class attributes)
+_DEFAULT_SHUTDOWN_TIMEOUT: float = 5.0
+_DEFAULT_CANCEL_TIMEOUT: float = 1.0
 
-def _require_config_value(
+# Error message truncation limit for health check responses
+_ERROR_MESSAGE_MAX_LENGTH: int = 200
+
+
+def _require_config_value[T](
     config: dict[str, object],
     key: str,
-    expected_type: type,
+    expected_type: type[T],
     correlation_id: UUID,
-) -> object:
+) -> T:
     """Extract required config value or raise ProtocolConfigurationError.
 
     Per CLAUDE.md configuration rules, the `.env` file is the SINGLE SOURCE OF TRUTH.
@@ -172,7 +179,15 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         - Timeout enforcement via asyncio.wait_for()
         - Full observability through the ONEX runtime
         See: TODO(OMN-1288) for dispatcher integration tracking
+
+    Class Attributes:
+        shutdown_timeout: Timeout for graceful server shutdown (default: 5.0s).
+        cancel_timeout: Timeout for forced cancellation after graceful fails (default: 1.0s).
     """
+
+    # Configurable timeout attributes (can be overridden on subclasses or instances)
+    shutdown_timeout: float = _DEFAULT_SHUTDOWN_TIMEOUT
+    cancel_timeout: float = _DEFAULT_CANCEL_TIMEOUT
 
     def __init__(
         self,
@@ -259,6 +274,69 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             EnumInfraTransportType.MCP - Model Context Protocol transport.
         """
         return EnumInfraTransportType.MCP
+
+    def _create_health_endpoint(
+        self,
+    ) -> Callable[[Request], Coroutine[object, object, JSONResponse]]:
+        """Create health endpoint with explicit handler binding.
+
+        Returns a coroutine function that closes over `self` explicitly,
+        avoiding fragile closure patterns with intermediate variables.
+
+        Returns:
+            Async function suitable for Starlette Route.
+        """
+        # Capture reference explicitly in closure scope
+        handler = self
+
+        async def health_endpoint(_request: Request) -> JSONResponse:
+            """Return health status for the MCP server."""
+            tool_count = 0
+            if handler._lifecycle and handler._lifecycle.registry:
+                tool_count = handler._lifecycle.registry.tool_count
+            return JSONResponse(
+                {
+                    "status": "healthy",
+                    "tool_count": tool_count,
+                    "initialized": handler._initialized,
+                }
+            )
+
+        return health_endpoint
+
+    def _create_tools_list_endpoint(
+        self,
+    ) -> Callable[[Request], Coroutine[object, object, JSONResponse]]:
+        """Create tools list endpoint with explicit handler binding.
+
+        Returns a coroutine function that closes over `self` explicitly,
+        avoiding fragile closure patterns with intermediate variables.
+
+        Returns:
+            Async function suitable for Starlette Route.
+        """
+        # Capture reference explicitly in closure scope
+        handler = self
+
+        async def tools_list_endpoint(_request: Request) -> JSONResponse:
+            """Return list of available MCP tools."""
+            if handler._lifecycle and handler._lifecycle.registry:
+                tools = await handler._lifecycle.registry.list_tools()
+                return JSONResponse(
+                    {
+                        "tools": [
+                            {
+                                "name": t.name,
+                                "description": t.description,
+                                "endpoint": t.endpoint,
+                            }
+                            for t in tools
+                        ]
+                    }
+                )
+            return JSONResponse({"tools": []})
+
+        return tools_list_endpoint
 
     async def _wait_for_server_ready(
         self,
@@ -405,29 +483,17 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 # Per CLAUDE.md: .env is the SINGLE SOURCE OF TRUTH.
                 # No hardcoded fallbacks - all required config must be explicit.
                 # The _require_config_value helper validates type, cast() is for mypy.
-                consul_host = cast(
-                    "str",
-                    _require_config_value(
-                        config, "consul_host", str, init_correlation_id
-                    ),
+                consul_host = _require_config_value(
+                    config, "consul_host", str, init_correlation_id
                 )
-                consul_port = cast(
-                    "int",
-                    _require_config_value(
-                        config, "consul_port", int, init_correlation_id
-                    ),
+                consul_port = _require_config_value(
+                    config, "consul_port", int, init_correlation_id
                 )
-                kafka_enabled = cast(
-                    "bool",
-                    _require_config_value(
-                        config, "kafka_enabled", bool, init_correlation_id
-                    ),
+                kafka_enabled = _require_config_value(
+                    config, "kafka_enabled", bool, init_correlation_id
                 )
-                dev_mode = cast(
-                    "bool",
-                    _require_config_value(
-                        config, "dev_mode", bool, init_correlation_id
-                    ),
+                dev_mode = _require_config_value(
+                    config, "dev_mode", bool, init_correlation_id
                 )
                 # contracts_dir is optional - only used when dev_mode=True
                 contracts_dir_val = config.get("contracts_dir")
@@ -457,39 +523,9 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     self._mcp_executor = self._lifecycle.executor
 
                 # Create Starlette app with HTTP endpoints (OMN-1282)
-                # Use closure to capture self for route handlers
-                handler_self = self
-
-                async def health_endpoint(_request: Request) -> JSONResponse:
-                    """Return health status for the MCP server."""
-                    tool_count = 0
-                    if handler_self._lifecycle and handler_self._lifecycle.registry:
-                        tool_count = handler_self._lifecycle.registry.tool_count
-                    return JSONResponse(
-                        {
-                            "status": "healthy",
-                            "tool_count": tool_count,
-                            "initialized": handler_self._initialized,
-                        }
-                    )
-
-                async def tools_list_endpoint(_request: Request) -> JSONResponse:
-                    """Return list of available MCP tools."""
-                    if handler_self._lifecycle and handler_self._lifecycle.registry:
-                        tools = await handler_self._lifecycle.registry.list_tools()
-                        return JSONResponse(
-                            {
-                                "tools": [
-                                    {
-                                        "name": t.name,
-                                        "description": t.description,
-                                        "endpoint": t.endpoint,
-                                    }
-                                    for t in tools
-                                ]
-                            }
-                        )
-                    return JSONResponse({"tools": []})
+                # Use factory methods for explicit handler reference binding
+                health_endpoint = self._create_health_endpoint()
+                tools_list_endpoint = self._create_tools_list_endpoint()
 
                 app = Starlette(
                     routes=[
@@ -584,11 +620,13 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         3. Shutdown MCPServerLifecycle (registry, discovery, sync)
         4. Clear tool registry and reset state
 
-        Safe to call multiple times. Never hangs indefinitely (max ~6s).
-        """
-        SHUTDOWN_TIMEOUT = 5.0
-        CANCEL_TIMEOUT = 1.0
+        Safe to call multiple times. Never hangs indefinitely (max ~6s with defaults).
 
+        Note:
+            Timeouts are configurable via class attributes:
+            - shutdown_timeout: Graceful shutdown timeout (default: 5.0s)
+            - cancel_timeout: Forced cancellation timeout (default: 1.0s)
+        """
         shutdown_correlation_id = uuid4()
 
         logger.info(
@@ -614,22 +652,24 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 logger.debug(
                     "Waiting for server task to complete",
                     extra={
-                        "timeout_seconds": SHUTDOWN_TIMEOUT,
+                        "timeout_seconds": self.shutdown_timeout,
                         "correlation_id": str(shutdown_correlation_id),
                     },
                 )
-                await asyncio.wait_for(self._server_task, timeout=SHUTDOWN_TIMEOUT)
+                await asyncio.wait_for(self._server_task, timeout=self.shutdown_timeout)
             except TimeoutError:
                 logger.warning(
                     "Server shutdown timed out, forcing cancellation",
                     extra={
-                        "timeout_seconds": SHUTDOWN_TIMEOUT,
+                        "timeout_seconds": self.shutdown_timeout,
                         "correlation_id": str(shutdown_correlation_id),
                     },
                 )
                 self._server_task.cancel()
                 try:
-                    await asyncio.wait_for(self._server_task, timeout=CANCEL_TIMEOUT)
+                    await asyncio.wait_for(
+                        self._server_task, timeout=self.cancel_timeout
+                    )
                 except (TimeoutError, asyncio.CancelledError):
                     pass  # Best effort
             except asyncio.CancelledError:
@@ -1223,8 +1263,13 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 "initialized": True,
             }
 
+        # Capture server task reference once to avoid TOCTOU race conditions.
+        # If _server_task is reassigned (e.g., by concurrent shutdown()),
+        # we work with the captured reference consistently.
+        server_task = self._server_task
+
         # Check server task state
-        if self._server_task is None:
+        if server_task is None:
             return {
                 "healthy": False,
                 "reason": "server_task_missing",
@@ -1232,9 +1277,9 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 "initialized": True,
             }
 
-        if self._server_task.done():
+        if server_task.done():
             # Task completed - check why
-            if self._server_task.cancelled():
+            if server_task.cancelled():
                 return {
                     "healthy": False,
                     "reason": "server_cancelled",
@@ -1242,12 +1287,12 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     "initialized": True,
                 }
 
-            exc = self._server_task.exception()
+            exc = server_task.exception()
             if exc is not None:
                 return {
                     "healthy": False,
                     "reason": "server_crashed",
-                    "error": str(exc)[:200],  # Truncate for safety
+                    "error": str(exc)[:_ERROR_MESSAGE_MAX_LENGTH],
                     "transport_type": self.transport_type.value,
                     "initialized": True,
                 }
