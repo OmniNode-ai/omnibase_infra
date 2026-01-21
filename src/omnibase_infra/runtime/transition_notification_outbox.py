@@ -767,6 +767,107 @@ class TransitionNotificationOutbox:
             poll_interval_seconds=self._poll_interval,
         )
 
+    async def cleanup_processed(
+        self,
+        retention_days: int = 7,
+    ) -> int:
+        """Delete old processed notifications from outbox.
+
+        Removes processed notifications older than the specified retention
+        period to prevent table bloat. Should be called periodically via
+        cron or scheduled task.
+
+        Args:
+            retention_days: Number of days to retain processed records.
+                Must be >= 0. Default: 7 days.
+
+        Returns:
+            Count of deleted records.
+
+        Raises:
+            ProtocolConfigurationError: If retention_days is negative.
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If query times out.
+            RuntimeHostError: For other database errors.
+
+        Example:
+            >>> # Delete records processed more than 7 days ago
+            >>> deleted = await outbox.cleanup_processed(retention_days=7)
+            >>> print(f"Cleaned up {deleted} old records")
+            >>>
+            >>> # Delete all processed records immediately
+            >>> deleted = await outbox.cleanup_processed(retention_days=0)
+        """
+        correlation_id = uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="outbox_cleanup",
+            target_name=self._table_name,
+            correlation_id=correlation_id,
+        )
+
+        if retention_days < 0:
+            raise ProtocolConfigurationError(
+                f"retention_days must be >= 0, got {retention_days}",
+                context=ctx,
+                parameter="retention_days",
+                value=retention_days,
+            )
+
+        table_quoted = quote_identifier(self._table_name)
+        # S608: Safe - table name from constructor, quoted via quote_identifier()
+        # retention_days is validated integer, safe to interpolate
+        query = f"""
+            DELETE FROM {table_quoted}
+            WHERE processed_at IS NOT NULL
+            AND processed_at < NOW() - INTERVAL '{retention_days} days'
+        """  # noqa: S608
+
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.execute(
+                    query,
+                    timeout=self._query_timeout,
+                )
+                # Parse result like "DELETE 42"
+                deleted_count = int(result.split()[-1]) if result else 0
+
+                logger.info(
+                    "Cleaned up processed outbox records",
+                    extra={
+                        "table_name": self._table_name,
+                        "retention_days": retention_days,
+                        "deleted_count": deleted_count,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+                return deleted_count
+
+        except asyncpg.PostgresConnectionError as e:
+            raise InfraConnectionError(
+                f"Failed to cleanup outbox: {self._table_name}",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="outbox_cleanup",
+                target_name=self._table_name,
+                correlation_id=correlation_id,
+            )
+            raise InfraTimeoutError(
+                f"Timeout cleaning up outbox: {self._table_name}",
+                context=timeout_ctx,
+            ) from e
+
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Failed to cleanup outbox: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
 
 __all__: list[str] = [
     "TransitionNotificationOutbox",

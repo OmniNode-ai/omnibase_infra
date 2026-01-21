@@ -319,6 +319,24 @@ class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOper
         if notification_config is not None:
             self._validate_notification_config(notification_config)
 
+        # Warn if notification config topic differs from publisher topic
+        # The config.topic is informational only; publisher determines actual destination
+        if (
+            notification_config is not None
+            and notification_publisher is not None
+            and hasattr(notification_publisher, "topic")
+            and notification_config.topic != notification_publisher.topic
+        ):
+            logger.warning(
+                "Notification config topic differs from publisher topic - "
+                "config.topic is informational only, publisher determines actual destination",
+                extra={
+                    "projector_id": contract.projector_id,
+                    "config_topic": notification_config.topic,
+                    "publisher_topic": notification_publisher.topic,
+                },
+            )
+
         logger.debug(
             "ProjectorShell initialized for projector '%s'",
             contract.projector_id,
