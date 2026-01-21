@@ -60,7 +60,9 @@ def get_service(request: Request) -> ServiceRegistryDiscovery:
     Raises:
         HTTPException: If service is not configured in app state.
     """
-    service = getattr(request.app.state, "registry_service", None)
+    service: ServiceRegistryDiscovery | None = getattr(
+        request.app.state, "registry_service", None
+    )
     if service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
