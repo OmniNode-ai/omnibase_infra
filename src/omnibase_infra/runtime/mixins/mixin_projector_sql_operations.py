@@ -513,8 +513,9 @@ class MixinProjectorSqlOperations:
         values = self._normalize_values(values)
 
         schema = self._contract.projection_schema
-        # schema.primary_key is a str field in omnibase_core.ModelProjectorSchema
-        pk_list = [schema.primary_key]
+        # Normalize primary_key to list (handles both str and list[str] from omnibase_core)
+        pk = schema.primary_key
+        pk_list: list[str] = pk if isinstance(pk, list) else [pk]
 
         # Determine conflict columns (single or composite)
         conflict_cols = conflict_columns if conflict_columns else pk_list
@@ -687,8 +688,11 @@ class MixinProjectorSqlOperations:
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        # schema.primary_key is a str field in omnibase_core.ModelProjectorSchema
-        pk_quoted = quote_identifier(schema.primary_key)
+        # Normalize primary_key (handles both str and list[str] from omnibase_core)
+        # For partial_update, use first column if composite (see docstring limitation note)
+        pk = schema.primary_key
+        pk_col = pk[0] if isinstance(pk, list) else pk
+        pk_quoted = quote_identifier(pk_col)
 
         # Build SET clause with parameterized placeholders
         # Column names are quoted for SQL safety; values use $1, $2, etc.

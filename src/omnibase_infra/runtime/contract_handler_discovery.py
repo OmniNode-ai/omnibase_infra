@@ -437,7 +437,12 @@ class ContractHandlerDiscovery:
                 if hasattr(e, "model") and hasattr(e.model, "context"):
                     context_dict = e.model.context
                     if isinstance(context_dict, dict):
-                        error_code = context_dict.get("loader_error", error_code)
+                        loader_error = context_dict.get("loader_error")
+                        error_code = (
+                            str(loader_error)
+                            if loader_error is not None
+                            else error_code
+                        )
 
                 errors.append(
                     ModelDiscoveryError(

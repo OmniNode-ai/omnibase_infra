@@ -98,15 +98,21 @@ class ServiceMCPToolDiscovery:
 
         if container is not None:
             # Resolve Consul configuration from container
-            consul_config = container.config.get("consul", {})
-            agent_url = consul_config.get("agent_url", "http://localhost:8500")
+            # Configuration() returns the underlying dict
+            config_data = container.config()
+            consul_config = (
+                config_data.get("consul", {}) if isinstance(config_data, dict) else {}
+            )
+            agent_url_raw = consul_config.get("agent_url", "http://localhost:8500")
+            agent_url = str(agent_url_raw) if agent_url_raw else "http://localhost:8500"
 
             # Parse the agent_url to extract host, port, and scheme
             parsed = urlparse(agent_url)
             self._consul_host = parsed.hostname or "localhost"
             self._consul_port = parsed.port or 8500
             self._consul_scheme = parsed.scheme or "http"
-            self._consul_token = consul_config.get("token")
+            token_raw = consul_config.get("token")
+            self._consul_token = str(token_raw) if token_raw is not None else None
         else:
             # Use directly provided parameters
             self._consul_host = consul_host

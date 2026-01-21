@@ -207,6 +207,7 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType, EnumIntrospectionReason
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -228,7 +229,9 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
-    from omnibase_infra.event_bus.models import ModelEventMessage
+    from omnibase_core.protocols.event_bus.protocol_event_message import (
+        ProtocolEventMessage,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -1489,8 +1492,13 @@ class MixinNodeIntrospection:
                 assert event_bus is not None  # Redundant but helps mypy
                 topic = self._introspection_topic
                 if hasattr(event_bus, "publish_envelope"):
+                    # Wrap event in ModelEventEnvelope for protocol compliance
+                    envelope = ModelEventEnvelope(
+                        payload=publish_event,
+                        correlation_id=final_correlation_id,
+                    )
                     await event_bus.publish_envelope(
-                        envelope=publish_event,
+                        envelope=envelope,
                         topic=topic,
                     )
                 else:
@@ -1604,8 +1612,13 @@ class MixinNodeIntrospection:
             assert event_bus is not None  # Redundant but helps mypy
             topic = self._heartbeat_topic
             if hasattr(event_bus, "publish_envelope"):
+                # Wrap event in ModelEventEnvelope for protocol compliance
+                envelope = ModelEventEnvelope(
+                    payload=heartbeat,
+                    correlation_id=heartbeat.correlation_id,
+                )
                 await event_bus.publish_envelope(
-                    envelope=heartbeat,
+                    envelope=envelope,
                     topic=topic,
                 )
             else:
@@ -1771,7 +1784,9 @@ class MixinNodeIntrospection:
                 )
             self._registry_unsubscribe = None
 
-    async def _handle_introspection_request(self, message: ModelEventMessage) -> None:
+    async def _handle_introspection_request(
+        self, message: ProtocolEventMessage
+    ) -> None:
         """Handle incoming introspection request.
 
         Includes error recovery with rate-limited logging to prevent
@@ -1779,7 +1794,7 @@ class MixinNodeIntrospection:
         non-fatal errors to maintain graceful degradation.
 
         Args:
-            message: The incoming event message
+            message: The incoming event message (implements ProtocolEventMessage protocol)
         """
         try:
             await self._process_introspection_request(message)
@@ -1788,7 +1803,9 @@ class MixinNodeIntrospection:
         except Exception as e:
             self._handle_request_error(e)
 
-    async def _process_introspection_request(self, message: ModelEventMessage) -> None:
+    async def _process_introspection_request(
+        self, message: ProtocolEventMessage
+    ) -> None:
         """Process the introspection request message.
 
         Args:

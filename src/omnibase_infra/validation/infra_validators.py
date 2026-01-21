@@ -37,10 +37,12 @@ from typing import TypedDict
 import yaml
 
 from omnibase_core.models.common import ModelValidationMetadata
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_core.models.validation.model_union_pattern import ModelUnionPattern
 from omnibase_core.validation import (
     CircularImportValidator,
     ModelContractValidationResult,
+    ModelImportValidationResult,
     ModelModuleImportResult,
     ModelValidationResult,
     validate_architecture,
@@ -751,13 +753,14 @@ def validate_infra_contract_deep(
         return result
 
     # If result is a different type, wrap it in ModelContractValidationResult
-    # Default to passed=False for unknown result types to avoid silently masking failures
-    # Check 'passed' first, then 'is_valid' as fallback (some validators use is_valid)
+    # Default to is_valid=False for unknown result types to avoid silently masking failures
+    # Check 'is_valid' first, then 'passed' as fallback (some validators use passed)
     return ModelContractValidationResult(
-        passed=getattr(result, "passed", getattr(result, "is_valid", False)),
+        is_valid=getattr(result, "is_valid", getattr(result, "passed", False)),
         score=getattr(result, "score", 0.0),
-        errors=getattr(result, "errors", []),
+        violations=getattr(result, "violations", getattr(result, "errors", [])),
         warnings=getattr(result, "warnings", []),
+        interface_version=ModelSemVer(major=1, minor=0, patch=0),
     )
 
 
@@ -1322,29 +1325,33 @@ def validate_infra_union_usage(
     # Note: ModelValidationMetadata uses extra="allow", so extension fields
     # are accepted as int values.
     # See docstring "Metadata Extension Fields" section for field documentation.
+    #
+    # Extension fields are passed via model_construct() to satisfy type checker
+    # while preserving runtime behavior with extra="allow".
+    metadata_fields: dict[str, object] = {
+        # Standard ModelValidationMetadata fields (formally defined)
+        "validation_type": "union_usage",
+        "files_processed": files_processed,
+        "violations_found": len(filtered_issues),
+        "total_unions": total_count,  # Base field: all unions found
+        "max_unions": max_unions,  # Base field: configured threshold
+        "strict_mode": strict,  # Base field: whether strict mode enabled
+        # Extension fields (via extra="allow", typed as int)
+        # These provide transparency into the exclusion logic:
+        "non_optional_unions": threshold_count,  # What threshold actually checks
+        "optional_unions_excluded": optional_count,  # X | None patterns
+        "isinstance_unions_excluded": isinstance_count,  # isinstance(x, A | B) patterns
+    }
     return ModelValidationResult(
         is_valid=is_valid,
         errors=filtered_issues,
-        metadata=ModelValidationMetadata(
-            # Standard ModelValidationMetadata fields (formally defined)
-            validation_type="union_usage",
-            files_processed=files_processed,
-            violations_found=len(filtered_issues),
-            total_unions=total_count,  # Base field: all unions found
-            max_unions=max_unions,  # Base field: configured threshold
-            strict_mode=strict,  # Base field: whether strict mode enabled
-            # Extension fields (via extra="allow", typed as int)
-            # These provide transparency into the exclusion logic:
-            non_optional_unions=threshold_count,  # What threshold actually checks
-            optional_unions_excluded=optional_count,  # X | None patterns
-            isinstance_unions_excluded=isinstance_count,  # isinstance(x, A | B) patterns
-        ),
+        metadata=ModelValidationMetadata.model_construct(**metadata_fields),
     )
 
 
 def validate_infra_circular_imports(
     directory: PathInput = INFRA_SRC_PATH,
-) -> ModelModuleImportResult:
+) -> ModelImportValidationResult:
     """
     Check for circular imports in infrastructure code.
 
@@ -1355,7 +1362,7 @@ def validate_infra_circular_imports(
         directory: Directory to check. Defaults to infrastructure source.
 
     Returns:
-        ModelModuleImportResult with detailed import validation results.
+        ModelImportValidationResult with detailed import validation results.
         Use result.has_circular_imports to check for issues.
     """
     validator = CircularImportValidator(source_path=Path(directory))
@@ -1365,7 +1372,7 @@ def validate_infra_circular_imports(
 def validate_infra_all(
     directory: PathInput = INFRA_SRC_PATH,
     nodes_directory: PathInput = INFRA_NODES_PATH,
-) -> dict[str, ValidationResult | ModelModuleImportResult]:
+) -> dict[str, ValidationResult | ModelImportValidationResult]:
     """
     Run all validations on infrastructure code.
 
@@ -1383,7 +1390,7 @@ def validate_infra_all(
     Returns:
         Dictionary mapping validator name to result.
     """
-    results: dict[str, ValidationResult | ModelModuleImportResult] = {}
+    results: dict[str, ValidationResult | ModelImportValidationResult] = {}
 
     # HIGH priority validators
     results["architecture"] = validate_infra_architecture(directory)
@@ -1398,7 +1405,7 @@ def validate_infra_all(
 
 
 def get_validation_summary(
-    results: dict[str, ValidationResult | ModelModuleImportResult],
+    results: dict[str, ValidationResult | ModelImportValidationResult],
 ) -> dict[str, int | list[str]]:
     """
     Generate a summary of validation results.

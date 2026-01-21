@@ -247,8 +247,8 @@ class RuntimeHostProcess:
 
                     ```python
                     container = ModelONEXContainer()
-                    wire_infrastructure_services(container)
-                    registry = container.service_registry.resolve_service(RegistryProtocolBinding)
+                    await wire_infrastructure_services(container)
+                    registry = await container.service_registry.resolve_service(RegistryProtocolBinding)
                     process = RuntimeHostProcess(handler_registry=registry)
                     ```
 

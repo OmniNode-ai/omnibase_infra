@@ -37,6 +37,7 @@ from pydantic import ValidationError
 
 from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumHandlerErrorType, EnumHandlerSourceType
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
@@ -102,6 +103,28 @@ logger = logging.getLogger(__name__)
 
 # File pattern for handler contracts
 HANDLER_CONTRACT_FILENAME = "handler_contract.yaml"
+
+
+def _parse_semver(version_str: str) -> ModelSemVer:
+    """Parse a version string into a ModelSemVer object.
+
+    Args:
+        version_str: Semantic version string (e.g., "1.0.0", "1.2.3-beta.1").
+
+    Returns:
+        ModelSemVer object with major, minor, and patch components.
+
+    Note:
+        This is a simple parser that handles the basic "major.minor.patch" format.
+        Prerelease and build metadata are not currently parsed.
+    """
+    parts = version_str.split("-")[0].split("+")[0].split(".")
+    return ModelSemVer(
+        major=int(parts[0]) if len(parts) > 0 else 0,
+        minor=int(parts[1]) if len(parts) > 1 else 0,
+        patch=int(parts[2]) if len(parts) > 2 else 0,
+    )
+
 
 # Maximum contract file size (10MB) to prevent memory exhaustion
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024
@@ -530,7 +553,7 @@ class HandlerContractSource(ProtocolContractSource):
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
             name=contract.name,
-            version=contract.version,
+            version=_parse_semver(contract.version),
             handler_kind=contract.descriptor.handler_kind,
             input_model=contract.input_model,
             output_model=contract.output_model,

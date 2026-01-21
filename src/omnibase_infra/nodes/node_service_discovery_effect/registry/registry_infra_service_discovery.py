@@ -40,6 +40,7 @@ Related:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ProtocolConfigurationError
@@ -50,6 +51,8 @@ if TYPE_CHECKING:
         ProtocolDiscoveryOperations,
     )
 
+logger = logging.getLogger(__name__)
+
 
 class RegistryInfraServiceDiscovery:
     """Registry for service discovery node dependencies.
@@ -59,11 +62,11 @@ class RegistryInfraServiceDiscovery:
     registration and explicit handler configuration.
 
     API Pattern Note:
-        This registry uses ``container.register_factory()`` and
-        ``container.register_instance()`` for protocol-based type-safe DI
-        resolution. This differs from RegistryInfraRegistrationStorage which
-        uses ``container.service_registry[key]`` dict access for multi-handler
-        routing by type string (e.g., "postgresql", "mock").
+        This registry uses ``container.service_registry.register_instance()``
+        for protocol-based type-safe DI resolution. This differs from
+        RegistryInfraRegistrationStorage which uses a module-level dict for
+        multi-handler routing by type string (e.g., "postgresql", "mock"),
+        as ServiceRegistry does not support dict-style indexed access.
 
         The different patterns serve different purposes:
         - Protocol-based registration: Single handler per protocol type
@@ -113,21 +116,18 @@ class RegistryInfraServiceDiscovery:
         if container.service_registry is None:
             return
 
-        # Import here to avoid circular imports
-        from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolDiscoveryOperations,
-        )
-
-        # Register protocol with lazy resolution
-        # The actual implementation is determined at resolution time
-        # based on configuration (CONSUL_AGENT_URL, K8S_NAMESPACE, etc.)
-        container.register_factory(
-            ProtocolDiscoveryOperations,
-            RegistryInfraServiceDiscovery._create_handler_from_config,
+        # NOTE: Factory registration (register_factory) is not implemented in
+        # omnibase_core v1.0. This method provides no-op registration for forward
+        # compatibility. Use register_with_handler() to explicitly provide a
+        # pre-configured handler instance.
+        logger.debug(
+            "Service discovery factory registration skipped - "
+            "factory registration not implemented in v1.0. "
+            "Use register_with_handler() to register an explicit handler instance."
         )
 
     @staticmethod
-    def register_with_handler(
+    async def register_with_handler(
         container: ModelONEXContainer,
         handler: ProtocolDiscoveryOperations,
     ) -> None:
@@ -146,12 +146,13 @@ class RegistryInfraServiceDiscovery:
         Example:
             >>> container = ModelONEXContainer()
             >>> handler = HandlerServiceDiscoveryConsul(config)
-            >>> RegistryInfraServiceDiscovery.register_with_handler(
+            >>> await RegistryInfraServiceDiscovery.register_with_handler(
             ...     container,
             ...     handler=handler,
             ... )
         """
         # Import at runtime for isinstance check (protocol is @runtime_checkable)
+        from omnibase_core.enums import EnumInjectionScope
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
             ProtocolDiscoveryOperations,
         )
@@ -174,7 +175,11 @@ class RegistryInfraServiceDiscovery:
         if container.service_registry is None:
             return
 
-        container.register_instance(ProtocolDiscoveryOperations, handler)
+        await container.service_registry.register_instance(
+            interface=ProtocolDiscoveryOperations,
+            instance=handler,
+            scope=EnumInjectionScope.GLOBAL,
+        )
 
     @staticmethod
     def _create_handler_from_config(

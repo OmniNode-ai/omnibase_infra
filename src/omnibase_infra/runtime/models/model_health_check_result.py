@@ -209,10 +209,11 @@ class ModelHealthCheckResult(BaseModel):
                 details=health_response,
             )
         # Non-dict response - treat as details, assume healthy
+        # Convert to string representation for JsonType compatibility
         return cls(
             handler_type=handler_type,
             healthy=True,
-            details={"raw_response": health_response},
+            details={"raw_response": str(health_response)},
         )
 
     def __str__(self) -> str:

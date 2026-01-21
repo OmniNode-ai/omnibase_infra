@@ -107,7 +107,10 @@ ONEX 4-Node Architecture Integration:
         class ValidationNode(NodeComputeService):
             def __init__(self, container: ONEXContainer):
                 super().__init__(container)
-                self.plugin = container.resolve(ProtocolPluginCompute)
+                # Resolve plugin from service registry (async required)
+                # self.plugin = await container.service_registry.resolve_service(
+                #     ProtocolPluginCompute
+                # )
 
             async def execute(self, input_model: ModelInput) -> ModelOutput:
                 # Node handles I/O and state management

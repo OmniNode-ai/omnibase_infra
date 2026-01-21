@@ -392,7 +392,7 @@ class IntrospectionEventRouter:
                 correlation_id=raw_envelope.correlation_id or callback_correlation_id,
                 source_tool=raw_envelope.source_tool,
                 target_tool=raw_envelope.target_tool,
-                metadata=_normalize_metadata(raw_envelope.metadata),
+                metadata=_normalize_metadata(raw_envelope.metadata),  # type: ignore[arg-type]
                 priority=raw_envelope.priority,
                 timeout_seconds=raw_envelope.timeout_seconds,
                 trace_id=raw_envelope.trace_id,
@@ -419,7 +419,7 @@ class IntrospectionEventRouter:
                 },
             )
             dispatcher_start_time = time.time()
-            result = await self._dispatcher.handle(event_envelope)
+            result = await self._dispatcher.handle(event_envelope)  # type: ignore[arg-type]
             dispatcher_duration = time.time() - dispatcher_start_time
 
             if result.is_successful():
@@ -441,7 +441,7 @@ class IntrospectionEventRouter:
                 if result.output_events:
                     for output_event in result.output_events:
                         # Wrap output event in envelope
-                        output_envelope = ModelEventEnvelope(
+                        output_envelope = ModelEventEnvelope(  # type: ignore[var-annotated]
                             payload=output_event,
                             correlation_id=event_envelope.correlation_id,
                             envelope_timestamp=datetime.now(UTC),

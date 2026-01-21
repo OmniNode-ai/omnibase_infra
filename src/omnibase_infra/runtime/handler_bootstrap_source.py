@@ -67,6 +67,7 @@ import threading
 import time
 from typing import TypedDict, final
 
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
@@ -303,7 +304,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
 ]
 
 # Version for all bootstrap handlers (hardcoded handlers use stable version)
-_BOOTSTRAP_HANDLER_VERSION = "1.0.0"
+_BOOTSTRAP_HANDLER_VERSION = ModelSemVer(major=1, minor=0, patch=0)
 
 
 @final

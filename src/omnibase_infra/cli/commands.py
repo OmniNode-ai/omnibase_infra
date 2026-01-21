@@ -127,8 +127,8 @@ def validate_imports_cmd(directory: str) -> None:
     console.print(f"[bold blue]Checking circular imports in {directory}...[/bold blue]")
     result = validate_infra_circular_imports(directory)
 
-    # ModelModuleImportResult uses has_circular_imports property
-    if not result.has_circular_imports:
+    # ModelModuleImportResult uses has_circular_import property (singular)
+    if not result.has_circular_import:
         console.print("[bold green]Circular Imports: PASS[/bold green]")
         raise SystemExit(0)
     console.print("[bold red]Circular Imports: FAIL[/bold red]")
@@ -182,8 +182,8 @@ def validate_all_cmd(directory: str, nodes_dir: str) -> None:
 
 def _is_result_valid(result: object) -> bool:
     """Check if a validation result is valid."""
-    if hasattr(result, "has_circular_imports"):
-        return not bool(result.has_circular_imports)
+    if hasattr(result, "has_circular_import"):
+        return not bool(result.has_circular_import)
     if hasattr(result, "is_valid"):
         return bool(result.is_valid)
     return False
@@ -191,10 +191,10 @@ def _is_result_valid(result: object) -> bool:
 
 def _get_error_count(result: object) -> int:
     """Get the error count from a validation result."""
-    if hasattr(result, "has_circular_imports"):
+    if hasattr(result, "has_circular_import"):
         if hasattr(result, "cycles"):
             return len(result.cycles)
-        return 1 if result.has_circular_imports else 0
+        return 1 if result.has_circular_import else 0
     if hasattr(result, "errors"):
         return len(result.errors)
     return 0
