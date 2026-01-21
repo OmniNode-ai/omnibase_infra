@@ -275,6 +275,30 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         """
         return EnumInfraTransportType.MCP
 
+    def _create_json_endpoint(
+        self,
+        response_factory: Callable[[], Coroutine[object, object, dict[str, object]]],
+    ) -> Callable[[Request], Coroutine[object, object, JSONResponse]]:
+        """Create a JSON endpoint that wraps an async response factory.
+
+        This method creates a Starlette-compatible async route handler that:
+        1. Calls the provided response_factory to generate response data
+        2. Wraps the data in a JSONResponse
+
+        Args:
+            response_factory: Async callable that returns the response data dict.
+                The factory is called on each request to generate fresh data.
+
+        Returns:
+            Async function suitable for Starlette Route.
+        """
+
+        async def endpoint(_request: Request) -> JSONResponse:
+            data = await response_factory()
+            return JSONResponse(data)
+
+        return endpoint
+
     def _create_health_endpoint(
         self,
     ) -> Callable[[Request], Coroutine[object, object, JSONResponse]]:
@@ -289,20 +313,18 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         # Capture reference explicitly in closure scope
         handler = self
 
-        async def health_endpoint(_request: Request) -> JSONResponse:
-            """Return health status for the MCP server."""
+        async def get_health_data() -> dict[str, object]:
+            """Return health status data for the MCP server."""
             tool_count = 0
             if handler._lifecycle and handler._lifecycle.registry:
                 tool_count = handler._lifecycle.registry.tool_count
-            return JSONResponse(
-                {
-                    "status": "healthy",
-                    "tool_count": tool_count,
-                    "initialized": handler._initialized,
-                }
-            )
+            return {
+                "status": "healthy",
+                "tool_count": tool_count,
+                "initialized": handler._initialized,
+            }
 
-        return health_endpoint
+        return self._create_json_endpoint(get_health_data)
 
     def _create_tools_list_endpoint(
         self,
@@ -318,25 +340,23 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         # Capture reference explicitly in closure scope
         handler = self
 
-        async def tools_list_endpoint(_request: Request) -> JSONResponse:
+        async def get_tools_data() -> dict[str, object]:
             """Return list of available MCP tools."""
             if handler._lifecycle and handler._lifecycle.registry:
                 tools = await handler._lifecycle.registry.list_tools()
-                return JSONResponse(
-                    {
-                        "tools": [
-                            {
-                                "name": t.name,
-                                "description": t.description,
-                                "endpoint": t.endpoint,
-                            }
-                            for t in tools
-                        ]
-                    }
-                )
-            return JSONResponse({"tools": []})
+                return {
+                    "tools": [
+                        {
+                            "name": t.name,
+                            "description": t.description,
+                            "endpoint": t.endpoint,
+                        }
+                        for t in tools
+                    ]
+                }
+            return {"tools": []}
 
-        return tools_list_endpoint
+        return self._create_json_endpoint(get_tools_data)
 
     async def _wait_for_server_ready(
         self,
@@ -355,6 +375,33 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Raises:
             ProtocolConfigurationError: If server doesn't start within timeout
+
+        Note:
+            Circuit Breaker Failures Are NOT Recorded Here
+
+            This method is for startup verification, not runtime health checking.
+            TCP connect failures during startup are expected and transient - the
+            server is still spinning up and will become available shortly.
+
+            Circuit breaker tracking is intentionally omitted because:
+
+            1. Startup retries are bounded and transient - the method either succeeds
+               within the timeout or raises ProtocolConfigurationError, ending startup.
+
+            2. Recording startup failures would pollute circuit breaker metrics with
+               expected transient failures, potentially triggering an open circuit
+               before the server even starts.
+
+            3. Circuit breakers are designed for runtime fault tolerance - detecting
+               when a previously-healthy service becomes unhealthy. Startup behavior
+               is fundamentally different: we expect failures until success.
+
+            4. If the server fails to start within timeout, we fail fast with
+               ProtocolConfigurationError rather than entering a degraded state.
+
+            Circuit breaker tracking should occur during runtime operations (e.g.,
+            tool execution, health checks) where failures indicate actual service
+            degradation rather than expected startup latency.
         """
         import socket
 

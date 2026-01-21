@@ -557,6 +557,17 @@ class ServiceRegistryDiscovery:
             # File doesn't exist or can't be accessed - will be handled below
             pass
 
+        # Log cache invalidation due to file change (only when cache existed)
+        if self._widget_mapping_cache is not None and current_mtime is not None:
+            logger.info(
+                "Widget mapping cache invalidated, reloading from file",
+                extra={
+                    "widget_mapping_path": str(self._widget_mapping_path),
+                    "old_mtime": self._widget_mapping_mtime,
+                    "new_mtime": current_mtime,
+                },
+            )
+
         if not self._widget_mapping_path.exists():
             warnings.append(
                 ModelWarning(
