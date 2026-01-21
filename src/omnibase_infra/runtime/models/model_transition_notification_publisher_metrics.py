@@ -148,6 +148,16 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
             "Formula: individual_publishes = notifications_published - batch_notifications_total."
         ),
     )
+    batch_failures_truncated: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Count of times failure tracking was truncated due to exceeding max_tracked_failures. "
+            "When batch operations have more failures than max_tracked_failures (default 100), "
+            "only the first max_tracked_failures are stored in memory. This counter tracks "
+            "how many times truncation occurred, indicating potential memory pressure events."
+        ),
+    )
 
     # Timing metrics (milliseconds)
     last_publish_at: datetime | None = Field(

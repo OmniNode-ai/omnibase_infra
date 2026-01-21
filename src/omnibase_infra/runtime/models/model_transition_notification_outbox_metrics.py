@@ -50,6 +50,16 @@ class ModelTransitionNotificationOutboxMetrics(BaseModel):
     notifications_sent_to_dlq: int = Field(
         default=0, ge=0, description="Total notifications sent to DLQ"
     )
+    dlq_publish_failures: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Count of failed DLQ publish attempts. Non-zero values indicate DLQ "
+            "availability issues. Monitor this metric to detect when the DLQ is "
+            "unavailable, which can cause infinite retry loops for notifications "
+            "that have exceeded max_retries."
+        ),
+    )
     batch_size: int = Field(default=100, ge=1, description="Configured batch size")
     poll_interval_seconds: float = Field(
         default=1.0, gt=0, description="Configured poll interval"

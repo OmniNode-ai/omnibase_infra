@@ -311,6 +311,7 @@ class TransitionNotificationOutbox:
         self._notifications_processed: int = 0
         self._notifications_failed: int = 0
         self._notifications_sent_to_dlq: int = 0
+        self._dlq_publish_failures: int = 0
 
         # DLQ configuration
         self._max_retries = max_retries
@@ -394,6 +395,16 @@ class TransitionNotificationOutbox:
     def notifications_sent_to_dlq(self) -> int:
         """Return total notifications sent to DLQ."""
         return self._notifications_sent_to_dlq
+
+    @property
+    def dlq_publish_failures(self) -> int:
+        """Return count of failed DLQ publish attempts.
+
+        Non-zero values indicate DLQ availability issues. Monitor this metric
+        to detect when the DLQ is unavailable, which can cause infinite retry
+        loops for notifications that have exceeded max_retries.
+        """
+        return self._dlq_publish_failures
 
     async def store(
         self,
@@ -976,6 +987,7 @@ class TransitionNotificationOutbox:
             # Notification will be retried on next cycle without incrementing retry_count
             # WARNING: If DLQ is permanently unavailable, this creates infinite retries.
             # Monitor: processed_at IS NULL AND retry_count >= max_retries
+            self._dlq_publish_failures += 1
             error_message = sanitize_error_string(str(e))
             logger.exception(
                 "Failed to publish notification to DLQ, will retry",
@@ -1004,6 +1016,7 @@ class TransitionNotificationOutbox:
             - notifications_processed: Total notifications successfully processed
             - notifications_failed: Total notifications that failed processing
             - notifications_sent_to_dlq: Total notifications moved to DLQ
+            - dlq_publish_failures: Count of failed DLQ publish attempts
             - batch_size: Configured batch size
             - poll_interval_seconds: Configured poll interval
             - max_retries: Max retries before DLQ (None if DLQ disabled)
@@ -1013,6 +1026,8 @@ class TransitionNotificationOutbox:
             >>> metrics = outbox.get_metrics()
             >>> print(f"Processed: {metrics.notifications_processed}")
             >>> print(f"Sent to DLQ: {metrics.notifications_sent_to_dlq}")
+            >>> if metrics.dlq_publish_failures > 0:
+            ...     print(f"WARNING: {metrics.dlq_publish_failures} DLQ failures")
         """
         return ModelTransitionNotificationOutboxMetrics(
             table_name=self._table_name,
@@ -1021,6 +1036,7 @@ class TransitionNotificationOutbox:
             notifications_processed=self._notifications_processed,
             notifications_failed=self._notifications_failed,
             notifications_sent_to_dlq=self._notifications_sent_to_dlq,
+            dlq_publish_failures=self._dlq_publish_failures,
             batch_size=self._batch_size,
             poll_interval_seconds=self._poll_interval,
             max_retries=self._max_retries,

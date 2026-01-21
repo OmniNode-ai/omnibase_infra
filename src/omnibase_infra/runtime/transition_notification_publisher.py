@@ -232,6 +232,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         self._batch_operations = 0
         self._batch_notifications_attempted = 0
         self._batch_notifications_total = 0
+        self._batch_failures_truncated = 0
         self._last_publish_at: datetime | None = None
         self._last_publish_duration_ms: float = 0.0
         self._total_publish_duration_ms: float = 0.0
@@ -406,6 +407,39 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             behavior - the batch continues attempting all notifications, but
             failures are recorded and reported at the end.
 
+        Correlation ID Behavior:
+            The batch uses the **first notification's correlation_id** for all
+            batch-level operations:
+
+            - Circuit breaker checks (at batch start)
+            - Batch summary logging ("Batch publish completed")
+            - Error context creation (when raising InfraConnectionError)
+            - Failure summary logging ("Batch publish failures - details")
+
+            However, **individual notification errors are logged with their own
+            correlation_id**. When a specific notification fails within the batch,
+            the warning log entry includes that notification's correlation_id,
+            not the batch correlation_id.
+
+            This design is intentional:
+
+            1. **Batch-level traceability**: Using a single correlation_id for
+               batch operations allows operators to correlate all batch-related
+               log entries and metrics under one trace ID.
+
+            2. **Per-notification traceability**: Individual failure logs retain
+               their specific correlation_id, enabling operators to trace the
+               complete lifecycle of each notification independently.
+
+            Example log correlation::
+
+                # Batch-level log (uses first notification's correlation_id)
+                {"message": "Batch publish completed", "correlation_id": "aaa-111"}
+
+                # Individual failure log (uses that notification's correlation_id)
+                {"message": "Failed to publish notification in batch",
+                 "correlation_id": "bbb-222"}
+
         Args:
             notifications: List of notifications to publish.
 
@@ -432,6 +466,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         success_count = 0
         last_error: Exception | None = None
         failed_notifications: list[FailedNotificationRecord] = []
+        truncation_occurred = False
 
         for notification in notifications:
             try:
@@ -452,6 +487,9 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                             error_message=sanitize_error_string(str(e)),
                         )
                     )
+                else:
+                    # Mark that truncation occurred (limit reached)
+                    truncation_occurred = True
                 logger.warning(
                     "Failed to publish notification in batch",
                     extra={
@@ -471,6 +509,8 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             self._batch_operations += 1
             self._batch_notifications_attempted += len(notifications)
             self._batch_notifications_total += success_count
+            if truncation_occurred:
+                self._batch_failures_truncated += 1
 
         failure_count = len(notifications) - success_count
 
@@ -594,6 +634,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             batch_operations=self._batch_operations,
             batch_notifications_attempted=self._batch_notifications_attempted,
             batch_notifications_total=self._batch_notifications_total,
+            batch_failures_truncated=self._batch_failures_truncated,
             last_publish_at=self._last_publish_at,
             last_publish_duration_ms=self._last_publish_duration_ms,
             average_publish_duration_ms=average_duration,
