@@ -382,6 +382,8 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
 
         success_count = 0
         last_error: Exception | None = None
+        # Track per-notification failures: (aggregate_type, aggregate_id, error_msg)
+        failed_notifications: list[tuple[str, str, str]] = []
 
         for notification in notifications:
             try:
@@ -393,6 +395,13 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 InfraUnavailableError,
             ) as e:
                 last_error = e
+                failed_notifications.append(
+                    (
+                        notification.aggregate_type,
+                        str(notification.aggregate_id),
+                        sanitize_error_string(str(e)),
+                    )
+                )
                 logger.warning(
                     "Failed to publish notification in batch",
                     extra={
@@ -425,7 +434,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             },
         )
 
-        # Raise with count information if any failures occurred
+        # Raise with detailed failure information if any failures occurred
         if last_error is not None:
             ctx = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
@@ -433,10 +442,18 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 operation="publish_batch",
                 target_name=self._topic,
             )
+            # Build detailed error message showing first 3 failures
+            failure_details = "; ".join(
+                f"{agg_type}:{agg_id[:8]}... - {err[:50]}"
+                for agg_type, agg_id, err in failed_notifications[:3]
+            )
+            if len(failed_notifications) > 3:
+                failure_details += f" ... and {len(failed_notifications) - 3} more"
+
             raise InfraConnectionError(
                 f"Batch publish partially failed: {failure_count}/{len(notifications)} "
                 f"notifications failed ({success_count} succeeded). "
-                f"Last error: {sanitize_error_string(str(last_error))}",
+                f"Failures: [{failure_details}]",
                 context=ctx,
             ) from last_error
 

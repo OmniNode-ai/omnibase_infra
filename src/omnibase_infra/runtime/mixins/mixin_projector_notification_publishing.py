@@ -52,6 +52,11 @@ from omnibase_core.models.notifications import ModelStateTransitionNotification
 from omnibase_core.protocols.notifications import (
     ProtocolTransitionNotificationPublisher,
 )
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+)
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 from omnibase_infra.runtime.models.model_projector_notification_config import (
     ModelProjectorNotificationConfig,
@@ -446,11 +451,25 @@ class MixinProjectorNotificationPublishing:
                 },
             )
 
-        except Exception as e:
-            # Log but don't fail - notifications are best-effort
+        except (InfraConnectionError, InfraTimeoutError, InfraUnavailableError) as e:
+            # Log but don't fail - notifications are best-effort (expected failures)
             logger.warning(
                 "Failed to publish transition notification: %s",
                 str(e),
+                extra={
+                    "projector_id": self.projector_id,
+                    "aggregate_type": self.aggregate_type,
+                    "aggregate_id": str(aggregate_id),
+                    "from_state": effective_from_state,
+                    "to_state": to_state,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+        except Exception as e:
+            # Log unexpected errors at ERROR level for visibility
+            logger.exception(
+                "Unexpected error publishing transition notification",
                 extra={
                     "projector_id": self.projector_id,
                     "aggregate_type": self.aggregate_type,

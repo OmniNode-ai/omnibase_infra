@@ -144,6 +144,7 @@ class TransitionNotificationOutbox:
     DEFAULT_BATCH_SIZE: int = 100
     DEFAULT_POLL_INTERVAL_SECONDS: float = 1.0
     DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
+    DEFAULT_STRICT_TRANSACTION_MODE: bool = False
     MAX_ERROR_MESSAGE_LENGTH: int = 1000
 
     def __init__(
@@ -154,6 +155,7 @@ class TransitionNotificationOutbox:
         batch_size: int = DEFAULT_BATCH_SIZE,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+        strict_transaction_mode: bool = DEFAULT_STRICT_TRANSACTION_MODE,
     ) -> None:
         """Initialize the TransitionNotificationOutbox.
 
@@ -164,6 +166,10 @@ class TransitionNotificationOutbox:
             batch_size: Maximum notifications to process per batch (default: 100).
             poll_interval_seconds: Seconds between polls when idle (default: 1.0).
             query_timeout_seconds: Timeout for database queries (default: 30.0).
+            strict_transaction_mode: If True, raises ProtocolConfigurationError when
+                store() is called outside a transaction context. If False (default),
+                logs a warning but continues execution. Enable this for fail-fast
+                behavior in production to catch misconfiguration early.
 
         Raises:
             ProtocolConfigurationError: If pool or publisher is None, or if
@@ -205,6 +211,7 @@ class TransitionNotificationOutbox:
         self._batch_size = batch_size
         self._poll_interval = poll_interval_seconds
         self._query_timeout = query_timeout_seconds
+        self._strict_transaction_mode = strict_transaction_mode
 
         # State management
         self._running = False
@@ -223,6 +230,7 @@ class TransitionNotificationOutbox:
                 "table_name": table_name,
                 "batch_size": batch_size,
                 "poll_interval_seconds": poll_interval_seconds,
+                "strict_transaction_mode": strict_transaction_mode,
             },
         )
 
@@ -261,6 +269,15 @@ class TransitionNotificationOutbox:
         """Return total notifications that failed processing."""
         return self._notifications_failed
 
+    @property
+    def strict_transaction_mode(self) -> bool:
+        """Return whether strict transaction mode is enabled.
+
+        When enabled, store() raises ProtocolConfigurationError if called
+        outside a transaction context, rather than just logging a warning.
+        """
+        return self._strict_transaction_mode
+
     async def store(
         self,
         notification: ModelStateTransitionNotification,
@@ -273,9 +290,14 @@ class TransitionNotificationOutbox:
         background processor and published asynchronously.
 
         Warning:
-            If called outside a transaction (auto-commit mode), this method logs
-            a WARNING but continues execution. The atomicity guarantee with
-            projection writes will be broken in this case.
+            If called outside a transaction (auto-commit mode), behavior depends
+            on ``strict_transaction_mode``:
+
+            - **strict_transaction_mode=False** (default): Logs a WARNING but
+              continues execution. The atomicity guarantee with projection
+              writes will be broken in this case.
+            - **strict_transaction_mode=True**: Raises ProtocolConfigurationError
+              immediately. Use this for fail-fast behavior in production.
 
         Args:
             notification: The state transition notification to store.
@@ -283,6 +305,8 @@ class TransitionNotificationOutbox:
                 MUST be the same connection used for the projection write.
 
         Raises:
+            ProtocolConfigurationError: If strict_transaction_mode is True and
+                store() is called outside a transaction context.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If store operation times out.
             RuntimeHostError: For other database errors.
@@ -303,8 +327,14 @@ class TransitionNotificationOutbox:
             correlation_id=correlation_id,
         )
 
-        # Warn if not in transaction - atomicity guarantee will be broken
+        # Check transaction context - behavior depends on strict_transaction_mode
         if not conn.is_in_transaction():
+            if self._strict_transaction_mode:
+                raise ProtocolConfigurationError(
+                    "store() called outside transaction context in strict mode - "
+                    "atomicity with projection not guaranteed",
+                    context=ctx,
+                )
             logger.warning(
                 "store() called outside transaction context - "
                 "atomicity with projection not guaranteed",
