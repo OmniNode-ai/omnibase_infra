@@ -74,7 +74,7 @@ def get_correlation_id(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid X-Correlation-ID header format: '{x_correlation_id}'. Must be a valid UUID (e.g., '550e8400-e29b-41d4-a716-446655440000').",
-        )
+        ) from None
 
 
 # Create router with prefix
@@ -223,7 +223,7 @@ async def list_nodes(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid state value: {state}. Valid values: {[s.value for s in EnumRegistrationState]}",
-            )
+            ) from None
 
     nodes, pagination, warnings = await service.list_nodes(
         limit=limit,

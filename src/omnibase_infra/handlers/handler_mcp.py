@@ -77,6 +77,7 @@ HANDLER_ID_MCP: str = "mcp-handler"
 # Shutdown timeout constants (can be overridden via class attributes)
 _DEFAULT_SHUTDOWN_TIMEOUT: float = 5.0
 _DEFAULT_CANCEL_TIMEOUT: float = 1.0
+_DEFAULT_STARTUP_TIMEOUT: float = 2.0
 
 # Error message truncation limit for health check responses
 _ERROR_MESSAGE_MAX_LENGTH: int = 200
@@ -183,11 +184,13 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
     Class Attributes:
         shutdown_timeout: Timeout for graceful server shutdown (default: 5.0s).
         cancel_timeout: Timeout for forced cancellation after graceful fails (default: 1.0s).
+        startup_timeout: Timeout for server readiness check during startup (default: 2.0s).
     """
 
     # Configurable timeout attributes (can be overridden on subclasses or instances)
     shutdown_timeout: float = _DEFAULT_SHUTDOWN_TIMEOUT
     cancel_timeout: float = _DEFAULT_CANCEL_TIMEOUT
+    startup_timeout: float = _DEFAULT_STARTUP_TIMEOUT
 
     def __init__(
         self,
@@ -603,7 +606,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     await self._wait_for_server_ready(
                         self._config.host,
                         self._config.port,
-                        timeout=2.0,
+                        timeout=self.startup_timeout,
                     )
                     self._server_started_at = time.time()
 

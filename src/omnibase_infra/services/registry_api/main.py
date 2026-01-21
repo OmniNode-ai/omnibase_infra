@@ -153,6 +153,16 @@ def create_app(
 
     # Configure CORS
     origins = cors_origins or os.environ.get("CORS_ORIGINS", "*").split(",")
+
+    # Warn about wildcard CORS in production environments
+    if "*" in origins:
+        logger.warning(
+            "CORS configured with wildcard origin '*'. "
+            "This is acceptable for development but should be restricted in production. "
+            "Set CORS_ORIGINS environment variable to specific allowed origins.",
+            extra={"origins": origins},
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
