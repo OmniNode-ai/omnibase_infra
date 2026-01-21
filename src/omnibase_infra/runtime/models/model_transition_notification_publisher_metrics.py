@@ -32,6 +32,7 @@ Example:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -84,6 +85,11 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         strict=True,
     )
 
+    # Health check threshold - matches default circuit breaker failure threshold.
+    # When consecutive_failures reaches this value, the circuit breaker opens,
+    # so is_healthy() returns False for both the threshold check and circuit state.
+    DEFAULT_HEALTH_FAILURE_THRESHOLD: ClassVar[int] = 5
+
     # Publisher identification
     publisher_id: str = Field(
         ...,
@@ -97,11 +103,15 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         min_length=1,
     )
 
-    # Notification counts (single publish)
+    # Notification counts (includes both individual and batch publishes)
     notifications_published: int = Field(
         default=0,
         ge=0,
-        description="Total number of notifications successfully published",
+        description=(
+            "Total notifications successfully published (ALL publishes). "
+            "Includes both individual publish() and batch publish_batch() calls. "
+            "Individual publishes = notifications_published - batch_notifications_total."
+        ),
     )
     notifications_failed: int = Field(
         default=0,
@@ -118,7 +128,11 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
     batch_notifications_total: int = Field(
         default=0,
         ge=0,
-        description="Notifications published via batch operations (subset of notifications_published)",
+        description=(
+            "Notifications published via publish_batch() (SUBSET of notifications_published). "
+            "This count is already included in notifications_published, not additional. "
+            "Example: 100 published, 80 batch_total means 20 individual + 80 batch = 100 total."
+        ),
     )
 
     # Timing metrics (milliseconds)
@@ -188,7 +202,15 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
 
         A publisher is considered healthy if:
         - The circuit breaker is closed
-        - Consecutive failures are below threshold (5)
+        - Consecutive failures are below the health threshold
+
+        Note:
+            The health threshold (DEFAULT_HEALTH_FAILURE_THRESHOLD = 5) matches
+            the default circuit breaker failure threshold. This alignment means
+            that when consecutive failures reach this count, the circuit breaker
+            opens and is_healthy() returns False for both conditions. This
+            provides early warning before the circuit breaker triggers, since
+            the threshold check fails at the same point the breaker would open.
 
         Returns:
             True if the publisher is healthy, False otherwise
@@ -201,7 +223,10 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
             >>> metrics.is_healthy()
             True
         """
-        return not self.circuit_breaker_open and self.consecutive_failures < 5
+        return (
+            not self.circuit_breaker_open
+            and self.consecutive_failures < self.DEFAULT_HEALTH_FAILURE_THRESHOLD
+        )
 
     def total_notifications(self) -> int:
         """
