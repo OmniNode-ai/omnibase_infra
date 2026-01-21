@@ -73,7 +73,7 @@ pytestmark = [
 # =============================================================================
 
 
-class MockRegistrationEvent(BaseModel):
+class ModelMockRegistrationEvent(BaseModel):
     """Mock registration event payload for testing."""
 
     entity_id: UUID
@@ -84,7 +84,7 @@ class MockRegistrationEvent(BaseModel):
     event_type: str = "registration.state.changed.v1"
 
 
-class MockHeartbeatEvent(BaseModel):
+class ModelMockHeartbeatEvent(BaseModel):
     """Mock heartbeat event payload for testing."""
 
     entity_id: UUID
@@ -238,14 +238,14 @@ def make_registration_envelope(
     current_state: str = "pending_registration",
     correlation_id: UUID | None = None,
     version: int = 1,
-) -> ModelEventEnvelope[MockRegistrationEvent]:
+) -> ModelEventEnvelope[ModelMockRegistrationEvent]:
     """Create a registration event envelope for testing."""
     if entity_id is None:
         entity_id = uuid4()
     if correlation_id is None:
         correlation_id = uuid4()
 
-    payload = MockRegistrationEvent(
+    payload = ModelMockRegistrationEvent(
         entity_id=entity_id,
         current_state=current_state,
         version=version,
@@ -449,7 +449,7 @@ class TestProjectorNotificationIntegration:
         )
 
         # Create an event type that's not in consumed_events
-        payload = MockHeartbeatEvent(
+        payload = ModelMockHeartbeatEvent(
             entity_id=uuid4(),
             heartbeat_count=1,
         )

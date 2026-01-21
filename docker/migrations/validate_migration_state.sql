@@ -250,7 +250,8 @@ SELECT
 FROM pg_index
 WHERE NOT indisvalid
   AND (indrelid = 'registration_projections'::regclass
-       OR indrelid = 'transition_notification_outbox'::regclass);
+       OR (to_regclass('transition_notification_outbox') IS NOT NULL
+           AND indrelid = to_regclass('transition_notification_outbox')));
 
 -- If no rows, show message
 DO $$
@@ -259,8 +260,8 @@ BEGIN
         SELECT 1 FROM pg_index
         WHERE NOT indisvalid
           AND (indrelid = 'registration_projections'::regclass
-               OR (EXISTS (SELECT 1 FROM pg_class WHERE relname = 'transition_notification_outbox')
-                   AND indrelid = 'transition_notification_outbox'::regclass))
+               OR (to_regclass('transition_notification_outbox') IS NOT NULL
+                   AND indrelid = to_regclass('transition_notification_outbox')))
     ) THEN
         RAISE NOTICE 'No invalid indexes found (good!)';
     END IF;
