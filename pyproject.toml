@@ -35,8 +35,8 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.8.0: Observability models (OMN-1367)
-omnibase-core = "^0.8.0"
+# omnibase-core v0.9.0: Added py.typed for PEP 561 compliance
+omnibase-core = "^0.9.0"
 # omnibase-spi v0.5.0: Protocol updates for omnibase-core 0.8.0 compatibility
 omnibase-spi = "^0.5.0"
 
@@ -317,14 +317,14 @@ disallow_untyped_defs = true
 mypy_path = "src"
 namespace_packages = true
 explicit_package_bases = true
-# TODO: Remove global ignore_missing_imports once omnibase_core adds py.typed marker file
-# Tracking: This should be removed when omnibase_core publishes type stubs
+# NOTE: omnibase_core 0.9.0 now includes py.typed marker file
+# TODO: Remove ignore_missing_imports once omnibase_spi also adds py.typed
 # Current workaround: ignore_missing_imports = true (global)
 # Target state: Per-module overrides only (see [[tool.mypy.overrides]] below)
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["omnibase_core.*", "omnibase_spi.*"]
+module = ["omnibase_spi.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]
