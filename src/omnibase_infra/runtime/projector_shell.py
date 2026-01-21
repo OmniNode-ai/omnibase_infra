@@ -26,6 +26,7 @@ Notification Publishing:
         >>>
         >>> publisher = TransitionNotificationPublisher(event_bus, topic="transitions.v1")
         >>> config = ModelProjectorNotificationConfig(
+        ...     topic="transitions.v1",
         ...     state_column="current_state",
         ...     aggregate_id_column="entity_id",
         ...     version_column="version",
@@ -267,6 +268,7 @@ class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOper
             >>>
             >>> publisher = TransitionNotificationPublisher(event_bus, "transitions.v1")
             >>> config = ModelProjectorNotificationConfig(
+            ...     topic="transitions.v1",
             ...     state_column="current_state",
             ...     aggregate_id_column="entity_id",
             ...     version_column="version",

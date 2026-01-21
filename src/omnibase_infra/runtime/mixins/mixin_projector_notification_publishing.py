@@ -58,6 +58,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
+from omnibase_infra.runtime.constants_notification import FROM_STATE_INITIAL
 from omnibase_infra.runtime.models.model_projector_notification_config import (
     ModelProjectorNotificationConfig,
 )
@@ -420,8 +421,12 @@ class MixinProjectorNotificationPublishing:
             return
 
         # Handle new entities (no previous state)
-        # from_state is required in the notification model, use empty string for new
-        effective_from_state = from_state if from_state is not None else ""
+        # from_state is required in the notification model; use FROM_STATE_INITIAL sentinel
+        # for new entities to clearly distinguish from empty string state values.
+        # See constants_notification.py for full documentation on this sentinel.
+        effective_from_state = (
+            from_state if from_state is not None else FROM_STATE_INITIAL
+        )
 
         # Create notification
         notification = ModelStateTransitionNotification(

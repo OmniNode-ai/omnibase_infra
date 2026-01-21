@@ -16,6 +16,7 @@ Architecture Overview:
     4. Orchestrators subscribe to notifications and coordinate downstream workflows
 
 Configuration Fields:
+    - topic: Event bus topic for publishing notifications (required)
     - state_column: Column name containing the FSM state (required)
     - aggregate_id_column: Column name containing the aggregate ID (required)
     - version_column: Column name containing the projection version (optional)
@@ -25,6 +26,7 @@ Example Usage:
     >>> from omnibase_infra.runtime.models import ModelProjectorNotificationConfig
     >>>
     >>> config = ModelProjectorNotificationConfig(
+    ...     topic="onex.fsm.state.transitions.v1",
     ...     state_column="current_state",
     ...     aggregate_id_column="entity_id",
     ...     version_column="version",
@@ -54,6 +56,11 @@ class ModelProjectorNotificationConfig(BaseModel):
     successful projection commits.
 
     Attributes:
+        topic: Event bus topic for publishing state transition notifications.
+            This should match the topic defined in the projector's contract
+            and follow ONEX topic naming conventions. Example topics:
+            - "onex.fsm.state.transitions.v1"
+            - "registration.state.transitions.v1"
         state_column: Name of the column that contains the FSM state value.
             This column must exist in the projection schema and contain string
             values representing the current state.
@@ -68,10 +75,13 @@ class ModelProjectorNotificationConfig(BaseModel):
 
     Example:
         >>> config = ModelProjectorNotificationConfig(
+        ...     topic="onex.fsm.state.transitions.v1",
         ...     state_column="current_state",
         ...     aggregate_id_column="entity_id",
         ...     version_column="version",
         ... )
+        >>> config.topic
+        'onex.fsm.state.transitions.v1'
         >>> config.state_column
         'current_state'
         >>> config.enabled
@@ -80,7 +90,8 @@ class ModelProjectorNotificationConfig(BaseModel):
     Note:
         The column names specified must match columns defined in the projector's
         contract schema. The ProjectorShell will validate these column names
-        against the schema at initialization time.
+        against the schema at initialization time. The topic should be defined
+        in the projector's contract rather than hardcoded.
 
     See Also:
         - ProjectorShell: Uses this config for notification integration
@@ -92,6 +103,14 @@ class ModelProjectorNotificationConfig(BaseModel):
         frozen=True,
         extra="forbid",
         from_attributes=True,
+    )
+
+    topic: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        description="Event bus topic for publishing state transition notifications. "
+        "Should match the topic defined in the projector's contract.",
     )
 
     state_column: str = Field(

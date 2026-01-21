@@ -143,7 +143,10 @@ def sample_notifications(
 @pytest.fixture
 def publisher(mock_event_bus: AsyncMock) -> TransitionNotificationPublisher:
     """Create publisher with default settings."""
-    return TransitionNotificationPublisher(event_bus=mock_event_bus)
+    return TransitionNotificationPublisher(
+        event_bus=mock_event_bus,
+        topic="test.fsm.state.transitions.v1",
+    )
 
 
 @pytest.fixture
@@ -167,19 +170,25 @@ class TestTransitionNotificationPublisherInit:
 
     def test_init_with_event_bus(self, mock_event_bus: AsyncMock) -> None:
         """Test initialization with event bus sets internal reference."""
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
         # Event bus is stored as private attribute
         assert publisher._event_bus is mock_event_bus
 
-    def test_init_with_default_topic(self, mock_event_bus: AsyncMock) -> None:
-        """Test initialization with default topic."""
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+    def test_init_with_explicit_topic(self, mock_event_bus: AsyncMock) -> None:
+        """Test initialization with explicit topic."""
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
-        # Default topic should follow ONEX naming convention
+        # Topic should be stored correctly
         assert publisher.topic is not None
         assert isinstance(publisher.topic, str)
-        assert len(publisher.topic) > 0
+        assert publisher.topic == "test.fsm.state.transitions.v1"
 
     def test_init_with_custom_topic(self, mock_event_bus: AsyncMock) -> None:
         """Test initialization with custom topic."""
@@ -195,6 +204,7 @@ class TestTransitionNotificationPublisherInit:
         """Test initialization with circuit breaker configuration."""
         publisher = TransitionNotificationPublisher(
             event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=3,
             circuit_breaker_reset_timeout=30.0,
         )
@@ -206,7 +216,10 @@ class TestTransitionNotificationPublisherInit:
         self, mock_event_bus: AsyncMock
     ) -> None:
         """Test initialization with default circuit breaker configuration."""
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
         # Default circuit breaker settings
         assert publisher.circuit_breaker_threshold == 5
@@ -399,6 +412,7 @@ class TestTransitionNotificationPublisherBatch:
 
         publisher = TransitionNotificationPublisher(
             event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=10,  # High threshold to prevent circuit opening
         )
 
@@ -429,6 +443,7 @@ class TestTransitionNotificationPublisherCircuitBreaker:
 
         publisher = TransitionNotificationPublisher(
             event_bus=failing_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=3,
             circuit_breaker_reset_timeout=60.0,
         )
@@ -465,6 +480,7 @@ class TestTransitionNotificationPublisherCircuitBreaker:
 
         publisher = TransitionNotificationPublisher(
             event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=5,  # Won't open
         )
 
@@ -494,6 +510,7 @@ class TestTransitionNotificationPublisherCircuitBreaker:
 
         publisher = TransitionNotificationPublisher(
             event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=2,
             circuit_breaker_reset_timeout=0.1,  # Very short timeout for testing
         )
@@ -565,6 +582,7 @@ class TestTransitionNotificationPublisherMetrics:
         """Metrics track failed publish attempts."""
         publisher = TransitionNotificationPublisher(
             event_bus=failing_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=10,  # High threshold to avoid circuit opening
         )
 
@@ -621,6 +639,7 @@ class TestTransitionNotificationPublisherErrors:
 
         publisher = TransitionNotificationPublisher(
             event_bus=failing_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=10,  # Prevent circuit from opening
         )
 
@@ -643,6 +662,7 @@ class TestTransitionNotificationPublisherErrors:
 
         publisher = TransitionNotificationPublisher(
             event_bus=failing_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=10,
         )
 
@@ -663,6 +683,7 @@ class TestTransitionNotificationPublisherErrors:
 
         publisher = TransitionNotificationPublisher(
             event_bus=failing_event_bus,
+            topic="test.fsm.state.transitions.v1",
             circuit_breaker_threshold=10,
         )
 
@@ -685,7 +706,10 @@ class TestTransitionNotificationPublisherErrors:
 
         # Create notification with problematic data
         # This tests that serialization issues are caught properly
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
         # Create a valid notification - serialization should succeed
         notification = ModelStateTransitionNotification(
@@ -717,7 +741,10 @@ class TestTransitionNotificationPublisherConcurrency:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Concurrent publishes are handled safely."""
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
         # Create 50 unique notifications
         notifications = [
@@ -746,7 +773,10 @@ class TestTransitionNotificationPublisherConcurrency:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Concurrent publishes preserve correct correlation IDs."""
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
         # Create notifications with unique correlation IDs
         notifications = [
@@ -782,7 +812,10 @@ class TestTransitionNotificationPublisherConcurrency:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Metrics are correctly updated under concurrent load."""
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
         notifications = [
             ModelStateTransitionNotification(
@@ -811,7 +844,10 @@ class TestTransitionNotificationPublisherConcurrency:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Mixed batch and single publishes work correctly."""
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
         # Create notifications
         batch_notifications = [
@@ -869,7 +905,10 @@ class TestTransitionNotificationPublisherProtocolCompliance:
             ProtocolTransitionNotificationPublisher,
         )
 
-        publisher = TransitionNotificationPublisher(event_bus=mock_event_bus)
+        publisher = TransitionNotificationPublisher(
+            event_bus=mock_event_bus,
+            topic="test.fsm.state.transitions.v1",
+        )
 
         assert isinstance(publisher, ProtocolTransitionNotificationPublisher)
 

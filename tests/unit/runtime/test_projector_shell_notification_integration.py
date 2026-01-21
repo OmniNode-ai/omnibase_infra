@@ -38,6 +38,7 @@ from omnibase_core.protocols.notifications import (
     ProtocolTransitionNotificationPublisher,
 )
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.runtime.constants_notification import FROM_STATE_INITIAL
 from omnibase_infra.runtime.models import ModelProjectorNotificationConfig
 from omnibase_infra.runtime.projector_shell import ProjectorShell
 
@@ -102,6 +103,7 @@ def basic_contract() -> ModelProjectorContract:
 def notification_config() -> ModelProjectorNotificationConfig:
     """Create a notification config for testing."""
     return ModelProjectorNotificationConfig(
+        topic="test.fsm.state.transitions.v1",
         state_column="current_state",
         aggregate_id_column="entity_id",
         version_column="version",
@@ -155,9 +157,11 @@ class TestModelProjectorNotificationConfig:
     def test_basic_config_creation(self) -> None:
         """Test creating a basic notification config."""
         config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
         )
+        assert config.topic == "test.fsm.state.transitions.v1"
         assert config.state_column == "current_state"
         assert config.aggregate_id_column == "entity_id"
         assert config.version_column is None
@@ -166,11 +170,13 @@ class TestModelProjectorNotificationConfig:
     def test_full_config_creation(self) -> None:
         """Test creating a config with all fields."""
         config = ModelProjectorNotificationConfig(
+            topic="custom.notifications.v1",
             state_column="fsm_state",
             aggregate_id_column="node_id",
             version_column="projection_version",
             enabled=False,
         )
+        assert config.topic == "custom.notifications.v1"
         assert config.state_column == "fsm_state"
         assert config.aggregate_id_column == "node_id"
         assert config.version_column == "projection_version"
@@ -179,6 +185,7 @@ class TestModelProjectorNotificationConfig:
     def test_config_is_immutable(self) -> None:
         """Test that config is frozen after creation."""
         config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
         )
@@ -190,6 +197,7 @@ class TestModelProjectorNotificationConfig:
         # Empty string should fail
         with pytest.raises(Exception):
             ModelProjectorNotificationConfig(
+                topic="test.fsm.state.transitions.v1",
                 state_column="",
                 aggregate_id_column="entity_id",
             )
@@ -199,6 +207,7 @@ class TestModelProjectorNotificationConfig:
         # Empty string should fail
         with pytest.raises(Exception):
             ModelProjectorNotificationConfig(
+                topic="test.fsm.state.transitions.v1",
                 state_column="current_state",
                 aggregate_id_column="",
             )
@@ -235,6 +244,7 @@ class TestProjectorShellNotificationConfigValidation:
     ) -> None:
         """Test that invalid state_column raises ProtocolConfigurationError."""
         invalid_config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="nonexistent_column",
             aggregate_id_column="entity_id",
         )
@@ -256,6 +266,7 @@ class TestProjectorShellNotificationConfigValidation:
     ) -> None:
         """Test that invalid aggregate_id_column raises ProtocolConfigurationError."""
         invalid_config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="nonexistent_id",
         )
@@ -277,6 +288,7 @@ class TestProjectorShellNotificationConfigValidation:
     ) -> None:
         """Test that invalid version_column raises ProtocolConfigurationError."""
         invalid_config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
             version_column="nonexistent_version",
@@ -329,6 +341,7 @@ class TestProjectorShellNotificationConfigValidation:
     ) -> None:
         """Test that disabled config doesn't enable notifications."""
         disabled_config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
             enabled=False,  # Explicitly disabled
@@ -418,11 +431,11 @@ class TestProjectorShellNotificationPublishing:
 
         assert result.success is True
 
-        # Verify notification was published with empty from_state
+        # Verify notification was published with FROM_STATE_INITIAL sentinel
         mock_notification_publisher.publish.assert_called_once()
         call_args = mock_notification_publisher.publish.call_args
         notification = call_args[0][0]
-        assert notification.from_state == ""  # Empty for new entity
+        assert notification.from_state == FROM_STATE_INITIAL  # Sentinel for new entity
         assert notification.to_state == "active"
 
     @pytest.mark.asyncio
@@ -469,6 +482,7 @@ class TestProjectorShellNotificationPublishing:
     ) -> None:
         """Test that notification is NOT published when config is disabled."""
         disabled_config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
             enabled=False,
@@ -707,6 +721,7 @@ class TestMixinHelperMethods:
     ) -> None:
         """Test _extract_version_from_values returns 0 when no version_column configured."""
         config_no_version = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
             version_column=None,  # No version column

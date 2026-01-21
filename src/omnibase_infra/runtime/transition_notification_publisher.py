@@ -157,7 +157,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
     def __init__(
         self,
         event_bus: ProtocolEventBusLike,
-        topic: str = "onex.fsm.state.transitions.v1",
+        topic: str,
         *,
         publisher_id: str | None = None,
         circuit_breaker_threshold: int = 5,
@@ -168,8 +168,11 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         Args:
             event_bus: Event bus implementing ProtocolEventBusLike for publishing.
                 Must support publish_envelope() method.
-            topic: Target topic for transition notifications.
-                Default: "onex.fsm.state.transitions.v1"
+            topic: Target topic for transition notifications. Required.
+                This should be configured in the projector's contract or
+                notification config rather than hardcoded. Example topics:
+                - "onex.fsm.state.transitions.v1"
+                - "registration.state.transitions.v1"
             publisher_id: Optional unique identifier for this publisher instance.
                 If not provided, a UUID will be generated.
             circuit_breaker_threshold: Maximum failures before opening circuit.
@@ -534,7 +537,10 @@ def _verify_protocol_compliance() -> None:  # pragma: no cover
     # Create instance to verify protocol compliance
     bus = cast("ProtocolEventBusLike", EventBusInmemory())
     publisher: ProtocolTransitionNotificationPublisher = (
-        TransitionNotificationPublisher(event_bus=bus)
+        TransitionNotificationPublisher(
+            event_bus=bus,
+            topic="onex.fsm.state.transitions.v1",
+        )
     )
     # Use the variable to silence unused warnings
     _ = publisher

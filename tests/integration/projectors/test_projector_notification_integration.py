@@ -48,7 +48,11 @@ from omnibase_core.protocols.notifications import (
     ProtocolTransitionNotificationPublisher,
 )
 from omnibase_infra.protocols import ProtocolEventBusLike
-from omnibase_infra.runtime import ProjectorShell, TransitionNotificationPublisher
+from omnibase_infra.runtime import (
+    FROM_STATE_INITIAL,
+    ProjectorShell,
+    TransitionNotificationPublisher,
+)
 from omnibase_infra.runtime.models import ModelProjectorNotificationConfig
 
 if TYPE_CHECKING:
@@ -156,6 +160,7 @@ def integration_contract() -> ModelProjectorContract:
 def notification_config() -> ModelProjectorNotificationConfig:
     """Create notification config for integration testing."""
     return ModelProjectorNotificationConfig(
+        topic="test.fsm.state.transitions.v1",
         state_column="current_state",
         aggregate_id_column="entity_id",
         version_column="version",
@@ -367,10 +372,10 @@ class TestProjectorNotificationIntegration:
         )
         await projector.project(envelope1, correlation_id)
 
-        # Verify first notification (new entity, from_state is empty)
+        # Verify first notification (new entity, from_state is sentinel)
         assert len(mock_event_bus.published_envelopes) == 1
         payload1 = mock_event_bus.published_envelopes[0][0].payload
-        assert payload1["from_state"] == ""  # New entity
+        assert payload1["from_state"] == FROM_STATE_INITIAL  # New entity
         assert payload1["to_state"] == "pending_registration"
 
         # Second transition: pending_registration -> active
@@ -567,6 +572,7 @@ class TestProjectorNotificationConfigIntegration:
     ) -> None:
         """Notifications are not published when config.enabled=False."""
         disabled_config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
             version_column="version",

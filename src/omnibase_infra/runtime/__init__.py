@@ -194,6 +194,7 @@ from omnibase_infra.runtime.security_metadata_validator import (
 )
 
 # Transition notification publisher and outbox (OMN-1139)
+from omnibase_infra.runtime.constants_notification import FROM_STATE_INITIAL
 from omnibase_infra.runtime.transition_notification_publisher import (
     TransitionNotificationPublisher,
 )
@@ -257,6 +258,8 @@ __all__: list[str] = [
     "ProtocolTransitionNotificationPublisher",
     # Error class
     "RegistryError",
+    # Notification constants (OMN-1139)
+    "FROM_STATE_INITIAL",
     # Runtime host
     "RuntimeHostProcess",
     "RuntimeScheduler",
