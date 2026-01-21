@@ -117,6 +117,21 @@ class ServiceRegistryDiscovery:
             },
         )
 
+    @property
+    def has_projection_reader(self) -> bool:
+        """Check if projection reader is configured."""
+        return self._projection_reader is not None
+
+    @property
+    def has_consul_handler(self) -> bool:
+        """Check if Consul handler is configured."""
+        return self._consul_handler is not None
+
+    @property
+    def consul_handler(self) -> HandlerServiceDiscoveryConsul | None:
+        """Get the Consul handler for lifecycle management."""
+        return self._consul_handler
+
     def invalidate_widget_mapping_cache(self) -> None:
         """Clear widget mapping cache, forcing reload on next access.
 
@@ -171,28 +186,41 @@ class ServiceRegistryDiscovery:
             )
         else:
             try:
-                # Query projections based on filters
+                # Query projections based on state filter
+                # Note: node_type filtering is applied in-memory since the projection
+                # reader API doesn't support it. We overfetch to ensure enough results
+                # after filtering.
+                fetch_limit = (limit + offset + 1) * (3 if node_type else 1)
+
                 if state is not None:
                     projections = await self._projection_reader.get_by_state(
                         state=state,
-                        limit=limit + offset + 1,  # Fetch extra to check has_more
+                        limit=fetch_limit,
                         correlation_id=correlation_id,
                     )
                 else:
-                    # Use count_by_state to get all states, then fetch
-                    state_counts = await self._projection_reader.count_by_state(
-                        correlation_id=correlation_id,
-                    )
-                    total = sum(state_counts.values())
-
-                    # Fetch active nodes by default (most useful for dashboards)
+                    # Fetch all states when no state filter specified
+                    # Get ACTIVE nodes first (most common for dashboards), then others
                     projections = await self._projection_reader.get_by_state(
                         state=EnumRegistrationState.ACTIVE,
-                        limit=limit + offset + 1,
+                        limit=fetch_limit,
                         correlation_id=correlation_id,
                     )
 
-                # Apply offset and limit
+                # Apply node_type filter in-memory if specified
+                # Normalize filter to uppercase for comparison
+                node_type_filter = node_type.upper() if node_type else None
+                if node_type_filter:
+                    projections = [
+                        p
+                        for p in projections
+                        if p.node_type.value.upper() == node_type_filter
+                    ]
+
+                # Calculate total before pagination
+                total = len(projections)
+
+                # Apply offset and limit after filtering
                 projections_slice = projections[offset : offset + limit]
 
                 # Convert to view models
@@ -217,16 +245,13 @@ class ServiceRegistryDiscovery:
                             else None,
                             display_name=None,
                             node_type=node_type_str,  # type: ignore[arg-type]
-                            version=str(proj.node_version),
+                            version=proj.node_version,
                             state=proj.current_state.value,
                             capabilities=proj.capability_tags,
                             registered_at=proj.registered_at,
                             last_heartbeat_at=proj.last_heartbeat_at,
                         )
                     )
-
-                if total == 0:
-                    total = len(projections)
 
             except Exception as e:
                 logger.exception(
@@ -246,7 +271,7 @@ class ServiceRegistryDiscovery:
             total=total,
             limit=limit,
             offset=offset,
-            has_more=len(nodes) > limit or offset + limit < total,
+            has_more=offset + len(nodes) < total,
         )
 
         return nodes, pagination, warnings
@@ -299,7 +324,7 @@ class ServiceRegistryDiscovery:
                 namespace=proj.domain if proj.domain != "registration" else None,
                 display_name=None,
                 node_type=node_type_str,  # type: ignore[arg-type]
-                version=str(proj.node_version),
+                version=proj.node_version,
                 state=proj.current_state.value,
                 capabilities=proj.capability_tags,
                 registered_at=proj.registered_at,

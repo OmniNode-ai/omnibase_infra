@@ -84,13 +84,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Registry API starting up")
 
     # Log configuration
-    service = getattr(app.state, "registry_service", None)
+    service: ServiceRegistryDiscovery | None = getattr(
+        app.state, "registry_service", None
+    )
     if service is not None:
         logger.info(
             "Registry service configured",
             extra={
-                "has_projection_reader": service._projection_reader is not None,
-                "has_consul_handler": service._consul_handler is not None,
+                "has_projection_reader": service.has_projection_reader,
+                "has_consul_handler": service.has_consul_handler,
             },
         )
     else:
@@ -101,9 +103,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Registry API shutting down")
 
     # Cleanup Consul handler if we own it
-    if service is not None and service._consul_handler is not None:
+    if service is not None and service.consul_handler is not None:
         try:
-            await service._consul_handler.shutdown()
+            await service.consul_handler.shutdown()
             logger.info("Consul handler shutdown complete")
         except Exception:
             logger.exception("Error during Consul handler shutdown")

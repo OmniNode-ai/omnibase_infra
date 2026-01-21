@@ -37,6 +37,30 @@ from omnibase_infra.services.registry_api.models import (
 if TYPE_CHECKING:
     from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
 
+
+def _parse_correlation_id(x_correlation_id: str | None) -> UUID:
+    """Parse correlation ID from header string or generate new UUID.
+
+    Args:
+        x_correlation_id: Optional correlation ID string from header.
+
+    Returns:
+        Parsed UUID or newly generated UUID if not provided.
+
+    Raises:
+        HTTPException: If correlation ID is provided but not a valid UUID format.
+    """
+    if x_correlation_id is None:
+        return uuid4()
+    try:
+        return UUID(x_correlation_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid X-Correlation-ID format: {x_correlation_id}. Must be a valid UUID.",
+        )
+
+
 # Create router with prefix
 router = APIRouter(
     prefix="/registry",
@@ -126,7 +150,7 @@ async def get_discovery(
     ] = None,
 ) -> ModelRegistryDiscoveryResponse:
     """Get full dashboard payload with nodes, instances, and summary."""
-    correlation_id = UUID(x_correlation_id) if x_correlation_id else uuid4()
+    correlation_id = _parse_correlation_id(x_correlation_id)
 
     response = await service.get_discovery(
         limit=limit,
@@ -180,7 +204,7 @@ async def list_nodes(
     str, list[ModelRegistryNodeView] | ModelPaginationInfo | list[dict[str, str]]
 ]:
     """List registered nodes with pagination and optional filtering."""
-    correlation_id = UUID(x_correlation_id) if x_correlation_id else uuid4()
+    correlation_id = _parse_correlation_id(x_correlation_id)
 
     # Parse state filter
     state_filter: EnumRegistrationState | None = None
@@ -227,7 +251,7 @@ async def get_node(
     ] = None,
 ) -> ModelRegistryNodeView:
     """Get a single node by ID."""
-    correlation_id = UUID(x_correlation_id) if x_correlation_id else uuid4()
+    correlation_id = _parse_correlation_id(x_correlation_id)
 
     node, warnings = await service.get_node(
         node_id=node_id,
@@ -276,7 +300,7 @@ async def list_instances(
     ] = None,
 ) -> dict[str, list[ModelRegistryInstanceView] | list[dict[str, str]]]:
     """List live Consul service instances."""
-    correlation_id = UUID(x_correlation_id) if x_correlation_id else uuid4()
+    correlation_id = _parse_correlation_id(x_correlation_id)
 
     instances, warnings = await service.list_instances(
         service_name=service_name,
@@ -339,7 +363,7 @@ async def health_check(
     ] = None,
 ) -> ModelRegistryHealthResponse:
     """Perform health check on all backend components."""
-    correlation_id = UUID(x_correlation_id) if x_correlation_id else uuid4()
+    correlation_id = _parse_correlation_id(x_correlation_id)
 
     response = await service.health_check(correlation_id=correlation_id)
 

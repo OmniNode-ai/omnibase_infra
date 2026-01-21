@@ -198,6 +198,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
         - CONSUL: HandlerConsul for HashiCorp Consul service discovery
         - DB: HandlerDb for PostgreSQL database operations
         - HTTP: HandlerHttpRest for HTTP/REST protocol operations
+        - MCP: HandlerMCP for Model Context Protocol AI agent integration
         - VAULT: HandlerVault for HashiCorp Vault secret management
 
     Registered Event Buses:
@@ -220,7 +221,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
     Example:
         >>> summary = wire_default_handlers()
         >>> print(summary)
-        {'handlers': ['consul', 'db', 'http', 'vault'], 'event_buses': ['inmemory']}
+        {'handlers': ['consul', 'db', 'http', 'mcp', 'vault'], 'event_buses': ['inmemory']}
 
     Note:
         This function uses the singleton registries returned by

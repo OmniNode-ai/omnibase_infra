@@ -14,6 +14,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+
 
 class ModelRegistryNodeView(BaseModel):
     """Node view for dashboard display.
@@ -61,9 +63,9 @@ class ModelRegistryNodeView(BaseModel):
         ...,
         description="ONEX node archetype",
     )
-    version: str = Field(
+    version: ModelSemVer = Field(
         ...,
-        description="Semantic version string",
+        description="Semantic version (ONEX standard)",
     )
     state: str = Field(
         ...,
