@@ -127,14 +127,14 @@ def load_handler_contract_config(
     # Check file existence with permission error handling
     try:
         file_exists = path.exists()
-    except PermissionError:
+    except PermissionError as e:
         raise ProtocolConfigurationError(
             f"Permission denied accessing contract file: {contract_path}",
             context=ModelInfraErrorContext.with_correlation(
                 operation="load_handler_contract",
                 target_name=handler_id,
             ),
-        ) from None
+        ) from e
     except OSError as e:
         raise ProtocolConfigurationError(
             f"OS error accessing contract file: {contract_path} ({e})",
@@ -156,14 +156,14 @@ def load_handler_contract_config(
     # Check file size before reading (security: prevent memory exhaustion)
     try:
         file_size = path.stat().st_size
-    except PermissionError:
+    except PermissionError as e:
         raise ProtocolConfigurationError(
             f"Permission denied reading contract file metadata: {contract_path}",
             context=ModelInfraErrorContext.with_correlation(
                 operation="load_handler_contract",
                 target_name=handler_id,
             ),
-        ) from None
+        ) from e
     except OSError as e:
         raise ProtocolConfigurationError(
             f"OS error reading contract file metadata: {contract_path} ({e})",
@@ -185,17 +185,35 @@ def load_handler_contract_config(
     try:
         with path.open() as f:
             contract = yaml.safe_load(f)
-    except PermissionError:
+    except FileNotFoundError as e:
+        # Race condition: file was deleted between exists() check and open()
+        raise ProtocolConfigurationError(
+            f"Contract file not found (deleted after check): {contract_path}",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="load_handler_contract",
+                target_name=handler_id,
+            ),
+        ) from e
+    except PermissionError as e:
         raise ProtocolConfigurationError(
             f"Permission denied reading contract file: {contract_path}",
             context=ModelInfraErrorContext.with_correlation(
                 operation="load_handler_contract",
                 target_name=handler_id,
             ),
-        ) from None
+        ) from e
     except yaml.YAMLError as e:
         raise ProtocolConfigurationError(
-            f"Invalid YAML in contract: {e}",
+            f"Invalid YAML in contract file: {contract_path}: {e}",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="load_handler_contract",
+                target_name=handler_id,
+            ),
+        ) from e
+    except OSError as e:
+        # Catch other I/O errors (disk full, I/O error, etc.)
+        raise ProtocolConfigurationError(
+            f"I/O error reading contract file: {contract_path}: {e}",
             context=ModelInfraErrorContext.with_correlation(
                 operation="load_handler_contract",
                 target_name=handler_id,

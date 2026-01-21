@@ -559,41 +559,46 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     contracts_dir=contracts_dir,
                 )
 
-                # Create and start MCPServerLifecycle for tool discovery
-                self._lifecycle = MCPServerLifecycle(config=server_config, bus=None)
-                await self._lifecycle.start()
-
-                # Update MCP registry and executor references from lifecycle
-                if self._lifecycle.registry is not None:
-                    self._mcp_registry = self._lifecycle.registry
-                if self._lifecycle.executor is not None:
-                    self._mcp_executor = self._lifecycle.executor
-
-                # Create Starlette app with HTTP endpoints (OMN-1282)
-                # Use factory methods for explicit handler reference binding
-                health_endpoint = self._create_health_endpoint()
-                tools_list_endpoint = self._create_tools_list_endpoint()
-
-                app = Starlette(
-                    routes=[
-                        Route("/health", health_endpoint, methods=["GET"]),
-                        Route("/mcp/tools", tools_list_endpoint, methods=["GET"]),
-                    ],
-                )
-
-                # Create uvicorn server config and server
-                uvicorn_config = uvicorn.Config(
-                    app=app,
-                    host=self._config.host,
-                    port=self._config.port,
-                    log_level="info",
-                )
-                self._server = uvicorn.Server(uvicorn_config)
-
-                # Start server in background task with cleanup on failure
-                self._server_task = asyncio.create_task(self._server.serve())
-
+                # Wrap entire server startup in try/except to ensure cleanup
+                # if ANY step fails after lifecycle starts. This prevents:
+                # - Orphan lifecycle resources (registry, executor, sync)
+                # - Orphan server tasks
+                # - Resource leaks from partial initialization
                 try:
+                    # Create and start MCPServerLifecycle for tool discovery
+                    self._lifecycle = MCPServerLifecycle(config=server_config, bus=None)
+                    await self._lifecycle.start()
+
+                    # Update MCP registry and executor references from lifecycle
+                    if self._lifecycle.registry is not None:
+                        self._mcp_registry = self._lifecycle.registry
+                    if self._lifecycle.executor is not None:
+                        self._mcp_executor = self._lifecycle.executor
+
+                    # Create Starlette app with HTTP endpoints (OMN-1282)
+                    # Use factory methods for explicit handler reference binding
+                    health_endpoint = self._create_health_endpoint()
+                    tools_list_endpoint = self._create_tools_list_endpoint()
+
+                    app = Starlette(
+                        routes=[
+                            Route("/health", health_endpoint, methods=["GET"]),
+                            Route("/mcp/tools", tools_list_endpoint, methods=["GET"]),
+                        ],
+                    )
+
+                    # Create uvicorn server config and server
+                    uvicorn_config = uvicorn.Config(
+                        app=app,
+                        host=self._config.host,
+                        port=self._config.port,
+                        log_level="info",
+                    )
+                    self._server = uvicorn.Server(uvicorn_config)
+
+                    # Start server in background task
+                    self._server_task = asyncio.create_task(self._server.serve())
+
                     # Wait for server to be ready before marking as initialized
                     await self._wait_for_server_ready(
                         self._config.host,
@@ -601,16 +606,29 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                         timeout=2.0,
                     )
                     self._server_started_at = time.time()
+
                 except Exception as startup_error:
-                    # Server task started but readiness check failed - clean up
+                    # Any failure during server startup - clean up all resources
+                    # This handles failures in:
+                    # - lifecycle.start() (Consul/contract discovery)
+                    # - Starlette app creation
+                    # - uvicorn config/server creation
+                    # - server task creation
+                    # - server readiness check
                     logger.exception(
-                        "MCP server startup failed during readiness check, cleaning up",
+                        "MCP server startup failed, cleaning up resources",
                         extra={
                             "host": self._config.host,
                             "port": self._config.port,
+                            "lifecycle_created": self._lifecycle is not None,
+                            "server_created": self._server is not None,
+                            "server_task_created": self._server_task is not None,
                             "correlation_id": str(init_correlation_id),
                         },
                     )
+                    # shutdown() safely handles partially initialized state:
+                    # - Checks each component before cleanup
+                    # - Safe to call even if components weren't created
                     await self.shutdown()
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.MCP,
@@ -619,7 +637,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                         correlation_id=init_correlation_id,
                     )
                     raise ProtocolConfigurationError(
-                        f"MCP server failed to become ready: {startup_error}",
+                        f"MCP server startup failed: {startup_error}",
                         context=ctx,
                     ) from startup_error
 

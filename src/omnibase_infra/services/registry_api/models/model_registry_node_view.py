@@ -30,7 +30,7 @@ class ModelRegistryNodeView(BaseModel):
         namespace: Optional namespace for multi-tenant deployments
         display_name: Optional human-friendly display name
         node_type: ONEX node archetype (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
-        version: Semantic version string (e.g., "1.0.0")
+        version: Semantic version (ModelSemVer instance)
         state: Current FSM registration state
         capabilities: List of capability tags
         registered_at: Timestamp of initial registration

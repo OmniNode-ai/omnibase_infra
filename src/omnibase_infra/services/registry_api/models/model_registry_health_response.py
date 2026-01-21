@@ -13,6 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 
 class ModelRegistryHealthResponse(BaseModel):
     """Health check response for the registry API.
@@ -34,7 +36,7 @@ class ModelRegistryHealthResponse(BaseModel):
         ...,
         description="When the health check was performed",
     )
-    components: dict[str, dict[str, str | bool]] = Field(
+    components: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Health status of individual components",
     )

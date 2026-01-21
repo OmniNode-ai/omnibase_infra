@@ -17,7 +17,7 @@ class ModelWidgetDefaults(BaseModel):
     Attributes vary by widget type and provide sensible defaults.
     """
 
-    model_config = ConfigDict(frozen=False, extra="allow")
+    model_config = ConfigDict(frozen=True, extra="allow")
 
     # Common fields - all optional
     show_timestamp: bool | None = None

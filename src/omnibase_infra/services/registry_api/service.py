@@ -10,9 +10,11 @@ Design Principles:
     - Warnings array: Communicates backend failures without crashing
     - Async-first: All methods are async for non-blocking I/O
     - Correlation IDs: Full traceability across all operations
+    - Container DI: Accepts ModelONEXContainer for dependency injection
 
 Related Tickets:
     - OMN-1278: Contract-Driven Dashboard - Registry Discovery
+    - OMN-1282: MCP Handler Contract-Driven Config
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ from uuid import UUID, uuid4
 
 import yaml
 
+from omnibase_core.container import ModelONEXContainer
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_status import (
     EnumHealthStatus,
@@ -44,6 +48,7 @@ from omnibase_infra.services.registry_api.models import (
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers.service_discovery import HandlerServiceDiscoveryConsul
+    from omnibase_infra.models.projection import ModelRegistrationProjection
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
 logger = logging.getLogger(__name__)
@@ -66,12 +71,24 @@ class ServiceRegistryDiscovery:
         This allows dashboards to display partial data rather than
         showing complete errors.
 
+    Dependency Injection:
+        This service accepts a ModelONEXContainer for ONEX-style dependency
+        injection. Dependencies can also be provided directly via constructor
+        parameters for testing or when the container is not available.
+
+        Priority: Direct parameters > Container resolution > None (with warnings)
+
     Thread Safety:
         This service is coroutine-safe. All methods are async and
         delegate to underlying services that handle their own
         concurrency requirements.
 
     Example:
+        >>> # Using container for DI
+        >>> service = ServiceRegistryDiscovery(container=container)
+        >>> response = await service.get_discovery()
+        >>>
+        >>> # Using direct dependencies (for testing)
         >>> service = ServiceRegistryDiscovery(
         ...     projection_reader=reader,
         ...     consul_handler=handler,
@@ -88,6 +105,7 @@ class ServiceRegistryDiscovery:
 
     def __init__(
         self,
+        container: ModelONEXContainer | None = None,
         projection_reader: ProjectionReaderRegistration | None = None,
         consul_handler: HandlerServiceDiscoveryConsul | None = None,
         widget_mapping_path: Path | None = None,
@@ -95,15 +113,38 @@ class ServiceRegistryDiscovery:
         """Initialize the registry discovery service.
 
         Args:
+            container: Optional ONEX container for dependency injection.
+                When provided, dependencies will be resolved from the container
+                if not explicitly passed via other parameters.
             projection_reader: Optional projection reader for node registrations.
-                If not provided, node queries will return empty results with warnings.
+                If not provided, will attempt to resolve from container.
+                If still None, node queries will return empty results with warnings.
             consul_handler: Optional Consul handler for live instances.
-                If not provided, instance queries will return empty results with warnings.
+                If not provided, will attempt to resolve from container.
+                If still None, instance queries will return empty results with warnings.
             widget_mapping_path: Path to widget mapping YAML file.
                 Defaults to configs/widget_mapping.yaml relative to package.
+
+        Note:
+            Direct dependency parameters take precedence over container resolution.
+            This allows easy mocking in tests while supporting full DI in production.
         """
+        self._container = container
+
+        # Resolve projection_reader: direct param > container > None
         self._projection_reader = projection_reader
+        if self._projection_reader is None and container is not None:
+            self._projection_reader = container.resolve(
+                "ProjectionReaderRegistration", None
+            )
+
+        # Resolve consul_handler: direct param > container > None
         self._consul_handler = consul_handler
+        if self._consul_handler is None and container is not None:
+            self._consul_handler = container.resolve(
+                "HandlerServiceDiscoveryConsul", None
+            )
+
         self._widget_mapping_path = widget_mapping_path or DEFAULT_WIDGET_MAPPING_PATH
         self._widget_mapping_cache: ModelWidgetMapping | None = None
         self._widget_mapping_mtime: float | None = None
@@ -111,8 +152,9 @@ class ServiceRegistryDiscovery:
         logger.info(
             "ServiceRegistryDiscovery initialized",
             extra={
-                "has_projection_reader": projection_reader is not None,
-                "has_consul_handler": consul_handler is not None,
+                "has_container": container is not None,
+                "has_projection_reader": self._projection_reader is not None,
+                "has_consul_handler": self._consul_handler is not None,
                 "widget_mapping_path": str(self._widget_mapping_path),
             },
         )
@@ -163,12 +205,19 @@ class ServiceRegistryDiscovery:
         Args:
             limit: Maximum number of nodes to return (1-1000).
             offset: Number of nodes to skip for pagination.
-            state: Optional filter by registration state.
-            node_type: Optional filter by node type (effect, compute, etc.).
+            state: Optional filter by registration state. When None, queries
+                all active states (ACTIVE, ACCEPTED, AWAITING_ACK, ACK_RECEIVED).
+            node_type: Optional filter by node type (effect, compute, reducer,
+                orchestrator). Case-insensitive.
             correlation_id: Optional correlation ID for tracing.
 
         Returns:
             Tuple of (nodes, pagination_info, warnings).
+
+        Note:
+            When node_type filter is specified, all matching records are fetched
+            to provide accurate pagination totals. For large datasets, consider
+            using state filters to reduce the query scope.
         """
         correlation_id = correlation_id or uuid4()
         warnings: list[ModelWarning] = []
@@ -186,29 +235,55 @@ class ServiceRegistryDiscovery:
             )
         else:
             try:
+                # Determine fetch limit based on whether node_type filter is applied
+                # When node_type is specified, we need all records for accurate totals
+                # since the projection reader doesn't support node_type filtering
+                if node_type:
+                    # Fetch all matching records to get accurate count after filtering
+                    # Use a high limit to get all records (10000 is a reasonable max)
+                    fetch_limit = 10000
+                else:
+                    # No node_type filter - can use normal pagination
+                    fetch_limit = limit + offset + 1  # +1 to detect has_more
+
                 # Query projections based on state filter
-                # Note: node_type filtering is applied in-memory since the projection
-                # reader API doesn't support it. We overfetch to ensure enough results
-                # after filtering.
-                fetch_limit = (limit + offset + 1) * (3 if node_type else 1)
+                projections: list[ModelRegistrationProjection] = []
 
                 if state is not None:
+                    # Single state filter
                     projections = await self._projection_reader.get_by_state(
                         state=state,
                         limit=fetch_limit,
                         correlation_id=correlation_id,
                     )
                 else:
-                    # Fetch all states when no state filter specified
-                    # Get ACTIVE nodes first (most common for dashboards), then others
-                    projections = await self._projection_reader.get_by_state(
-                        state=EnumRegistrationState.ACTIVE,
-                        limit=fetch_limit,
-                        correlation_id=correlation_id,
+                    # No state filter - query all active states and combine
+                    # This provides results across all relevant states, not just ACTIVE
+                    active_states = [
+                        EnumRegistrationState.ACTIVE,
+                        EnumRegistrationState.ACCEPTED,
+                        EnumRegistrationState.AWAITING_ACK,
+                        EnumRegistrationState.ACK_RECEIVED,
+                        EnumRegistrationState.PENDING_REGISTRATION,
+                    ]
+                    all_projections: list[ModelRegistrationProjection] = []
+                    for query_state in active_states:
+                        state_projections = await self._projection_reader.get_by_state(
+                            state=query_state,
+                            limit=fetch_limit,
+                            correlation_id=correlation_id,
+                        )
+                        all_projections.extend(state_projections)
+
+                    # Sort combined results by updated_at descending
+                    projections = sorted(
+                        all_projections,
+                        key=lambda p: p.updated_at,
+                        reverse=True,
                     )
 
                 # Apply node_type filter in-memory if specified
-                # Normalize filter to uppercase for comparison
+                # The projection reader API doesn't support node_type filtering
                 node_type_filter = node_type.upper() if node_type else None
                 if node_type_filter:
                     projections = [
@@ -217,10 +292,10 @@ class ServiceRegistryDiscovery:
                         if p.node_type.value.upper() == node_type_filter
                     ]
 
-                # Calculate total before pagination
+                # Calculate total from ALL filtered records (accurate count)
                 total = len(projections)
 
-                # Apply offset and limit after filtering
+                # Apply offset and limit for pagination
                 projections_slice = projections[offset : offset + limit]
 
                 # Convert to view models
@@ -678,7 +753,7 @@ class ServiceRegistryDiscovery:
             Health check response with component statuses.
         """
         correlation_id = correlation_id or uuid4()
-        components: dict[str, dict[str, str | bool]] = {}
+        components: dict[str, JsonType] = {}
         overall_healthy = True
 
         # Check projection reader

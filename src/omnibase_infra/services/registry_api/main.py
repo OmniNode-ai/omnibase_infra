@@ -107,8 +107,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             await service.consul_handler.shutdown()
             logger.info("Consul handler shutdown complete")
-        except Exception:
-            logger.exception("Error during Consul handler shutdown")
+        except Exception as e:
+            logger.exception(
+                "Error during Consul handler shutdown",
+                extra={"error_type": type(e).__name__},
+            )
 
 
 def create_app(
@@ -193,7 +196,10 @@ def create_app(
 
 # Default app instance for direct uvicorn usage
 # Example: uvicorn omnibase_infra.services.registry_api.main:app --host 0.0.0.0 --port 8000
-app = create_app()
+# Note: This creates an app with no backends configured. For production,
+# use create_app() directly with proper backend configuration (projection_reader,
+# consul_handler). Tests should also use create_app() for controlled app creation.
+app: FastAPI = create_app()
 
 
 __all__ = ["app", "create_app"]

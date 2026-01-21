@@ -36,6 +36,12 @@ from omnibase_infra.services.registry_api.models.model_registry_node_view import
 from omnibase_infra.services.registry_api.models.model_registry_summary import (
     ModelRegistrySummary,
 )
+from omnibase_infra.services.registry_api.models.model_response_list_instances import (
+    ModelResponseListInstances,
+)
+from omnibase_infra.services.registry_api.models.model_response_list_nodes import (
+    ModelResponseListNodes,
+)
 from omnibase_infra.services.registry_api.models.model_warning import ModelWarning
 from omnibase_infra.services.registry_api.models.model_widget_defaults import (
     ModelWidgetDefaults,
@@ -52,6 +58,8 @@ __all__ = [
     "ModelRegistryInstanceView",
     "ModelRegistryNodeView",
     "ModelRegistrySummary",
+    "ModelResponseListInstances",
+    "ModelResponseListNodes",
     "ModelWarning",
     "ModelWidgetDefaults",
     "ModelWidgetMapping",
