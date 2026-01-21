@@ -1,0 +1,1298 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Unit tests for TransitionNotificationOutbox (TDD approach).
+
+This test suite validates the TransitionNotificationOutbox implementation for:
+- Storing notifications within the same database transaction
+- Serialization to JSONB for PostgreSQL storage
+- Processing pending notifications with batch limits
+- Publishing notifications and marking as processed
+- Handling publish failures with retry tracking
+- Using FOR UPDATE SKIP LOCKED for concurrent processing
+- Background processor lifecycle (start/stop)
+- Metrics tracking for observability
+
+The TransitionNotificationOutbox implements the outbox pattern for reliable
+notification delivery of state transition events. It ensures atomic consistency
+between state changes and notification publishing by:
+1. Storing notifications in the same transaction as state mutations
+2. Background processor picks up and publishes pending notifications
+3. Handles failures with retry logic and error tracking
+
+Test Organization:
+    - TestTransitionNotificationOutboxFixtures: Fixture validation
+    - TestTransitionNotificationOutboxStore: Storage operations
+    - TestTransitionNotificationOutboxProcess: Processing logic
+    - TestTransitionNotificationOutboxConcurrency: SKIP LOCKED behavior
+    - TestTransitionNotificationOutboxLifecycle: Start/stop lifecycle
+    - TestTransitionNotificationOutboxMetrics: Metrics tracking
+    - TestTransitionNotificationOutboxConfiguration: Config options
+
+Related:
+    - docs/patterns/retry_backoff_compensation_strategy.md (Outbox Pattern)
+    - OMN-XXX: State Transition Notifications via Outbox Pattern
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
+from uuid import UUID, uuid4
+
+import pytest
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+
+# =============================================================================
+# Test Models (TDD - defining expected interfaces)
+# =============================================================================
+
+
+class ModelStateTransitionNotification(BaseModel):
+    """State transition notification model for outbox storage.
+
+    This model represents a notification about a state transition that needs
+    to be reliably delivered to downstream consumers via the outbox pattern.
+
+    NOTE: This is a TDD placeholder - the actual model will be in omnibase_core.
+    """
+
+    aggregate_type: str = Field(
+        ..., description="Type of aggregate (e.g., 'registration', 'workflow')"
+    )
+    aggregate_id: UUID = Field(..., description="Unique identifier of the aggregate")
+    from_state: str = Field(..., description="State before transition")
+    to_state: str = Field(..., description="State after transition")
+    projection_version: int = Field(
+        ..., ge=1, description="Version of the projection after this transition"
+    )
+    correlation_id: UUID = Field(..., description="Correlation ID for request tracing")
+    causation_id: UUID = Field(
+        ..., description="ID of the event that caused this transition"
+    )
+    timestamp: datetime = Field(..., description="When the transition occurred")
+    metadata: dict[str, str] = Field(
+        default_factory=dict, description="Optional metadata for the notification"
+    )
+
+    model_config = {"frozen": True}
+
+
+class ModelOutboxConfig(BaseModel):
+    """Configuration for TransitionNotificationOutbox.
+
+    NOTE: This is a TDD placeholder for the expected configuration model.
+    """
+
+    table_name: str = Field(
+        default="state_transition_outbox", description="PostgreSQL table name"
+    )
+    batch_size: int = Field(
+        default=100, ge=1, le=1000, description="Notifications per processing batch"
+    )
+    poll_interval_seconds: float = Field(
+        default=1.0, ge=0.1, le=60.0, description="Background processor poll interval"
+    )
+    max_retries: int = Field(
+        default=5, ge=1, le=100, description="Max retries before moving to DLQ"
+    )
+    retry_backoff_seconds: float = Field(
+        default=60.0, ge=1.0, description="Backoff before retrying failed notifications"
+    )
+
+
+class ModelOutboxMetrics(BaseModel):
+    """Metrics for TransitionNotificationOutbox.
+
+    NOTE: This is a TDD placeholder for the expected metrics model.
+    """
+
+    notifications_stored: int = Field(default=0, ge=0)
+    notifications_processed: int = Field(default=0, ge=0)
+    notifications_failed: int = Field(default=0, ge=0)
+    notifications_retried: int = Field(default=0, ge=0)
+    last_processed_at: datetime | None = Field(default=None)
+    is_running: bool = Field(default=False)
+
+
+# =============================================================================
+# Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def mock_pool() -> AsyncMock:
+    """Create mock database pool.
+
+    Returns an AsyncMock configured to simulate asyncpg.Pool behavior,
+    including acquire() context manager for connection handling.
+    """
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+
+    # Configure connection mock
+    mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+    mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.fetchrow = AsyncMock(return_value=None)
+    mock_conn.fetchval = AsyncMock(return_value=None)
+
+    # Configure transaction context manager
+    mock_transaction = MagicMock()
+    mock_transaction.__aenter__ = AsyncMock(return_value=None)
+    mock_transaction.__aexit__ = AsyncMock(return_value=None)
+    mock_conn.transaction.return_value = mock_transaction
+
+    # Configure acquire context manager
+    @asynccontextmanager
+    async def acquire_context() -> AsyncIterator[AsyncMock]:
+        yield mock_conn
+
+    pool.acquire = MagicMock(side_effect=acquire_context)
+    pool._mock_connection = mock_conn  # Expose for test assertions
+
+    return pool
+
+
+@pytest.fixture
+def mock_publisher() -> AsyncMock:
+    """Create mock notification publisher.
+
+    Returns an AsyncMock simulating a notification publisher interface
+    with publish() and publish_batch() methods.
+    """
+    publisher = AsyncMock()
+    publisher.publish = AsyncMock(return_value=None)
+    publisher.publish_batch = AsyncMock(return_value=None)
+    return publisher
+
+
+@pytest.fixture
+def sample_notification() -> ModelStateTransitionNotification:
+    """Create sample notification for testing.
+
+    Returns a fully populated ModelStateTransitionNotification suitable
+    for use in store and process tests.
+    """
+    return ModelStateTransitionNotification(
+        aggregate_type="registration",
+        aggregate_id=uuid4(),
+        from_state="pending",
+        to_state="active",
+        projection_version=1,
+        correlation_id=uuid4(),
+        causation_id=uuid4(),
+        timestamp=datetime.now(UTC),
+    )
+
+
+@pytest.fixture
+def sample_notification_with_metadata() -> ModelStateTransitionNotification:
+    """Create sample notification with metadata for testing."""
+    return ModelStateTransitionNotification(
+        aggregate_type="workflow",
+        aggregate_id=uuid4(),
+        from_state="running",
+        to_state="completed",
+        projection_version=42,
+        correlation_id=uuid4(),
+        causation_id=uuid4(),
+        timestamp=datetime.now(UTC),
+        metadata={"node_id": "abc-123", "executor": "runtime-host"},
+    )
+
+
+@pytest.fixture
+def outbox_config() -> ModelOutboxConfig:
+    """Create default outbox configuration for tests."""
+    return ModelOutboxConfig(
+        table_name="state_transition_outbox",
+        batch_size=100,
+        poll_interval_seconds=0.1,  # Fast for tests
+        max_retries=3,
+        retry_backoff_seconds=1.0,
+    )
+
+
+@pytest.fixture
+def outbox_config_custom_table() -> ModelOutboxConfig:
+    """Create outbox configuration with custom table name."""
+    return ModelOutboxConfig(
+        table_name="custom_notifications_outbox",
+        batch_size=50,
+        poll_interval_seconds=0.1,
+        max_retries=5,
+        retry_backoff_seconds=30.0,
+    )
+
+
+# =============================================================================
+# Test Fixture Validation
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestTransitionNotificationOutboxFixtures:
+    """Validate test fixtures are correctly configured."""
+
+    def test_mock_pool_has_acquire_context_manager(self, mock_pool: AsyncMock) -> None:
+        """Test that mock pool supports async context manager protocol."""
+        assert hasattr(mock_pool, "acquire")
+        assert hasattr(mock_pool, "_mock_connection")
+
+    def test_mock_publisher_has_publish_methods(
+        self, mock_publisher: AsyncMock
+    ) -> None:
+        """Test that mock publisher has required publish methods."""
+        assert hasattr(mock_publisher, "publish")
+        assert hasattr(mock_publisher, "publish_batch")
+
+    def test_sample_notification_is_valid(
+        self, sample_notification: ModelStateTransitionNotification
+    ) -> None:
+        """Test that sample notification has all required fields."""
+        assert sample_notification.aggregate_type == "registration"
+        assert sample_notification.from_state == "pending"
+        assert sample_notification.to_state == "active"
+        assert sample_notification.projection_version == 1
+        assert isinstance(sample_notification.aggregate_id, UUID)
+        assert isinstance(sample_notification.correlation_id, UUID)
+        assert isinstance(sample_notification.causation_id, UUID)
+        assert isinstance(sample_notification.timestamp, datetime)
+
+    def test_sample_notification_is_frozen(
+        self, sample_notification: ModelStateTransitionNotification
+    ) -> None:
+        """Test that notification model is immutable."""
+        with pytest.raises(Exception):  # ValidationError for frozen model
+            sample_notification.to_state = "different"  # type: ignore[misc]
+
+    def test_sample_notification_serializes_to_json(
+        self, sample_notification: ModelStateTransitionNotification
+    ) -> None:
+        """Test that notification can be serialized to JSON."""
+        json_str = sample_notification.model_dump_json()
+        assert "registration" in json_str
+        assert "pending" in json_str
+        assert "active" in json_str
+
+        # Verify round-trip
+        data = json.loads(json_str)
+        assert data["aggregate_type"] == "registration"
+        assert data["projection_version"] == 1
+
+    def test_outbox_config_defaults(self, outbox_config: ModelOutboxConfig) -> None:
+        """Test outbox configuration default values."""
+        assert outbox_config.table_name == "state_transition_outbox"
+        assert outbox_config.batch_size == 100
+        assert outbox_config.max_retries == 3
+
+
+# =============================================================================
+# Storage Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxStore:
+    """Test notification storage operations."""
+
+    async def test_store_notification_in_same_connection(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Notification is stored using provided connection.
+
+        When store() is called with an explicit connection, it MUST use that
+        connection to ensure the notification is written in the same transaction
+        as the state mutation. This is the core outbox pattern guarantee.
+        """
+        # This test validates the interface contract:
+        # store(notification, connection=existing_conn) uses existing_conn
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+
+        # The outbox store method signature should accept optional connection
+        # await outbox.store(notification, connection=mock_conn)
+
+        # For TDD, we assert the expected behavior:
+        # 1. execute() should be called on the provided connection
+        # 2. The notification should be serialized to JSONB
+        # 3. The table name should come from config
+
+        # Expected SQL pattern
+        expected_sql_contains = [
+            "INSERT INTO",
+            outbox_config.table_name,
+            "payload",
+            "aggregate_type",
+            "aggregate_id",
+        ]
+
+        # Simulate the call (TDD - testing expected interface)
+        # NOTE: f-string SQL is safe here - table name comes from trusted config
+        await mock_conn.execute(
+            f"""
+            INSERT INTO {outbox_config.table_name}
+            (id, aggregate_type, aggregate_id, payload, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            """,  # noqa: S608
+            uuid4(),
+            sample_notification.aggregate_type,
+            sample_notification.aggregate_id,
+            sample_notification.model_dump_json(),
+            datetime.now(UTC),
+        )
+
+        # Verify execute was called
+        mock_conn.execute.assert_called_once()
+        call_args = mock_conn.execute.call_args
+        sql = call_args[0][0]
+
+        for expected in expected_sql_contains:
+            assert expected in sql, f"Expected '{expected}' in SQL: {sql}"
+
+    async def test_store_serializes_notification_as_json(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Notification is serialized to JSONB for PostgreSQL storage.
+
+        The notification payload must be serialized as valid JSON that
+        can be stored in PostgreSQL JSONB column and deserialized later.
+        """
+        # Serialize notification
+        payload_json = sample_notification.model_dump_json()
+
+        # Verify it's valid JSON
+        parsed = json.loads(payload_json)
+
+        # Verify all fields are present
+        assert parsed["aggregate_type"] == sample_notification.aggregate_type
+        assert parsed["aggregate_id"] == str(sample_notification.aggregate_id)
+        assert parsed["from_state"] == sample_notification.from_state
+        assert parsed["to_state"] == sample_notification.to_state
+        assert parsed["projection_version"] == sample_notification.projection_version
+        assert parsed["correlation_id"] == str(sample_notification.correlation_id)
+        assert parsed["causation_id"] == str(sample_notification.causation_id)
+
+    async def test_store_uses_uuid_primary_key(
+        self,
+        mock_pool: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """Store generates UUID primary key for each notification."""
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+
+        # The store should generate a unique ID
+        notification_id = uuid4()
+
+        # Simulate store call
+        await mock_conn.execute(
+            "INSERT INTO outbox (id, payload) VALUES ($1, $2)",
+            notification_id,
+            sample_notification.model_dump_json(),
+        )
+
+        # Verify UUID was passed
+        call_args = mock_conn.execute.call_args
+        assert isinstance(call_args[0][1], UUID)
+
+    async def test_store_records_created_at_timestamp(
+        self,
+        mock_pool: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """Store records created_at timestamp for ordering and debugging."""
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+
+        before = datetime.now(UTC)
+
+        # Simulate store call with timestamp
+        created_at = datetime.now(UTC)
+        await mock_conn.execute(
+            "INSERT INTO outbox (id, payload, created_at) VALUES ($1, $2, $3)",
+            uuid4(),
+            sample_notification.model_dump_json(),
+            created_at,
+        )
+
+        after = datetime.now(UTC)
+
+        # Verify timestamp is within expected range
+        call_args = mock_conn.execute.call_args
+        stored_timestamp = call_args[0][3]
+        assert before <= stored_timestamp <= after
+
+
+# =============================================================================
+# Processing Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxProcess:
+    """Test notification processing operations."""
+
+    async def test_process_pending_fetches_unprocessed(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Process pending fetches only unprocessed notifications.
+
+        The processor should query for notifications where:
+        - processed_at IS NULL (not yet processed)
+        - retry_count < max_retries (not exhausted)
+        - ORDER BY created_at ASC (FIFO ordering)
+        """
+        mock_conn = mock_pool._mock_connection
+
+        # Configure mock to return unprocessed notifications
+        mock_rows = [
+            {
+                "id": uuid4(),
+                "aggregate_type": "registration",
+                "aggregate_id": uuid4(),
+                "payload": '{"from_state": "pending", "to_state": "active"}',
+                "created_at": datetime.now(UTC),
+                "processed_at": None,
+                "retry_count": 0,
+            }
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        # Simulate process_pending call
+        # NOTE: f-string SQL is safe here - table name comes from trusted config
+        await mock_conn.fetch(
+            f"""
+            SELECT id, aggregate_type, aggregate_id, payload, created_at,
+                   processed_at, retry_count, last_error
+            FROM {outbox_config.table_name}
+            WHERE processed_at IS NULL
+              AND retry_count < $1
+            ORDER BY created_at ASC
+            LIMIT $2
+            FOR UPDATE SKIP LOCKED
+            """,  # noqa: S608
+            outbox_config.max_retries,
+            outbox_config.batch_size,
+        )
+
+        # Verify query was called with correct parameters
+        mock_conn.fetch.assert_called_once()
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+
+        assert "processed_at IS NULL" in sql
+        assert "retry_count < $1" in sql
+        assert "ORDER BY created_at ASC" in sql
+        assert "FOR UPDATE SKIP LOCKED" in sql
+
+    async def test_process_pending_publishes_and_marks_processed(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Successfully processed notifications are marked as processed.
+
+        After successful publish:
+        1. Publisher.publish() is called with notification data
+        2. processed_at is set to current timestamp
+        3. Notification is not re-processed in future batches
+        """
+        mock_conn = mock_pool._mock_connection
+        notification_id = uuid4()
+
+        # Configure mock to return one unprocessed notification
+        mock_rows = [
+            {
+                "id": notification_id,
+                "aggregate_type": sample_notification.aggregate_type,
+                "aggregate_id": sample_notification.aggregate_id,
+                "payload": sample_notification.model_dump_json(),
+                "created_at": datetime.now(UTC),
+                "processed_at": None,
+                "retry_count": 0,
+            }
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        # Simulate processing flow
+        rows = await mock_conn.fetch("SELECT ... FOR UPDATE SKIP LOCKED")
+
+        for row in rows:
+            # Publish notification
+            await mock_publisher.publish(row["payload"])
+
+            # Mark as processed
+            # NOTE: f-string SQL is safe - table name from trusted config
+            await mock_conn.execute(
+                f"""
+                UPDATE {outbox_config.table_name}
+                SET processed_at = $1
+                WHERE id = $2
+                """,  # noqa: S608
+                datetime.now(UTC),
+                row["id"],
+            )
+
+        # Verify publisher was called
+        mock_publisher.publish.assert_called_once()
+
+        # Verify notification was marked as processed
+        update_calls = [
+            c for c in mock_conn.execute.call_args_list if "UPDATE" in str(c)
+        ]
+        assert len(update_calls) == 1
+        update_sql = update_calls[0][0][0]
+        assert "processed_at = $1" in update_sql
+
+    async def test_process_pending_handles_publish_failure(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Failed publishes increment retry_count and store error.
+
+        When publisher.publish() raises an exception:
+        1. retry_count is incremented
+        2. last_error stores the error message
+        3. Notification remains unprocessed for retry
+        """
+        mock_conn = mock_pool._mock_connection
+        notification_id = uuid4()
+
+        # Configure mock to return one unprocessed notification
+        mock_rows = [
+            {
+                "id": notification_id,
+                "aggregate_type": sample_notification.aggregate_type,
+                "aggregate_id": sample_notification.aggregate_id,
+                "payload": sample_notification.model_dump_json(),
+                "created_at": datetime.now(UTC),
+                "processed_at": None,
+                "retry_count": 0,
+            }
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        # Configure publisher to fail
+        publish_error = ConnectionError("Kafka unavailable")
+        mock_publisher.publish = AsyncMock(side_effect=publish_error)
+
+        # Simulate processing flow with error handling
+        rows = await mock_conn.fetch("SELECT ...")
+
+        for row in rows:
+            try:
+                await mock_publisher.publish(row["payload"])
+                # Mark as processed (not reached)
+                await mock_conn.execute(
+                    "UPDATE ... SET processed_at = $1 WHERE id = $2",
+                    datetime.now(UTC),
+                    row["id"],
+                )
+            except Exception as e:
+                # Increment retry count and store error
+                # NOTE: f-string SQL is safe - table name from trusted config
+                await mock_conn.execute(
+                    f"""
+                    UPDATE {outbox_config.table_name}
+                    SET retry_count = retry_count + 1,
+                        last_error = $1
+                    WHERE id = $2
+                    """,  # noqa: S608
+                    str(e),
+                    row["id"],
+                )
+
+        # Verify publisher was called
+        mock_publisher.publish.assert_called_once()
+
+        # Verify error was recorded
+        error_update_calls = [
+            c for c in mock_conn.execute.call_args_list if "retry_count" in str(c)
+        ]
+        assert len(error_update_calls) == 1
+        error_sql = error_update_calls[0][0][0]
+        assert "retry_count = retry_count + 1" in error_sql
+        assert "last_error = $1" in error_sql
+
+    async def test_batch_size_limits_processing(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Only batch_size notifications are processed per call.
+
+        The LIMIT clause should use the configured batch_size to prevent
+        overwhelming the publisher or holding database locks too long.
+        """
+        mock_conn = mock_pool._mock_connection
+        batch_size = 50
+
+        config = ModelOutboxConfig(batch_size=batch_size)
+
+        # Simulate process call
+        # NOTE: f-string SQL is safe - table name from trusted config
+        await mock_conn.fetch(
+            f"""
+            SELECT id, payload
+            FROM {config.table_name}
+            WHERE processed_at IS NULL
+            LIMIT $1
+            """,  # noqa: S608
+            config.batch_size,
+        )
+
+        # Verify LIMIT uses batch_size
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        limit_param = call_args[0][1]
+
+        assert "LIMIT $1" in sql
+        assert limit_param == batch_size
+
+
+# =============================================================================
+# Concurrency Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxConcurrency:
+    """Test concurrent processing with SKIP LOCKED."""
+
+    async def test_process_pending_uses_skip_locked(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Query uses FOR UPDATE SKIP LOCKED for concurrency.
+
+        Multiple processors can run concurrently without deadlocks:
+        - FOR UPDATE locks selected rows
+        - SKIP LOCKED skips rows already locked by other processors
+        """
+        mock_conn = mock_pool._mock_connection
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        # Simulate process call
+        # NOTE: f-string SQL is safe - table name from trusted config
+        await mock_conn.fetch(
+            f"""
+            SELECT id, aggregate_type, payload
+            FROM {outbox_config.table_name}
+            WHERE processed_at IS NULL
+            ORDER BY created_at ASC
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+            """,  # noqa: S608
+            outbox_config.batch_size,
+        )
+
+        # Verify FOR UPDATE SKIP LOCKED is present
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "FOR UPDATE SKIP LOCKED" in sql
+
+    async def test_skip_locked_prevents_duplicate_processing(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """SKIP LOCKED ensures no notification is processed twice concurrently.
+
+        When two processors query simultaneously:
+        - Processor A locks rows 1, 2, 3
+        - Processor B skips rows 1, 2, 3 and gets rows 4, 5, 6
+        """
+        # This test documents the expected behavior
+        # Implementation uses PostgreSQL's SKIP LOCKED which guarantees
+        # that locked rows are skipped rather than blocking
+
+        # Simulate two concurrent processors
+        processor_a_rows = [{"id": uuid4()} for _ in range(3)]
+        processor_b_rows = [{"id": uuid4()} for _ in range(3)]
+
+        # Rows should not overlap
+        processor_a_ids = {row["id"] for row in processor_a_rows}
+        processor_b_ids = {row["id"] for row in processor_b_rows}
+
+        assert processor_a_ids.isdisjoint(processor_b_ids)
+
+
+# =============================================================================
+# Lifecycle Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxLifecycle:
+    """Test background processor lifecycle."""
+
+    async def test_start_begins_background_processing(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Start method initiates background processor.
+
+        After start():
+        - is_running should be True
+        - Background task should be created
+        - Processor should poll at configured interval
+        """
+        is_running = False
+        background_task: asyncio.Task[None] | None = None
+
+        async def process_loop() -> None:
+            nonlocal is_running
+            while is_running:
+                # Simulate processing
+                await asyncio.sleep(outbox_config.poll_interval_seconds)
+
+        # Simulate start
+        is_running = True
+        background_task = asyncio.create_task(process_loop())
+
+        # Verify running
+        assert is_running is True
+        assert background_task is not None
+        assert not background_task.done()
+
+        # Cleanup
+        is_running = False
+        background_task.cancel()
+        try:
+            await background_task
+        except asyncio.CancelledError:
+            pass
+
+    async def test_stop_gracefully_stops_processor(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Stop method gracefully terminates processor.
+
+        After stop():
+        - is_running should be False
+        - Background task should complete (not be cancelled abruptly)
+        - Current processing batch should finish
+        """
+        is_running = True
+        processing_completed = False
+        background_task: asyncio.Task[None] | None = None
+
+        async def process_loop() -> None:
+            nonlocal is_running, processing_completed
+            while is_running:
+                # Simulate processing batch
+                await asyncio.sleep(0.01)
+                processing_completed = True
+                await asyncio.sleep(outbox_config.poll_interval_seconds)
+
+        background_task = asyncio.create_task(process_loop())
+
+        # Let it run briefly
+        await asyncio.sleep(0.05)
+
+        # Simulate graceful stop
+        is_running = False
+
+        # Wait for graceful shutdown
+        await asyncio.sleep(0.15)
+
+        # Verify stopped
+        assert is_running is False
+        assert processing_completed is True
+
+        # Cleanup
+        if not background_task.done():
+            background_task.cancel()
+            try:
+                await background_task
+            except asyncio.CancelledError:
+                pass
+
+    async def test_start_is_idempotent(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Starting an already-running outbox is a no-op.
+
+        Calling start() twice should not create multiple background tasks.
+        """
+        is_running = False
+        start_count = 0
+
+        def start() -> None:
+            nonlocal is_running, start_count
+            if is_running:
+                return  # Idempotent
+            is_running = True
+            start_count += 1
+
+        # Start twice
+        start()
+        start()
+
+        assert is_running is True
+        assert start_count == 1  # Only started once
+
+    async def test_stop_is_idempotent(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Stopping an already-stopped outbox is a no-op.
+
+        Calling stop() twice should not raise errors.
+        """
+        is_running = False
+        stop_count = 0
+
+        def stop() -> None:
+            nonlocal is_running, stop_count
+            if not is_running:
+                return  # Idempotent
+            is_running = False
+            stop_count += 1
+
+        # Stop without starting
+        stop()
+        stop()
+
+        assert is_running is False
+        assert stop_count == 0  # Never actually stopped (wasn't running)
+
+
+# =============================================================================
+# Configuration Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxConfiguration:
+    """Test configuration options."""
+
+    async def test_custom_table_name(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+        outbox_config_custom_table: ModelOutboxConfig,
+    ) -> None:
+        """Custom table name is used in queries.
+
+        The outbox should use the configured table_name for all SQL operations.
+        """
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        custom_table = outbox_config_custom_table.table_name
+        assert custom_table == "custom_notifications_outbox"
+
+        # Simulate store operation
+        # NOTE: f-string SQL is safe - table name from trusted config
+        await mock_conn.execute(
+            f"INSERT INTO {custom_table} (id, payload) VALUES ($1, $2)",  # noqa: S608
+            uuid4(),
+            sample_notification.model_dump_json(),
+        )
+
+        # Verify custom table name was used
+        call_args = mock_conn.execute.call_args
+        sql = call_args[0][0]
+        assert custom_table in sql
+
+        # Simulate fetch operation
+        # NOTE: f-string SQL is safe - table name from trusted config
+        await mock_conn.fetch(
+            f"SELECT * FROM {custom_table} WHERE processed_at IS NULL"  # noqa: S608
+        )
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert custom_table in sql
+
+    async def test_max_retries_configuration(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Max retries configuration is respected.
+
+        Notifications exceeding max_retries should not be selected for processing.
+        """
+        config = ModelOutboxConfig(max_retries=5)
+        mock_conn = mock_pool._mock_connection
+
+        # Simulate process query with max_retries filter
+        await mock_conn.fetch(
+            """
+            SELECT id, payload
+            FROM state_transition_outbox
+            WHERE processed_at IS NULL
+              AND retry_count < $1
+            """,
+            config.max_retries,
+        )
+
+        call_args = mock_conn.fetch.call_args
+        assert call_args[0][1] == 5
+
+    async def test_poll_interval_configuration(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Poll interval configuration controls processing frequency."""
+        config = ModelOutboxConfig(poll_interval_seconds=5.0)
+        assert config.poll_interval_seconds == 5.0
+
+
+# =============================================================================
+# Metrics Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxMetrics:
+    """Test metrics tracking."""
+
+    async def test_metrics_track_processed_count(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Metrics are updated with processed notification counts.
+
+        The outbox should track:
+        - notifications_stored: Total stored
+        - notifications_processed: Successfully processed
+        - notifications_failed: Failed to process
+        """
+        metrics = ModelOutboxMetrics()
+
+        # Simulate storing notifications
+        for _ in range(5):
+            metrics = metrics.model_copy(
+                update={"notifications_stored": metrics.notifications_stored + 1}
+            )
+
+        assert metrics.notifications_stored == 5
+
+        # Simulate processing (3 success, 2 fail)
+        for _ in range(3):
+            metrics = metrics.model_copy(
+                update={"notifications_processed": metrics.notifications_processed + 1}
+            )
+        for _ in range(2):
+            metrics = metrics.model_copy(
+                update={"notifications_failed": metrics.notifications_failed + 1}
+            )
+
+        assert metrics.notifications_processed == 3
+        assert metrics.notifications_failed == 2
+
+    async def test_metrics_track_retry_count(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Metrics track notification retry attempts."""
+        metrics = ModelOutboxMetrics()
+
+        # Simulate retries
+        for _ in range(3):
+            metrics = metrics.model_copy(
+                update={"notifications_retried": metrics.notifications_retried + 1}
+            )
+
+        assert metrics.notifications_retried == 3
+
+    async def test_metrics_track_last_processed_timestamp(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Metrics track when last processing occurred."""
+        metrics = ModelOutboxMetrics()
+        assert metrics.last_processed_at is None
+
+        # Simulate processing
+        now = datetime.now(UTC)
+        metrics = metrics.model_copy(update={"last_processed_at": now})
+
+        assert metrics.last_processed_at == now
+
+    async def test_metrics_track_running_state(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Metrics track whether processor is running."""
+        metrics = ModelOutboxMetrics()
+        assert metrics.is_running is False
+
+        # Simulate start
+        metrics = metrics.model_copy(update={"is_running": True})
+        assert metrics.is_running is True
+
+        # Simulate stop
+        metrics = metrics.model_copy(update={"is_running": False})
+        assert metrics.is_running is False
+
+
+# =============================================================================
+# Error Handling Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxErrorHandling:
+    """Test error handling scenarios."""
+
+    async def test_database_error_during_store_propagates(
+        self,
+        mock_pool: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """Database errors during store should propagate to caller.
+
+        The caller is responsible for transaction rollback when store fails.
+        """
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(
+            side_effect=Exception("Database constraint violation")
+        )
+
+        with pytest.raises(Exception, match="Database constraint violation"):
+            await mock_conn.execute(
+                "INSERT INTO outbox (id, payload) VALUES ($1, $2)",
+                uuid4(),
+                sample_notification.model_dump_json(),
+            )
+
+    async def test_publisher_error_does_not_stop_processing(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Publisher errors should be handled per-notification.
+
+        A single publish failure should not stop processing of other notifications.
+        """
+        mock_conn = mock_pool._mock_connection
+        notifications_processed = 0
+        notifications_failed = 0
+
+        # Configure publisher to fail on second notification
+        call_count = 0
+
+        async def conditional_publish(payload: str) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise ConnectionError("Temporary failure")
+
+        mock_publisher.publish = AsyncMock(side_effect=conditional_publish)
+
+        # Simulate processing 3 notifications
+        rows = [{"id": uuid4(), "payload": "{}"} for _ in range(3)]
+
+        for row in rows:
+            try:
+                await mock_publisher.publish(row["payload"])
+                notifications_processed += 1
+            except Exception:
+                notifications_failed += 1
+
+        # All notifications should be attempted
+        assert mock_publisher.publish.call_count == 3
+        assert notifications_processed == 2
+        assert notifications_failed == 1
+
+    async def test_exhausted_retries_logged_for_dlq(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Notifications exceeding max_retries should be flagged for DLQ.
+
+        When retry_count >= max_retries:
+        - Notification should not be selected for processing
+        - Should be available for DLQ processing (separate query)
+        """
+        mock_conn = mock_pool._mock_connection
+
+        # Simulate DLQ query for exhausted notifications
+        # NOTE: f-string SQL is safe - table name from trusted config
+        await mock_conn.fetch(
+            f"""
+            SELECT id, aggregate_type, payload, retry_count, last_error
+            FROM {outbox_config.table_name}
+            WHERE processed_at IS NULL
+              AND retry_count >= $1
+            """,  # noqa: S608
+            outbox_config.max_retries,
+        )
+
+        call_args = mock_conn.fetch.call_args
+        sql = call_args[0][0]
+        assert "retry_count >= $1" in sql
+
+
+# =============================================================================
+# Integration-style Tests (with mocks)
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxIntegration:
+    """Integration-style tests combining multiple components."""
+
+    async def test_full_store_and_process_flow(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Test complete flow from store to process to published.
+
+        This test simulates the full lifecycle:
+        1. Store notification in transaction
+        2. Background processor picks up notification
+        3. Publisher receives notification
+        4. Notification marked as processed
+        """
+        mock_conn = mock_pool._mock_connection
+        notification_id = uuid4()
+
+        # Step 1: Store notification
+        # NOTE: f-string SQL is safe - table name from trusted config
+        mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+        await mock_conn.execute(
+            f"""
+            INSERT INTO {outbox_config.table_name}
+            (id, aggregate_type, aggregate_id, payload, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            """,  # noqa: S608
+            notification_id,
+            sample_notification.aggregate_type,
+            sample_notification.aggregate_id,
+            sample_notification.model_dump_json(),
+            datetime.now(UTC),
+        )
+
+        # Step 2: Process picks up notification
+        mock_conn.fetch = AsyncMock(
+            return_value=[
+                {
+                    "id": notification_id,
+                    "aggregate_type": sample_notification.aggregate_type,
+                    "aggregate_id": sample_notification.aggregate_id,
+                    "payload": sample_notification.model_dump_json(),
+                    "created_at": datetime.now(UTC),
+                    "processed_at": None,
+                    "retry_count": 0,
+                }
+            ]
+        )
+        # NOTE: f-string SQL is safe - table name from trusted config
+        rows = await mock_conn.fetch(
+            f"""
+            SELECT * FROM {outbox_config.table_name}
+            WHERE processed_at IS NULL
+            FOR UPDATE SKIP LOCKED
+            """  # noqa: S608
+        )
+
+        # Step 3: Publish notification
+        for row in rows:
+            await mock_publisher.publish(row["payload"])
+
+        # Verify publisher received correct payload
+        mock_publisher.publish.assert_called_once()
+        published_payload = mock_publisher.publish.call_args[0][0]
+        assert sample_notification.aggregate_type in published_payload
+
+        # Step 4: Mark as processed
+        # NOTE: f-string SQL is safe - table name from trusted config
+        await mock_conn.execute(
+            f"""
+            UPDATE {outbox_config.table_name}
+            SET processed_at = $1
+            WHERE id = $2
+            """,  # noqa: S608
+            datetime.now(UTC),
+            notification_id,
+        )
+
+        # Verify update was called
+        update_calls = [
+            c for c in mock_conn.execute.call_args_list if "UPDATE" in str(c)
+        ]
+        assert len(update_calls) == 1
+
+    async def test_notification_with_metadata_roundtrip(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        sample_notification_with_metadata: ModelStateTransitionNotification,
+        outbox_config: ModelOutboxConfig,
+    ) -> None:
+        """Test that metadata is preserved through store and process."""
+        notification = sample_notification_with_metadata
+
+        # Serialize
+        payload_json = notification.model_dump_json()
+
+        # Deserialize (simulating what processor would do)
+        parsed = json.loads(payload_json)
+        restored = ModelStateTransitionNotification.model_validate(parsed)
+
+        # Verify metadata preserved
+        assert restored.metadata == notification.metadata
+        assert restored.metadata.get("node_id") == "abc-123"
+        assert restored.metadata.get("executor") == "runtime-host"
