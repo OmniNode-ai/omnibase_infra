@@ -109,6 +109,7 @@ from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.runtime.models.model_transition_notification_publisher_metrics import (
     ModelTransitionNotificationPublisherMetrics,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 if TYPE_CHECKING:
     from omnibase_infra.protocols import ProtocolEventBusLike
@@ -397,7 +398,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                     extra={
                         "aggregate_type": notification.aggregate_type,
                         "aggregate_id": str(notification.aggregate_id),
-                        "error": str(e),
+                        "error": sanitize_error_string(str(e)),
                         "correlation_id": str(notification.correlation_id),
                     },
                 )
@@ -435,7 +436,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             raise InfraConnectionError(
                 f"Batch publish partially failed: {failure_count}/{len(notifications)} "
                 f"notifications failed ({success_count} succeeded). "
-                f"Last error: {last_error}",
+                f"Last error: {sanitize_error_string(str(last_error))}",
                 context=ctx,
             ) from last_error
 

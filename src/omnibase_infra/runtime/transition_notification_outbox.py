@@ -269,6 +269,11 @@ class TransitionNotificationOutbox:
         write to ensure atomicity. The notification will be picked up by the
         background processor and published asynchronously.
 
+        Warning:
+            If called outside a transaction (auto-commit mode), this method logs
+            a WARNING but continues execution. The atomicity guarantee with
+            projection writes will be broken in this case.
+
         Args:
             notification: The state transition notification to store.
             conn: The database connection from the current transaction.
@@ -294,6 +299,19 @@ class TransitionNotificationOutbox:
             target_name=self._table_name,
             correlation_id=correlation_id,
         )
+
+        # Warn if not in transaction - atomicity guarantee will be broken
+        if not conn.is_in_transaction():
+            logger.warning(
+                "store() called outside transaction context - "
+                "atomicity with projection not guaranteed",
+                extra={
+                    "table_name": self._table_name,
+                    "aggregate_type": notification.aggregate_type,
+                    "aggregate_id": str(notification.aggregate_id),
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
         # Build INSERT query - table name from trusted config
         # S608: Safe - table name from constructor, not user input

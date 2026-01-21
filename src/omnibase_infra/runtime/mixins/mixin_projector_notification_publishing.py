@@ -169,49 +169,58 @@ class MixinProjectorNotificationPublishing:
         Returns:
             True if notifications should be published, False otherwise.
         """
-        return (
+        return self._get_notification_context() is not None
+
+    def _get_notification_context(
+        self,
+    ) -> (
+        tuple[ProtocolTransitionNotificationPublisher, ModelProjectorNotificationConfig]
+        | None
+    ):
+        """Return (publisher, config) tuple if notifications are enabled, None otherwise.
+
+        This helper consolidates the enabled check with access to both publisher and config,
+        reducing duplication in type-narrowing methods. The 3-way check (publisher not None,
+        config not None, config.enabled is True) is performed once here.
+
+        Returns:
+            Tuple of (publisher, config) if notifications are enabled, None otherwise.
+        """
+        if (
             self._notification_publisher is not None
             and self._notification_config is not None
             and self._notification_config.enabled
-        )
+        ):
+            return (self._notification_publisher, self._notification_config)
+        return None
 
     def _get_notification_config_if_enabled(
         self,
     ) -> ModelProjectorNotificationConfig | None:
         """Return notification config if notifications are enabled, None otherwise.
 
-        This helper combines the enabled check with config access, providing
-        proper type narrowing for mypy without redundant None guards.
+        This helper provides proper type narrowing for mypy without redundant None guards.
+        Delegates to ``_get_notification_context()`` for the enabled check.
 
         Returns:
             The notification config if enabled, None otherwise.
         """
-        if (
-            self._notification_publisher is not None
-            and self._notification_config is not None
-            and self._notification_config.enabled
-        ):
-            return self._notification_config
-        return None
+        context = self._get_notification_context()
+        return context[1] if context else None
 
     def _get_notification_publisher_if_enabled(
         self,
     ) -> ProtocolTransitionNotificationPublisher | None:
         """Return notification publisher if notifications are enabled, None otherwise.
 
-        This helper combines the enabled check with publisher access, providing
-        proper type narrowing for mypy without redundant None guards.
+        This helper provides proper type narrowing for mypy without redundant None guards.
+        Delegates to ``_get_notification_context()`` for the enabled check.
 
         Returns:
             The notification publisher if enabled, None otherwise.
         """
-        if (
-            self._notification_publisher is not None
-            and self._notification_config is not None
-            and self._notification_config.enabled
-        ):
-            return self._notification_publisher
-        return None
+        context = self._get_notification_context()
+        return context[0] if context else None
 
     async def _fetch_current_state_for_notification(
         self,
