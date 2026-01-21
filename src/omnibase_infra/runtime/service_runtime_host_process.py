@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from omnibase_infra.idempotency.protocol_idempotency_store import (
         ProtocolIdempotencyStore,
     )
+    from omnibase_infra.models.handlers import ModelHandlerDescriptor
     from omnibase_infra.nodes.architecture_validator import ProtocolArchitectureRule
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
@@ -475,6 +476,11 @@ class RuntimeHostProcess:
         # Track failed handler instantiations (handler_type -> error message)
         # Used by health_check() to report degraded state
         self._failed_handlers: dict[str, str] = {}
+
+        # Handler descriptors (handler_type -> descriptor with contract_config)
+        # Stored during registration for use during handler initialization
+        # Enables contract config to be passed to handlers via initialize()
+        self._handler_descriptors: dict[str, ModelHandlerDescriptor] = {}
 
         # Pending message tracking for graceful shutdown (OMN-756)
         # Tracks count of in-flight messages currently being processed
@@ -1183,6 +1189,10 @@ class RuntimeHostProcess:
                 handler_registry.register(protocol_type, handler_cls)
                 registered_count += 1
 
+                # Store descriptor for later use during handler initialization
+                # This enables passing contract_config to handler.initialize()
+                self._handler_descriptors[protocol_type] = descriptor
+
                 logger.debug(
                     "Registered bootstrap handler: %s -> %s",
                     protocol_type,
@@ -1191,6 +1201,7 @@ class RuntimeHostProcess:
                         "handler_id": descriptor.handler_id,
                         "protocol_type": protocol_type,
                         "handler_class": handler_class_path,
+                        "has_contract_config": descriptor.contract_config is not None,
                         "source_type": SOURCE_TYPE_BOOTSTRAP,
                     },
                 )
@@ -1298,7 +1309,41 @@ class RuntimeHostProcess:
                 # Call initialize() if the handler has this method
                 # Handlers may require async initialization with config
                 if hasattr(handler_instance, "initialize"):
-                    await handler_instance.initialize(self._config)
+                    # Build effective config: contract config as base, runtime overrides on top
+                    # This enables contracts to provide handler-specific defaults while
+                    # allowing runtime/deploy-time customization without touching contracts
+                    effective_config: dict[str, object] = {}
+                    config_source = "runtime_only"
+
+                    # Layer 1: Contract config as baseline (if descriptor exists with config)
+                    descriptor = self._handler_descriptors.get(handler_type)
+                    if descriptor and descriptor.contract_config:
+                        effective_config.update(descriptor.contract_config)
+                        config_source = "contract_only"
+
+                    # Layer 2: Runtime config overrides
+                    # Runtime config takes precedence, enabling deploy-time customization
+                    if self._config:
+                        effective_config.update(self._config)
+                        if descriptor and descriptor.contract_config:
+                            config_source = "contract+runtime_override"
+
+                    # Pass empty dict if no config, not None
+                    # Handlers expect dict interface (e.g., config.get("key"))
+                    await handler_instance.initialize(effective_config)
+
+                    logger.debug(
+                        "Handler initialized with effective config",
+                        extra={
+                            "handler_type": handler_type,
+                            "config_source": config_source,
+                            "effective_config_keys": list(effective_config.keys()),
+                            "has_contract_config": bool(
+                                descriptor and descriptor.contract_config
+                            ),
+                            "has_runtime_config": bool(self._config),
+                        },
+                    )
 
                 # Store the handler instance for routing
                 self._handlers[handler_type] = handler_instance

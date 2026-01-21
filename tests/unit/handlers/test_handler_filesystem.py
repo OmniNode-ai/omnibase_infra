@@ -54,9 +54,13 @@ def temp_dir() -> Path:
 
     Yields:
         Path: Temporary directory path that exists for the duration of the test.
+               The path is resolved to canonical form (on macOS, /var -> /private/var)
+               to ensure consistency with handler symlink validation.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
+        # Resolve to canonical path for macOS compatibility
+        # /var/folders/... -> /private/var/folders/...
+        yield Path(tmpdir).resolve()
 
 
 @pytest.fixture
@@ -78,11 +82,12 @@ async def initialized_handler(handler, temp_dir: Path):
 
     Args:
         handler: The HandlerFileSystem fixture
-        temp_dir: Temporary directory fixture
+        temp_dir: Temporary directory fixture (already resolved to canonical form)
 
     Yields:
         HandlerFileSystem: An initialized handler with temp_dir allowed.
     """
+    # temp_dir fixture already resolves to canonical path
     await handler.initialize(
         {
             "allowed_paths": [str(temp_dir)],
@@ -149,8 +154,10 @@ class TestHandlerFileSystemInitialization:
         await handler.initialize(config)
 
         assert handler._initialized is True
-        # _allowed_paths is a list of Path objects
-        assert temp_dir in handler._allowed_paths
+        # _allowed_paths is a list of Path objects resolved to canonical form
+        # On macOS, /var is a symlink to /private/var, so we must resolve
+        # the temp_dir before comparing
+        assert temp_dir.resolve() in handler._allowed_paths
 
         await handler.shutdown()
 

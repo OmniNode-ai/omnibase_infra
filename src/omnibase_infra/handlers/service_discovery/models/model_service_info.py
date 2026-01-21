@@ -45,6 +45,8 @@ class ModelServiceInfo(BaseModel):
         health_status: Current health status of the service.
         metadata: Additional key-value metadata for the service.
         health_check_url: Optional URL for health checks (handler extension).
+        health_output: Output message from the last health check (handler extension).
+        last_check_at: Timestamp of the last health check (handler extension).
         registered_at: Timestamp when the service was registered (handler extension).
         correlation_id: Correlation ID for tracing (handler extension).
     """
@@ -85,6 +87,14 @@ class ModelServiceInfo(BaseModel):
     health_check_url: str | None = Field(
         default=None,
         description="Optional URL for health checks",
+    )
+    health_output: str | None = Field(
+        default=None,
+        description="Output message from the last health check",
+    )
+    last_check_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of the last health check",
     )
     registered_at: datetime | None = Field(
         default=None,

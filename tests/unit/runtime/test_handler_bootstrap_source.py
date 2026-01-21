@@ -5,7 +5,7 @@ Unit tests for HandlerBootstrapSource hardcoded handler registration.
 
 Tests the HandlerBootstrapSource functionality including:
 - Protocol compliance with ProtocolContractSource
-- Bootstrap handler discovery (consul, db, http, vault)
+- Bootstrap handler discovery (consul, db, http, mcp, vault)
 - ModelHandlerDescriptor validation for all bootstrap handlers
 - Graceful mode behavior (API consistency)
 - Idempotency of discover_handlers() calls
@@ -18,7 +18,7 @@ Related:
 Expected Behavior:
     HandlerBootstrapSource implements ProtocolContractSource from omnibase_infra.
     It provides hardcoded handler descriptors for core infrastructure handlers
-    (Consul, Database, HTTP, Vault) without requiring contract.yaml files.
+    (Consul, Database, HTTP, MCP, Vault) without requiring contract.yaml files.
 
     The source_type property returns "BOOTSTRAP" as per the implementation.
     All handlers have handler_kind="effect" since they perform external I/O.
@@ -49,6 +49,7 @@ EXPECTED_HANDLER_IDS = frozenset(
         "bootstrap.consul",
         "bootstrap.db",
         "bootstrap.http",
+        "bootstrap.mcp",
         "bootstrap.vault",
     }
 )
@@ -60,7 +61,7 @@ EXPECTED_HANDLER_KIND = "effect"
 EXPECTED_VERSION = "1.0.0"
 
 # Expected count of bootstrap handlers
-EXPECTED_HANDLER_COUNT = 4
+EXPECTED_HANDLER_COUNT = 5
 
 
 # =============================================================================
@@ -169,13 +170,14 @@ class TestHandlerBootstrapSourceDiscovery:
         assert hasattr(result, "validation_errors")
 
     @pytest.mark.asyncio
-    async def test_discovers_exactly_four_handlers(self) -> None:
-        """discover_handlers() should return exactly 4 bootstrap handlers.
+    async def test_discovers_exactly_five_handlers(self) -> None:
+        """discover_handlers() should return exactly 5 bootstrap handlers.
 
         The bootstrap handlers are:
         - bootstrap.consul: HashiCorp Consul service discovery
         - bootstrap.db: PostgreSQL database operations
         - bootstrap.http: HTTP REST protocol
+        - bootstrap.mcp: Model Context Protocol for AI agent integration
         - bootstrap.vault: HashiCorp Vault secret management
         """
         source = HandlerBootstrapSource()
@@ -192,7 +194,7 @@ class TestHandlerBootstrapSourceDiscovery:
         """All discovered handlers should have expected handler_id values.
 
         Handler IDs must follow the pattern "bootstrap.<service_name>" where
-        service_name is one of: consul, db, http, vault.
+        service_name is one of: consul, db, http, mcp, vault.
         """
         source = HandlerBootstrapSource()
 
@@ -257,20 +259,35 @@ class TestHandlerBootstrapSourceDiscovery:
             assert descriptor.version.patch == 0
 
     @pytest.mark.asyncio
-    async def test_all_handlers_have_contract_path_none(self) -> None:
-        """All bootstrap handlers should have contract_path=None.
+    async def test_all_handlers_have_valid_contract_paths(self) -> None:
+        """All bootstrap handlers should have valid contract_path values.
 
-        Bootstrap handlers are hardcoded and don't come from contract files,
-        so their contract_path should always be None.
+        Bootstrap handlers now load their configuration from contract YAML files.
+        Each handler should have a contract_path that points to an existing file.
+
+        Basic handlers use: contracts/handlers/<type>/handler_contract.yaml
+        MCP uses rich contract: src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml
         """
         source = HandlerBootstrapSource()
 
         result = await source.discover_handlers()
 
+        expected_paths = {
+            "bootstrap.consul": "contracts/handlers/consul/handler_contract.yaml",
+            "bootstrap.db": "contracts/handlers/db/handler_contract.yaml",
+            "bootstrap.http": "contracts/handlers/http/handler_contract.yaml",
+            "bootstrap.vault": "contracts/handlers/vault/handler_contract.yaml",
+            "bootstrap.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
+        }
+
         for descriptor in result.descriptors:
-            assert descriptor.contract_path is None, (
+            assert descriptor.contract_path is not None, (
+                f"Handler '{descriptor.handler_id}' has contract_path=None, expected a path"
+            )
+            expected = expected_paths.get(descriptor.handler_id)
+            assert descriptor.contract_path == expected, (
                 f"Handler '{descriptor.handler_id}' has contract_path="
-                f"'{descriptor.contract_path}', expected None"
+                f"'{descriptor.contract_path}', expected '{expected}'"
             )
 
     @pytest.mark.asyncio
@@ -512,6 +529,30 @@ class TestHandlerBootstrapSourceDescriptors:
         assert descriptor.name == "Vault Handler"
         assert "vault" in descriptor.description.lower()
         assert descriptor.handler_kind == "effect"
+
+    @pytest.mark.asyncio
+    async def test_mcp_handler_descriptor_content(self) -> None:
+        """Verify the MCP handler descriptor has expected content."""
+        source = HandlerBootstrapSource()
+
+        result = await source.discover_handlers()
+
+        mcp_descriptors = [
+            d for d in result.descriptors if d.handler_id == "bootstrap.mcp"
+        ]
+
+        assert len(mcp_descriptors) == 1, "Should have exactly one MCP handler"
+
+        descriptor = mcp_descriptors[0]
+        assert descriptor.name == "MCP Handler"
+        assert descriptor.handler_kind == "effect"
+        assert (
+            descriptor.description
+            == "Model Context Protocol handler for AI agent integration"
+        )
+        assert (
+            descriptor.handler_class == "omnibase_infra.handlers.handler_mcp.HandlerMCP"
+        )
 
 
 # =============================================================================
@@ -982,7 +1023,7 @@ class TestHandlerBootstrapSourceThreadSafety:
 
         # Verify all results are valid
         for i, result in enumerate(results):
-            assert len(result.descriptors) == 4, (
+            assert len(result.descriptors) == EXPECTED_HANDLER_COUNT, (
                 f"Result {i + 1} has wrong handler count: {len(result.descriptors)}"
             )
             assert result.validation_errors == [], (

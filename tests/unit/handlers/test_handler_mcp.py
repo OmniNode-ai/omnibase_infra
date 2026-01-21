@@ -97,8 +97,10 @@ class TestHandlerMCPInitialization:
             verify that default configuration values are correctly applied.
             This validates the initialization contract that cannot be fully
             tested via public APIs alone.
+
+            Uses skip_server=True to avoid port binding during unit tests.
         """
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
 
         assert handler._initialized is True
         assert handler._config is not None
@@ -119,6 +121,8 @@ class TestHandlerMCPInitialization:
             verify that custom configuration values are correctly applied.
             This validates the initialization contract that cannot be fully
             tested via public APIs alone.
+
+            Uses skip_server=True to avoid port binding during unit tests.
         """
         config: dict[str, object] = {
             "host": "127.0.0.1",
@@ -126,6 +130,7 @@ class TestHandlerMCPInitialization:
             "path": "/api/mcp",
             "timeout_seconds": 60.0,
             "max_tools": 50,
+            "skip_server": True,
         }
         await handler.initialize(config)
 
@@ -148,8 +153,10 @@ class TestHandlerMCPInitialization:
             _tool_registry) to verify that shutdown properly clears all state.
             This is a critical invariant that must be verified at the unit level
             to ensure no state leaks between handler lifecycles.
+
+            Uses skip_server=True to avoid port binding during unit tests.
         """
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         assert handler._initialized is True
 
         await handler.shutdown()
@@ -164,9 +171,12 @@ class TestHandlerMCPDescribe:
 
     @pytest.fixture
     async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture with mock container."""
+        """Create and initialize a HandlerMCP fixture with mock container.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         yield handler
         await handler.shutdown()
 
@@ -190,9 +200,12 @@ class TestHandlerMCPListTools:
 
     @pytest.fixture
     async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture with mock container."""
+        """Create and initialize a HandlerMCP fixture with mock container.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         yield handler
         await handler.shutdown()
 
@@ -234,9 +247,12 @@ class TestHandlerMCPCallTool:
 
     @pytest.fixture
     async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture with mock container."""
+        """Create and initialize a HandlerMCP fixture with mock container.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         yield handler
         await handler.shutdown()
 
@@ -281,9 +297,12 @@ class TestHandlerMCPOperationValidation:
 
     @pytest.fixture
     async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture with mock container."""
+        """Create and initialize a HandlerMCP fixture with mock container.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         yield handler
         await handler.shutdown()
 
@@ -322,9 +341,12 @@ class TestHandlerMCPHealthCheck:
 
     @pytest.fixture
     async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture with mock container."""
+        """Create and initialize a HandlerMCP fixture with mock container.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         yield handler
         await handler.shutdown()
 
@@ -332,12 +354,11 @@ class TestHandlerMCPHealthCheck:
     async def test_health_check_initialized(
         self, initialized_handler: HandlerMCP
     ) -> None:
-        """Test health check returns healthy when initialized."""
+        """Test health check returns healthy when initialized with skip_server."""
         health = await initialized_handler.health_check()
 
         assert health["healthy"] is True
-        assert health["initialized"] is True
-        assert health["tool_count"] == 0
+        assert health["skip_server"] is True
         assert health["transport_type"] == "mcp"
 
     @pytest.mark.asyncio
@@ -349,7 +370,8 @@ class TestHandlerMCPHealthCheck:
         health = await handler.health_check()
 
         assert health["healthy"] is False
-        assert health["initialized"] is False
+        assert health["reason"] == "not_initialized"
+        assert health["transport_type"] == "mcp"
 
 
 class TestMcpHandlerConfig:
@@ -400,9 +422,12 @@ class TestHandlerMCPDescribeOperation:
 
     @pytest.fixture
     async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
-        """Create and initialize a HandlerMCP fixture with mock container."""
+        """Create and initialize a HandlerMCP fixture with mock container.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         yield handler
         await handler.shutdown()
 
@@ -454,13 +479,16 @@ class TestHandlerMCPLifecycle:
     async def test_lifecycle_transition_healthy_after_init(
         self, handler: HandlerMCP
     ) -> None:
-        """Test handler becomes healthy after initialization via health_check."""
+        """Test handler becomes healthy after initialization via health_check.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
         # Before init - unhealthy
         health_before = await handler.health_check()
         assert health_before["healthy"] is False
 
         # After init - healthy
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         health_after = await handler.health_check()
         assert health_after["healthy"] is True
 
@@ -470,8 +498,11 @@ class TestHandlerMCPLifecycle:
     async def test_lifecycle_transition_unhealthy_after_shutdown(
         self, handler: HandlerMCP
     ) -> None:
-        """Test handler becomes unhealthy after shutdown via health_check."""
-        await handler.initialize({})
+        """Test handler becomes unhealthy after shutdown via health_check.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
+        await handler.initialize({"skip_server": True})
 
         # Before shutdown - healthy
         health_before = await handler.health_check()
@@ -486,13 +517,16 @@ class TestHandlerMCPLifecycle:
     async def test_describe_reflects_initialization_state(
         self, handler: HandlerMCP
     ) -> None:
-        """Test describe reflects initialization state correctly."""
+        """Test describe reflects initialization state correctly.
+
+        Uses skip_server=True to avoid port binding during unit tests.
+        """
         # Before init
         desc_before = handler.describe()
         assert desc_before["initialized"] is False
 
         # After init
-        await handler.initialize({})
+        await handler.initialize({"skip_server": True})
         desc_after = handler.describe()
         assert desc_after["initialized"] is True
 
