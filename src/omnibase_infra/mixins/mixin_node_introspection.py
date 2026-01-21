@@ -1493,12 +1493,12 @@ class MixinNodeIntrospection:
                 topic = self._introspection_topic
                 if hasattr(event_bus, "publish_envelope"):
                     # Wrap event in ModelEventEnvelope for protocol compliance
-                    envelope = ModelEventEnvelope(
+                    envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
                         payload=publish_event,
                         correlation_id=final_correlation_id,
                     )
                     await event_bus.publish_envelope(
-                        envelope=envelope,
+                        envelope=envelope,  # type: ignore[arg-type]
                         topic=topic,
                     )
                 else:
@@ -1613,12 +1613,12 @@ class MixinNodeIntrospection:
             topic = self._heartbeat_topic
             if hasattr(event_bus, "publish_envelope"):
                 # Wrap event in ModelEventEnvelope for protocol compliance
-                envelope = ModelEventEnvelope(
+                envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
                     payload=heartbeat,
                     correlation_id=heartbeat.correlation_id,
                 )
                 await event_bus.publish_envelope(
-                    envelope=envelope,
+                    envelope=envelope,  # type: ignore[arg-type]
                     topic=topic,
                 )
             else:

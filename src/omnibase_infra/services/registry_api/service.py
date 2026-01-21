@@ -824,7 +824,9 @@ class ServiceRegistryDiscovery:
 
         # Determine overall status
         unhealthy_count = sum(
-            1 for c in components.values() if not c.get("healthy", False)
+            1
+            for c in components.values()
+            if isinstance(c, dict) and not c.get("healthy", False)
         )
         if unhealthy_count == 0:
             status = "healthy"

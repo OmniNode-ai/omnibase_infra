@@ -511,7 +511,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 )
 
             # Register handler
-            registry.register_handler(handler_instance)
+            registry.register_handler(handler_instance)  # type: ignore[arg-type]
             logger.debug(
                 "Registered handler from contract: %s",
                 handler_class_name,

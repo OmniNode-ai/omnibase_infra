@@ -570,12 +570,12 @@ class ServiceTimeoutEmitter:
         )
 
         # Wrap event in ModelEventEnvelope for protocol compliance
-        envelope = ModelEventEnvelope(
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=event,
             correlation_id=correlation_id,
         )
         await self._event_bus.publish_envelope(
-            envelope=envelope,
+            envelope=envelope,  # type: ignore[arg-type]
             topic=topic,
         )
 
@@ -664,12 +664,12 @@ class ServiceTimeoutEmitter:
         )
 
         # Wrap event in ModelEventEnvelope for protocol compliance
-        envelope = ModelEventEnvelope(
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=event,
             correlation_id=correlation_id,
         )
         await self._event_bus.publish_envelope(
-            envelope=envelope,
+            envelope=envelope,  # type: ignore[arg-type]
             topic=topic,
         )
 

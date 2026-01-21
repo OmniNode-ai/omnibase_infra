@@ -1345,7 +1345,7 @@ def validate_infra_union_usage(
     return ModelValidationResult(
         is_valid=is_valid,
         errors=filtered_issues,
-        metadata=ModelValidationMetadata.model_construct(**metadata_fields),
+        metadata=ModelValidationMetadata.model_construct(**metadata_fields),  # type: ignore[arg-type]
     )
 
 

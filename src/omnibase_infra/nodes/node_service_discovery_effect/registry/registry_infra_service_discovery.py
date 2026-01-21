@@ -176,7 +176,7 @@ class RegistryInfraServiceDiscovery:
             return
 
         await container.service_registry.register_instance(
-            interface=ProtocolDiscoveryOperations,
+            interface=ProtocolDiscoveryOperations,  # type: ignore[arg-type]
             instance=handler,
             scope=EnumInjectionScope.GLOBAL,
         )
