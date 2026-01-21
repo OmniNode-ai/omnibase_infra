@@ -321,33 +321,106 @@ def _resolve_contract_path(relative_path: Path) -> Path | None:
     return None
 
 
+def _validate_required_contract_fields(
+    contract: dict[str, JsonType],
+    handler_type: str,
+) -> None:
+    """Validate required fields are present in contract.
+
+    Performs fail-fast validation for required contract fields. Raises
+    ProtocolConfigurationError immediately if any required field is missing.
+
+    Required Fields:
+        - name: Handler name (REQUIRED)
+        - handler_class: Fully qualified class path (REQUIRED)
+        - handler_type OR descriptor.handler_kind: At least one (REQUIRED)
+
+    Args:
+        contract: Parsed contract dict to validate.
+        handler_type: Handler type identifier for error context.
+
+    Raises:
+        ProtocolConfigurationError: If any required field is missing, with
+            clear message indicating which field and proper error context.
+    """
+    # Validate 'name' field
+    if "name" not in contract:
+        raise ProtocolConfigurationError(
+            f"Missing required field 'name' in handler contract for '{handler_type}'",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="extract_handler_config",
+                target_name=handler_type,
+            ),
+        )
+
+    # Validate 'handler_class' field
+    if "handler_class" not in contract:
+        raise ProtocolConfigurationError(
+            f"Missing required field 'handler_class' in handler contract for '{handler_type}'",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="extract_handler_config",
+                target_name=handler_type,
+            ),
+        )
+
+    # Validate handler kind: must have either 'handler_type' or 'descriptor.handler_kind'
+    has_handler_type = "handler_type" in contract
+    descriptor = contract.get("descriptor", {})
+    has_descriptor_handler_kind = (
+        isinstance(descriptor, dict) and "handler_kind" in descriptor
+    )
+
+    if not has_handler_type and not has_descriptor_handler_kind:
+        raise ProtocolConfigurationError(
+            f"Missing required field 'handler_type' or 'descriptor.handler_kind' "
+            f"in handler contract for '{handler_type}'",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="extract_handler_config",
+                target_name=handler_type,
+            ),
+        )
+
+
 def extract_handler_config(
     contract: dict[str, JsonType],
     handler_type: str,
+    *,
+    require_basic_fields: bool = True,
 ) -> dict[str, JsonType]:
     """Extract handler-specific configuration from parsed contract.
 
     Extracts configuration values from both basic and rich contract structures
     and flattens them into a dict suitable for handler initialization.
 
+    Fail-Fast Validation:
+        When require_basic_fields=True (default), validates that required fields
+        are present and raises ProtocolConfigurationError immediately if missing.
+
+        Required fields for basic contracts:
+            - name: REQUIRED
+            - handler_class: REQUIRED
+            - handler_type OR descriptor.handler_kind: At least one REQUIRED
+
     Supports Two Contract Formats:
 
     Basic Contract Structure (contracts/handlers/*/handler_contract.yaml):
-        - name: Handler name (e.g., "handler-consul")
-        - handler_class: Fully qualified class path
-        - handler_type: Handler kind (effect, compute, etc.)
+        - name: Handler name (e.g., "handler-consul") [REQUIRED]
+        - handler_class: Fully qualified class path [REQUIRED]
+        - handler_type: Handler kind (effect, compute, etc.) [REQUIRED*]
         - tags: List of discovery tags
         - security: Security metadata dict
             - trusted_namespace: Required trusted import namespace
             - audit_logging: Whether to enable audit logging
             - requires_authentication: Whether auth is required (optional)
 
+        *handler_type is required unless descriptor.handler_kind is provided.
+
     Rich Contract Structure (src/omnibase_infra/contracts/handlers/*/handler_contract.yaml):
         - handler_id: Unique identifier (e.g., "effect.mcp.handler")
-        - name: Handler name
+        - name: Handler name [REQUIRED]
         - version: Semantic version
         - descriptor: Handler descriptor with timeout, retry, circuit breaker
-            - handler_kind: Handler behavioral type
+            - handler_kind: Handler behavioral type [REQUIRED*]
             - timeout_ms: Timeout in milliseconds
             - retry_policy: Retry configuration
             - circuit_breaker: Circuit breaker configuration
@@ -362,10 +435,16 @@ def extract_handler_config(
                 - tool_access: Tool access control
                     - max_tools: Maximum number of tools
 
+        *handler_kind is required unless handler_type is provided.
+
     Args:
         contract: Parsed contract dict from load_handler_contract_config().
         handler_type: Handler type identifier (e.g., "consul", "db") for
             logging and context.
+        require_basic_fields: If True (default), validates required fields are
+            present and raises ProtocolConfigurationError if missing. Set to
+            False for rich contracts that may have different requirements or
+            during migration.
 
     Returns:
         Flat dict with extracted configuration values suitable for
@@ -384,6 +463,12 @@ def extract_handler_config(
             - json_response: Transport JSON response flag (rich contracts)
             - timeout_seconds: Timeout in seconds (rich contracts)
             - max_tools: Maximum tools for MCP (rich contracts)
+
+    Raises:
+        ProtocolConfigurationError: If require_basic_fields=True and any of:
+            - 'name' field is missing
+            - 'handler_class' field is missing
+            - Neither 'handler_type' nor 'descriptor.handler_kind' is present
 
     Example:
         >>> # Basic contract
@@ -417,7 +502,18 @@ def extract_handler_config(
         8090
         >>> config["max_tools"]
         100
+
+        >>> # Missing required field raises error
+        >>> bad_contract = {"handler_class": "some.Handler"}
+        >>> extract_handler_config(bad_contract, "test")  # doctest: +SKIP
+        Traceback (most recent call last):
+            ...
+        ProtocolConfigurationError: Missing required field 'name' in handler contract
     """
+    # Fail-fast validation for required fields
+    if require_basic_fields:
+        _validate_required_contract_fields(contract, handler_type)
+
     config: dict[str, JsonType] = {}
 
     # Extract top-level fields

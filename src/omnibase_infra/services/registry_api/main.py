@@ -35,6 +35,8 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.services.registry_api.routes import router
 from omnibase_infra.services.registry_api.service import ServiceRegistryDiscovery
 
@@ -131,10 +133,15 @@ def create_app(
         consul_handler: Optional Consul handler for live instances.
         widget_mapping_path: Optional path to widget mapping YAML.
         cors_origins: Optional list of allowed CORS origins.
-            Defaults to ["*"] for development, should be restricted in production.
+            If not provided, reads from CORS_ORIGINS environment variable.
+            Raises ProtocolConfigurationError if neither is configured (fail-fast).
 
     Returns:
         Configured FastAPI application.
+
+    Raises:
+        ProtocolConfigurationError: If CORS origins not configured via parameter
+            or CORS_ORIGINS environment variable.
 
     Example:
         >>> from omnibase_infra.services.registry_api import create_app
@@ -151,15 +158,30 @@ def create_app(
         openapi_url="/openapi.json",
     )
 
-    # Configure CORS
-    origins = cors_origins or os.environ.get("CORS_ORIGINS", "*").split(",")
+    # Configure CORS - fail-fast if not configured
+    if cors_origins is not None:
+        origins = cors_origins
+    else:
+        env_origins = os.environ.get("CORS_ORIGINS")
+        if env_origins is None:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="configure_cors",
+            )
+            raise ProtocolConfigurationError(
+                "CORS_ORIGINS must be configured. "
+                "Set the CORS_ORIGINS environment variable (comma-separated list of allowed origins) "
+                "or pass cors_origins parameter to create_app(). "
+                "Example: CORS_ORIGINS=http://localhost:3000,https://dashboard.example.com",
+                context=context,
+            )
+        origins = env_origins.split(",")
 
-    # Warn about wildcard CORS in production environments
+    # Warn about wildcard CORS - only when explicitly configured
     if "*" in origins:
         logger.warning(
-            "CORS configured with wildcard origin '*'. "
-            "This is acceptable for development but should be restricted in production. "
-            "Set CORS_ORIGINS environment variable to specific allowed origins.",
+            "CORS explicitly configured with wildcard origin '*'. "
+            "This is acceptable for development but should be restricted in production.",
             extra={"origins": origins},
         )
 
@@ -209,7 +231,13 @@ def create_app(
 # Note: This creates an app with no backends configured. For production,
 # use create_app() directly with proper backend configuration (projection_reader,
 # consul_handler). Tests should also use create_app() for controlled app creation.
-app: FastAPI = create_app()
+#
+# IMPORTANT: CORS_ORIGINS environment variable MUST be set for module-level app creation.
+# If CORS_ORIGINS is not set, the module can still be imported but `app` will be None.
+# Use create_app(cors_origins=["..."]) directly for programmatic usage.
+app: FastAPI | None = None
+if os.environ.get("CORS_ORIGINS") is not None:
+    app = create_app()
 
 
 __all__ = ["app", "create_app"]

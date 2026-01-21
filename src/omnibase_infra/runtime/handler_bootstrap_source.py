@@ -409,7 +409,12 @@ class HandlerBootstrapSource(
                     handler_def["handler_id"],
                 )
                 handler_type = handler_def["handler_id"].split(".")[-1]
-                contract_config = extract_handler_config(contract, handler_type)
+                # Bootstrap handlers get handler_class from _BOOTSTRAP_HANDLER_DEFINITIONS,
+                # not from the contract file. Rich contracts (like MCP) and basic contracts
+                # don't include handler_class since it would be redundant with the definition.
+                contract_config = extract_handler_config(
+                    contract, handler_type, require_basic_fields=False
+                )
                 logger.debug(
                     "Loaded contract config for bootstrap handler",
                     extra={
