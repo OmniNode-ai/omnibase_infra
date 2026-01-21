@@ -490,6 +490,31 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 operation="publish_batch",
                 target_name=self._topic,
             )
+
+            # Log full failure details for debugging before raising truncated error
+            # This ensures all tracked failures are visible in logs even though
+            # the exception message is truncated for propagation
+            logger.warning(
+                "Batch publish failures - full details",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "topic": self._topic,
+                    "total_notifications": len(notifications),
+                    "success_count": success_count,
+                    "failure_count": failure_count,
+                    "tracked_failures": len(failed_notifications),
+                    "max_tracked_failures": self._max_tracked_failures,
+                    "failures": [
+                        {
+                            "aggregate_type": record.aggregate_type,
+                            "aggregate_id": record.aggregate_id,
+                            "error_message": record.error_message,
+                        }
+                        for record in failed_notifications
+                    ],
+                },
+            )
+
             # Build detailed error message showing first 3 failures
             failure_details = "; ".join(
                 f"{record.aggregate_type}:{record.aggregate_id[:8]}... - "
