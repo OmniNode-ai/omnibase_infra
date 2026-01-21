@@ -176,6 +176,44 @@ class MixinProjectorNotificationPublishing:
             and self._notification_config.enabled
         )
 
+    def _get_notification_config_if_enabled(
+        self,
+    ) -> ModelProjectorNotificationConfig | None:
+        """Return notification config if notifications are enabled, None otherwise.
+
+        This helper combines the enabled check with config access, providing
+        proper type narrowing for mypy without redundant None guards.
+
+        Returns:
+            The notification config if enabled, None otherwise.
+        """
+        if (
+            self._notification_publisher is not None
+            and self._notification_config is not None
+            and self._notification_config.enabled
+        ):
+            return self._notification_config
+        return None
+
+    def _get_notification_publisher_if_enabled(
+        self,
+    ) -> ProtocolTransitionNotificationPublisher | None:
+        """Return notification publisher if notifications are enabled, None otherwise.
+
+        This helper combines the enabled check with publisher access, providing
+        proper type narrowing for mypy without redundant None guards.
+
+        Returns:
+            The notification publisher if enabled, None otherwise.
+        """
+        if (
+            self._notification_publisher is not None
+            and self._notification_config is not None
+            and self._notification_config.enabled
+        ):
+            return self._notification_publisher
+        return None
+
     async def _fetch_current_state_for_notification(
         self,
         aggregate_id: UUID,
@@ -197,11 +235,7 @@ class MixinProjectorNotificationPublishing:
             - No row exists for this aggregate (new entity)
             - State column value is NULL
         """
-        if not self._is_notification_enabled():
-            return None
-
-        config = self._notification_config
-        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        config = self._get_notification_config_if_enabled()
         if config is None:
             return None
 
@@ -265,11 +299,7 @@ class MixinProjectorNotificationPublishing:
         Returns:
             The state value as a string, or None if not found.
         """
-        if not self._is_notification_enabled():
-            return None
-
-        config = self._notification_config
-        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        config = self._get_notification_config_if_enabled()
         if config is None:
             return None
 
@@ -290,11 +320,7 @@ class MixinProjectorNotificationPublishing:
         Returns:
             The aggregate ID as a UUID, or None if not found or invalid.
         """
-        if not self._is_notification_enabled():
-            return None
-
-        config = self._notification_config
-        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        config = self._get_notification_config_if_enabled()
         if config is None:
             return None
 
@@ -333,11 +359,7 @@ class MixinProjectorNotificationPublishing:
             - No version column is configured
             - Version column value is missing or invalid
         """
-        if not self._is_notification_enabled():
-            return 0
-
-        config = self._notification_config
-        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        config = self._get_notification_config_if_enabled()
         if config is None:
             return 0
 
@@ -380,11 +402,7 @@ class MixinProjectorNotificationPublishing:
             aggregate_id: The aggregate instance ID.
             correlation_id: Correlation ID for distributed tracing.
         """
-        if not self._is_notification_enabled():
-            return
-
-        publisher = self._notification_publisher
-        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        publisher = self._get_notification_publisher_if_enabled()
         if publisher is None:
             return
 

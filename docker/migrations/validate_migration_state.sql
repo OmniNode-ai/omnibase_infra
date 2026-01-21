@@ -55,6 +55,30 @@ index_check AS (
         'idx_registration_protocols',
         'idx_registration_contract_type_state'
       )
+),
+outbox_table_check AS (
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'transition_notification_outbox'
+          AND table_schema = 'public'
+    ) AS table_exists
+),
+outbox_column_check AS (
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = 'transition_notification_outbox'
+      AND column_name IN ('id', 'notification_data', 'created_at', 'processed_at', 'retry_count', 'last_error', 'aggregate_type', 'aggregate_id')
+),
+outbox_index_check AS (
+    SELECT i.indexname, idx.indisvalid
+    FROM pg_indexes i
+    JOIN pg_class c ON c.relname = i.indexname
+    JOIN pg_index idx ON idx.indexrelid = c.oid
+    WHERE i.tablename = 'transition_notification_outbox'
+      AND i.indexname IN (
+        'idx_outbox_pending',
+        'idx_outbox_aggregate'
+      )
 )
 SELECT
     migration,
@@ -102,6 +126,18 @@ FROM (
             ELSE 'MISSING'
         END AS status,
         'capability GIN indexes (4 indexes)' AS description
+    UNION ALL
+    SELECT
+        '005' AS migration,
+        CASE
+            WHEN NOT (SELECT table_exists FROM outbox_table_check) THEN 'MISSING'
+            WHEN (SELECT COUNT(*) FROM outbox_column_check) < 8 THEN 'PARTIAL'
+            WHEN (SELECT COUNT(*) FROM outbox_index_check WHERE indisvalid = false) > 0 THEN 'INVALID_INDEXES'
+            WHEN (SELECT COUNT(*) FROM outbox_index_check WHERE indisvalid = true) = 2 THEN 'APPLIED'
+            WHEN (SELECT COUNT(*) FROM outbox_index_check) > 0 THEN 'PARTIAL'
+            ELSE 'PARTIAL'
+        END AS status,
+        'transition_notification_outbox table (8 columns, 2 indexes)' AS description
 ) results
 ORDER BY migration;
 
@@ -151,7 +187,53 @@ ORDER BY i.indexname;
 \echo ''
 
 -- =============================================================================
--- PART 4: Invalid Index Detection
+-- PART 4: Detailed Outbox Table Check (for 005 validation)
+-- =============================================================================
+\echo 'Migration 005 - Transition Notification Outbox Detail:'
+\echo '-------------------------------------------------------'
+
+SELECT
+    CASE WHEN EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'transition_notification_outbox'
+          AND table_schema = 'public'
+    ) THEN 'Table exists' ELSE 'TABLE MISSING' END AS table_status;
+
+\echo ''
+\echo 'Outbox Columns:'
+
+SELECT
+    column_name,
+    data_type,
+    CASE WHEN is_nullable = 'YES' THEN 'nullable' ELSE 'not null' END AS nullable
+FROM information_schema.columns
+WHERE table_name = 'transition_notification_outbox'
+  AND column_name IN ('id', 'notification_data', 'created_at', 'processed_at', 'retry_count', 'last_error', 'aggregate_type', 'aggregate_id')
+ORDER BY column_name;
+
+\echo ''
+\echo 'Outbox Indexes:'
+
+SELECT
+    i.indexname AS index_name,
+    CASE WHEN idx.indisvalid THEN 'valid' ELSE 'INVALID' END AS status,
+    pg_size_pretty(pg_relation_size(c.oid)) AS size,
+    am.amname AS index_type
+FROM pg_indexes i
+JOIN pg_class c ON c.relname = i.indexname
+JOIN pg_index idx ON idx.indexrelid = c.oid
+JOIN pg_am am ON c.relam = am.oid
+WHERE i.tablename = 'transition_notification_outbox'
+  AND i.indexname IN (
+    'idx_outbox_pending',
+    'idx_outbox_aggregate'
+  )
+ORDER BY i.indexname;
+
+\echo ''
+
+-- =============================================================================
+-- PART 5: Invalid Index Detection
 -- =============================================================================
 \echo 'Invalid Index Check:'
 \echo '--------------------'
@@ -161,7 +243,8 @@ SELECT
     'INVALID - needs recreation' AS status
 FROM pg_index
 WHERE NOT indisvalid
-  AND indrelid = 'registration_projections'::regclass;
+  AND (indrelid = 'registration_projections'::regclass
+       OR indrelid = 'transition_notification_outbox'::regclass);
 
 -- If no rows, show message
 DO $$
@@ -169,7 +252,9 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_index
         WHERE NOT indisvalid
-          AND indrelid = 'registration_projections'::regclass
+          AND (indrelid = 'registration_projections'::regclass
+               OR (EXISTS (SELECT 1 FROM pg_class WHERE relname = 'transition_notification_outbox')
+                   AND indrelid = 'transition_notification_outbox'::regclass))
     ) THEN
         RAISE NOTICE 'No invalid indexes found (good!)';
     END IF;
@@ -178,7 +263,7 @@ END$$;
 \echo ''
 
 -- =============================================================================
--- PART 5: 003a vs 004 Disambiguation
+-- PART 6: 003a vs 004 Disambiguation
 -- =============================================================================
 \echo '003a/004 Disambiguation (for legacy deployments):'
 \echo '--------------------------------------------------'
