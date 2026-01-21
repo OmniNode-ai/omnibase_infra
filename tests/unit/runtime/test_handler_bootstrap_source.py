@@ -1047,10 +1047,10 @@ class TestHandlerBootstrapSourcePerformance:
 
     @pytest.mark.asyncio
     async def test_discovery_is_fast(self) -> None:
-        """discover_handlers() should complete quickly (no I/O).
+        """discover_handlers() should complete quickly.
 
-        The bootstrap source should be very fast since it uses
-        hardcoded definitions with no filesystem or network I/O.
+        The bootstrap source should be fast. Since OMN-1282, contract
+        YAML files are loaded during discovery, adding minimal file I/O.
         """
         import time
 
@@ -1068,7 +1068,12 @@ class TestHandlerBootstrapSourcePerformance:
 
     @pytest.mark.asyncio
     async def test_multiple_rapid_calls_are_fast(self) -> None:
-        """Multiple rapid calls should all be fast."""
+        """Multiple rapid calls should all be fast.
+
+        Note: Since OMN-1282, bootstrap handlers load contract YAML files
+        during discovery, adding file I/O. The threshold is set to 20ms
+        to account for contract loading and CI environment variance.
+        """
         import time
 
         source = HandlerBootstrapSource()
@@ -1081,9 +1086,10 @@ class TestHandlerBootstrapSourcePerformance:
 
         avg_duration = total_duration / call_count
 
-        # Average should be under 10ms per call
-        assert avg_duration < 0.01, (
-            f"Average call took {avg_duration * 1000:.2f}ms, expected < 10ms"
+        # Average should be under 20ms per call (includes contract YAML loading)
+        # CI environments may have variable I/O performance
+        assert avg_duration < 0.02, (
+            f"Average call took {avg_duration * 1000:.2f}ms, expected < 20ms"
         )
 
 
