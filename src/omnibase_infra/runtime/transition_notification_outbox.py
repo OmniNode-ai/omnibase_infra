@@ -454,14 +454,29 @@ class TransitionNotificationOutbox:
                         self._notifications_failed += 1
                         error_message = sanitize_error_string(str(e))
 
-                        await conn.execute(
-                            update_failure_query,
-                            row_id,
-                            error_message[
-                                : self.MAX_ERROR_MESSAGE_LENGTH
-                            ],  # Truncate for DB column
-                            timeout=self._query_timeout,
-                        )
+                        try:
+                            await conn.execute(
+                                update_failure_query,
+                                row_id,
+                                error_message[
+                                    : self.MAX_ERROR_MESSAGE_LENGTH
+                                ],  # Truncate for DB column
+                                timeout=self._query_timeout,
+                            )
+                        except (asyncpg.PostgresError, TimeoutError) as update_err:
+                            # Log but continue - the outbox row will be retried on next poll
+                            logger.warning(
+                                "Failed to record outbox failure, row will be retried",
+                                extra={
+                                    "outbox_id": row_id,
+                                    "original_error": error_message,
+                                    "update_error": sanitize_error_string(
+                                        str(update_err)
+                                    ),
+                                    "update_error_type": type(update_err).__name__,
+                                    "correlation_id": str(correlation_id),
+                                },
+                            )
 
                         logger.warning(
                             "Failed to publish notification from outbox",

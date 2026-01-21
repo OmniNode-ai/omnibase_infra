@@ -58,6 +58,13 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         consecutive_failures: Number of consecutive publish failures
         started_at: Timestamp when the publisher started
 
+    Note:
+        Notification Count Relationships:
+        - ``notifications_published`` counts ALL successful publishes (individual + batch)
+        - ``batch_notifications_total`` is a SUBSET of ``notifications_published``,
+          counting only those published via ``publish_batch()``
+        - Individual publishes = ``notifications_published - batch_notifications_total``
+
     Example:
         >>> from datetime import datetime, UTC
         >>> metrics = ModelTransitionNotificationPublisherMetrics(
@@ -111,7 +118,7 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
     batch_notifications_total: int = Field(
         default=0,
         ge=0,
-        description="Total number of notifications published via batch operations",
+        description="Notifications published via batch operations (subset of notifications_published)",
     )
 
     # Timing metrics (milliseconds)

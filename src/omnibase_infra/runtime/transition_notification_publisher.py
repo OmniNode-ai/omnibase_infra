@@ -411,20 +411,33 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             self._batch_operations += 1
             self._batch_notifications_total += success_count
 
+        failure_count = len(notifications) - success_count
+
         logger.info(
             "Batch publish completed",
             extra={
                 "total": len(notifications),
                 "success": success_count,
-                "failed": len(notifications) - success_count,
+                "failed": failure_count,
                 "duration_ms": duration_ms,
                 "correlation_id": str(correlation_id),
             },
         )
 
-        # Raise last error if any failures occurred
+        # Raise with count information if any failures occurred
         if last_error is not None:
-            raise last_error
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="publish_batch",
+                target_name=self._topic,
+            )
+            raise InfraConnectionError(
+                f"Batch publish partially failed: {failure_count}/{len(notifications)} "
+                f"notifications failed ({success_count} succeeded). "
+                f"Last error: {last_error}",
+                context=ctx,
+            ) from last_error
 
     async def _handle_failure(
         self,
@@ -464,10 +477,12 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         failures_value = cb_state.get("failures", 0)
         consecutive_failures = failures_value if isinstance(failures_value, int) else 0
 
-        # Calculate average duration
-        total_ops = self._notifications_published + self._notifications_failed
+        # Calculate average duration (only from successful publishes since
+        # _total_publish_duration_ms is only updated on success)
         average_duration = (
-            self._total_publish_duration_ms / total_ops if total_ops > 0 else 0.0
+            self._total_publish_duration_ms / self._notifications_published
+            if self._notifications_published > 0
+            else 0.0
         )
 
         return ModelTransitionNotificationPublisherMetrics(
