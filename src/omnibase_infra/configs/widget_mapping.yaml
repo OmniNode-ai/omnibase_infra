@@ -1,0 +1,176 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# Widget Mapping Configuration for ONEX Registry Dashboard
+#
+# This file defines the mapping from node capabilities and semantic roles
+# to dashboard widget types. Used by the Registry API to inform dashboards
+# which widget to render for each node.
+#
+# Related Tickets:
+#   - OMN-1278: Contract-Driven Dashboard - Registry Discovery
+#
+# Widget Types:
+#   - status_indicator: Shows health/state with colored indicator
+#   - event_feed: Scrolling list of recent events
+#   - metric_card: Single metric with value and optional trend
+#   - info_card: General information display
+#   - status_grid: Grid of status indicators
+#   - timeline: Time-based visualization
+#   - gauge: Circular progress/threshold indicator
+#   - table: Tabular data display
+#
+# Configuration Sections:
+#   - version: Schema version for compatibility checking
+#   - capability_mappings: Maps capability tags to widget configs
+#   - semantic_mappings: Maps semantic roles to widget configs
+#   - fallback: Default config when no mapping matches
+version: "1.0.0"
+# Capability Mappings
+# Map specific capability tags to widget configurations.
+# These take precedence over semantic mappings.
+capability_mappings:
+  # Health and monitoring capabilities
+  health.check:
+    widget_type: status_indicator
+    defaults:
+      show_timestamp: true
+      refresh_interval_seconds: 10
+  health.heartbeat:
+    widget_type: status_indicator
+    defaults:
+      show_timestamp: true
+      show_last_seen: true
+  # Event-related capabilities
+  event.emit:
+    widget_type: event_feed
+    defaults:
+      max_items: 50
+      show_timestamp: true
+      auto_scroll: true
+  event.consume:
+    widget_type: event_feed
+    defaults:
+      max_items: 50
+      show_source: true
+  event.transform:
+    widget_type: timeline
+    defaults:
+      show_duration: true
+  # Kafka/messaging capabilities
+  kafka.consumer:
+    widget_type: metric_card
+    defaults:
+      refresh_interval_seconds: 5
+      show_lag: true
+  kafka.producer:
+    widget_type: metric_card
+    defaults:
+      refresh_interval_seconds: 5
+      show_throughput: true
+  kafka.stream:
+    widget_type: timeline
+    defaults:
+      show_offset: true
+  # Database capabilities
+  postgres.storage:
+    widget_type: metric_card
+    defaults:
+      show_connection_count: true
+      refresh_interval_seconds: 10
+  postgres.query:
+    widget_type: table
+    defaults:
+      show_query_time: true
+  # Service discovery
+  consul.register:
+    widget_type: status_indicator
+    defaults:
+      show_service_id: true
+  consul.discover:
+    widget_type: status_grid
+    defaults:
+      show_health: true
+      group_by: service_name
+  # Workflow capabilities
+  workflow.orchestrate:
+    widget_type: timeline
+    defaults:
+      show_steps: true
+      show_duration: true
+  workflow.reduce:
+    widget_type: gauge
+    defaults:
+      show_progress: true
+  # Compute capabilities
+  compute.transform:
+    widget_type: metric_card
+    defaults:
+      show_throughput: true
+      show_latency: true
+  compute.validate:
+    widget_type: status_indicator
+    defaults:
+      show_pass_rate: true
+  # Effect capabilities
+  effect.http:
+    widget_type: metric_card
+    defaults:
+      show_latency: true
+      show_error_rate: true
+  effect.grpc:
+    widget_type: metric_card
+    defaults:
+      show_latency: true
+      show_error_rate: true
+# Semantic Mappings
+# Map semantic roles/contexts to widget configurations.
+# Used when capability_mappings don't match.
+semantic_mappings:
+  # Node overview in dashboard
+  node_overview:
+    widget_type: info_card
+    defaults:
+      show_version: true
+      show_capabilities: true
+      show_state: true
+  # Instance health grid
+  instance_health:
+    widget_type: status_grid
+    defaults:
+      group_by: service_name
+      show_address: true
+      show_port: true
+  # Registration timeline
+  registration_timeline:
+    widget_type: timeline
+    defaults:
+      show_state_transitions: true
+      show_timestamps: true
+  # Capability matrix
+  capability_matrix:
+    widget_type: table
+    defaults:
+      group_by: node_type
+      show_capability_tags: true
+  # Summary statistics
+  summary_stats:
+    widget_type: metric_card
+    defaults:
+      show_trend: true
+      compare_to_previous: true
+  # Error monitoring
+  error_monitoring:
+    widget_type: event_feed
+    defaults:
+      filter_level: error
+      max_items: 100
+      highlight_critical: true
+# Fallback Configuration
+# Used when no capability or semantic mapping matches.
+fallback:
+  widget_type: info_card
+  defaults:
+    show_name: true
+    show_state: true
+    show_type: true

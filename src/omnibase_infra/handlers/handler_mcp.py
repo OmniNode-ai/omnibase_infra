@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 import uvicorn
@@ -73,6 +73,56 @@ logger = logging.getLogger(__name__)
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_MCP: str = "mcp-handler"
+
+
+def _require_config_value(
+    config: dict[str, object],
+    key: str,
+    expected_type: type,
+    correlation_id: UUID,
+) -> object:
+    """Extract required config value or raise ProtocolConfigurationError.
+
+    Per CLAUDE.md configuration rules, the `.env` file is the SINGLE SOURCE OF TRUTH.
+    There should be ZERO hardcoded fallbacks - all configuration must be explicitly
+    provided. If missing, this function raises an error rather than using defaults.
+
+    Args:
+        config: Configuration dictionary to extract value from.
+        key: Configuration key to look up.
+        expected_type: Expected Python type for the value.
+        correlation_id: Correlation ID for error context.
+
+    Returns:
+        The validated configuration value.
+
+    Raises:
+        ProtocolConfigurationError: If value is missing or has wrong type.
+    """
+    value = config.get(key)
+    if value is None:
+        raise ProtocolConfigurationError(
+            f"Missing required config: '{key}'. Must be set in .env or runtime config.",
+            context=ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.MCP,
+                operation="initialize",
+                target_name="handler_mcp",
+            ),
+        )
+    if not isinstance(value, expected_type):
+        raise ProtocolConfigurationError(
+            f"Invalid config type for '{key}': expected {expected_type.__name__}, "
+            f"got {type(value).__name__}",
+            context=ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.MCP,
+                operation="initialize",
+                target_name="handler_mcp",
+            ),
+        )
+    return value
+
 
 # Supported operations
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
@@ -252,7 +302,13 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(poll_interval)
-                # When server binds to 0.0.0.0, connect to localhost for readiness check
+                # TCP PROTOCOL REQUIREMENT (NOT a config fallback):
+                # When a server binds to 0.0.0.0 (INADDR_ANY), it listens on all
+                # interfaces but you cannot connect() to 0.0.0.0 - it's not a
+                # routable address. TCP requires connecting to a specific interface.
+                # Using 127.0.0.1 (loopback) is the correct way to reach a local
+                # server that bound to 0.0.0.0. This is standard TCP/IP behavior,
+                # not an environment configuration fallback.
                 effective_host = "127.0.0.1" if host == "0.0.0.0" else host  # noqa: S104
                 result = sock.connect_ex((effective_host, port))
                 sock.close()
@@ -292,16 +348,19 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 - json_response: Return JSON responses (default: True)
                 - timeout_seconds: Tool execution timeout (default: 30.0)
                 - max_tools: Maximum tools to expose (default: 100)
-                - consul_host: Consul server hostname (default: localhost)
-                - consul_port: Consul server port (default: 8500)
-                - kafka_enabled: Whether to enable Kafka hot reload (default: True)
-                - dev_mode: Whether to run in development mode (default: False)
-                - contracts_dir: Directory for contract scanning in dev mode
+                - consul_host: Consul server hostname (REQUIRED - no default)
+                - consul_port: Consul server port (REQUIRED - no default)
+                - kafka_enabled: Whether to enable Kafka hot reload (REQUIRED - no default)
+                - dev_mode: Whether to run in development mode (REQUIRED - no default)
+                - contracts_dir: Directory for contract scanning in dev mode (optional)
                 - skip_server: Skip starting uvicorn server (default: False).
                     Use for unit testing to avoid port binding.
 
         Raises:
-            ProtocolConfigurationError: If configuration is invalid.
+            ProtocolConfigurationError: If configuration is invalid or required
+                config values (consul_host, consul_port, kafka_enabled, dev_mode)
+                are missing. Per CLAUDE.md, .env is the single source of truth -
+                no hardcoded fallbacks are used.
         """
         init_correlation_id = uuid4()
 
@@ -342,22 +401,35 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             if not skip_server:
                 # Build MCPServerConfig from handler config (OMN-1282)
                 # Map handler config fields to lifecycle config fields
-                consul_host_val = config.get("consul_host")
-                consul_host: str = (
-                    consul_host_val if isinstance(consul_host_val, str) else "localhost"
+                #
+                # Per CLAUDE.md: .env is the SINGLE SOURCE OF TRUTH.
+                # No hardcoded fallbacks - all required config must be explicit.
+                # The _require_config_value helper validates type, cast() is for mypy.
+                consul_host = cast(
+                    "str",
+                    _require_config_value(
+                        config, "consul_host", str, init_correlation_id
+                    ),
                 )
-                consul_port_val = config.get("consul_port")
-                consul_port: int = (
-                    consul_port_val if isinstance(consul_port_val, int) else 8500
+                consul_port = cast(
+                    "int",
+                    _require_config_value(
+                        config, "consul_port", int, init_correlation_id
+                    ),
                 )
-                kafka_enabled_val = config.get("kafka_enabled")
-                kafka_enabled: bool = (
-                    kafka_enabled_val if isinstance(kafka_enabled_val, bool) else False
+                kafka_enabled = cast(
+                    "bool",
+                    _require_config_value(
+                        config, "kafka_enabled", bool, init_correlation_id
+                    ),
                 )
-                dev_mode_val = config.get("dev_mode")
-                dev_mode: bool = (
-                    dev_mode_val if isinstance(dev_mode_val, bool) else True
+                dev_mode = cast(
+                    "bool",
+                    _require_config_value(
+                        config, "dev_mode", bool, init_correlation_id
+                    ),
                 )
+                # contracts_dir is optional - only used when dev_mode=True
                 contracts_dir_val = config.get("contracts_dir")
                 contracts_dir: str | None = (
                     contracts_dir_val if isinstance(contracts_dir_val, str) else None

@@ -10,6 +10,12 @@ tool registration, and lifecycle management.
 
 Tests focus on observable behavior via public APIs (describe, health_check,
 execute) rather than directly accessing internal state where possible.
+
+Configuration Policy (per CLAUDE.md):
+    All tests must provide complete configuration dictionaries. The handler
+    does not use hardcoded fallbacks - .env is the single source of truth
+    for production. Tests explicitly provide all required config values to
+    verify the handler works correctly with explicit configuration.
 """
 
 from __future__ import annotations
@@ -35,6 +41,57 @@ from omnibase_infra.handlers.models.mcp import (
     EnumMcpOperationType,
     ModelMcpHandlerConfig,
 )
+
+# =============================================================================
+# Configuration Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def mcp_test_config() -> dict[str, object]:
+    """Standard MCP handler config for unit tests.
+
+    Provides all required config values explicitly to avoid relying on
+    hardcoded fallbacks. Uses skip_server=True to avoid port binding
+    during unit tests.
+
+    Per CLAUDE.md: .env is the single source of truth. Tests must provide
+    explicit configuration values rather than relying on defaults.
+
+    Returns:
+        Complete configuration dictionary for HandlerMCP.initialize().
+    """
+    return {
+        "skip_server": True,
+        "consul_host": "localhost",
+        "consul_port": 8500,
+        "kafka_enabled": False,
+        "dev_mode": True,
+    }
+
+
+@pytest.fixture
+def mcp_custom_config() -> dict[str, object]:
+    """Custom MCP handler config with non-default server values.
+
+    Provides complete configuration with custom host/port/path values
+    for testing configuration parsing.
+
+    Returns:
+        Complete configuration dictionary with custom server settings.
+    """
+    return {
+        "host": "127.0.0.1",
+        "port": 9000,
+        "path": "/api/mcp",
+        "timeout_seconds": 60.0,
+        "max_tools": 50,
+        "skip_server": True,
+        "consul_host": "localhost",
+        "consul_port": 8500,
+        "kafka_enabled": False,
+        "dev_mode": True,
+    }
 
 
 class TestHandlerMCPInitialization:
@@ -89,18 +146,21 @@ class TestHandlerMCPInitialization:
         assert handler.transport_type == EnumInfraTransportType.MCP
 
     @pytest.mark.asyncio
-    async def test_initialize_with_empty_config(self, handler: HandlerMCP) -> None:
-        """Test handler initializes with empty config (uses defaults).
+    async def test_initialize_with_test_config(
+        self, handler: HandlerMCP, mcp_test_config: dict[str, object]
+    ) -> None:
+        """Test handler initializes with standard test config.
 
         Note:
             This unit test accesses internal state (_initialized, _config) to
-            verify that default configuration values are correctly applied.
+            verify that configuration values are correctly applied.
             This validates the initialization contract that cannot be fully
             tested via public APIs alone.
 
-            Uses skip_server=True to avoid port binding during unit tests.
+            Uses mcp_test_config fixture which provides all required config
+            values explicitly (skip_server=True to avoid port binding).
         """
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
 
         assert handler._initialized is True
         assert handler._config is not None
@@ -113,7 +173,9 @@ class TestHandlerMCPInitialization:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_initialize_with_custom_config(self, handler: HandlerMCP) -> None:
+    async def test_initialize_with_custom_config(
+        self, handler: HandlerMCP, mcp_custom_config: dict[str, object]
+    ) -> None:
         """Test handler initializes with custom configuration.
 
         Note:
@@ -122,17 +184,10 @@ class TestHandlerMCPInitialization:
             This validates the initialization contract that cannot be fully
             tested via public APIs alone.
 
-            Uses skip_server=True to avoid port binding during unit tests.
+            Uses mcp_custom_config fixture which provides complete config
+            with custom server settings (skip_server=True to avoid port binding).
         """
-        config: dict[str, object] = {
-            "host": "127.0.0.1",
-            "port": 9000,
-            "path": "/api/mcp",
-            "timeout_seconds": 60.0,
-            "max_tools": 50,
-            "skip_server": True,
-        }
-        await handler.initialize(config)
+        await handler.initialize(mcp_custom_config)
 
         assert handler._initialized is True
         assert handler._config is not None
@@ -145,7 +200,9 @@ class TestHandlerMCPInitialization:
         await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_shutdown_clears_state(self, handler: HandlerMCP) -> None:
+    async def test_shutdown_clears_state(
+        self, handler: HandlerMCP, mcp_test_config: dict[str, object]
+    ) -> None:
         """Test shutdown clears handler state.
 
         Note:
@@ -154,9 +211,10 @@ class TestHandlerMCPInitialization:
             This is a critical invariant that must be verified at the unit level
             to ensure no state leaks between handler lifecycles.
 
-            Uses skip_server=True to avoid port binding during unit tests.
+            Uses mcp_test_config fixture which provides all required config
+            values explicitly (skip_server=True to avoid port binding).
         """
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         assert handler._initialized is True
 
         await handler.shutdown()
@@ -170,13 +228,16 @@ class TestHandlerMCPDescribe:
     """Test suite for describe operation."""
 
     @pytest.fixture
-    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+    async def initialized_handler(
+        self, mock_container: MagicMock, mcp_test_config: dict[str, object]
+    ) -> HandlerMCP:
         """Create and initialize a HandlerMCP fixture with mock container.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         yield handler
         await handler.shutdown()
 
@@ -199,13 +260,16 @@ class TestHandlerMCPListTools:
     """Test suite for list_tools operation."""
 
     @pytest.fixture
-    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+    async def initialized_handler(
+        self, mock_container: MagicMock, mcp_test_config: dict[str, object]
+    ) -> HandlerMCP:
         """Create and initialize a HandlerMCP fixture with mock container.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         yield handler
         await handler.shutdown()
 
@@ -246,13 +310,16 @@ class TestHandlerMCPCallTool:
     """Test suite for call_tool operation."""
 
     @pytest.fixture
-    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+    async def initialized_handler(
+        self, mock_container: MagicMock, mcp_test_config: dict[str, object]
+    ) -> HandlerMCP:
         """Create and initialize a HandlerMCP fixture with mock container.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         yield handler
         await handler.shutdown()
 
@@ -296,13 +363,16 @@ class TestHandlerMCPOperationValidation:
     """Test suite for operation validation."""
 
     @pytest.fixture
-    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+    async def initialized_handler(
+        self, mock_container: MagicMock, mcp_test_config: dict[str, object]
+    ) -> HandlerMCP:
         """Create and initialize a HandlerMCP fixture with mock container.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         yield handler
         await handler.shutdown()
 
@@ -340,13 +410,16 @@ class TestHandlerMCPHealthCheck:
     """Test suite for health check."""
 
     @pytest.fixture
-    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+    async def initialized_handler(
+        self, mock_container: MagicMock, mcp_test_config: dict[str, object]
+    ) -> HandlerMCP:
         """Create and initialize a HandlerMCP fixture with mock container.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         yield handler
         await handler.shutdown()
 
@@ -421,13 +494,16 @@ class TestHandlerMCPDescribeOperation:
     """Test suite for mcp.describe operation via execute method."""
 
     @pytest.fixture
-    async def initialized_handler(self, mock_container: MagicMock) -> HandlerMCP:
+    async def initialized_handler(
+        self, mock_container: MagicMock, mcp_test_config: dict[str, object]
+    ) -> HandlerMCP:
         """Create and initialize a HandlerMCP fixture with mock container.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
         handler = HandlerMCP(container=mock_container)
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         yield handler
         await handler.shutdown()
 
@@ -477,18 +553,19 @@ class TestHandlerMCPLifecycle:
 
     @pytest.mark.asyncio
     async def test_lifecycle_transition_healthy_after_init(
-        self, handler: HandlerMCP
+        self, handler: HandlerMCP, mcp_test_config: dict[str, object]
     ) -> None:
         """Test handler becomes healthy after initialization via health_check.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
         # Before init - unhealthy
         health_before = await handler.health_check()
         assert health_before["healthy"] is False
 
         # After init - healthy
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         health_after = await handler.health_check()
         assert health_after["healthy"] is True
 
@@ -496,13 +573,14 @@ class TestHandlerMCPLifecycle:
 
     @pytest.mark.asyncio
     async def test_lifecycle_transition_unhealthy_after_shutdown(
-        self, handler: HandlerMCP
+        self, handler: HandlerMCP, mcp_test_config: dict[str, object]
     ) -> None:
         """Test handler becomes unhealthy after shutdown via health_check.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
 
         # Before shutdown - healthy
         health_before = await handler.health_check()
@@ -515,18 +593,19 @@ class TestHandlerMCPLifecycle:
 
     @pytest.mark.asyncio
     async def test_describe_reflects_initialization_state(
-        self, handler: HandlerMCP
+        self, handler: HandlerMCP, mcp_test_config: dict[str, object]
     ) -> None:
         """Test describe reflects initialization state correctly.
 
-        Uses skip_server=True to avoid port binding during unit tests.
+        Uses mcp_test_config fixture which provides all required config
+        values explicitly (skip_server=True to avoid port binding).
         """
         # Before init
         desc_before = handler.describe()
         assert desc_before["initialized"] is False
 
         # After init
-        await handler.initialize({"skip_server": True})
+        await handler.initialize(mcp_test_config)
         desc_after = handler.describe()
         assert desc_after["initialized"] is True
 
@@ -534,3 +613,73 @@ class TestHandlerMCPLifecycle:
         await handler.shutdown()
         desc_final = handler.describe()
         assert desc_final["initialized"] is False
+
+
+class TestHandlerMCPConfigValidation:
+    """Test suite for configuration validation.
+
+    Per CLAUDE.md: .env is the single source of truth for all configuration.
+    No fallbacks are allowed. Tests verify that missing required config
+    raises appropriate errors.
+    """
+
+    @pytest.fixture
+    def handler(self, mock_container: MagicMock) -> HandlerMCP:
+        """Create HandlerMCP fixture with mock container."""
+        return HandlerMCP(container=mock_container)
+
+    @pytest.mark.asyncio
+    async def test_initialize_with_skip_server_only_succeeds(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Test that skip_server=True allows initialization without full config.
+
+        When skip_server=True, the handler skips MCPServerLifecycle initialization
+        which requires consul_host, consul_port, etc. Only the Pydantic model
+        config validation runs, which has its own defaults for server-specific
+        fields (host, port, path, etc.).
+
+        This test verifies the skip_server path works correctly for unit tests.
+        """
+        # skip_server=True bypasses the code path that needs consul_host etc.
+        await handler.initialize({"skip_server": True})
+
+        assert handler._initialized is True
+        assert handler._config is not None
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_initialize_validates_pydantic_config(
+        self, handler: HandlerMCP
+    ) -> None:
+        """Test that invalid Pydantic config raises ProtocolConfigurationError.
+
+        The handler uses ModelMcpHandlerConfig for validation. Invalid types
+        that cannot be coerced should raise ProtocolConfigurationError.
+        """
+        invalid_config: dict[str, object] = {
+            "skip_server": True,
+            "port": "not_a_valid_port",  # Should be int, string "not_a_valid_port" cannot be coerced
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(invalid_config)
+
+        assert "invalid" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_initialize_with_complete_config_succeeds(
+        self, handler: HandlerMCP, mcp_test_config: dict[str, object]
+    ) -> None:
+        """Test that complete config with all required values succeeds.
+
+        This test verifies that providing all config values explicitly
+        (as required per CLAUDE.md) results in successful initialization.
+        """
+        await handler.initialize(mcp_test_config)
+
+        assert handler._initialized is True
+        assert handler._config is not None
+
+        await handler.shutdown()

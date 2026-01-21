@@ -83,8 +83,14 @@ def load_handler_contract_config(
         Dict containing the parsed contract YAML content.
 
     Raises:
-        ProtocolConfigurationError: If contract_path is None, file not found,
-            file too large, YAML syntax error, or contract is not a dict.
+        ProtocolConfigurationError: If any of the following conditions occur:
+            - contract_path is None
+            - File not found
+            - Permission denied (accessing, reading metadata, or reading content)
+            - OS error (path too long, invalid characters, etc.)
+            - File too large (exceeds MAX_CONTRACT_SIZE_BYTES)
+            - YAML syntax error
+            - Contract is not a dict
 
     Example:
         >>> contract = load_handler_contract_config(
@@ -118,7 +124,27 @@ def load_handler_contract_config(
             )
         path = resolved_path
 
-    if not path.exists():
+    # Check file existence with permission error handling
+    try:
+        file_exists = path.exists()
+    except PermissionError:
+        raise ProtocolConfigurationError(
+            f"Permission denied accessing contract file: {contract_path}",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="load_handler_contract",
+                target_name=handler_id,
+            ),
+        ) from None
+    except OSError as e:
+        raise ProtocolConfigurationError(
+            f"OS error accessing contract file: {contract_path} ({e})",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="load_handler_contract",
+                target_name=handler_id,
+            ),
+        ) from e
+
+    if not file_exists:
         raise ProtocolConfigurationError(
             f"Contract file not found: {contract_path}",
             context=ModelInfraErrorContext.with_correlation(
@@ -128,7 +154,25 @@ def load_handler_contract_config(
         )
 
     # Check file size before reading (security: prevent memory exhaustion)
-    file_size = path.stat().st_size
+    try:
+        file_size = path.stat().st_size
+    except PermissionError:
+        raise ProtocolConfigurationError(
+            f"Permission denied reading contract file metadata: {contract_path}",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="load_handler_contract",
+                target_name=handler_id,
+            ),
+        ) from None
+    except OSError as e:
+        raise ProtocolConfigurationError(
+            f"OS error reading contract file metadata: {contract_path} ({e})",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="load_handler_contract",
+                target_name=handler_id,
+            ),
+        ) from e
+
     if file_size > MAX_CONTRACT_SIZE_BYTES:
         raise ProtocolConfigurationError(
             f"Contract file too large: {file_size} bytes (max {MAX_CONTRACT_SIZE_BYTES})",
@@ -141,6 +185,14 @@ def load_handler_contract_config(
     try:
         with path.open() as f:
             contract = yaml.safe_load(f)
+    except PermissionError:
+        raise ProtocolConfigurationError(
+            f"Permission denied reading contract file: {contract_path}",
+            context=ModelInfraErrorContext.with_correlation(
+                operation="load_handler_contract",
+                target_name=handler_id,
+            ),
+        ) from None
     except yaml.YAMLError as e:
         raise ProtocolConfigurationError(
             f"Invalid YAML in contract: {e}",
@@ -176,28 +228,72 @@ def _resolve_contract_path(relative_path: Path) -> Path | None:
 
     Tries multiple base directories to find the contract file:
     1. Current working directory
-    2. Package root (omnibase_infra source root)
-    3. Repository root (three levels up from this file)
+    2. Repository root (for contracts/handlers/*/handler_contract.yaml)
+    3. Source directory (for src/omnibase_infra/contracts/handlers/*)
+
+    Path Resolution Reference:
+        This file: src/omnibase_infra/runtime/handler_contract_config_loader.py
+        - .parent = runtime/
+        - .parent.parent = omnibase_infra/
+        - .parent.parent.parent = src/
+        - .parent.parent.parent.parent = repo root (contains contracts/)
 
     Args:
         relative_path: Relative path to the contract file.
 
     Returns:
         Resolved absolute path if found, None otherwise.
+
+    Note:
+        Permission errors and symlink resolution issues are logged but do not
+        cause failures - the function continues to the next base path.
     """
-    # Base directories to try
+    # Calculate paths with clear semantics based on this file's location:
+    # This file: src/omnibase_infra/runtime/handler_contract_config_loader.py
+    this_file = Path(__file__)
+    runtime_dir = this_file.parent  # src/omnibase_infra/runtime/
+    infra_pkg_dir = runtime_dir.parent  # src/omnibase_infra/
+    src_dir = infra_pkg_dir.parent  # src/
+    repo_root = src_dir.parent  # repository root (contains contracts/)
+
+    # Base directories to try, in order of preference
     base_paths = [
-        Path.cwd(),
-        # Package source root (src/omnibase_infra -> go up to repo root)
-        Path(__file__).parent.parent.parent.parent,
-        # Alternative: direct parent chain
-        Path(__file__).parent.parent.parent.parent.parent,
+        Path.cwd(),  # Current working directory (most specific)
+        repo_root,  # For contracts/handlers/*/handler_contract.yaml
+        src_dir,  # For src/omnibase_infra/contracts/handlers/*/handler_contract.yaml
     ]
 
     for base in base_paths:
         full_path = base / relative_path
-        if full_path.exists():
-            return full_path.resolve()
+        try:
+            if full_path.exists():
+                # Resolve symlinks and normalize the path
+                try:
+                    return full_path.resolve(strict=True)
+                except OSError as resolve_error:
+                    # Symlink resolution failed (broken symlink, etc.)
+                    # Fall back to non-strict resolution
+                    logger.debug(
+                        "Symlink resolution failed, using non-strict resolution",
+                        extra={
+                            "path": str(full_path),
+                            "error": str(resolve_error),
+                        },
+                    )
+                    return full_path.resolve(strict=False)
+        except PermissionError:
+            logger.warning(
+                "Permission denied checking contract path",
+                extra={"path": str(full_path), "base": str(base)},
+            )
+            continue
+        except OSError as e:
+            # Handle other OS-level errors (e.g., path too long, invalid characters)
+            logger.warning(
+                "OS error checking contract path",
+                extra={"path": str(full_path), "error": str(e)},
+            )
+            continue
 
     return None
 
