@@ -48,7 +48,7 @@ Exports:
     ModelSecretSourceInfo: Non-sensitive source information for introspection
     ModelRetryPolicy: Retry policy configuration for handler operations
     ModelTransitionNotificationPublisherMetrics: Metrics for transition notification publisher
-    ModelStateTransitionNotification: State transition notification for outbox delivery
+    ModelStateTransitionNotification: State transition notification (re-export from omnibase_core)
     ModelProjectorNotificationConfig: Configuration for projector notification publishing
     ModelBindingConfig: Configuration for binding a handler to the runtime
     ModelBindingConfigCacheStats: Cache statistics for BindingConfigResolver
@@ -56,6 +56,8 @@ Exports:
     ModelConfigCacheEntry: Internal cache entry for BindingConfigResolver
 """
 
+# Re-export from omnibase_core for convenience
+from omnibase_core.models.notifications import ModelStateTransitionNotification
 from omnibase_infra.runtime.enums.enum_config_ref_scheme import EnumConfigRefScheme
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
     ModelBatchLifecycleResult,
@@ -148,9 +150,6 @@ from omnibase_infra.runtime.models.model_shutdown_batch_result import (
     ModelShutdownBatchResult,
 )
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
-from omnibase_infra.runtime.models.model_state_transition_notification import (
-    ModelStateTransitionNotification,
-)
 from omnibase_infra.runtime.models.model_transition_notification_publisher_metrics import (
     ModelTransitionNotificationPublisherMetrics,
 )

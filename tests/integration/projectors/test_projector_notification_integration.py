@@ -336,7 +336,8 @@ class TestProjectorNotificationIntegration:
         # The envelope payload contains the notification data
         payload = published_envelope.payload
         assert payload["aggregate_type"] == "registration"
-        assert payload["aggregate_id"] == str(entity_id)
+        # UUID fields may be UUID objects or strings depending on serialization
+        assert str(payload["aggregate_id"]) == str(entity_id)
 
     async def test_notification_tracks_state_transition(
         self,
@@ -417,9 +418,10 @@ class TestProjectorNotificationIntegration:
         # Verify IDs
         assert len(mock_event_bus.published_envelopes) == 1
         payload = mock_event_bus.published_envelopes[0][0].payload
-        assert payload["correlation_id"] == str(correlation_id)
+        # UUID fields may be UUID objects or strings depending on serialization
+        assert str(payload["correlation_id"]) == str(correlation_id)
         # causation_id should be the envelope_id of the triggering event
-        assert payload["causation_id"] == str(envelope.envelope_id)
+        assert str(payload["causation_id"]) == str(envelope.envelope_id)
 
     async def test_no_notification_on_zero_rows_affected(
         self,
@@ -544,8 +546,9 @@ class TestProjectorNotificationIntegration:
         assert len(mock_event_bus.published_envelopes) == 3
 
         # Verify each notification corresponds to correct entity
+        # UUID fields may be UUID objects or strings depending on serialization
         published_aggregate_ids = [
-            envelope.payload["aggregate_id"]
+            str(envelope.payload["aggregate_id"])
             for envelope, _ in mock_event_bus.published_envelopes
         ]
         for entity_id in entity_ids:

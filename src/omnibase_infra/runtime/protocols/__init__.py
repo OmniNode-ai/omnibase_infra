@@ -23,11 +23,12 @@ Related:
 
 from __future__ import annotations
 
+# Re-export from omnibase_core for convenience
+from omnibase_core.protocols.notifications import (
+    ProtocolTransitionNotificationPublisher,
+)
 from omnibase_infra.runtime.protocols.protocol_runtime_scheduler import (
     ProtocolRuntimeScheduler,
-)
-from omnibase_infra.runtime.protocols.protocol_transition_notification_publisher import (
-    ProtocolTransitionNotificationPublisher,
 )
 
 __all__: list[str] = [

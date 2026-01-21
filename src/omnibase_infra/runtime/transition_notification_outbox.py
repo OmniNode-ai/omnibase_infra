@@ -57,6 +57,11 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+# Use core model and protocol
+from omnibase_core.models.notifications import ModelStateTransitionNotification
+from omnibase_core.protocols.notifications import (
+    ProtocolTransitionNotificationPublisher,
+)
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -65,12 +70,6 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
-)
-from omnibase_infra.runtime.models.model_state_transition_notification import (
-    ModelStateTransitionNotification,
-)
-from omnibase_infra.runtime.protocols.protocol_transition_notification_publisher import (
-    ProtocolTransitionNotificationPublisher,
 )
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
@@ -317,7 +316,6 @@ class TransitionNotificationOutbox:
             logger.debug(
                 "Notification stored in outbox",
                 extra={
-                    "notification_id": str(notification.notification_id),
                     "aggregate_type": notification.aggregate_type,
                     "aggregate_id": str(notification.aggregate_id),
                     "correlation_id": str(correlation_id),
@@ -444,8 +442,8 @@ class TransitionNotificationOutbox:
                             "Notification published from outbox",
                             extra={
                                 "outbox_id": row_id,
-                                "notification_id": str(notification.notification_id),
                                 "aggregate_type": notification.aggregate_type,
+                                "aggregate_id": str(notification.aggregate_id),
                                 "correlation_id": str(notification.correlation_id),
                             },
                         )
