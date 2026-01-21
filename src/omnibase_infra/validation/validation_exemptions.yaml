@@ -511,6 +511,22 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-1139
   # ==========================================================================
+  # TransitionNotificationOutbox Method Count Exemption (OMN-1139)
+  # ==========================================================================
+  # Outbox pattern requires lifecycle (start/stop), storage (store/cleanup),
+  # processing (process_pending), and multiple config properties for observability.
+  # NOTE: Pattern anchored with src/omnibase_infra/runtime/ prefix to match only
+  # the production file, not test files.
+  - file_pattern: 'src/omnibase_infra/runtime/transition_notification_outbox\.py'
+    class_pattern: "Class 'TransitionNotificationOutbox'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Transactional outbox pattern inherently requires: lifecycle methods (start/stop), storage operations (store/cleanup_processed), processing (process_pending), background loop (_processor_loop), metrics (get_metrics), and configuration properties (table_name, batch_size, poll_interval, is_running, shutdown_timeout, notifications_stored/processed/failed, strict_transaction_mode). Method count is driven by pattern requirements, not poor design.
+
+    documentation:
+      - src/omnibase_infra/schemas/schema_transition_notification_outbox.sql
+    ticket: OMN-1139
+  # ==========================================================================
   # ServiceTimeoutEmitter/Scanner Naming Exemptions (OMN-1055)
   # ==========================================================================
   # These service classes follow the CLAUDE.md Service<Name> naming convention.

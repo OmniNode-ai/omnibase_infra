@@ -88,7 +88,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 from uuid import UUID, uuid4
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -115,6 +115,23 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
+
+
+class FailedNotificationRecord(NamedTuple):
+    """Record of a failed notification publish attempt.
+
+    Used to track failures during batch publishing operations with clear
+    field semantics for error reporting and debugging.
+
+    Attributes:
+        aggregate_type: The type of aggregate that failed (e.g., "registration").
+        aggregate_id: The ID of the aggregate (as string for error reporting).
+        error_message: Sanitized error message describing the failure.
+    """
+
+    aggregate_type: str
+    aggregate_id: str
+    error_message: str
 
 
 class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
@@ -153,6 +170,10 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         >>> metrics = publisher.get_metrics()
         >>> print(f"Success rate: {metrics.publish_success_rate():.2%}")
     """
+
+    # Maximum number of failures to track in memory during batch operations.
+    # Prevents unbounded memory growth for very large batches with many failures.
+    MAX_TRACKED_FAILURES: int = 100
 
     def __init__(
         self,
@@ -385,8 +406,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
 
         success_count = 0
         last_error: Exception | None = None
-        # Track per-notification failures: (aggregate_type, aggregate_id, error_msg)
-        failed_notifications: list[tuple[str, str, str]] = []
+        failed_notifications: list[FailedNotificationRecord] = []
 
         for notification in notifications:
             try:
@@ -398,13 +418,15 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 InfraUnavailableError,
             ) as e:
                 last_error = e
-                failed_notifications.append(
-                    (
-                        notification.aggregate_type,
-                        str(notification.aggregate_id),
-                        sanitize_error_string(str(e)),
+                # Only track failures up to the limit to prevent unbounded memory growth
+                if len(failed_notifications) < self.MAX_TRACKED_FAILURES:
+                    failed_notifications.append(
+                        FailedNotificationRecord(
+                            aggregate_type=notification.aggregate_type,
+                            aggregate_id=str(notification.aggregate_id),
+                            error_message=sanitize_error_string(str(e)),
+                        )
                     )
-                )
                 logger.warning(
                     "Failed to publish notification in batch",
                     extra={
@@ -447,11 +469,12 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             )
             # Build detailed error message showing first 3 failures
             failure_details = "; ".join(
-                f"{agg_type}:{agg_id[:8]}... - {err[:50]}"
-                for agg_type, agg_id, err in failed_notifications[:3]
+                f"{record.aggregate_type}:{record.aggregate_id[:8]}... - "
+                f"{record.error_message[:50]}"
+                for record in failed_notifications[:3]
             )
-            if len(failed_notifications) > 3:
-                failure_details += f" ... and {len(failed_notifications) - 3} more"
+            if failure_count > 3:
+                failure_details += f" ... and {failure_count - 3} more"
 
             raise InfraConnectionError(
                 f"Batch publish partially failed: {failure_count}/{len(notifications)} "
@@ -546,4 +569,4 @@ def _verify_protocol_compliance() -> None:  # pragma: no cover
     _ = publisher
 
 
-__all__: list[str] = ["TransitionNotificationPublisher"]
+__all__: list[str] = ["FailedNotificationRecord", "TransitionNotificationPublisher"]

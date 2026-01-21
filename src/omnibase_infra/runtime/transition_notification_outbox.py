@@ -98,6 +98,7 @@ class TransitionNotificationOutbox:
         table_name: Name of the outbox table (default: "transition_notification_outbox")
         batch_size: Number of notifications to process per batch (default: 100)
         poll_interval: Seconds between processing polls when idle (default: 1.0)
+        shutdown_timeout: Seconds to wait for graceful shutdown during stop() (default: 10.0)
         is_running: Whether the background processor is running
 
     Concurrency Safety:
@@ -146,6 +147,7 @@ class TransitionNotificationOutbox:
     DEFAULT_POLL_INTERVAL_SECONDS: float = 1.0
     DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
     DEFAULT_STRICT_TRANSACTION_MODE: bool = True
+    DEFAULT_SHUTDOWN_TIMEOUT_SECONDS: float = 10.0
     MAX_ERROR_MESSAGE_LENGTH: int = 1000
 
     def __init__(
@@ -157,6 +159,7 @@ class TransitionNotificationOutbox:
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
         strict_transaction_mode: bool = DEFAULT_STRICT_TRANSACTION_MODE,
+        shutdown_timeout_seconds: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
     ) -> None:
         """Initialize the TransitionNotificationOutbox.
 
@@ -171,6 +174,9 @@ class TransitionNotificationOutbox:
                 when store() is called outside a transaction context, providing
                 fail-fast behavior to catch misconfiguration early. If False,
                 logs a warning but continues execution (atomicity not guaranteed).
+            shutdown_timeout_seconds: Timeout in seconds for graceful shutdown
+                during stop() (default: 10.0). If the background processor does
+                not complete within this timeout, it will be cancelled.
 
         Raises:
             ProtocolConfigurationError: If pool or publisher is None, or if
@@ -205,6 +211,13 @@ class TransitionNotificationOutbox:
                 parameter="poll_interval_seconds",
                 value=poll_interval_seconds,
             )
+        if shutdown_timeout_seconds <= 0:
+            raise ProtocolConfigurationError(
+                f"shutdown_timeout_seconds must be > 0, got {shutdown_timeout_seconds}",
+                context=context,
+                parameter="shutdown_timeout_seconds",
+                value=shutdown_timeout_seconds,
+            )
 
         self._pool = pool
         self._publisher = publisher
@@ -213,6 +226,7 @@ class TransitionNotificationOutbox:
         self._poll_interval = poll_interval_seconds
         self._query_timeout = query_timeout_seconds
         self._strict_transaction_mode = strict_transaction_mode
+        self._shutdown_timeout = shutdown_timeout_seconds
 
         # State management
         self._running = False
@@ -232,6 +246,7 @@ class TransitionNotificationOutbox:
                 "batch_size": batch_size,
                 "poll_interval_seconds": poll_interval_seconds,
                 "strict_transaction_mode": strict_transaction_mode,
+                "shutdown_timeout_seconds": shutdown_timeout_seconds,
             },
         )
 
@@ -249,6 +264,11 @@ class TransitionNotificationOutbox:
     def poll_interval(self) -> float:
         """Return the poll interval in seconds."""
         return self._poll_interval
+
+    @property
+    def shutdown_timeout(self) -> float:
+        """Return the shutdown timeout in seconds."""
+        return self._shutdown_timeout
 
     @property
     def is_running(self) -> bool:
@@ -644,7 +664,9 @@ class TransitionNotificationOutbox:
         # Wait for processor task to complete
         if self._processor_task is not None:
             try:
-                await asyncio.wait_for(self._processor_task, timeout=10.0)
+                await asyncio.wait_for(
+                    self._processor_task, timeout=self._shutdown_timeout
+                )
             except TimeoutError:
                 logger.warning(
                     "Outbox processor did not complete within timeout, cancelling",
@@ -816,17 +838,18 @@ class TransitionNotificationOutbox:
 
         table_quoted = quote_identifier(self._table_name)
         # S608: Safe - table name from constructor, quoted via quote_identifier()
-        # retention_days is validated integer, safe to interpolate
+        # retention_days passed as $1 parameter via make_interval()
         query = f"""
             DELETE FROM {table_quoted}
             WHERE processed_at IS NOT NULL
-            AND processed_at < NOW() - INTERVAL '{retention_days} days'
+            AND processed_at < NOW() - make_interval(days => $1)
         """  # noqa: S608
 
         try:
             async with self._pool.acquire() as conn:
                 result = await conn.execute(
                     query,
+                    retention_days,
                     timeout=self._query_timeout,
                 )
                 # Parse result like "DELETE 42"
