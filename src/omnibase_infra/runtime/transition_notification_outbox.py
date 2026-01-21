@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import asyncpg
 
@@ -62,6 +62,7 @@ from omnibase_core.models.notifications import ModelStateTransitionNotification
 from omnibase_core.protocols.notifications import (
     ProtocolTransitionNotificationPublisher,
 )
+from omnibase_core.utils.util_uuid_service import UtilUUID
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -102,6 +103,18 @@ class TransitionNotificationOutbox:
 
         DLQ notifications are published with the original notification payload,
         allowing downstream consumers to process or investigate failures.
+
+    Warning:
+        **DLQ Unavailability Risk**: If the DLQ itself becomes permanently
+        unavailable, notifications that have exceeded ``max_retries`` will
+        continue to be retried indefinitely. This occurs because ``retry_count``
+        is intentionally NOT incremented when DLQ publish fails (to preserve
+        the retry state for when the DLQ recovers).
+
+        **Monitoring Recommendation**: Monitor for notifications matching:
+        ``processed_at IS NULL AND retry_count >= max_retries``. Notifications
+        in this state indicate DLQ availability issues requiring operator
+        intervention.
 
     Attributes:
         table_name: Name of the outbox table (default: "transition_notification_outbox")
@@ -522,7 +535,7 @@ class TransitionNotificationOutbox:
             cause the method to raise. The failed notification's retry_count
             and last_error are updated in the database.
         """
-        correlation_id = uuid4()
+        correlation_id = UtilUUID.generate_correlation_id()
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="outbox_process_pending",
@@ -915,6 +928,12 @@ class TransitionNotificationOutbox:
             no data loss even if the DLQ is temporarily unavailable. The
             retry_count is NOT incremented on DLQ failure since it already
             exceeds max_retries.
+
+        Warning:
+            If the DLQ is **permanently** unavailable, this creates an infinite
+            retry loop for notifications exceeding max_retries. Monitor for
+            ``processed_at IS NULL AND retry_count >= max_retries`` to detect
+            this condition.
         """
         if self._dlq_publisher is None:
             # Should not happen due to _should_move_to_dlq check, but defensive
@@ -955,6 +974,8 @@ class TransitionNotificationOutbox:
         except Exception as e:
             # DLQ publish failed - do NOT mark as processed
             # Notification will be retried on next cycle without incrementing retry_count
+            # WARNING: If DLQ is permanently unavailable, this creates infinite retries.
+            # Monitor: processed_at IS NULL AND retry_count >= max_retries
             error_message = sanitize_error_string(str(e))
             logger.exception(
                 "Failed to publish notification to DLQ, will retry",
@@ -1037,7 +1058,7 @@ class TransitionNotificationOutbox:
             >>> # Delete all processed records immediately
             >>> deleted = await outbox.cleanup_processed(retention_days=0)
         """
-        correlation_id = uuid4()
+        correlation_id = UtilUUID.generate_correlation_id()
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="outbox_cleanup",

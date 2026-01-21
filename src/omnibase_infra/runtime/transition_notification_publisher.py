@@ -89,13 +89,14 @@ import logging
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, NamedTuple
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.notifications import ModelStateTransitionNotification
 from omnibase_core.protocols.notifications import (
     ProtocolTransitionNotificationPublisher,
 )
+from omnibase_core.utils.util_uuid_service import UtilUUID
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -219,7 +220,9 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         """
         self._event_bus = event_bus
         self._topic = topic
-        self._publisher_id = publisher_id or f"transition-publisher-{uuid4()!s}"
+        self._publisher_id = (
+            publisher_id or f"transition-publisher-{UtilUUID.generate()!s}"
+        )
         self._lock = asyncio.Lock()
         self._max_tracked_failures = max_tracked_failures
 
@@ -419,7 +422,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         if not notifications:
             return
 
-        correlation_id = notifications[0].correlation_id if notifications else uuid4()
+        correlation_id = notifications[0].correlation_id
         start_time = time.monotonic()
 
         # Check circuit breaker before starting batch
@@ -491,11 +494,22 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 target_name=self._topic,
             )
 
-            # Log full failure details for debugging before raising truncated error
-            # This ensures all tracked failures are visible in logs even though
-            # the exception message is truncated for propagation
+            # Log failure details for debugging before raising truncated error.
+            # Limit logged failures to prevent oversized log entries while
+            # preserving full counts for metrics and observability.
+            max_logged_failures = 10
+            logged_failures = [
+                {
+                    "aggregate_type": record.aggregate_type,
+                    "aggregate_id": record.aggregate_id,
+                    "error_message": record.error_message,
+                }
+                for record in failed_notifications[:max_logged_failures]
+            ]
+            failures_truncated = len(failed_notifications) > max_logged_failures
+
             logger.warning(
-                "Batch publish failures - full details",
+                "Batch publish failures - details",
                 extra={
                     "correlation_id": str(correlation_id),
                     "topic": self._topic,
@@ -504,14 +518,9 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                     "failure_count": failure_count,
                     "tracked_failures": len(failed_notifications),
                     "max_tracked_failures": self._max_tracked_failures,
-                    "failures": [
-                        {
-                            "aggregate_type": record.aggregate_type,
-                            "aggregate_id": record.aggregate_id,
-                            "error_message": record.error_message,
-                        }
-                        for record in failed_notifications
-                    ],
+                    "logged_failures": len(logged_failures),
+                    "failures_truncated": failures_truncated,
+                    "failures": logged_failures,
                 },
             )
 
