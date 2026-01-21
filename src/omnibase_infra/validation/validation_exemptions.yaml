@@ -486,19 +486,6 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-953
   # ==========================================================================
-  # TransitionNotificationPublisher publisher_id Exemption (OMN-1139)
-  # ==========================================================================
-  # publisher_id is a human-readable semantic identifier similar to scheduler_id.
-  # It identifies the publisher instance and may be auto-generated or user-specified.
-  - file_pattern: 'model_transition_notification_publisher_metrics\.py'
-    violation_pattern: "Field 'publisher_id' should use UUID"
-    reason: >
-      publisher_id is a human-readable semantic identifier (e.g., "transition-publisher-<uuid>") that identifies the publisher instance. Follows the same pattern as scheduler_id.
-
-    documentation:
-      - CLAUDE.md (Registry Naming Conventions)
-    ticket: OMN-1139
-  # ==========================================================================
   # ServiceTimeoutEmitter/Scanner Naming Exemptions (OMN-1055)
   # ==========================================================================
   # These service classes follow the CLAUDE.md Service<Name> naming convention.
@@ -1490,17 +1477,16 @@ pattern_exemptions:
   # ProjectorShell Exemptions (OMN-1169)
   # ==========================================================================
   # ProjectorShell implements ProtocolEventProjector protocol which requires:
-  # - Protocol properties (projector_id, aggregate_type, consumed_events, contract, is_placeholder)
-  # - Core methods (project, get_state, get_states, partial_update, upsert_partial)
-  # - SQL execution modes handled by MixinProjectorSqlOperations
-  # - Value extraction (_extract_values, _resolve_path, _get_event_type, _execute_projection)
-  # - Notification integration (via MixinProjectorNotificationPublishing)
-  # Total: 11 methods, all cohesive to the contract-driven projector pattern.
-  # OMN-1139: Added notification publishing support via mixin composition.
-  # NOTE: Pattern anchored with src/omnibase_infra/runtime/ prefix to match only
-  # the production file at src/omnibase_infra/runtime/projector_shell.py.
+  # - Protocol properties (projector_id, aggregate_type, consumed_events, is_placeholder)
+  # - Core methods (project, get_state)
+  # - SQL execution modes (_upsert, _insert, _append, _execute_projection)
+  # - Value extraction (_extract_values, _resolve_path, _get_event_type)
+  # - Utility (_parse_row_count)
+  # Total: 11 methods, all cohesive to the projector contract pattern.
+  # NOTE: Pattern anchored with omnibase_infra/runtime/ prefix and $ suffix to
+  # match only the production file at src/omnibase_infra/runtime/projector_shell.py.
   # This prevents matching test files in tests/unit/runtime/ or tests/integration/runtime/.
-  - file_pattern: 'src/omnibase_infra/runtime/projector_shell\.py'
+  - file_pattern: 'omnibase_infra/runtime/projector_shell\.py$'
     class_pattern: "Class 'ProjectorShell'"
     violation_pattern: 'has \d+ methods'
     reason: >

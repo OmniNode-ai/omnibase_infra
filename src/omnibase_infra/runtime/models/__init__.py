@@ -47,9 +47,6 @@ Exports:
     ModelSecretResolverMetrics: Resolution metrics for observability
     ModelSecretSourceInfo: Non-sensitive source information for introspection
     ModelRetryPolicy: Retry policy configuration for handler operations
-    ModelTransitionNotificationPublisherMetrics: Metrics for transition notification publisher
-    ModelStateTransitionNotification: State transition notification for outbox delivery
-    ModelProjectorNotificationConfig: Configuration for projector notification publishing
     ModelBindingConfig: Configuration for binding a handler to the runtime
     ModelBindingConfigCacheStats: Cache statistics for BindingConfigResolver
     ModelBindingConfigResolverConfig: Configuration for BindingConfigResolver
@@ -113,9 +110,6 @@ from omnibase_infra.runtime.models.model_policy_registration import (
 )
 from omnibase_infra.runtime.models.model_policy_result import ModelPolicyResult
 from omnibase_infra.runtime.models.model_policy_type_filter import ModelPolicyTypeFilter
-from omnibase_infra.runtime.models.model_projector_notification_config import (
-    ModelProjectorNotificationConfig,
-)
 from omnibase_infra.runtime.models.model_projector_plugin_loader_config import (
     ModelProjectorPluginLoaderConfig,
 )
@@ -148,12 +142,6 @@ from omnibase_infra.runtime.models.model_shutdown_batch_result import (
     ModelShutdownBatchResult,
 )
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
-from omnibase_infra.runtime.models.model_state_transition_notification import (
-    ModelStateTransitionNotification,
-)
-from omnibase_infra.runtime.models.model_transition_notification_publisher_metrics import (
-    ModelTransitionNotificationPublisherMetrics,
-)
 
 __all__: list[str] = [
     "EnumConfigRefScheme",
@@ -185,7 +173,6 @@ __all__: list[str] = [
     "ModelPolicyRegistration",
     "ModelPolicyResult",
     "ModelPolicyTypeFilter",
-    "ModelProjectorNotificationConfig",
     "ModelProjectorPluginLoaderConfig",
     "ModelProtocolRegistrationConfig",
     "ModelRetryPolicy",
@@ -201,7 +188,5 @@ __all__: list[str] = [
     "ModelSecretSourceSpec",
     "ModelShutdownBatchResult",
     "ModelShutdownConfig",
-    "ModelStateTransitionNotification",
-    "ModelTransitionNotificationPublisherMetrics",
     "SecretSourceType",
 ]
