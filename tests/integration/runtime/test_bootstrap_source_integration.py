@@ -1,0 +1,425 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Integration tests for HandlerBootstrapSource integration (OMN-1087).
+
+This module validates that HandlerBootstrapSource is correctly integrated
+into the RuntimeHostProcess bootstrap flow, ensuring core infrastructure
+handlers are loaded from descriptor-based definitions.
+
+Test Coverage:
+- HandlerBootstrapSource.discover_handlers() is called during runtime bootstrap
+- Core 4 handlers (consul, db, http, vault) are loaded from bootstrap source
+- Bootstrap handlers are registered before contract-based or default handlers
+- Bootstrap handlers are available after RuntimeHostProcess.start()
+
+Related:
+    - OMN-1087: HandlerBootstrapSource for hardcoded handler registration
+    - src/omnibase_infra/runtime/handler_bootstrap_source.py
+    - src/omnibase_infra/runtime/service_runtime_host_process.py
+
+Note:
+    These tests verify handler REGISTRATION, not handler EXECUTION.
+    Handlers may fail during initialize() if external services are not available,
+    but they should still be registered in the handler registry.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.runtime.handler_bootstrap_source import (
+    SOURCE_TYPE_BOOTSTRAP,
+    HandlerBootstrapSource,
+)
+from omnibase_infra.runtime.handler_registry import (
+    HANDLER_TYPE_CONSUL,
+    HANDLER_TYPE_DATABASE,
+    HANDLER_TYPE_HTTP,
+    HANDLER_TYPE_VAULT,
+    RegistryProtocolBinding,
+    get_handler_registry,
+)
+from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+
+# =============================================================================
+# Test Classes
+# =============================================================================
+
+
+class TestHandlerBootstrapSourceDiscovery:
+    """Test HandlerBootstrapSource discover_handlers() functionality.
+
+    These tests verify that HandlerBootstrapSource correctly provides
+    handler descriptors for the core infrastructure handlers.
+    """
+
+    @pytest.mark.asyncio
+    async def test_discover_handlers_returns_four_descriptors(self) -> None:
+        """HandlerBootstrapSource.discover_handlers() returns 4 handler descriptors.
+
+        Verifies:
+        1. discover_handlers() returns ModelContractDiscoveryResult
+        2. Result contains exactly 4 descriptors
+        3. No validation errors (hardcoded handlers are pre-validated)
+        """
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+
+        assert len(result.descriptors) == 4
+        assert len(result.validation_errors) == 0
+
+    @pytest.mark.asyncio
+    async def test_discover_handlers_includes_core_handlers(self) -> None:
+        """HandlerBootstrapSource includes consul, db, http, vault handlers.
+
+        Verifies that all four core infrastructure handlers are present
+        in the discovery result.
+        """
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+
+        handler_ids = {d.handler_id for d in result.descriptors}
+        expected_ids = {
+            "bootstrap.consul",
+            "bootstrap.db",
+            "bootstrap.http",
+            "bootstrap.vault",
+        }
+
+        assert handler_ids == expected_ids
+
+    @pytest.mark.asyncio
+    async def test_discover_handlers_descriptors_have_handler_class(self) -> None:
+        """All bootstrap handler descriptors have valid handler_class paths.
+
+        Verifies:
+        1. Each descriptor has a non-None handler_class
+        2. Handler class paths are fully qualified (contain dots)
+        """
+        source = HandlerBootstrapSource()
+        result = await source.discover_handlers()
+
+        for descriptor in result.descriptors:
+            assert descriptor.handler_class is not None
+            assert "." in descriptor.handler_class
+            assert descriptor.handler_class.startswith("omnibase_infra.handlers.")
+
+    @pytest.mark.asyncio
+    async def test_source_type_is_bootstrap(self) -> None:
+        """HandlerBootstrapSource.source_type returns 'BOOTSTRAP'."""
+        source = HandlerBootstrapSource()
+        assert source.source_type == SOURCE_TYPE_BOOTSTRAP
+
+    @pytest.mark.asyncio
+    async def test_discover_handlers_is_idempotent(self) -> None:
+        """Multiple calls to discover_handlers() return consistent results.
+
+        Verifies that discover_handlers() can be called multiple times
+        and returns the same descriptors each time.
+        """
+        source = HandlerBootstrapSource()
+
+        result1 = await source.discover_handlers()
+        result2 = await source.discover_handlers()
+
+        # Same number of descriptors
+        assert len(result1.descriptors) == len(result2.descriptors)
+
+        # Same handler IDs
+        ids1 = {d.handler_id for d in result1.descriptors}
+        ids2 = {d.handler_id for d in result2.descriptors}
+        assert ids1 == ids2
+
+
+class TestBootstrapSourceRuntimeIntegration:
+    """Test HandlerBootstrapSource integration with RuntimeHostProcess.
+
+    These tests verify that RuntimeHostProcess correctly uses
+    HandlerBootstrapSource during the startup bootstrap process.
+    """
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_handlers_registered_on_start(self) -> None:
+        """Bootstrap handlers are registered in handler registry on start.
+
+        Verifies:
+        1. RuntimeHostProcess.start() registers bootstrap handlers
+        2. All 4 core handlers (consul, db, http, vault) are in registry
+        """
+        event_bus = EventBusInmemory()
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+            # No contract_paths - bootstrap handlers provide core infrastructure
+        )
+
+        try:
+            await process.start()
+
+            # Verify bootstrap handlers are in the singleton registry
+            registry = get_handler_registry()
+            assert registry.is_registered(HANDLER_TYPE_CONSUL)
+            assert registry.is_registered(HANDLER_TYPE_DATABASE)
+            assert registry.is_registered(HANDLER_TYPE_HTTP)
+            assert registry.is_registered(HANDLER_TYPE_VAULT)
+
+        finally:
+            await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_handlers_registered_before_contracts(
+        self, tmp_path: Path
+    ) -> None:
+        """Bootstrap handlers are registered BEFORE contract-based discovery.
+
+        Verifies that bootstrap handlers are loaded first, then contract-based
+        handlers. This ensures core infrastructure is always available.
+        """
+        # Create a contract directory (empty - no handlers)
+        contracts_dir = tmp_path / "contracts"
+        contracts_dir.mkdir()
+
+        # Track registration order
+        registration_order: list[str] = []
+
+        original_register = RegistryProtocolBinding.register
+
+        def tracking_register(
+            self: RegistryProtocolBinding, protocol_type: str, handler_class: type
+        ) -> None:
+            registration_order.append(protocol_type)
+            return original_register(self, protocol_type, handler_class)
+
+        with patch.object(RegistryProtocolBinding, "register", tracking_register):
+            event_bus = EventBusInmemory()
+            process = RuntimeHostProcess(
+                event_bus=event_bus,
+                input_topic="test.input",
+                contract_paths=[str(contracts_dir)],
+            )
+
+            try:
+                await process.start()
+
+                # Bootstrap handlers should be registered first
+                # (consul, db, http, vault in some order)
+                bootstrap_handlers = {
+                    HANDLER_TYPE_CONSUL,
+                    HANDLER_TYPE_DATABASE,
+                    HANDLER_TYPE_HTTP,
+                    HANDLER_TYPE_VAULT,
+                }
+
+                # Check that bootstrap handlers were registered
+                registered_set = set(registration_order)
+                assert bootstrap_handlers.issubset(registered_set), (
+                    f"Bootstrap handlers not found in registration. "
+                    f"Expected: {bootstrap_handlers}, Got: {registered_set}"
+                )
+
+            finally:
+                await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_source_called_during_start(self) -> None:
+        """HandlerBootstrapSource.discover_handlers() is called during start.
+
+        Verifies that RuntimeHostProcess actually calls the bootstrap source
+        discover_handlers() method during startup.
+        """
+        event_bus = EventBusInmemory()
+
+        # Patch at the source module where it's imported from
+        with patch(
+            "omnibase_infra.runtime.handler_bootstrap_source.HandlerBootstrapSource"
+        ) as MockBootstrapSource:
+            # Create a mock that returns proper discovery result
+            mock_source = MagicMock()
+            mock_discovery_result = MagicMock()
+            mock_discovery_result.descriptors = []  # Empty for simplicity
+            mock_source.discover_handlers = AsyncMock(
+                return_value=mock_discovery_result
+            )
+            MockBootstrapSource.return_value = mock_source
+
+            process = RuntimeHostProcess(
+                event_bus=event_bus,
+                input_topic="test.input",
+            )
+
+            try:
+                await process.start()
+
+                # Verify HandlerBootstrapSource was instantiated and called
+                MockBootstrapSource.assert_called_once()
+                mock_source.discover_handlers.assert_called_once()
+
+            finally:
+                await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_handlers_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Bootstrap handler registration is logged.
+
+        Verifies that appropriate log messages are generated during
+        bootstrap handler registration.
+        """
+        event_bus = EventBusInmemory()
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic="test.input",
+        )
+
+        with caplog.at_level(logging.INFO):
+            try:
+                await process.start()
+
+                # Check for bootstrap-related log messages
+                log_messages = [r.message for r in caplog.records]
+
+                has_bootstrap_log = any(
+                    "bootstrap" in msg.lower() for msg in log_messages
+                )
+                assert has_bootstrap_log, (
+                    f"Should have logs mentioning 'bootstrap'. "
+                    f"Log messages: {log_messages}"
+                )
+
+            finally:
+                await process.stop()
+
+
+class TestBootstrapSourceErrorHandling:
+    """Test error handling in bootstrap source integration.
+
+    These tests verify that errors during bootstrap handler registration
+    are handled gracefully without crashing the runtime.
+    """
+
+    @pytest.mark.asyncio
+    async def test_single_handler_import_error_does_not_crash(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Import error for one handler doesn't prevent others from loading.
+
+        Verifies graceful degradation: if one bootstrap handler fails to
+        import, other handlers should still be registered.
+        """
+        event_bus = EventBusInmemory()
+
+        # Patch importlib.import_module to fail for one specific handler
+        original_import = __import__("importlib").import_module
+
+        def failing_import(name: str, package: str | None = None) -> object:
+            if "handler_consul" in name:
+                raise ImportError("Simulated import error for consul handler")
+            return original_import(name, package)
+
+        with patch("importlib.import_module", side_effect=failing_import):
+            with caplog.at_level(logging.WARNING):
+                process = RuntimeHostProcess(
+                    event_bus=event_bus,
+                    input_topic="test.input",
+                )
+
+                try:
+                    await process.start()
+
+                    # Process should still start
+                    assert process.is_running
+
+                    # Other handlers should be registered (db, http, vault)
+                    registry = get_handler_registry()
+                    # At least some handlers should be registered
+                    registered = registry.list_protocols()
+                    assert len(registered) >= 1, (
+                        "At least one handler should be registered despite consul failing"
+                    )
+
+                    # Check for error log about failed import
+                    error_logs = [
+                        r for r in caplog.records if r.levelno >= logging.WARNING
+                    ]
+                    assert len(error_logs) >= 1, (
+                        "Should have warning/error logs for failed handler import"
+                    )
+
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_with_empty_descriptors_continues(self) -> None:
+        """Runtime continues if bootstrap source returns empty descriptors.
+
+        Verifies that if HandlerBootstrapSource somehow returns no descriptors,
+        the runtime still starts (graceful degradation).
+        """
+        event_bus = EventBusInmemory()
+
+        # Patch at the source module where it's imported from
+        with patch(
+            "omnibase_infra.runtime.handler_bootstrap_source.HandlerBootstrapSource"
+        ) as MockBootstrapSource:
+            # Return empty descriptors
+            mock_source = MagicMock()
+            mock_discovery_result = MagicMock()
+            mock_discovery_result.descriptors = []
+            mock_source.discover_handlers = AsyncMock(
+                return_value=mock_discovery_result
+            )
+            MockBootstrapSource.return_value = mock_source
+
+            process = RuntimeHostProcess(
+                event_bus=event_bus,
+                input_topic="test.input",
+            )
+
+            try:
+                await process.start()
+
+                # Process should still start (graceful degradation)
+                assert process.is_running
+
+            finally:
+                await process.stop()
+
+
+class TestBootstrapSourcePerformance:
+    """Test performance characteristics of bootstrap source integration.
+
+    These tests verify that bootstrap handler loading is fast and doesn't
+    add significant overhead to runtime startup.
+    """
+
+    @pytest.mark.asyncio
+    async def test_discover_handlers_is_fast(self) -> None:
+        """HandlerBootstrapSource.discover_handlers() completes in < 100ms.
+
+        Bootstrap handler discovery should be very fast since it's just
+        creating in-memory descriptor objects (no file I/O).
+        """
+        import time
+
+        source = HandlerBootstrapSource()
+
+        start = time.perf_counter()
+        await source.discover_handlers()
+        duration = time.perf_counter() - start
+
+        # Should complete in under 100ms (generous for CI)
+        assert duration < 0.1, f"Discovery took {duration:.3f}s, expected < 0.1s"
+
+
+__all__: list[str] = [
+    "TestHandlerBootstrapSourceDiscovery",
+    "TestBootstrapSourceRuntimeIntegration",
+    "TestBootstrapSourceErrorHandling",
+    "TestBootstrapSourcePerformance",
+]

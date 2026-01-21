@@ -73,7 +73,7 @@ def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
             parameter="scheme",
             value=scheme,
         )
-    return cast(Literal["postgresql", "postgres"], scheme)
+    return cast("Literal['postgresql', 'postgres']", scheme)
 
 
 def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:

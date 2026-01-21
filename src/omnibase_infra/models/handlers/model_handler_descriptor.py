@@ -99,6 +99,7 @@ class ModelHandlerDescriptor(BaseModel):
         input_model: Fully qualified input model class path.
         output_model: Fully qualified output model class path.
         description: Optional description of the handler.
+        handler_class: Fully qualified Python class path for dynamic handler import.
         contract_path: Path to the source contract file.
 
     Example:
@@ -175,6 +176,12 @@ class ModelHandlerDescriptor(BaseModel):
     description: str | None = Field(
         default=None,
         description="Optional description of the handler",
+    )
+    handler_class: str | None = Field(
+        default=None,
+        min_length=3,
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$",
+        description="Fully qualified Python class path for dynamic handler import (e.g., 'omnibase_infra.handlers.handler_consul.HandlerConsul')",
     )
     contract_path: str | None = Field(
         default=None,

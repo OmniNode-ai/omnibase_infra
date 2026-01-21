@@ -12,6 +12,10 @@ and error reporting in ONEX handlers.
     Added ModelHandlerDescriptor and ModelContractDiscoveryResult for
     OMN-1097 filesystem handler discovery.
 
+.. versionchanged:: 0.6.4
+    Added ModelBootstrapHandlerDescriptor for OMN-1087 bootstrap handler
+    validation with required handler_class field.
+
 Note:
     ModelContractDiscoveryResult uses a forward reference to
     ModelHandlerValidationError to avoid circular imports. The forward
@@ -20,10 +24,14 @@ Note:
     tests/unit/runtime/test_handler_contract_source.py.
 """
 
+from omnibase_infra.models.handlers.model_bootstrap_handler_descriptor import (
+    ModelBootstrapHandlerDescriptor,
+)
 from omnibase_infra.models.handlers.model_contract_discovery_result import (
     ModelContractDiscoveryResult,
 )
 from omnibase_infra.models.handlers.model_handler_descriptor import (
+    LiteralHandlerKind,
     ModelHandlerDescriptor,
 )
 from omnibase_infra.models.handlers.model_handler_identifier import (
@@ -31,6 +39,8 @@ from omnibase_infra.models.handlers.model_handler_identifier import (
 )
 
 __all__ = [
+    "LiteralHandlerKind",
+    "ModelBootstrapHandlerDescriptor",
     "ModelContractDiscoveryResult",
     "ModelHandlerDescriptor",
     "ModelHandlerIdentifier",

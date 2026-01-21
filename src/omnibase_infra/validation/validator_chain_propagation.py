@@ -183,7 +183,7 @@ def get_message_id(envelope: ModelEventEnvelope[object]) -> UUID:
     """
     # envelope_id is typed as UUID in ModelEventEnvelope, but mypy sees it as Any
     # due to the generic type parameter. Cast is required for type safety.
-    return cast(UUID, envelope.envelope_id)
+    return cast("UUID", envelope.envelope_id)
 
 
 def get_correlation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
@@ -200,7 +200,7 @@ def get_correlation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
     correlation_id = envelope.correlation_id
     if correlation_id is None:
         return None
-    return cast(UUID, correlation_id)
+    return cast("UUID", correlation_id)
 
 
 def get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:

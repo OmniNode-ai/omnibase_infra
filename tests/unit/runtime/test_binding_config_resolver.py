@@ -3607,7 +3607,9 @@ class TestSymlinkValidation:
     def test_symlink_rejected_when_disabled(self) -> None:
         """Symlinks are rejected when allow_symlinks=False (within config_dir)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config_dir = Path(tmpdir)
+            # Resolve to real path to avoid macOS /var -> /private/var symlink
+            # This ensures we test explicit symlink rejection, not system symlinks
+            config_dir = Path(tmpdir).resolve()
 
             # Create actual config file inside config_dir
             real_config = config_dir / "real_config.yaml"
@@ -3635,7 +3637,9 @@ class TestSymlinkValidation:
     def test_regular_file_works_when_symlinks_disabled(self) -> None:
         """Regular (non-symlink) files work when allow_symlinks=False."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config_dir = Path(tmpdir)
+            # Resolve to real path to avoid macOS /var -> /private/var symlink
+            # The test verifies regular files work, not system symlink handling
+            config_dir = Path(tmpdir).resolve()
 
             # Create regular config file (no symlink)
             config_file = config_dir / "config.yaml"
@@ -3660,7 +3664,9 @@ class TestSymlinkValidation:
     def test_symlink_in_parent_path_rejected_when_disabled(self) -> None:
         """Symlinks in parent directories are rejected when allow_symlinks=False."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            base_dir = Path(tmpdir)
+            # Resolve to real path to avoid macOS /var -> /private/var symlink
+            # This ensures we test explicit symlink parent rejection
+            base_dir = Path(tmpdir).resolve()
 
             # Create real directory with config
             real_configs = base_dir / "real_configs"

@@ -1032,6 +1032,27 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1097
   # ==========================================================================
+  # Handler Bootstrap Source Exemptions (OMN-1087)
+  # ==========================================================================
+  # HandlerBootstrapSource provides hardcoded handler descriptors for core
+  # infrastructure handlers. The "Handler" in the name refers to ONEX handler
+  # concepts, consistent with HandlerContractSource and HandlerPluginLoader.
+  #
+  # Pattern specificity note: Uses separate class_pattern + violation_pattern
+  # (not combined "Class name .* contains...") for precise targeting. All three
+  # patterns must match: exact filename, exact class name, and violation type.
+  # This is consistent with HandlerContractSource/HandlerPluginLoader exemptions.
+  - file_pattern: 'handler_bootstrap_source\.py'
+    class_pattern: "Class name 'HandlerBootstrapSource'"
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      HandlerBootstrapSource centralizes hardcoded handler registration for core infrastructure handlers (Consul, DB, HTTP, Vault). The "Handler" refers to ONEX handler concepts, consistent with HandlerContractSource. This is legitimate handler infrastructure code per OMN-1087.
+
+    documentation:
+      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
+      - CLAUDE.md (ONEX Architecture - Handler Types)
+    ticket: OMN-1087
+  # ==========================================================================
   # Handler Plugin Loader Exemptions (OMN-1132)
   # ==========================================================================
   # HandlerPluginLoader discovers and loads ONEX handlers from contract YAML files.

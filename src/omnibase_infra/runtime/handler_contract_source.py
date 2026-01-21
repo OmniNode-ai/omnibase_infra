@@ -46,11 +46,42 @@ from omnibase_infra.models.handlers import (
 )
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
+# =============================================================================
+# Module-Level Model Rebuild Pattern (Immediate Execution)
+# =============================================================================
+#
+# This module uses a simple MODULE-LEVEL model_rebuild() call. This differs from
+# HandlerBootstrapSource which uses a deferred, thread-safe pattern.
+#
+# WHY IMMEDIATE (module-load) IS SAFE HERE:
+#   - HandlerContractSource is NOT imported through runtime.__init__.py
+#   - This module is imported explicitly by user code AFTER the runtime is
+#     initialized and all model dependencies are resolved
+#   - Python's import mechanism is inherently thread-safe for module-level code:
+#     the import lock ensures module initialization runs exactly once, even if
+#     multiple threads import the same module simultaneously
+#   - Therefore, no explicit thread-safety mechanism (locks) is needed
+#
+# WHY HANDLERBOOTSTRAPSOURCE NEEDS DEFERRED PATTERN:
+#   - HandlerBootstrapSource is imported during runtime bootstrap (via __init__.py)
+#   - At that point, ModelHandlerValidationError may not be fully resolved
+#   - Additionally, discover_handlers() may be called from multiple threads,
+#     requiring explicit synchronization for the rebuild call
+#
+# PATTERN COMPARISON:
+#   - HandlerContractSource: Immediate + module-level (this file)
+#   - HandlerBootstrapSource: Deferred + thread-safe (see that file for rationale)
+#
+# See Also:
+#   - handler_bootstrap_source.py lines 68-100 for the deferred pattern rationale
+#   - OMN-1087 for the ticket tracking this design decision
+# =============================================================================
+#
 # Rebuild ModelContractDiscoveryResult to resolve the forward reference
 # to ModelHandlerValidationError. This must happen after ModelHandlerValidationError
 # is imported to make the type available for Pydantic validation.
 #
-# Why this pattern is used:
+# Why forward reference resolution is needed:
 #   ModelContractDiscoveryResult has a field typed as list[ModelHandlerValidationError].
 #   ModelHandlerValidationError imports ModelHandlerIdentifier from models.handlers.
 #   If ModelContractDiscoveryResult directly imported ModelHandlerValidationError,
@@ -477,6 +508,24 @@ class HandlerContractSource(ProtocolContractSource):
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(raw_data)
 
+        # TODO [OMN-1420]: Extract handler_class from ModelHandlerContract
+        #
+        # handler_contract.yaml files include a `handler_class` field for dynamic import
+        # (e.g., "omnibase_infra.handlers.handler_consul.HandlerConsul"), but
+        # ModelHandlerContract from omnibase_core does not have this field yet.
+        #
+        # Once ModelHandlerContract is updated to include handler_class, this code
+        # should be changed from:
+        #     handler_class=raw_data.get("handler_class")
+        # to:
+        #     handler_class=contract.handler_class
+        #
+        # For now, extract directly from raw YAML data to support dynamic handler loading.
+        # See: https://linear.app/omninode/issue/OMN-1420
+        handler_class = (
+            raw_data.get("handler_class") if isinstance(raw_data, dict) else None
+        )
+
         # Transform to descriptor
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
@@ -486,6 +535,7 @@ class HandlerContractSource(ProtocolContractSource):
             input_model=contract.input_model,
             output_model=contract.output_model,
             description=contract.description,
+            handler_class=handler_class,
             contract_path=str(contract_path),
         )
 

@@ -1353,7 +1353,7 @@ class MixinNodeIntrospection:
         # Update cache - cast the model_dump output to our typed dict since we know
         # the structure matches (model_dump returns dict[str, Any] by default)
         self._introspection_cache = cast(
-            IntrospectionCacheDict, event.model_dump(mode="json")
+            "IntrospectionCacheDict", event.model_dump(mode="json")
         )
         self._introspection_cached_at = current_time
 

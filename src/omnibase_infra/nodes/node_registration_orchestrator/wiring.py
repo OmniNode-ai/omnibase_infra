@@ -579,7 +579,7 @@ async def get_projection_reader_from_container(
     _validate_service_registry(container, "resolve ProjectionReaderRegistration")
     try:
         return cast(
-            ProjectionReaderRegistration,
+            "ProjectionReaderRegistration",
             await container.service_registry.resolve_service(
                 ProjectionReaderRegistration
             ),
@@ -622,7 +622,7 @@ async def get_handler_node_introspected_from_container(
     _validate_service_registry(container, "resolve HandlerNodeIntrospected")
     try:
         return cast(
-            HandlerNodeIntrospected,
+            "HandlerNodeIntrospected",
             await container.service_registry.resolve_service(HandlerNodeIntrospected),
         )
     except Exception as e:
@@ -663,7 +663,7 @@ async def get_handler_runtime_tick_from_container(
     _validate_service_registry(container, "resolve HandlerRuntimeTick")
     try:
         return cast(
-            HandlerRuntimeTick,
+            "HandlerRuntimeTick",
             await container.service_registry.resolve_service(HandlerRuntimeTick),
         )
     except Exception as e:
@@ -704,7 +704,7 @@ async def get_handler_node_registration_acked_from_container(
     _validate_service_registry(container, "resolve HandlerNodeRegistrationAcked")
     try:
         return cast(
-            HandlerNodeRegistrationAcked,
+            "HandlerNodeRegistrationAcked",
             await container.service_registry.resolve_service(
                 HandlerNodeRegistrationAcked
             ),

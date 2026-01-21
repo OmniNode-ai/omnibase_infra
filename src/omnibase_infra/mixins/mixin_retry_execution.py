@@ -196,7 +196,7 @@ class MixinRetryExecution(ABC):
             This should only be called when _circuit_breaker_initialized is True,
             which guarantees the circuit breaker methods are available.
         """
-        return cast(ProtocolCircuitBreakerAware, self)
+        return cast("ProtocolCircuitBreakerAware", self)
 
     async def _record_circuit_failure_if_enabled(
         self, operation: str, correlation_id: UUID

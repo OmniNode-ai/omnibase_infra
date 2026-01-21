@@ -75,12 +75,12 @@ class PluginJsonNormalizer(PluginComputeBase):
             effective_max_depth = self.MAX_RECURSION_DEPTH
 
         try:
-            json_data = cast(object, input_data.get("json", {}))
+            json_data = cast("object", input_data.get("json", {}))
             normalized: object = self._sort_keys_recursively(
                 json_data, _max_depth=effective_max_depth
             )
             output: JsonNormalizerOutput = {"normalized": normalized}
-            return cast(ModelPluginOutputData, output)
+            return cast("ModelPluginOutputData", output)
 
         except RecursionError as e:
             raise OnexError(

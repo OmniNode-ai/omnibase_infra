@@ -43,6 +43,7 @@ Integration with Handlers:
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -967,33 +968,37 @@ class RuntimeHostProcess:
         logger.info("RuntimeHostProcess stopped successfully")
 
     async def _discover_or_wire_handlers(self) -> None:
-        """Discover handlers from contracts or wire default handlers.
+        """Discover and register handlers for the runtime.
 
         This method implements the handler discovery/wiring step (Step 3) of the
-        start() sequence. It supports two modes:
+        start() sequence.
+
+        Bootstrap Handlers (OMN-1087):
+            Bootstrap handlers (Consul, DB, HTTP, Vault) are ALWAYS registered first
+            via HandlerBootstrapSource. These core infrastructure handlers are
+            essential for the ONEX runtime and are loaded from descriptor-based
+            definitions rather than filesystem contracts.
 
         Contract-Based Discovery (OMN-1133):
             If contract_paths were provided at init, uses ContractHandlerDiscovery
-            to auto-discover and register handlers from the specified paths.
+            to auto-discover and register additional handlers from the specified paths.
 
             Discovery errors are logged but do not block startup, enabling
             graceful degradation where some handlers can be registered even
             if others fail to load.
 
-        Default Handler Wiring (Fallback):
-            If no contract_paths were provided, falls back to wire_default_handlers()
-            which registers the standard set of handlers (HTTP, DB, Consul, Vault).
-
         The discovery/wiring step registers handler CLASSES with the handler registry.
         The subsequent _populate_handlers_from_registry() step instantiates and
         initializes these handler classes.
         """
+        # Register bootstrap handlers FIRST (OMN-1087)
+        # Bootstrap handlers are core infrastructure handlers that are always
+        # available, loaded from HandlerBootstrapSource descriptors.
+        await self._register_bootstrap_handlers()
+
         if self._contract_paths:
             # Contract-based handler discovery (OMN-1133)
             await self._discover_handlers_from_contracts()
-        else:
-            # Fallback to default handler wiring (existing behavior)
-            wire_handlers()
 
     async def _discover_handlers_from_contracts(self) -> None:
         """Discover and register handlers from contract files.
@@ -1073,6 +1078,163 @@ class RuntimeHostProcess:
                 extra={
                     "handlers_discovered": discovery_result.handlers_discovered,
                     "handlers_registered": discovery_result.handlers_registered,
+                },
+            )
+
+    async def _register_bootstrap_handlers(self) -> None:
+        """Register core infrastructure handlers from HandlerBootstrapSource.
+
+        This method implements descriptor-based handler registration as part of
+        OMN-1087. It uses HandlerBootstrapSource to discover and register the
+        core infrastructure handlers (Consul, DB, HTTP, Vault) without requiring
+        contract.yaml files on the filesystem.
+
+        Bootstrap handlers are registered FIRST, before any contract-based or
+        default handler wiring. This ensures core infrastructure handlers are
+        always available regardless of how other handlers are discovered.
+
+        Handler Registration Process:
+            1. Create HandlerBootstrapSource instance
+            2. Call discover_handlers() to get handler descriptors
+            3. For each descriptor:
+               a. Extract protocol type from handler_id (e.g., "bootstrap.consul" -> "consul")
+               b. Import handler class from fully qualified class path
+               c. Register class with handler registry
+
+        Error Handling:
+            Individual handler failures are logged but do not block registration
+            of other handlers. This enables graceful degradation where some
+            bootstrap handlers can be registered even if others fail to import.
+
+        Related:
+            - HandlerBootstrapSource: Source that provides handler descriptors
+            - ModelHandlerDescriptor: Descriptor model with handler metadata
+            - _discover_or_wire_handlers: Caller that orchestrates all handler loading
+        """
+        from omnibase_infra.runtime.handler_bootstrap_source import (
+            SOURCE_TYPE_BOOTSTRAP,
+            HandlerBootstrapSource,
+        )
+
+        logger.info(
+            "Starting bootstrap handler registration",
+            extra={"source_type": SOURCE_TYPE_BOOTSTRAP},
+        )
+
+        # Get handler registry for registration
+        handler_registry = await self._get_handler_registry()
+
+        # Create bootstrap source and discover handlers
+        bootstrap_source = HandlerBootstrapSource()
+        discovery_result = await bootstrap_source.discover_handlers()
+
+        registered_count = 0
+        error_count = 0
+
+        for descriptor in discovery_result.descriptors:
+            try:
+                # Extract protocol type from handler_id
+                # Handler IDs are formatted as "bootstrap.{protocol_type}"
+                # e.g., "bootstrap.consul" -> "consul"
+                # removeprefix returns original string if prefix not found
+                protocol_type = descriptor.handler_id.removeprefix("bootstrap.")
+
+                # Import the handler class from fully qualified path
+                handler_class_path = descriptor.handler_class
+                if handler_class_path is None:
+                    logger.warning(
+                        "Bootstrap handler missing handler_class, skipping",
+                        extra={
+                            "handler_id": descriptor.handler_id,
+                            "handler_name": descriptor.name,
+                        },
+                    )
+                    error_count += 1
+                    continue
+
+                # Import class using rsplit pattern (same as ContractHandlerDiscovery)
+                if "." not in handler_class_path:
+                    logger.error(
+                        "Invalid handler class path (must be fully qualified): %s",
+                        handler_class_path,
+                        extra={"handler_id": descriptor.handler_id},
+                    )
+                    error_count += 1
+                    continue
+
+                module_path, class_name = handler_class_path.rsplit(".", 1)
+                module = importlib.import_module(module_path)
+                handler_cls = getattr(module, class_name)
+
+                # Verify it's actually a class
+                if not isinstance(handler_cls, type):
+                    logger.error(
+                        "Handler path does not resolve to a class: %s",
+                        handler_class_path,
+                        extra={
+                            "handler_id": descriptor.handler_id,
+                            "resolved_type": type(handler_cls).__name__,
+                        },
+                    )
+                    error_count += 1
+                    continue
+
+                # Register with handler registry
+                handler_registry.register(protocol_type, handler_cls)
+                registered_count += 1
+
+                logger.debug(
+                    "Registered bootstrap handler: %s -> %s",
+                    protocol_type,
+                    handler_class_path,
+                    extra={
+                        "handler_id": descriptor.handler_id,
+                        "protocol_type": protocol_type,
+                        "handler_class": handler_class_path,
+                        "source_type": SOURCE_TYPE_BOOTSTRAP,
+                    },
+                )
+
+            except (ImportError, AttributeError):
+                # Module or class import failed
+                error_count += 1
+                logger.exception(
+                    "Failed to import bootstrap handler",
+                    extra={
+                        "handler_id": descriptor.handler_id,
+                        "handler_class": descriptor.handler_class,
+                    },
+                )
+
+            except Exception:
+                # Unexpected error - log but continue with other handlers
+                error_count += 1
+                logger.exception(
+                    "Unexpected error registering bootstrap handler",
+                    extra={
+                        "handler_id": descriptor.handler_id,
+                        "handler_class": descriptor.handler_class,
+                    },
+                )
+
+        # Log summary
+        if error_count > 0:
+            logger.warning(
+                "Bootstrap handler registration completed with errors",
+                extra={
+                    "registered_count": registered_count,
+                    "error_count": error_count,
+                    "total_descriptors": len(discovery_result.descriptors),
+                    "source_type": SOURCE_TYPE_BOOTSTRAP,
+                },
+            )
+        else:
+            logger.info(
+                "Bootstrap handler registration completed successfully",
+                extra={
+                    "registered_count": registered_count,
+                    "total_descriptors": len(discovery_result.descriptors),
+                    "source_type": SOURCE_TYPE_BOOTSTRAP,
                 },
             )
 
