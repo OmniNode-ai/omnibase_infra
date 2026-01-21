@@ -488,7 +488,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
 
 
 # Protocol compliance check (runtime_checkable allows isinstance checks)
-def _verify_protocol_compliance() -> None:
+def _verify_protocol_compliance() -> None:  # pragma: no cover
     """Verify TransitionNotificationPublisher implements the protocol.
 
     This function is never called at runtime - it exists purely for static

@@ -41,6 +41,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
@@ -200,8 +201,9 @@ class MixinProjectorNotificationPublishing:
             return None
 
         config = self._notification_config
-        # config is not None here due to _is_notification_enabled check
-        assert config is not None  # Type narrowing for mypy
+        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        if config is None:
+            return None
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
@@ -236,8 +238,9 @@ class MixinProjectorNotificationPublishing:
                 return str(state_value)
             return None
 
-        except Exception as e:
+        except (TimeoutError, asyncpg.PostgresError) as e:
             # Log but don't fail - notifications are best-effort
+            # Narrowed to DB and timeout errors to avoid masking configuration errors
             logger.warning(
                 "Failed to fetch current state for notification: %s",
                 str(e),
@@ -266,7 +269,9 @@ class MixinProjectorNotificationPublishing:
             return None
 
         config = self._notification_config
-        assert config is not None  # Type narrowing for mypy
+        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        if config is None:
+            return None
 
         state_value = values.get(config.state_column)
         if state_value is not None:
@@ -289,7 +294,9 @@ class MixinProjectorNotificationPublishing:
             return None
 
         config = self._notification_config
-        assert config is not None  # Type narrowing for mypy
+        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        if config is None:
+            return None
 
         aggregate_id_value = values.get(config.aggregate_id_column)
         if aggregate_id_value is None:
@@ -330,7 +337,9 @@ class MixinProjectorNotificationPublishing:
             return 0
 
         config = self._notification_config
-        assert config is not None  # Type narrowing for mypy
+        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        if config is None:
+            return 0
 
         if config.version_column is None:
             return 0
@@ -375,7 +384,9 @@ class MixinProjectorNotificationPublishing:
             return
 
         publisher = self._notification_publisher
-        assert publisher is not None  # Type narrowing for mypy
+        # Explicit type guard for mypy - _is_notification_enabled() ensures this
+        if publisher is None:
+            return
 
         # Handle new entities (no previous state)
         # from_state is required in the notification model, use empty string for new

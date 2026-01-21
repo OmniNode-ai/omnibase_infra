@@ -141,6 +141,7 @@ class TransitionNotificationOutbox:
     DEFAULT_BATCH_SIZE: int = 100
     DEFAULT_POLL_INTERVAL_SECONDS: float = 1.0
     DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
+    MAX_ERROR_MESSAGE_LENGTH: int = 1000
 
     def __init__(
         self,
@@ -456,7 +457,9 @@ class TransitionNotificationOutbox:
                         await conn.execute(
                             update_failure_query,
                             row_id,
-                            error_message[:1000],  # Truncate for DB column
+                            error_message[
+                                : self.MAX_ERROR_MESSAGE_LENGTH
+                            ],  # Truncate for DB column
                             timeout=self._query_timeout,
                         )
 
