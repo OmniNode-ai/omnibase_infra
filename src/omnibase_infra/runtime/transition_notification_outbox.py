@@ -144,7 +144,7 @@ class TransitionNotificationOutbox:
     DEFAULT_BATCH_SIZE: int = 100
     DEFAULT_POLL_INTERVAL_SECONDS: float = 1.0
     DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
-    DEFAULT_STRICT_TRANSACTION_MODE: bool = False
+    DEFAULT_STRICT_TRANSACTION_MODE: bool = True
     MAX_ERROR_MESSAGE_LENGTH: int = 1000
 
     def __init__(
@@ -166,10 +166,10 @@ class TransitionNotificationOutbox:
             batch_size: Maximum notifications to process per batch (default: 100).
             poll_interval_seconds: Seconds between polls when idle (default: 1.0).
             query_timeout_seconds: Timeout for database queries (default: 30.0).
-            strict_transaction_mode: If True, raises ProtocolConfigurationError when
-                store() is called outside a transaction context. If False (default),
-                logs a warning but continues execution. Enable this for fail-fast
-                behavior in production to catch misconfiguration early.
+            strict_transaction_mode: If True (default), raises ProtocolConfigurationError
+                when store() is called outside a transaction context, providing
+                fail-fast behavior to catch misconfiguration early. If False,
+                logs a warning but continues execution (atomicity not guaranteed).
 
         Raises:
             ProtocolConfigurationError: If pool or publisher is None, or if
@@ -293,11 +293,10 @@ class TransitionNotificationOutbox:
             If called outside a transaction (auto-commit mode), behavior depends
             on ``strict_transaction_mode``:
 
-            - **strict_transaction_mode=False** (default): Logs a WARNING but
-              continues execution. The atomicity guarantee with projection
-              writes will be broken in this case.
-            - **strict_transaction_mode=True**: Raises ProtocolConfigurationError
-              immediately. Use this for fail-fast behavior in production.
+            - **strict_transaction_mode=True** (default): Raises ProtocolConfigurationError
+              immediately, providing fail-fast behavior to catch misconfiguration early.
+            - **strict_transaction_mode=False**: Logs a WARNING but continues execution.
+              The atomicity guarantee with projection writes will be broken in this case.
 
         Args:
             notification: The state transition notification to store.

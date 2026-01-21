@@ -758,7 +758,7 @@ class TestProjectorNotificationConcurrency:
         # Verify from_state -> to_state chain is correct
         for i, (envelope, _) in enumerate(mock_event_bus.published_envelopes):
             payload = envelope.payload
-            expected_from = "" if i == 0 else states[i - 1]
+            expected_from = FROM_STATE_INITIAL if i == 0 else states[i - 1]
             expected_to = states[i]
             assert payload["from_state"] == expected_from, (
                 f"Expected from_state '{expected_from}' at step {i}, "
