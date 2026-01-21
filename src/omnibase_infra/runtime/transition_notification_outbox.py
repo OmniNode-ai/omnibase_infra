@@ -71,6 +71,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 from omnibase_infra.runtime.models.model_transition_notification_outbox_metrics import (
     ModelTransitionNotificationOutboxMetrics,
 )
@@ -345,10 +346,11 @@ class TransitionNotificationOutbox:
                 },
             )
 
-        # Build INSERT query - table name from trusted config
-        # S608: Safe - table name from constructor, not user input
+        # Build INSERT query - table name from trusted config, quoted for safety
+        # S608: Safe - table name from constructor, quoted via quote_identifier()
+        table_quoted = quote_identifier(self._table_name)
         query = f"""
-            INSERT INTO {self._table_name}
+            INSERT INTO {table_quoted}
             (notification_data, aggregate_type, aggregate_id)
             VALUES ($1, $2, $3)
         """  # noqa: S608
@@ -425,27 +427,30 @@ class TransitionNotificationOutbox:
             correlation_id=correlation_id,
         )
 
-        # Build SELECT query with FOR UPDATE SKIP LOCKED for concurrent safety
-        # S608: Safe - table name from constructor, not user input
+        # Build queries - table name from trusted config, quoted for safety
+        table_quoted = quote_identifier(self._table_name)
+
+        # SELECT query with FOR UPDATE SKIP LOCKED for concurrent safety
+        # S608: Safe - table name from constructor, quoted via quote_identifier()
         select_query = f"""
             SELECT id, notification_data
-            FROM {self._table_name}
+            FROM {table_quoted}
             WHERE processed_at IS NULL
             ORDER BY created_at
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         """  # noqa: S608
 
-        # Build UPDATE queries
-        # S608: Safe - table name from constructor, not user input
+        # UPDATE queries
+        # S608: Safe - table name from constructor, quoted via quote_identifier()
         update_success_query = f"""
-            UPDATE {self._table_name}
+            UPDATE {table_quoted}
             SET processed_at = NOW()
             WHERE id = $1
         """  # noqa: S608
 
         update_failure_query = f"""
-            UPDATE {self._table_name}
+            UPDATE {table_quoted}
             SET retry_count = retry_count + 1, last_error = $2
             WHERE id = $1
         """  # noqa: S608

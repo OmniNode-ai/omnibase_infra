@@ -262,6 +262,31 @@ class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOper
             for notification publishing to be enabled. If only one is provided,
             notifications will not be published (silent no-op).
 
+            **Topic Consistency**: When both notification_publisher and
+            notification_config are provided, be aware that:
+
+            - The ``notification_config.topic`` field is **informational only**
+              (used for logging, metrics, and configuration documentation)
+            - The **actual topic** used for publishing is determined solely by
+              the ``notification_publisher``'s internal configuration (the topic
+              passed to ``TransitionNotificationPublisher.__init__``)
+            - These two values are **not validated** against each other to avoid
+              tight coupling between components
+            - **Users should ensure these match** when configuring both components
+              to avoid confusion during debugging
+
+            Example of consistent configuration::
+
+                # Publisher determines actual destination
+                publisher = TransitionNotificationPublisher(event_bus, "transitions.v1")
+
+                # Config topic should match for documentation consistency
+                config = ModelProjectorNotificationConfig(
+                    topic="transitions.v1",  # Match publisher's topic
+                    state_column="current_state",
+                    ...
+                )
+
         Example:
             >>> from omnibase_infra.runtime import TransitionNotificationPublisher
             >>> from omnibase_infra.runtime.models import ModelProjectorNotificationConfig

@@ -110,7 +110,11 @@ class ModelProjectorNotificationConfig(BaseModel):
         min_length=1,
         max_length=256,
         description="Event bus topic for publishing state transition notifications. "
-        "Should match the topic defined in the projector's contract.",
+        "IMPORTANT: This field is informational/for documentation purposes only. "
+        "The actual topic used for publishing is determined by the "
+        "TransitionNotificationPublisher's configuration, not this field. "
+        "Users should ensure this value matches the publisher's topic to avoid "
+        "confusion during debugging. See ProjectorShell.__init__ for details.",
     )
 
     state_column: str = Field(

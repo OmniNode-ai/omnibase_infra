@@ -145,6 +145,28 @@ class MixinProjectorNotificationPublishing:
         ...                 event, from_state, to_state, version, correlation_id
         ...             )
         ...         return result
+
+    Warning:
+        **Race Condition in from_state Tracking**: The ``from_state`` value is fetched
+        in a separate query BEFORE the projection executes. There is a race window where
+        another concurrent projection could modify the state between the fetch and the
+        actual projection commit. In this scenario, the ``from_state`` in the notification
+        may not reflect the true previous state.
+
+        This is acceptable for most use cases because:
+
+        1. Notifications are best-effort (failures are logged, not raised)
+        2. Consumers should be idempotent and tolerate slight inconsistencies
+        3. The ``to_state`` is always accurate (extracted from projection values)
+
+        For use cases requiring truly accurate ``from_state`` tracking, consider:
+
+        - **Database triggers**: Use PostgreSQL triggers to capture old row values atomically
+        - **RETURNING clause**: Modify the projection SQL to use ``UPDATE ... RETURNING``
+          with the old value (requires schema changes)
+        - **Optimistic locking**: Add version checks to detect concurrent modifications
+
+        See ``_fetch_current_state_for_notification`` for detailed race condition analysis.
     """
 
     # Type hints for expected attributes from implementing class
@@ -248,6 +270,57 @@ class MixinProjectorNotificationPublishing:
             - Notifications are not enabled
             - No row exists for this aggregate (new entity)
             - State column value is NULL
+
+        Warning:
+            **Race Condition Window**: This method fetches state BEFORE the projection
+            executes, not atomically with it. The sequence is::
+
+                T1: _fetch_current_state_for_notification() -> reads state="pending"
+                T2: [Another projection commits] -> state changes to "approved"
+                T1: _execute_projection() -> changes state to "completed"
+                T1: Notification published with from_state="pending" (STALE!)
+
+            In this scenario, the actual transition was "approved" -> "completed",
+            but the notification reports "pending" -> "completed".
+
+            **Impact Assessment**:
+
+            - **Low impact**: Notifications are best-effort; consumers should be idempotent
+            - **to_state is accurate**: Always extracted from projection values, not fetched
+            - **Ordering preserved**: projection_version ensures consumers can order correctly
+
+            **When This Matters**:
+
+            - Audit logging requiring exact state history
+            - UI showing real-time state transitions
+            - Compliance systems requiring accurate audit trails
+
+            **Alternatives for Strict Requirements**:
+
+            1. **Database triggers** (recommended): Create a PostgreSQL trigger that fires
+               BEFORE UPDATE and captures OLD.state into a session variable or audit table::
+
+                   CREATE OR REPLACE FUNCTION capture_old_state()
+                   RETURNS TRIGGER AS $$
+                   BEGIN
+                       PERFORM set_config('app.old_state', OLD.state, true);
+                       RETURN NEW;
+                   END;
+                   $$ LANGUAGE plpgsql;
+
+            2. **RETURNING clause**: Modify projection SQL to return old value using
+               a subquery or CTE (requires significant projection refactoring)::
+
+                   WITH old AS (SELECT state FROM table WHERE id = $1)
+                   UPDATE table SET state = $2 WHERE id = $1
+                   RETURNING (SELECT state FROM old) AS old_state
+
+            3. **Serializable isolation**: Use SERIALIZABLE transaction isolation
+               (significant performance impact, not recommended for high-throughput)
+
+            **Design Decision**: This implementation prioritizes simplicity and performance
+            over strict consistency. The race window is small (typically <10ms) and the
+            impact is limited to from_state accuracy in notifications.
         """
         config = self._get_notification_config_if_enabled()
         if config is None:
