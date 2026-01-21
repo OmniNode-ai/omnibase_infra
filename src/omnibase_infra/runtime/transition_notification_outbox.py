@@ -94,12 +94,23 @@ class TransitionNotificationOutbox:
     guarantee atomicity. A separate process then reads from the outbox
     and publishes events.
 
+    Dead Letter Queue (DLQ) Support:
+        When configured with ``max_retries`` and ``dlq_publisher``, notifications
+        that exceed the retry threshold are moved to a dead letter queue instead
+        of being retried indefinitely. This prevents poison messages from blocking
+        the outbox and provides a way to inspect and replay failed notifications.
+
+        DLQ notifications are published with the original notification payload,
+        allowing downstream consumers to process or investigate failures.
+
     Attributes:
         table_name: Name of the outbox table (default: "transition_notification_outbox")
         batch_size: Number of notifications to process per batch (default: 100)
         poll_interval: Seconds between processing polls when idle (default: 1.0)
         shutdown_timeout: Seconds to wait for graceful shutdown during stop() (default: 10.0)
         is_running: Whether the background processor is running
+        max_retries: Maximum retry attempts before moving to DLQ (None if DLQ disabled)
+        dlq_topic: DLQ topic name for metrics/logging (None if DLQ disabled)
 
     Concurrency Safety:
         This implementation is coroutine-safe using asyncio primitives:
@@ -135,6 +146,18 @@ class TransitionNotificationOutbox:
         >>> # Stop gracefully
         >>> await outbox.stop()
 
+    Example with DLQ:
+        >>> # Create outbox with DLQ support
+        >>> dlq_publisher = KafkaDLQPublisher(topic="notifications-dlq")
+        >>> outbox = TransitionNotificationOutbox(
+        ...     pool=pool,
+        ...     publisher=publisher,
+        ...     max_retries=3,
+        ...     dlq_publisher=dlq_publisher,
+        ...     dlq_topic="notifications-dlq",
+        ... )
+        >>> # Notifications failing 3+ times will be moved to DLQ
+
     Related:
         - OMN-1139: TransitionNotificationOutbox implementation
         - ProtocolTransitionNotificationPublisher: Publisher protocol
@@ -160,6 +183,9 @@ class TransitionNotificationOutbox:
         query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
         strict_transaction_mode: bool = DEFAULT_STRICT_TRANSACTION_MODE,
         shutdown_timeout_seconds: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
+        max_retries: int | None = None,
+        dlq_publisher: ProtocolTransitionNotificationPublisher | None = None,
+        dlq_topic: str | None = None,
     ) -> None:
         """Initialize the TransitionNotificationOutbox.
 
@@ -177,10 +203,18 @@ class TransitionNotificationOutbox:
             shutdown_timeout_seconds: Timeout in seconds for graceful shutdown
                 during stop() (default: 10.0). If the background processor does
                 not complete within this timeout, it will be cancelled.
+            max_retries: Maximum retry attempts before moving notification to DLQ.
+                Must be >= 1 if specified. If None (default), DLQ is disabled.
+            dlq_publisher: Publisher for dead letter queue. Required if max_retries
+                is specified. If None when max_retries is set, raises
+                ProtocolConfigurationError.
+            dlq_topic: Topic name for DLQ (for metrics/logging purposes).
+                Optional, used for observability.
 
         Raises:
-            ProtocolConfigurationError: If pool or publisher is None, or if
-                configuration values are invalid.
+            ProtocolConfigurationError: If pool or publisher is None, if
+                configuration values are invalid, if max_retries < 1, or if
+                max_retries is set but dlq_publisher is None.
         """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
@@ -219,6 +253,31 @@ class TransitionNotificationOutbox:
                 value=shutdown_timeout_seconds,
             )
 
+        # DLQ validation
+        if max_retries is not None and max_retries < 1:
+            raise ProtocolConfigurationError(
+                f"max_retries must be >= 1, got {max_retries}",
+                context=context,
+                parameter="max_retries",
+                value=max_retries,
+            )
+
+        if max_retries is not None and dlq_publisher is None:
+            raise ProtocolConfigurationError(
+                "dlq_publisher is required when max_retries is configured",
+                context=context,
+                parameter="dlq_publisher",
+            )
+
+        if dlq_publisher is not None and max_retries is None:
+            logger.warning(
+                "dlq_publisher configured but max_retries is None - DLQ will never be used",
+                extra={
+                    "table_name": table_name,
+                    "dlq_topic": dlq_topic,
+                },
+            )
+
         self._pool = pool
         self._publisher = publisher
         self._table_name = table_name
@@ -238,6 +297,12 @@ class TransitionNotificationOutbox:
         self._notifications_stored: int = 0
         self._notifications_processed: int = 0
         self._notifications_failed: int = 0
+        self._notifications_sent_to_dlq: int = 0
+
+        # DLQ configuration
+        self._max_retries = max_retries
+        self._dlq_publisher = dlq_publisher
+        self._dlq_topic = dlq_topic
 
         logger.debug(
             "TransitionNotificationOutbox initialized",
@@ -247,6 +312,9 @@ class TransitionNotificationOutbox:
                 "poll_interval_seconds": poll_interval_seconds,
                 "strict_transaction_mode": strict_transaction_mode,
                 "shutdown_timeout_seconds": shutdown_timeout_seconds,
+                "max_retries": max_retries,
+                "dlq_enabled": dlq_publisher is not None,
+                "dlq_topic": dlq_topic,
             },
         )
 
@@ -298,6 +366,21 @@ class TransitionNotificationOutbox:
         outside a transaction context, rather than just logging a warning.
         """
         return self._strict_transaction_mode
+
+    @property
+    def max_retries(self) -> int | None:
+        """Return the max retries before DLQ, or None if DLQ disabled."""
+        return self._max_retries
+
+    @property
+    def dlq_topic(self) -> str | None:
+        """Return the DLQ topic name for metrics/logging."""
+        return self._dlq_topic
+
+    @property
+    def notifications_sent_to_dlq(self) -> int:
+        """Return total notifications sent to DLQ."""
+        return self._notifications_sent_to_dlq
 
     async def store(
         self,
@@ -453,7 +536,7 @@ class TransitionNotificationOutbox:
         # SELECT query with FOR UPDATE SKIP LOCKED for concurrent safety
         # S608: Safe - table name from constructor, quoted via quote_identifier()
         select_query = f"""
-            SELECT id, notification_data
+            SELECT id, notification_data, retry_count
             FROM {table_quoted}
             WHERE processed_at IS NULL
             ORDER BY created_at
@@ -472,6 +555,13 @@ class TransitionNotificationOutbox:
         update_failure_query = f"""
             UPDATE {table_quoted}
             SET retry_count = retry_count + 1, last_error = $2
+            WHERE id = $1
+        """  # noqa: S608
+
+        # S608: Safe - table name from constructor, quoted via quote_identifier()
+        update_dlq_query = f"""
+            UPDATE {table_quoted}
+            SET processed_at = NOW(), last_error = $2
             WHERE id = $1
         """  # noqa: S608
 
@@ -495,6 +585,7 @@ class TransitionNotificationOutbox:
                     for row in rows:
                         row_id: int = row["id"]
                         notification_data = row["notification_data"]
+                        row_retry_count: int = row["retry_count"]
 
                         try:
                             # Parse notification - asyncpg returns dict for JSONB columns
@@ -508,6 +599,23 @@ class TransitionNotificationOutbox:
                                 notification = ModelStateTransitionNotification.model_validate_json(
                                     notification_data
                                 )
+
+                            # Check if notification should be moved to DLQ
+                            if self._should_move_to_dlq(row_retry_count):
+                                dlq_success = await self._move_to_dlq(
+                                    row_id=row_id,
+                                    notification=notification,
+                                    retry_count=row_retry_count,
+                                    conn=conn,
+                                    update_dlq_query=update_dlq_query,
+                                    correlation_id=correlation_id,
+                                )
+                                if dlq_success:
+                                    processed += (
+                                        1  # Count as processed since it's been handled
+                                    )
+                                # Skip normal publishing regardless - DLQ failures will retry
+                                continue
 
                             # Publish notification
                             await self._publisher.publish(notification)
@@ -762,6 +870,108 @@ class TransitionNotificationOutbox:
                 },
             )
 
+    def _should_move_to_dlq(self, retry_count: int) -> bool:
+        """Check if notification should be moved to DLQ.
+
+        Args:
+            retry_count: Current retry count for the notification.
+
+        Returns:
+            True if the notification should be moved to DLQ, False otherwise.
+        """
+        if self._max_retries is None or self._dlq_publisher is None:
+            return False
+        return retry_count >= self._max_retries
+
+    async def _move_to_dlq(
+        self,
+        row_id: int,
+        notification: ModelStateTransitionNotification,
+        retry_count: int,
+        conn: asyncpg.Connection,
+        update_dlq_query: str,
+        correlation_id: UUID,
+    ) -> bool:
+        """Move a notification to the dead letter queue.
+
+        Publishes the notification to the DLQ via the dlq_publisher, marks
+        the original record as processed with an error message, and updates
+        metrics.
+
+        Args:
+            row_id: Database row ID of the notification.
+            notification: The parsed notification to move to DLQ.
+            retry_count: Current retry count for the notification.
+            conn: Database connection for updates.
+            update_dlq_query: SQL query to mark notification as processed.
+            correlation_id: Correlation ID for logging.
+
+        Returns:
+            True if the notification was successfully moved to DLQ, False otherwise.
+
+        Note:
+            If DLQ publish fails, the notification is NOT marked as processed
+            and will be retried on the next processing cycle. This ensures
+            no data loss even if the DLQ is temporarily unavailable. The
+            retry_count is NOT incremented on DLQ failure since it already
+            exceeds max_retries.
+        """
+        if self._dlq_publisher is None:
+            # Should not happen due to _should_move_to_dlq check, but defensive
+            return False
+
+        dlq_error_message = f"Moved to DLQ after {retry_count} retries"
+
+        try:
+            # Publish to DLQ
+            await self._dlq_publisher.publish(notification)
+
+            # Mark as processed with DLQ error message
+            await conn.execute(
+                update_dlq_query,
+                row_id,
+                dlq_error_message[: self.MAX_ERROR_MESSAGE_LENGTH],
+                timeout=self._query_timeout,
+            )
+
+            self._notifications_sent_to_dlq += 1
+
+            logger.warning(
+                "Notification moved to DLQ after exceeding max retries",
+                extra={
+                    "outbox_id": row_id,
+                    "aggregate_type": notification.aggregate_type,
+                    "aggregate_id": str(notification.aggregate_id),
+                    "correlation_id": str(notification.correlation_id),
+                    "retry_count": retry_count,
+                    "max_retries": self._max_retries,
+                    "dlq_topic": self._dlq_topic,
+                    "batch_correlation_id": str(correlation_id),
+                },
+            )
+
+            return True
+
+        except Exception as e:
+            # DLQ publish failed - do NOT mark as processed
+            # Notification will be retried on next cycle without incrementing retry_count
+            error_message = sanitize_error_string(str(e))
+            logger.exception(
+                "Failed to publish notification to DLQ, will retry",
+                extra={
+                    "outbox_id": row_id,
+                    "aggregate_type": notification.aggregate_type,
+                    "aggregate_id": str(notification.aggregate_id),
+                    "correlation_id": str(notification.correlation_id),
+                    "retry_count": retry_count,
+                    "error": error_message,
+                    "error_type": type(e).__name__,
+                    "dlq_topic": self._dlq_topic,
+                    "batch_correlation_id": str(correlation_id),
+                },
+            )
+            return False
+
     def get_metrics(self) -> ModelTransitionNotificationOutboxMetrics:
         """Return current outbox metrics for observability.
 
@@ -772,12 +982,16 @@ class TransitionNotificationOutbox:
             - notifications_stored: Total notifications stored
             - notifications_processed: Total notifications successfully processed
             - notifications_failed: Total notifications that failed processing
+            - notifications_sent_to_dlq: Total notifications moved to DLQ
             - batch_size: Configured batch size
             - poll_interval_seconds: Configured poll interval
+            - max_retries: Max retries before DLQ (None if DLQ disabled)
+            - dlq_topic: DLQ topic name (None if DLQ disabled)
 
         Example:
             >>> metrics = outbox.get_metrics()
             >>> print(f"Processed: {metrics.notifications_processed}")
+            >>> print(f"Sent to DLQ: {metrics.notifications_sent_to_dlq}")
         """
         return ModelTransitionNotificationOutboxMetrics(
             table_name=self._table_name,
@@ -785,8 +999,11 @@ class TransitionNotificationOutbox:
             notifications_stored=self._notifications_stored,
             notifications_processed=self._notifications_processed,
             notifications_failed=self._notifications_failed,
+            notifications_sent_to_dlq=self._notifications_sent_to_dlq,
             batch_size=self._batch_size,
             poll_interval_seconds=self._poll_interval,
+            max_retries=self._max_retries,
+            dlq_topic=self._dlq_topic,
         )
 
     async def cleanup_processed(

@@ -1296,3 +1296,840 @@ class TestTransitionNotificationOutboxIntegration:
         assert restored.metadata == notification.metadata
         assert restored.metadata.get("node_id") == "abc-123"
         assert restored.metadata.get("executor") == "runtime-host"
+
+
+# =============================================================================
+# DLQ Tests
+# =============================================================================
+
+
+@pytest.fixture
+def mock_dlq_publisher() -> AsyncMock:
+    """Create mock DLQ publisher.
+
+    Returns an AsyncMock simulating a DLQ notification publisher interface
+    for dead letter queue functionality.
+    """
+    publisher = AsyncMock()
+    publisher.publish = AsyncMock(return_value=None)
+    return publisher
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTransitionNotificationOutboxDLQ:
+    """Test Dead Letter Queue (DLQ) functionality."""
+
+    # =========================================================================
+    # Configuration Validation Tests
+    # =========================================================================
+
+    async def test_dlq_max_retries_less_than_one_raises_error(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+    ) -> None:
+        """max_retries < 1 should raise ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        with pytest.raises(
+            ProtocolConfigurationError, match="max_retries must be >= 1"
+        ):
+            TransitionNotificationOutbox(
+                pool=mock_pool,
+                publisher=mock_publisher,
+                max_retries=0,
+                dlq_publisher=mock_dlq_publisher,
+            )
+
+    async def test_dlq_max_retries_without_publisher_raises_error(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """max_retries set but dlq_publisher=None should raise error."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        with pytest.raises(
+            ProtocolConfigurationError,
+            match="dlq_publisher is required when max_retries is configured",
+        ):
+            TransitionNotificationOutbox(
+                pool=mock_pool,
+                publisher=mock_publisher,
+                max_retries=3,
+                dlq_publisher=None,
+            )
+
+    async def test_dlq_publisher_without_max_retries_logs_warning(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """dlq_publisher set but max_retries=None should log warning."""
+        import logging
+
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            outbox = TransitionNotificationOutbox(
+                pool=mock_pool,
+                publisher=mock_publisher,
+                max_retries=None,
+                dlq_publisher=mock_dlq_publisher,
+            )
+
+        assert "dlq_publisher configured but max_retries is None" in caplog.text
+        assert "DLQ will never be used" in caplog.text
+        assert outbox.max_retries is None
+
+    async def test_dlq_valid_configuration_succeeds(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+    ) -> None:
+        """Valid DLQ config (max_retries=3, dlq_publisher set) succeeds."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+            dlq_topic="test-dlq-topic",
+        )
+
+        assert outbox.max_retries == 3
+        assert outbox.dlq_topic == "test-dlq-topic"
+        assert outbox.notifications_sent_to_dlq == 0
+
+    # =========================================================================
+    # _should_move_to_dlq() Tests
+    # =========================================================================
+
+    async def test_should_move_to_dlq_returns_false_when_disabled(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Returns False when max_retries is None."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=None,
+            dlq_publisher=None,
+        )
+
+        # Should return False for any retry count when DLQ disabled
+        assert outbox._should_move_to_dlq(0) is False
+        assert outbox._should_move_to_dlq(1) is False
+        assert outbox._should_move_to_dlq(100) is False
+
+    async def test_should_move_to_dlq_returns_false_below_threshold(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+    ) -> None:
+        """Returns False when retry_count < max_retries."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        # retry_count 0, 1, 2 < max_retries 3
+        assert outbox._should_move_to_dlq(0) is False
+        assert outbox._should_move_to_dlq(1) is False
+        assert outbox._should_move_to_dlq(2) is False
+
+    async def test_should_move_to_dlq_returns_true_at_threshold(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+    ) -> None:
+        """Returns True when retry_count == max_retries."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        # retry_count 3 == max_retries 3
+        assert outbox._should_move_to_dlq(3) is True
+
+    async def test_should_move_to_dlq_returns_true_above_threshold(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+    ) -> None:
+        """Returns True when retry_count > max_retries."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        # retry_count > max_retries
+        assert outbox._should_move_to_dlq(4) is True
+        assert outbox._should_move_to_dlq(10) is True
+        assert outbox._should_move_to_dlq(100) is True
+
+    # =========================================================================
+    # _move_to_dlq() Behavior Tests
+    # =========================================================================
+
+    async def test_move_to_dlq_publishes_notification(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """DLQ publisher.publish() is called with notification."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        result = await outbox._move_to_dlq(
+            row_id=1,
+            notification=sample_notification,
+            retry_count=3,
+            conn=mock_conn,
+            update_dlq_query="UPDATE test SET processed_at = NOW() WHERE id = $1",
+            correlation_id=uuid4(),
+        )
+
+        assert result is True
+        mock_dlq_publisher.publish.assert_called_once_with(sample_notification)
+
+    async def test_move_to_dlq_marks_as_processed(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """Notification is marked as processed after DLQ publish."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        update_query = (
+            "UPDATE test SET processed_at = NOW(), last_error = $2 WHERE id = $1"
+        )
+
+        await outbox._move_to_dlq(
+            row_id=42,
+            notification=sample_notification,
+            retry_count=3,
+            conn=mock_conn,
+            update_dlq_query=update_query,
+            correlation_id=uuid4(),
+        )
+
+        # Verify execute was called with row_id
+        mock_conn.execute.assert_called_once()
+        call_args = mock_conn.execute.call_args
+        assert call_args[0][0] == update_query
+        assert call_args[0][1] == 42  # row_id
+
+    async def test_move_to_dlq_updates_last_error(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """last_error is set to 'Moved to DLQ after N retries'."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        update_query = (
+            "UPDATE test SET processed_at = NOW(), last_error = $2 WHERE id = $1"
+        )
+
+        await outbox._move_to_dlq(
+            row_id=1,
+            notification=sample_notification,
+            retry_count=5,
+            conn=mock_conn,
+            update_dlq_query=update_query,
+            correlation_id=uuid4(),
+        )
+
+        call_args = mock_conn.execute.call_args
+        error_message = call_args[0][2]
+        assert error_message == "Moved to DLQ after 5 retries"
+
+    async def test_move_to_dlq_increments_metric(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """_notifications_sent_to_dlq counter is incremented."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        assert outbox.notifications_sent_to_dlq == 0
+
+        await outbox._move_to_dlq(
+            row_id=1,
+            notification=sample_notification,
+            retry_count=3,
+            conn=mock_conn,
+            update_dlq_query="UPDATE test SET processed_at = NOW() WHERE id = $1",
+            correlation_id=uuid4(),
+        )
+
+        assert outbox.notifications_sent_to_dlq == 1
+
+        # Call again
+        await outbox._move_to_dlq(
+            row_id=2,
+            notification=sample_notification,
+            retry_count=4,
+            conn=mock_conn,
+            update_dlq_query="UPDATE test SET processed_at = NOW() WHERE id = $1",
+            correlation_id=uuid4(),
+        )
+
+        assert outbox.notifications_sent_to_dlq == 2
+
+    async def test_move_to_dlq_returns_true_on_success(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """Returns True when DLQ publish succeeds."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        result = await outbox._move_to_dlq(
+            row_id=1,
+            notification=sample_notification,
+            retry_count=3,
+            conn=mock_conn,
+            update_dlq_query="UPDATE test SET processed_at = NOW() WHERE id = $1",
+            correlation_id=uuid4(),
+        )
+
+        assert result is True
+
+    # =========================================================================
+    # DLQ Failure Handling Tests
+    # =========================================================================
+
+    async def test_move_to_dlq_failure_returns_false(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """Returns False when DLQ publish fails."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+
+        # Configure DLQ publisher to fail
+        mock_dlq_publisher.publish = AsyncMock(
+            side_effect=ConnectionError("DLQ unavailable")
+        )
+
+        result = await outbox._move_to_dlq(
+            row_id=1,
+            notification=sample_notification,
+            retry_count=3,
+            conn=mock_conn,
+            update_dlq_query="UPDATE test SET processed_at = NOW() WHERE id = $1",
+            correlation_id=uuid4(),
+        )
+
+        assert result is False
+
+    async def test_move_to_dlq_failure_does_not_mark_processed(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """Notification NOT marked as processed when DLQ publish fails."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        # Configure DLQ publisher to fail
+        mock_dlq_publisher.publish = AsyncMock(
+            side_effect=ConnectionError("DLQ unavailable")
+        )
+
+        await outbox._move_to_dlq(
+            row_id=1,
+            notification=sample_notification,
+            retry_count=3,
+            conn=mock_conn,
+            update_dlq_query="UPDATE test SET processed_at = NOW() WHERE id = $1",
+            correlation_id=uuid4(),
+        )
+
+        # Execute should NOT have been called since publish failed before DB update
+        mock_conn.execute.assert_not_called()
+
+    async def test_move_to_dlq_failure_does_not_increment_metric(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """_notifications_sent_to_dlq NOT incremented on DLQ failure."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+
+        # Configure DLQ publisher to fail
+        mock_dlq_publisher.publish = AsyncMock(
+            side_effect=ConnectionError("DLQ unavailable")
+        )
+
+        assert outbox.notifications_sent_to_dlq == 0
+
+        await outbox._move_to_dlq(
+            row_id=1,
+            notification=sample_notification,
+            retry_count=3,
+            conn=mock_conn,
+            update_dlq_query="UPDATE test SET processed_at = NOW() WHERE id = $1",
+            correlation_id=uuid4(),
+        )
+
+        # Metric should NOT be incremented
+        assert outbox.notifications_sent_to_dlq == 0
+
+    # =========================================================================
+    # Integration with process_pending() Tests
+    # =========================================================================
+
+    async def test_process_pending_moves_exhausted_to_dlq(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+    ) -> None:
+        """Notifications exceeding max_retries are moved to DLQ."""
+        from omnibase_core.models.notifications import (
+            ModelStateTransitionNotification as CoreModelNotification,
+        )
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        notification_id = 1
+
+        # Create notification data compatible with the real core model
+        notification_data = {
+            "aggregate_type": "registration",
+            "aggregate_id": str(uuid4()),
+            "from_state": "pending",
+            "to_state": "active",
+            "projection_version": 1,
+            "correlation_id": str(uuid4()),
+            "causation_id": str(uuid4()),
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+        # Return notification that has exceeded max_retries
+        mock_rows = [
+            {
+                "id": notification_id,
+                "notification_data": notification_data,
+                "retry_count": 3,  # Equals max_retries, should go to DLQ
+            }
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        # Configure transaction context manager properly
+        mock_transaction = MagicMock()
+        mock_transaction.__aenter__ = AsyncMock(return_value=None)
+        mock_transaction.__aexit__ = AsyncMock(return_value=None)
+        mock_conn.transaction = MagicMock(return_value=mock_transaction)
+
+        processed = await outbox.process_pending()
+
+        # Should be processed via DLQ
+        assert processed == 1
+
+        # DLQ publisher should have been called
+        mock_dlq_publisher.publish.assert_called_once()
+
+        # Regular publisher should NOT have been called
+        mock_publisher.publish.assert_not_called()
+
+        # DLQ metric should be incremented
+        assert outbox.notifications_sent_to_dlq == 1
+
+    async def test_process_pending_skips_dlq_when_disabled(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """When max_retries=None, no DLQ processing occurs."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=None,  # DLQ disabled
+            dlq_publisher=None,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        notification_id = 1
+
+        # Create notification data compatible with the real core model
+        notification_data = {
+            "aggregate_type": "registration",
+            "aggregate_id": str(uuid4()),
+            "from_state": "pending",
+            "to_state": "active",
+            "projection_version": 1,
+            "correlation_id": str(uuid4()),
+            "causation_id": str(uuid4()),
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+        # Return notification with high retry count
+        mock_rows = [
+            {
+                "id": notification_id,
+                "notification_data": notification_data,
+                "retry_count": 100,  # High retry count but DLQ disabled
+            }
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        # Configure transaction context manager properly
+        mock_transaction = MagicMock()
+        mock_transaction.__aenter__ = AsyncMock(return_value=None)
+        mock_transaction.__aexit__ = AsyncMock(return_value=None)
+        mock_conn.transaction = MagicMock(return_value=mock_transaction)
+
+        processed = await outbox.process_pending()
+
+        # Should be processed via normal publisher
+        assert processed == 1
+
+        # Regular publisher should have been called
+        mock_publisher.publish.assert_called_once()
+
+        # DLQ metric should remain zero
+        assert outbox.notifications_sent_to_dlq == 0
+
+    async def test_process_pending_counts_dlq_as_processed(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+    ) -> None:
+        """DLQ moves count toward the returned processed count."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+
+        # Create notification data compatible with the real core model
+        def make_notification_data() -> dict[str, object]:
+            return {
+                "aggregate_type": "registration",
+                "aggregate_id": str(uuid4()),
+                "from_state": "pending",
+                "to_state": "active",
+                "projection_version": 1,
+                "correlation_id": str(uuid4()),
+                "causation_id": str(uuid4()),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+
+        # Return mix of normal and DLQ-bound notifications
+        mock_rows = [
+            {
+                "id": 1,
+                "notification_data": make_notification_data(),
+                "retry_count": 0,  # Normal processing
+            },
+            {
+                "id": 2,
+                "notification_data": make_notification_data(),
+                "retry_count": 3,  # DLQ processing
+            },
+            {
+                "id": 3,
+                "notification_data": make_notification_data(),
+                "retry_count": 1,  # Normal processing
+            },
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        # Configure transaction context manager properly
+        mock_transaction = MagicMock()
+        mock_transaction.__aenter__ = AsyncMock(return_value=None)
+        mock_transaction.__aexit__ = AsyncMock(return_value=None)
+        mock_conn.transaction = MagicMock(return_value=mock_transaction)
+
+        processed = await outbox.process_pending()
+
+        # All 3 should count as processed
+        assert processed == 3
+
+        # Regular publisher should have been called twice (retry_count 0 and 1)
+        assert mock_publisher.publish.call_count == 2
+
+        # DLQ publisher should have been called once (retry_count 3)
+        mock_dlq_publisher.publish.assert_called_once()
+
+        # Metrics should reflect this
+        assert outbox.notifications_processed == 2  # Normal processing increments this
+        assert outbox.notifications_sent_to_dlq == 1
+
+    # =========================================================================
+    # Metrics Tests
+    # =========================================================================
+
+    async def test_metrics_include_dlq_fields(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+    ) -> None:
+        """get_metrics() includes notifications_sent_to_dlq, max_retries, dlq_topic."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=5,
+            dlq_publisher=mock_dlq_publisher,
+            dlq_topic="test-notifications-dlq",
+        )
+
+        metrics = outbox.get_metrics()
+
+        # Verify DLQ fields are present
+        assert metrics.notifications_sent_to_dlq == 0
+        assert metrics.max_retries == 5
+        assert metrics.dlq_topic == "test-notifications-dlq"
+
+        # Verify other standard fields
+        assert metrics.is_running is False
+        assert metrics.notifications_stored == 0
+        assert metrics.notifications_processed == 0
+        assert metrics.notifications_failed == 0
+
+    async def test_metrics_dlq_fields_when_disabled(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """get_metrics() returns None for DLQ fields when DLQ disabled."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=None,  # DLQ disabled
+            dlq_publisher=None,
+        )
+
+        metrics = outbox.get_metrics()
+
+        # DLQ fields should reflect disabled state
+        assert metrics.notifications_sent_to_dlq == 0
+        assert metrics.max_retries is None
+        assert metrics.dlq_topic is None
+
+    async def test_metrics_dlq_counter_updates_after_dlq_move(
+        self,
+        mock_pool: AsyncMock,
+        mock_publisher: AsyncMock,
+        mock_dlq_publisher: AsyncMock,
+        sample_notification: ModelStateTransitionNotification,
+    ) -> None:
+        """get_metrics() reflects updated DLQ counter after moving to DLQ."""
+        from omnibase_infra.runtime.transition_notification_outbox import (
+            TransitionNotificationOutbox,
+        )
+
+        outbox = TransitionNotificationOutbox(
+            pool=mock_pool,
+            publisher=mock_publisher,
+            max_retries=3,
+            dlq_publisher=mock_dlq_publisher,
+        )
+
+        mock_conn = mock_pool._mock_connection
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        # Initial metrics
+        metrics_before = outbox.get_metrics()
+        assert metrics_before.notifications_sent_to_dlq == 0
+
+        # Move to DLQ
+        await outbox._move_to_dlq(
+            row_id=1,
+            notification=sample_notification,
+            retry_count=3,
+            conn=mock_conn,
+            update_dlq_query="UPDATE test SET processed_at = NOW() WHERE id = $1",
+            correlation_id=uuid4(),
+        )
+
+        # Updated metrics
+        metrics_after = outbox.get_metrics()
+        assert metrics_after.notifications_sent_to_dlq == 1

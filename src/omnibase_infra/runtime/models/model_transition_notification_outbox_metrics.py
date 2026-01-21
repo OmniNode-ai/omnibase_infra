@@ -23,8 +23,12 @@ class ModelTransitionNotificationOutboxMetrics(BaseModel):
         notifications_stored: Total count of notifications stored in outbox.
         notifications_processed: Total count of notifications successfully processed.
         notifications_failed: Total count of notifications that failed processing.
+        notifications_sent_to_dlq: Total count of notifications sent to DLQ after
+            exceeding max retry attempts.
         batch_size: Configured batch size for processing.
         poll_interval_seconds: Configured poll interval in seconds.
+        max_retries: Configured maximum retry attempts before DLQ (None if DLQ disabled).
+        dlq_topic: Configured DLQ topic name (None if DLQ disabled).
     """
 
     model_config = ConfigDict(
@@ -43,9 +47,18 @@ class ModelTransitionNotificationOutboxMetrics(BaseModel):
     notifications_failed: int = Field(
         default=0, ge=0, description="Total notifications that failed processing"
     )
+    notifications_sent_to_dlq: int = Field(
+        default=0, ge=0, description="Total notifications sent to DLQ"
+    )
     batch_size: int = Field(default=100, ge=1, description="Configured batch size")
     poll_interval_seconds: float = Field(
         default=1.0, gt=0, description="Configured poll interval"
+    )
+    max_retries: int | None = Field(
+        default=None, ge=1, description="Max retries before DLQ (None if DLQ disabled)"
+    )
+    dlq_topic: str | None = Field(
+        default=None, description="DLQ topic name (None if DLQ disabled)"
     )
 
 
