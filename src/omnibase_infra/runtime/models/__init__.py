@@ -48,6 +48,7 @@ Exports:
     ModelSecretSourceInfo: Non-sensitive source information for introspection
     ModelRetryPolicy: Retry policy configuration for handler operations
     ModelTransitionNotificationPublisherMetrics: Metrics for transition notification publisher
+    ModelTransitionNotificationOutboxMetrics: Metrics for transition notification outbox
     ModelStateTransitionNotification: State transition notification (re-export from omnibase_core)
     ModelProjectorNotificationConfig: Configuration for projector notification publishing
     ModelBindingConfig: Configuration for binding a handler to the runtime
@@ -150,6 +151,9 @@ from omnibase_infra.runtime.models.model_shutdown_batch_result import (
     ModelShutdownBatchResult,
 )
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
+from omnibase_infra.runtime.models.model_transition_notification_outbox_metrics import (
+    ModelTransitionNotificationOutboxMetrics,
+)
 from omnibase_infra.runtime.models.model_transition_notification_publisher_metrics import (
     ModelTransitionNotificationPublisherMetrics,
 )
@@ -201,6 +205,7 @@ __all__: list[str] = [
     "ModelShutdownBatchResult",
     "ModelShutdownConfig",
     "ModelStateTransitionNotification",
+    "ModelTransitionNotificationOutboxMetrics",
     "ModelTransitionNotificationPublisherMetrics",
     "SecretSourceType",
 ]

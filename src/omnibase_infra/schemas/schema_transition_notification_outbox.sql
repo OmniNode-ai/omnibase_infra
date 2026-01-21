@@ -51,12 +51,7 @@ CREATE TABLE IF NOT EXISTS transition_notification_outbox (
     aggregate_id UUID NOT NULL,
 
     -- Constraints
-    CONSTRAINT valid_retry_count CHECK (retry_count >= 0),
-    CONSTRAINT processed_implies_no_pending CHECK (
-        -- If processed_at is set, the record has been successfully processed
-        -- last_error may still contain the error from a previous retry
-        processed_at IS NULL OR retry_count >= 0
-    )
+    CONSTRAINT valid_retry_count CHECK (retry_count >= 0)
 );
 
 -- =============================================================================

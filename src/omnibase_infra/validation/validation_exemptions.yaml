@@ -499,6 +499,18 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-1139
   # ==========================================================================
+  # ModelTransitionNotificationOutboxMetrics table_name Exemption (OMN-1139)
+  # ==========================================================================
+  # table_name is the database table name string, not an entity reference.
+  - file_pattern: 'model_transition_notification_outbox_metrics\.py'
+    violation_pattern: "Field 'table_name' might reference an entity"
+    reason: >
+      table_name is the database table name string (e.g., "transition_notification_outbox"), not an entity reference. It identifies the outbox table for metrics reporting and does not require ID + display_name pattern.
+
+    documentation:
+      - CLAUDE.md (Registry Naming Conventions)
+    ticket: OMN-1139
+  # ==========================================================================
   # ServiceTimeoutEmitter/Scanner Naming Exemptions (OMN-1055)
   # ==========================================================================
   # These service classes follow the CLAUDE.md Service<Name> naming convention.

@@ -5,7 +5,7 @@
 This module implements the outbox pattern for state transition notifications.
 The outbox stores notifications in the same database transaction as projections,
 then processes them asynchronously via a background processor to ensure
-exactly-once delivery semantics.
+at-least-once delivery semantics. Consumers must handle idempotency.
 
 Database Schema (must be created before use):
     ```sql
@@ -71,6 +71,9 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.runtime.models.model_transition_notification_outbox_metrics import (
+    ModelTransitionNotificationOutboxMetrics,
+)
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
@@ -80,8 +83,8 @@ class TransitionNotificationOutbox:
     """Outbox pattern for guaranteed notification delivery.
 
     Stores notifications in the same database transaction as projections,
-    ensuring exactly-once semantics. A background processor publishes
-    pending notifications asynchronously.
+    ensuring at-least-once semantics. A background processor publishes
+    pending notifications asynchronously. Consumers must handle idempotency.
 
     The outbox pattern solves the dual-write problem: when you need to
     update a database AND publish an event, either operation could fail
@@ -420,93 +423,101 @@ class TransitionNotificationOutbox:
 
         try:
             async with self._pool.acquire() as conn:
-                # Fetch pending notifications
-                rows = await conn.fetch(
-                    select_query,
-                    self._batch_size,
-                    timeout=self._query_timeout,
-                )
+                # Wrap in transaction to maintain row locks from SELECT FOR UPDATE
+                # Without explicit transaction, locks are released immediately after SELECT
+                async with conn.transaction():
+                    # Fetch pending notifications
+                    rows = await conn.fetch(
+                        select_query,
+                        self._batch_size,
+                        timeout=self._query_timeout,
+                    )
 
-                if not rows:
-                    return 0
+                    if not rows:
+                        return 0
 
-                processed = 0
+                    processed = 0
 
-                for row in rows:
-                    row_id: int = row["id"]
-                    notification_json: str = row["notification_data"]
-
-                    try:
-                        # Parse notification
-                        notification = (
-                            ModelStateTransitionNotification.model_validate_json(
-                                notification_json
-                            )
-                        )
-
-                        # Publish notification
-                        await self._publisher.publish(notification)
-
-                        # Mark as processed
-                        await conn.execute(
-                            update_success_query,
-                            row_id,
-                            timeout=self._query_timeout,
-                        )
-
-                        processed += 1
-                        self._notifications_processed += 1
-
-                        logger.debug(
-                            "Notification published from outbox",
-                            extra={
-                                "outbox_id": row_id,
-                                "aggregate_type": notification.aggregate_type,
-                                "aggregate_id": str(notification.aggregate_id),
-                                "correlation_id": str(notification.correlation_id),
-                            },
-                        )
-
-                    except Exception as e:
-                        # Record failure but continue processing other notifications
-                        self._notifications_failed += 1
-                        error_message = sanitize_error_string(str(e))
+                    for row in rows:
+                        row_id: int = row["id"]
+                        notification_data = row["notification_data"]
 
                         try:
+                            # Parse notification - asyncpg returns dict for JSONB columns
+                            if isinstance(notification_data, dict):
+                                notification = (
+                                    ModelStateTransitionNotification.model_validate(
+                                        notification_data
+                                    )
+                                )
+                            else:
+                                notification = ModelStateTransitionNotification.model_validate_json(
+                                    notification_data
+                                )
+
+                            # Publish notification
+                            await self._publisher.publish(notification)
+
+                            # Mark as processed
                             await conn.execute(
-                                update_failure_query,
+                                update_success_query,
                                 row_id,
-                                error_message[
-                                    : self.MAX_ERROR_MESSAGE_LENGTH
-                                ],  # Truncate for DB column
                                 timeout=self._query_timeout,
                             )
-                        except (asyncpg.PostgresError, TimeoutError) as update_err:
-                            # Log but continue - the outbox row will be retried on next poll
-                            logger.warning(
-                                "Failed to record outbox failure, row will be retried",
+
+                            processed += 1
+                            self._notifications_processed += 1
+
+                            logger.debug(
+                                "Notification published from outbox",
                                 extra={
                                     "outbox_id": row_id,
-                                    "original_error": error_message,
-                                    "update_error": sanitize_error_string(
-                                        str(update_err)
-                                    ),
-                                    "update_error_type": type(update_err).__name__,
+                                    "aggregate_type": notification.aggregate_type,
+                                    "aggregate_id": str(notification.aggregate_id),
+                                    "correlation_id": str(notification.correlation_id),
+                                },
+                            )
+
+                        except Exception as e:
+                            # Record failure but continue processing other notifications
+                            self._notifications_failed += 1
+                            error_message = sanitize_error_string(str(e))
+
+                            try:
+                                await conn.execute(
+                                    update_failure_query,
+                                    row_id,
+                                    error_message[
+                                        : self.MAX_ERROR_MESSAGE_LENGTH
+                                    ],  # Truncate for DB column
+                                    timeout=self._query_timeout,
+                                )
+                            except (asyncpg.PostgresError, TimeoutError) as update_err:
+                                # Log but continue - the outbox row will be retried
+                                logger.warning(
+                                    "Failed to record outbox failure, row will be retried",
+                                    extra={
+                                        "outbox_id": row_id,
+                                        "original_error": error_message,
+                                        "update_error": sanitize_error_string(
+                                            str(update_err)
+                                        ),
+                                        "update_error_type": type(update_err).__name__,
+                                        "correlation_id": str(correlation_id),
+                                    },
+                                )
+
+                            logger.warning(
+                                "Failed to publish notification from outbox",
+                                extra={
+                                    "outbox_id": row_id,
+                                    "error": error_message,
+                                    "error_type": type(e).__name__,
                                     "correlation_id": str(correlation_id),
                                 },
                             )
 
-                        logger.warning(
-                            "Failed to publish notification from outbox",
-                            extra={
-                                "outbox_id": row_id,
-                                "error": error_message,
-                                "error_type": type(e).__name__,
-                                "correlation_id": str(correlation_id),
-                            },
-                        )
-
-                return processed
+                    return processed
 
         except asyncpg.PostgresConnectionError as e:
             raise InfraConnectionError(
@@ -695,11 +706,11 @@ class TransitionNotificationOutbox:
                 },
             )
 
-    def get_metrics(self) -> dict[str, object]:
+    def get_metrics(self) -> ModelTransitionNotificationOutboxMetrics:
         """Return current outbox metrics for observability.
 
         Returns:
-            Dictionary containing:
+            Typed metrics model containing:
             - table_name: The outbox table name
             - is_running: Whether processor is running
             - notifications_stored: Total notifications stored
@@ -710,17 +721,17 @@ class TransitionNotificationOutbox:
 
         Example:
             >>> metrics = outbox.get_metrics()
-            >>> print(f"Processed: {metrics['notifications_processed']}")
+            >>> print(f"Processed: {metrics.notifications_processed}")
         """
-        return {
-            "table_name": self._table_name,
-            "is_running": self._running,
-            "notifications_stored": self._notifications_stored,
-            "notifications_processed": self._notifications_processed,
-            "notifications_failed": self._notifications_failed,
-            "batch_size": self._batch_size,
-            "poll_interval_seconds": self._poll_interval,
-        }
+        return ModelTransitionNotificationOutboxMetrics(
+            table_name=self._table_name,
+            is_running=self._running,
+            notifications_stored=self._notifications_stored,
+            notifications_processed=self._notifications_processed,
+            notifications_failed=self._notifications_failed,
+            batch_size=self._batch_size,
+            poll_interval_seconds=self._poll_interval,
+        )
 
 
 __all__: list[str] = [

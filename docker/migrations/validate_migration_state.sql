@@ -77,7 +77,10 @@ outbox_index_check AS (
     WHERE i.tablename = 'transition_notification_outbox'
       AND i.indexname IN (
         'idx_outbox_pending',
-        'idx_outbox_aggregate'
+        'idx_outbox_aggregate',
+        'idx_outbox_retry_pending',
+        'idx_outbox_cleanup',
+        'idx_outbox_aggregate_type_pending'
       )
 )
 SELECT
@@ -133,11 +136,11 @@ FROM (
             WHEN NOT (SELECT table_exists FROM outbox_table_check) THEN 'MISSING'
             WHEN (SELECT COUNT(*) FROM outbox_column_check) < 8 THEN 'PARTIAL'
             WHEN (SELECT COUNT(*) FROM outbox_index_check WHERE indisvalid = false) > 0 THEN 'INVALID_INDEXES'
-            WHEN (SELECT COUNT(*) FROM outbox_index_check WHERE indisvalid = true) = 2 THEN 'APPLIED'
+            WHEN (SELECT COUNT(*) FROM outbox_index_check WHERE indisvalid = true) = 5 THEN 'APPLIED'
             WHEN (SELECT COUNT(*) FROM outbox_index_check) > 0 THEN 'PARTIAL'
             ELSE 'PARTIAL'
         END AS status,
-        'transition_notification_outbox table (8 columns, 2 indexes)' AS description
+        'transition_notification_outbox table (8 columns, 5 indexes)' AS description
 ) results
 ORDER BY migration;
 
@@ -226,7 +229,10 @@ JOIN pg_am am ON c.relam = am.oid
 WHERE i.tablename = 'transition_notification_outbox'
   AND i.indexname IN (
     'idx_outbox_pending',
-    'idx_outbox_aggregate'
+    'idx_outbox_aggregate',
+    'idx_outbox_retry_pending',
+    'idx_outbox_cleanup',
+    'idx_outbox_aggregate_type_pending'
   )
 ORDER BY i.indexname;
 
