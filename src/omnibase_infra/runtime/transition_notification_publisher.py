@@ -171,9 +171,10 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         >>> print(f"Success rate: {metrics.publish_success_rate():.2%}")
     """
 
-    # Maximum number of failures to track in memory during batch operations.
+    # Default maximum number of failures to track in memory during batch operations.
     # Prevents unbounded memory growth for very large batches with many failures.
-    MAX_TRACKED_FAILURES: int = 100
+    # Can be overridden via constructor parameter for large batch tuning.
+    DEFAULT_MAX_TRACKED_FAILURES: int = 100
 
     def __init__(
         self,
@@ -183,6 +184,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         publisher_id: str | None = None,
         circuit_breaker_threshold: int = 5,
         circuit_breaker_reset_timeout: float = 60.0,
+        max_tracked_failures: int = DEFAULT_MAX_TRACKED_FAILURES,
     ) -> None:
         """Initialize transition notification publisher.
 
@@ -200,6 +202,11 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 Default: 5
             circuit_breaker_reset_timeout: Seconds before automatic reset.
                 Default: 60.0
+            max_tracked_failures: Maximum number of failures to track in memory
+                during batch operations. Prevents unbounded memory growth for
+                very large batches with many failures. For large batch operations,
+                this can be tuned higher to capture more failure details.
+                Default: 100
 
         Example:
             >>> publisher = TransitionNotificationPublisher(
@@ -207,17 +214,20 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             ...     topic="onex.fsm.state.transitions.v1",
             ...     circuit_breaker_threshold=3,
             ...     circuit_breaker_reset_timeout=30.0,
+            ...     max_tracked_failures=200,  # Tune for large batches
             ... )
         """
         self._event_bus = event_bus
         self._topic = topic
         self._publisher_id = publisher_id or f"transition-publisher-{uuid4()!s}"
         self._lock = asyncio.Lock()
+        self._max_tracked_failures = max_tracked_failures
 
         # Metrics tracking
         self._notifications_published = 0
         self._notifications_failed = 0
         self._batch_operations = 0
+        self._batch_notifications_attempted = 0
         self._batch_notifications_total = 0
         self._last_publish_at: datetime | None = None
         self._last_publish_duration_ms: float = 0.0
@@ -243,6 +253,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 "topic": self._topic,
                 "circuit_breaker_threshold": circuit_breaker_threshold,
                 "circuit_breaker_reset_timeout": circuit_breaker_reset_timeout,
+                "max_tracked_failures": self._max_tracked_failures,
             },
         )
 
@@ -419,7 +430,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             ) as e:
                 last_error = e
                 # Only track failures up to the limit to prevent unbounded memory growth
-                if len(failed_notifications) < self.MAX_TRACKED_FAILURES:
+                if len(failed_notifications) < self._max_tracked_failures:
                     failed_notifications.append(
                         FailedNotificationRecord(
                             aggregate_type=notification.aggregate_type,
@@ -444,6 +455,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         # Update batch metrics
         async with self._lock:
             self._batch_operations += 1
+            self._batch_notifications_attempted += len(notifications)
             self._batch_notifications_total += success_count
 
         failure_count = len(notifications) - success_count
@@ -535,6 +547,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             notifications_published=self._notifications_published,
             notifications_failed=self._notifications_failed,
             batch_operations=self._batch_operations,
+            batch_notifications_attempted=self._batch_notifications_attempted,
             batch_notifications_total=self._batch_notifications_total,
             last_publish_at=self._last_publish_at,
             last_publish_duration_ms=self._last_publish_duration_ms,

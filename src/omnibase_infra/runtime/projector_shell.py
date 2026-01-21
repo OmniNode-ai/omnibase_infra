@@ -265,24 +265,23 @@ class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOper
             **Topic Consistency**: When both notification_publisher and
             notification_config are provided, be aware that:
 
-            - The ``notification_config.topic`` field is **informational only**
-              (used for logging, metrics, and configuration documentation)
+            - The ``notification_config.expected_topic`` field is for
+              **documentation and validation purposes only**
             - The **actual topic** used for publishing is determined solely by
               the ``notification_publisher``'s internal configuration (the topic
               passed to ``TransitionNotificationPublisher.__init__``)
-            - These two values are **not validated** against each other to avoid
-              tight coupling between components
+            - A **warning is logged** if these values differ to catch configuration
+              errors early
             - **Users should ensure these match** when configuring both components
-              to avoid confusion during debugging
 
             Example of consistent configuration::
 
                 # Publisher determines actual destination
                 publisher = TransitionNotificationPublisher(event_bus, "transitions.v1")
 
-                # Config topic should match for documentation consistency
+                # Config expected_topic should match for consistency validation
                 config = ModelProjectorNotificationConfig(
-                    topic="transitions.v1",  # Match publisher's topic
+                    expected_topic="transitions.v1",  # Match publisher's topic
                     state_column="current_state",
                     ...
                 )
@@ -293,7 +292,7 @@ class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOper
             >>>
             >>> publisher = TransitionNotificationPublisher(event_bus, "transitions.v1")
             >>> config = ModelProjectorNotificationConfig(
-            ...     topic="transitions.v1",
+            ...     expected_topic="transitions.v1",
             ...     state_column="current_state",
             ...     aggregate_id_column="entity_id",
             ...     version_column="version",
@@ -319,20 +318,20 @@ class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOper
         if notification_config is not None:
             self._validate_notification_config(notification_config)
 
-        # Warn if notification config topic differs from publisher topic
-        # The config.topic is informational only; publisher determines actual destination
+        # Warn if notification config expected_topic differs from publisher topic
+        # The config.expected_topic is for validation only; publisher determines destination
         if (
             notification_config is not None
             and notification_publisher is not None
             and hasattr(notification_publisher, "topic")
-            and notification_config.topic != notification_publisher.topic
+            and notification_config.expected_topic != notification_publisher.topic
         ):
             logger.warning(
-                "Notification config topic differs from publisher topic - "
-                "config.topic is informational only, publisher determines actual destination",
+                "Notification config expected_topic differs from publisher topic - "
+                "expected_topic is for validation only, publisher determines actual destination",
                 extra={
                     "projector_id": contract.projector_id,
-                    "config_topic": notification_config.topic,
+                    "config_expected_topic": notification_config.expected_topic,
                     "publisher_topic": notification_publisher.topic,
                 },
             )

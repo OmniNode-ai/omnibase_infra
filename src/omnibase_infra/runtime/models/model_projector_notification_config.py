@@ -16,7 +16,9 @@ Architecture Overview:
     4. Orchestrators subscribe to notifications and coordinate downstream workflows
 
 Configuration Fields:
-    - topic: Event bus topic for publishing notifications (required)
+    - expected_topic: Expected event bus topic for validation/documentation (required).
+        NOTE: The actual publishing topic is determined by TransitionNotificationPublisher.
+        This field accepts "topic" as an alias for backwards compatibility.
     - state_column: Column name containing the FSM state (required)
     - aggregate_id_column: Column name containing the aggregate ID (required)
     - version_column: Column name containing the projection version (optional)
@@ -25,12 +27,20 @@ Configuration Fields:
 Example Usage:
     >>> from omnibase_infra.runtime.models import ModelProjectorNotificationConfig
     >>>
+    >>> # Using the preferred field name
     >>> config = ModelProjectorNotificationConfig(
-    ...     topic="onex.fsm.state.transitions.v1",
+    ...     expected_topic="onex.fsm.state.transitions.v1",
     ...     state_column="current_state",
     ...     aggregate_id_column="entity_id",
     ...     version_column="version",
     ...     enabled=True,
+    ... )
+    >>>
+    >>> # Using the backwards-compatible alias
+    >>> config = ModelProjectorNotificationConfig(
+    ...     topic="onex.fsm.state.transitions.v1",  # alias for expected_topic
+    ...     state_column="current_state",
+    ...     aggregate_id_column="entity_id",
     ... )
 
 Related Tickets:
@@ -56,11 +66,14 @@ class ModelProjectorNotificationConfig(BaseModel):
     successful projection commits.
 
     Attributes:
-        topic: Event bus topic for publishing state transition notifications.
-            This should match the topic defined in the projector's contract
-            and follow ONEX topic naming conventions. Example topics:
+        expected_topic: Expected event bus topic for state transition notifications.
+            This field is for documentation and validation purposes only - the actual
+            publishing topic is determined by TransitionNotificationPublisher's
+            configuration. ProjectorShell will log a warning if this value differs
+            from the publisher's configured topic. Example topics:
             - "onex.fsm.state.transitions.v1"
             - "registration.state.transitions.v1"
+            Accepts "topic" as an alias for backwards compatibility.
         state_column: Name of the column that contains the FSM state value.
             This column must exist in the projection schema and contain string
             values representing the current state.
@@ -75,12 +88,12 @@ class ModelProjectorNotificationConfig(BaseModel):
 
     Example:
         >>> config = ModelProjectorNotificationConfig(
-        ...     topic="onex.fsm.state.transitions.v1",
+        ...     expected_topic="onex.fsm.state.transitions.v1",
         ...     state_column="current_state",
         ...     aggregate_id_column="entity_id",
         ...     version_column="version",
         ... )
-        >>> config.topic
+        >>> config.expected_topic
         'onex.fsm.state.transitions.v1'
         >>> config.state_column
         'current_state'
@@ -90,8 +103,12 @@ class ModelProjectorNotificationConfig(BaseModel):
     Note:
         The column names specified must match columns defined in the projector's
         contract schema. The ProjectorShell will validate these column names
-        against the schema at initialization time. The topic should be defined
-        in the projector's contract rather than hardcoded.
+        against the schema at initialization time.
+
+        Important: The expected_topic field does NOT control where notifications
+        are published. The actual topic is determined by TransitionNotificationPublisher.
+        This field exists so ProjectorShell can warn when there's a mismatch between
+        the expected and actual topics, helping catch configuration errors early.
 
     See Also:
         - ProjectorShell: Uses this config for notification integration
@@ -103,18 +120,20 @@ class ModelProjectorNotificationConfig(BaseModel):
         frozen=True,
         extra="forbid",
         from_attributes=True,
+        populate_by_name=True,  # Allow both "expected_topic" and "topic" (alias)
     )
 
-    topic: str = Field(
+    expected_topic: str = Field(
         ...,
+        alias="topic",  # Backwards compatibility
         min_length=1,
         max_length=256,
-        description="Event bus topic for publishing state transition notifications. "
-        "IMPORTANT: This field is informational/for documentation purposes only. "
-        "The actual topic used for publishing is determined by the "
-        "TransitionNotificationPublisher's configuration, not this field. "
-        "Users should ensure this value matches the publisher's topic to avoid "
-        "confusion during debugging. See ProjectorShell.__init__ for details.",
+        description=(
+            "Expected event bus topic for state transition notifications. "
+            "NOTE: This field is for documentation and validation purposes only. "
+            "The actual publishing topic is determined by TransitionNotificationPublisher. "
+            "ProjectorShell will warn if this value differs from the publisher's topic."
+        ),
     )
 
     state_column: str = Field(

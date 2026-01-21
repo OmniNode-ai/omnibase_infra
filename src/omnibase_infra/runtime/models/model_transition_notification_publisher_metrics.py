@@ -50,7 +50,8 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         notifications_published: Total notifications successfully published
         notifications_failed: Total notifications that failed to publish
         batch_operations: Total batch publish operations executed
-        batch_notifications_total: Total notifications published via batch
+        batch_notifications_attempted: Total notifications attempted via batch
+        batch_notifications_total: Total notifications successfully published via batch
         last_publish_at: Timestamp of the most recent publish operation
         last_publish_duration_ms: Duration of the most recent publish in ms
         average_publish_duration_ms: Rolling average publish duration in ms
@@ -62,9 +63,12 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
     Note:
         Notification Count Relationships:
         - ``notifications_published`` counts ALL successful publishes (individual + batch)
+        - ``batch_notifications_attempted`` counts ALL notifications passed to ``publish_batch()``,
+          regardless of success or failure (sum of all batch sizes)
         - ``batch_notifications_total`` is a SUBSET of ``notifications_published``,
-          counting only those published via ``publish_batch()``
+          counting only those SUCCESSFULLY published via ``publish_batch()``
         - Individual publishes = ``notifications_published - batch_notifications_total``
+        - Batch failure rate = ``1 - (batch_notifications_total / batch_notifications_attempted)``
 
     Example:
         >>> from datetime import datetime, UTC
@@ -125,11 +129,21 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         ge=0,
         description="Total number of batch publish operations executed",
     )
+    batch_notifications_attempted: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Total notifications attempted via publish_batch() calls. "
+            "This is the sum of all batch sizes, regardless of success/failure. "
+            "Compare with batch_notifications_total to see failure rate in batches."
+        ),
+    )
     batch_notifications_total: int = Field(
         default=0,
         ge=0,
         description=(
-            "Notifications published via publish_batch() (SUBSET of notifications_published). "
+            "Notifications SUCCESSFULLY published via publish_batch() "
+            "(SUBSET of notifications_published). "
             "This count is already included in notifications_published, not additional. "
             "Example: 100 published, 80 batch_total means 20 individual + 80 batch = 100 total."
         ),

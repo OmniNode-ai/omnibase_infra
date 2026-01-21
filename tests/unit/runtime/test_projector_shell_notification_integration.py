@@ -155,28 +155,40 @@ class TestModelProjectorNotificationConfig:
     """Tests for ModelProjectorNotificationConfig model."""
 
     def test_basic_config_creation(self) -> None:
-        """Test creating a basic notification config."""
+        """Test creating a basic notification config using expected_topic."""
         config = ModelProjectorNotificationConfig(
-            topic="test.fsm.state.transitions.v1",
+            expected_topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
         )
-        assert config.topic == "test.fsm.state.transitions.v1"
+        assert config.expected_topic == "test.fsm.state.transitions.v1"
         assert config.state_column == "current_state"
         assert config.aggregate_id_column == "entity_id"
         assert config.version_column is None
         assert config.enabled is True
 
+    def test_backwards_compatible_topic_alias(self) -> None:
+        """Test creating a config using topic alias for backwards compatibility."""
+        config = ModelProjectorNotificationConfig(
+            topic="test.fsm.state.transitions.v1",  # Using alias
+            state_column="current_state",
+            aggregate_id_column="entity_id",
+        )
+        # Attribute is always expected_topic, but accepts topic as input alias
+        assert config.expected_topic == "test.fsm.state.transitions.v1"
+        assert config.state_column == "current_state"
+        assert config.aggregate_id_column == "entity_id"
+
     def test_full_config_creation(self) -> None:
         """Test creating a config with all fields."""
         config = ModelProjectorNotificationConfig(
-            topic="custom.notifications.v1",
+            expected_topic="custom.notifications.v1",
             state_column="fsm_state",
             aggregate_id_column="node_id",
             version_column="projection_version",
             enabled=False,
         )
-        assert config.topic == "custom.notifications.v1"
+        assert config.expected_topic == "custom.notifications.v1"
         assert config.state_column == "fsm_state"
         assert config.aggregate_id_column == "node_id"
         assert config.version_column == "projection_version"
@@ -185,7 +197,7 @@ class TestModelProjectorNotificationConfig:
     def test_config_is_immutable(self) -> None:
         """Test that config is frozen after creation."""
         config = ModelProjectorNotificationConfig(
-            topic="test.fsm.state.transitions.v1",
+            expected_topic="test.fsm.state.transitions.v1",
             state_column="current_state",
             aggregate_id_column="entity_id",
         )
