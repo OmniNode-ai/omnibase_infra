@@ -128,11 +128,11 @@ class ModelProjectorNotificationConfig(BaseModel):
         alias="topic",  # Backwards compatibility
         min_length=1,
         max_length=256,
-        pattern=r"^[a-zA-Z0-9._-]+$",
+        pattern=r"^[a-zA-Z][a-zA-Z0-9._-]*$",
         description=(
             "Expected event bus topic for state transition notifications. "
-            "Must contain only alphanumeric characters, dots, underscores, and hyphens "
-            "(a-zA-Z0-9._-). "
+            "Must start with a letter (a-zA-Z) and contain only alphanumeric characters, "
+            "dots, underscores, and hyphens (a-zA-Z0-9._-). "
             "NOTE: This field is for documentation and validation purposes only. "
             "The actual publishing topic is determined by TransitionNotificationPublisher. "
             "ProjectorShell will warn if this value differs from the publisher's topic."

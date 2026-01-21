@@ -242,28 +242,5 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
             and self.consecutive_failures < self.DEFAULT_HEALTH_FAILURE_THRESHOLD
         )
 
-    def total_notifications(self) -> int:
-        """
-        Get total notification publish count.
-
-        Note: notifications_published includes all notifications (both individual
-        and batch). batch_notifications_total is a subset indicating how many
-        were published via batch operations.
-
-        Returns:
-            Total number of notifications published
-
-        Example:
-            >>> metrics = ModelTransitionNotificationPublisherMetrics(
-            ...     publisher_id="test",
-            ...     topic="test.topic",
-            ...     notifications_published=100,  # Total published
-            ...     batch_notifications_total=80,  # Subset via batch
-            ... )
-            >>> metrics.total_notifications()
-            100
-        """
-        return self.notifications_published
-
 
 __all__: list[str] = ["ModelTransitionNotificationPublisherMetrics"]
