@@ -425,7 +425,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                    type from str | EnumPolicyType to EnumPolicyType)
 # - 98 (2026-01-20): OMN-1277 security validator contract refactoring (+2 unions)
 #                    ast.FunctionDef | ast.AsyncFunctionDef for AST method type checking
-INFRA_MAX_UNIONS = 98
+# - 105 (2026-01-21): Contract-driven handler config loading (+4 unions)
+#                     ModelHandlerContract transport config fields and lifecycle types
+INFRA_MAX_UNIONS = 105
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

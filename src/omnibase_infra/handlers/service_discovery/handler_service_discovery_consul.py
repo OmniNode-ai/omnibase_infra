@@ -664,6 +664,303 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
                 context=context,
             ) from e
 
+    async def list_all_services(
+        self,
+        tag_filter: str | None = None,
+        correlation_id: UUID | None = None,
+    ) -> dict[str, list[str]]:
+        """List all registered service names with their tags.
+
+        Uses Consul catalog API (/v1/catalog/services) to retrieve all
+        service names registered in the Consul catalog, along with their tags.
+
+        Args:
+            tag_filter: Optional tag to filter services by. If provided,
+                only services with this tag will be returned.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Dictionary mapping service names to their list of tags.
+            Example: {"my-service": ["web", "api"], "other-service": ["db"]}
+
+        Raises:
+            InfraConnectionError: If connection to Consul fails.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        correlation_id = correlation_id or uuid4()
+        start_time = time.monotonic()
+
+        # Guard against use-after-shutdown
+        self._check_not_shutdown("list_all_services", correlation_id)
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="list_all_services",
+                correlation_id=correlation_id,
+            )
+
+        try:
+            # Query Consul catalog for all services
+            client = self._consul_client
+            executor = await self._ensure_executor()
+            loop = asyncio.get_running_loop()
+
+            def _query_catalog() -> tuple[int, dict[str, list[str]]]:
+                # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
+                # catalog.services exists on Optional[Consul] union type.
+                result: tuple[int, dict[str, list[str]]] = client.catalog.services()  # type: ignore[union-attr]  # NOTE: duck-typed client
+                return result
+
+            _, services = await asyncio.wait_for(
+                loop.run_in_executor(executor, _query_catalog),
+                timeout=self._timeout_seconds,
+            )
+
+            # Reset circuit breaker on success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            # Apply tag filter if provided
+            if tag_filter is not None:
+                services = {
+                    name: tags for name, tags in services.items() if tag_filter in tags
+                }
+
+            duration_ms = (time.monotonic() - start_time) * 1000
+
+            logger.info(
+                "Listed all services from Consul catalog",
+                extra={
+                    "service_count": len(services),
+                    "tag_filter": tag_filter,
+                    "duration_ms": duration_ms,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+            return services
+
+        except TimeoutError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="list_all_services",
+                    correlation_id=correlation_id,
+                )
+            raise InfraTimeoutError(
+                f"Consul catalog query timed out after {self._timeout_seconds}s",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="list_all_services",
+                    target_name="consul.discovery",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
+            ) from e
+
+        except consul.ConsulException as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="list_all_services",
+                    correlation_id=correlation_id,
+                )
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="list_all_services",
+                target_name="consul.discovery",
+                correlation_id=correlation_id,
+            )
+            raise InfraConnectionError(
+                "Consul catalog query failed",
+                context=context,
+            ) from e
+
+    async def get_all_service_instances(
+        self,
+        service_name: str,
+        include_unhealthy: bool = True,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelServiceInfo]:
+        """Get all instances of a service, optionally including unhealthy ones.
+
+        Uses Consul health API (/v1/health/service/<name>) to retrieve all
+        instances of a service with their health status information.
+
+        Args:
+            service_name: Name of the service to query.
+            include_unhealthy: If True, return all instances regardless of health.
+                If False, only return healthy (passing) instances.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            List of ModelServiceInfo objects representing service instances,
+            including health status, health output, and last check timestamp.
+
+        Raises:
+            InfraConnectionError: If connection to Consul fails.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        correlation_id = correlation_id or uuid4()
+        start_time = time.monotonic()
+
+        # Guard against use-after-shutdown
+        self._check_not_shutdown("get_all_service_instances", correlation_id)
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="get_all_service_instances",
+                correlation_id=correlation_id,
+            )
+
+        try:
+            # Query Consul health API for service instances
+            client = self._consul_client
+            executor = await self._ensure_executor()
+            loop = asyncio.get_running_loop()
+
+            def _query_health() -> tuple[int, list[dict[str, object]]]:
+                # NOTE: client is duck-typed ProtocolConsulClient; mypy cannot verify
+                # health.service exists on Optional[Consul] union type.
+                # When passing=False, we get ALL instances
+                # When passing=True, we only get healthy instances
+                result: tuple[int, list[dict[str, object]]] = client.health.service(  # type: ignore[union-attr]  # NOTE: duck-typed client
+                    service_name,
+                    passing=not include_unhealthy,
+                )
+                return result
+
+            _, services = await asyncio.wait_for(
+                loop.run_in_executor(executor, _query_health),
+                timeout=self._timeout_seconds,
+            )
+
+            # Reset circuit breaker on success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            # Convert to ModelServiceInfo list with full health details
+            service_infos: list[ModelServiceInfo] = []
+            for svc in services:
+                # Cast nested dicts for type safety
+                svc_data = cast("dict[str, object]", svc.get("Service", {}))
+                node_data = cast("dict[str, object]", svc.get("Node", {}))
+                checks = cast("list[dict[str, object]]", svc.get("Checks", []))
+
+                svc_id_str = str(svc_data.get("ID", ""))
+                svc_name = svc_data.get("Service", "")
+                address = svc_data.get("Address", "") or node_data.get("Address", "")
+                port_raw = svc_data.get("Port", 0)
+                port = int(port_raw) if isinstance(port_raw, int | float | str) else 0
+                svc_tags = cast("list[str]", svc_data.get("Tags", []))
+                svc_meta = cast("dict[str, str]", svc_data.get("Meta", {}))
+
+                if svc_id_str and svc_name and address and port:
+                    # Convert Consul service ID string to UUID
+                    try:
+                        svc_id = UUID(svc_id_str)
+                    except ValueError:
+                        # Non-UUID service ID from Consul - generate deterministic UUID5
+                        logger.warning(
+                            "Non-UUID service ID from Consul, using deterministic UUID5 conversion",
+                            extra={
+                                "original_id": svc_id_str,
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+                        svc_id = uuid5(NAMESPACE_ONEX_SERVICE, svc_id_str)
+
+                    # Determine health status from checks
+                    health_status = EnumHealthStatus.UNKNOWN
+                    health_output: str | None = None
+                    last_check_at: datetime | None = None
+
+                    # Find the service-specific health check
+                    for check in checks:
+                        check_service_id = check.get("ServiceID", "")
+                        if check_service_id == svc_id_str or not check_service_id:
+                            status_str = str(check.get("Status", "")).lower()
+                            if status_str == "passing":
+                                health_status = EnumHealthStatus.HEALTHY
+                            elif status_str in ("critical", "warning"):
+                                health_status = EnumHealthStatus.UNHEALTHY
+                            else:
+                                health_status = EnumHealthStatus.UNKNOWN
+
+                            health_output = str(check.get("Output", "")) or None
+
+                            # Parse CreateIndex as a proxy for last check time
+                            # (Consul doesn't directly expose last check time in this API)
+                            # In production, you might use the check's CreateIndex or ModifyIndex
+                            break
+
+                    service_infos.append(
+                        ModelServiceInfo(
+                            service_id=svc_id,
+                            service_name=str(svc_name),
+                            address=str(address),
+                            port=port,
+                            tags=tuple(svc_tags or []),
+                            health_status=health_status,
+                            health_output=health_output,
+                            last_check_at=last_check_at,
+                            metadata=svc_meta or {},
+                            registered_at=datetime.now(UTC),
+                            correlation_id=correlation_id,
+                        )
+                    )
+
+            duration_ms = (time.monotonic() - start_time) * 1000
+
+            logger.info(
+                "Retrieved service instances from Consul",
+                extra={
+                    "service_name": service_name,
+                    "instance_count": len(service_infos),
+                    "include_unhealthy": include_unhealthy,
+                    "duration_ms": duration_ms,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+            return service_infos
+
+        except TimeoutError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="get_all_service_instances",
+                    correlation_id=correlation_id,
+                )
+            raise InfraTimeoutError(
+                f"Consul health query timed out after {self._timeout_seconds}s",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="get_all_service_instances",
+                    target_name="consul.discovery",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
+            ) from e
+
+        except consul.ConsulException as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="get_all_service_instances",
+                    correlation_id=correlation_id,
+                )
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="get_all_service_instances",
+                target_name="consul.discovery",
+                correlation_id=correlation_id,
+            )
+            raise InfraConnectionError(
+                "Consul health query failed",
+                context=context,
+            ) from e
+
     async def health_check(
         self,
         correlation_id: UUID | None = None,

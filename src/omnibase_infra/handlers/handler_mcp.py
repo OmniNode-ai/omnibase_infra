@@ -13,6 +13,7 @@ Key Features:
     - Dynamic tool discovery from ONEX node registry
     - Contract-to-MCP schema generation
     - Request/response correlation for observability
+    - Internal uvicorn server lifecycle management (OMN-1282)
 
 Note:
     This handler requires the `mcp` package (anthropic-ai/mcp-python-sdk).
@@ -21,12 +22,18 @@ Note:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+import uvicorn
 from pydantic import ValidationError
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import (
@@ -46,9 +53,10 @@ from omnibase_infra.handlers.models.mcp import (
     ModelMcpToolResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+from omnibase_infra.services.mcp import MCPServerLifecycle, ModelMCPServerConfig
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Coroutine, Sequence
 
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_infra.adapters.adapter_onex_tool_execution import (
@@ -65,6 +73,64 @@ logger = logging.getLogger(__name__)
 
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_MCP: str = "mcp-handler"
+
+# Shutdown timeout constants (can be overridden via class attributes)
+_DEFAULT_SHUTDOWN_TIMEOUT: float = 5.0
+_DEFAULT_CANCEL_TIMEOUT: float = 1.0
+_DEFAULT_STARTUP_TIMEOUT: float = 2.0
+
+# Error message truncation limit for health check responses
+_ERROR_MESSAGE_MAX_LENGTH: int = 200
+
+
+def _require_config_value[T](
+    config: dict[str, object],
+    key: str,
+    expected_type: type[T],
+    correlation_id: UUID,
+) -> T:
+    """Extract required config value or raise ProtocolConfigurationError.
+
+    Per CLAUDE.md configuration rules, the `.env` file is the SINGLE SOURCE OF TRUTH.
+    There should be ZERO hardcoded fallbacks - all configuration must be explicitly
+    provided. If missing, this function raises an error rather than using defaults.
+
+    Args:
+        config: Configuration dictionary to extract value from.
+        key: Configuration key to look up.
+        expected_type: Expected Python type for the value.
+        correlation_id: Correlation ID for error context.
+
+    Returns:
+        The validated configuration value.
+
+    Raises:
+        ProtocolConfigurationError: If value is missing or has wrong type.
+    """
+    value = config.get(key)
+    if value is None:
+        raise ProtocolConfigurationError(
+            f"Missing required config: '{key}'. Must be set in .env or runtime config.",
+            context=ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.MCP,
+                operation="initialize",
+                target_name="handler_mcp",
+            ),
+        )
+    if not isinstance(value, expected_type):
+        raise ProtocolConfigurationError(
+            f"Invalid config type for '{key}': expected {expected_type.__name__}, "
+            f"got {type(value).__name__}",
+            context=ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.MCP,
+                operation="initialize",
+                target_name="handler_mcp",
+            ),
+        )
+    return value
+
 
 # Supported operations
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
@@ -114,19 +180,30 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         - Timeout enforcement via asyncio.wait_for()
         - Full observability through the ONEX runtime
         See: TODO(OMN-1288) for dispatcher integration tracking
+
+    Class Attributes:
+        shutdown_timeout: Timeout for graceful server shutdown (default: 5.0s).
+        cancel_timeout: Timeout for forced cancellation after graceful fails (default: 1.0s).
+        startup_timeout: Timeout for server readiness check during startup (default: 2.0s).
     """
+
+    # Configurable timeout attributes (can be overridden on subclasses or instances)
+    shutdown_timeout: float = _DEFAULT_SHUTDOWN_TIMEOUT
+    cancel_timeout: float = _DEFAULT_CANCEL_TIMEOUT
+    startup_timeout: float = _DEFAULT_STARTUP_TIMEOUT
 
     def __init__(
         self,
-        container: ModelONEXContainer,
+        container: ModelONEXContainer | None = None,
         registry: ServiceMCPToolRegistry | None = None,
         executor: AdapterONEXToolExecution | None = None,
     ) -> None:
-        """Initialize HandlerMCP with ONEX container for dependency injection.
+        """Initialize HandlerMCP with optional ONEX container for dependency injection.
 
         Args:
-            container: ONEX container providing dependency injection for
-                services, configuration, and runtime context.
+            container: Optional ONEX container providing dependency injection for
+                services, configuration, and runtime context. When None, the handler
+                operates in standalone mode without container-based DI.
             registry: Optional MCP tool registry for dynamic tool discovery.
                 If provided, tools are looked up from this registry. If not
                 provided, the handler uses its local _tool_registry dict.
@@ -135,11 +212,13 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 this adapter. If not provided, placeholder execution is used.
 
         Note:
-            The container is stored for interface compliance with the standard ONEX
-            handler pattern (def __init__(self, container: ModelONEXContainer)) and
-            to enable future DI-based service resolution (e.g., dispatcher routing,
-            metrics integration). Currently, the handler operates independently but
-            the container parameter ensures API consistency across all handlers.
+            The container parameter is optional to support two instantiation paths:
+            1. Registry-based: RuntimeHostProcess creates handlers via registry lookup
+               with no-argument constructor calls. Container is None in this case.
+            2. DI-based: Explicit container injection for full ONEX integration.
+
+            When container is provided, it enables future DI-based service resolution
+            (e.g., dispatcher routing, metrics integration).
 
         MCP Integration (OMN-1281):
             When registry and executor are provided, the handler operates in
@@ -148,6 +227,11 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             - Tool list is cached in ServiceMCPToolRegistry
             - Tool execution routes through AdapterONEXToolExecution
             - Hot reload updates are received via ServiceMCPToolSync
+
+        Server Lifecycle (OMN-1282):
+            The handler owns its uvicorn server lifecycle. When initialize() is
+            called, the handler starts a uvicorn server in a background task.
+            When shutdown() is called, the server is gracefully stopped.
         """
         self._container = container
         self._config: ModelMcpHandlerConfig | None = None
@@ -157,6 +241,13 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         # MCP integration components (OMN-1281)
         self._mcp_registry: ServiceMCPToolRegistry | None = registry
         self._mcp_executor: AdapterONEXToolExecution | None = executor
+
+        # Server lifecycle components (OMN-1282)
+        self._server: uvicorn.Server | None = None
+        self._server_task: asyncio.Task[None] | None = None
+        self._lifecycle: MCPServerLifecycle | None = None
+        self._skip_server: bool = False  # Track if server was intentionally skipped
+        self._server_started_at: float | None = None  # Timestamp for uptime tracking
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -187,8 +278,194 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         """
         return EnumInfraTransportType.MCP
 
+    def _create_json_endpoint(
+        self,
+        response_factory: Callable[[], Coroutine[object, object, dict[str, object]]],
+    ) -> Callable[[Request], Coroutine[object, object, JSONResponse]]:
+        """Create a JSON endpoint that wraps an async response factory.
+
+        This method creates a Starlette-compatible async route handler that:
+        1. Calls the provided response_factory to generate response data
+        2. Wraps the data in a JSONResponse
+
+        Args:
+            response_factory: Async callable that returns the response data dict.
+                The factory is called on each request to generate fresh data.
+
+        Returns:
+            Async function suitable for Starlette Route.
+        """
+
+        async def endpoint(_request: Request) -> JSONResponse:
+            data = await response_factory()
+            return JSONResponse(data)
+
+        return endpoint
+
+    def _create_health_endpoint(
+        self,
+    ) -> Callable[[Request], Coroutine[object, object, JSONResponse]]:
+        """Create health endpoint with explicit handler binding.
+
+        Returns a coroutine function that closes over `self` explicitly,
+        avoiding fragile closure patterns with intermediate variables.
+
+        Returns:
+            Async function suitable for Starlette Route.
+        """
+        # Capture reference explicitly in closure scope
+        handler = self
+
+        async def get_health_data() -> dict[str, object]:
+            """Return health status data for the MCP server."""
+            tool_count = 0
+            if handler._lifecycle and handler._lifecycle.registry:
+                tool_count = handler._lifecycle.registry.tool_count
+            return {
+                "status": "healthy",
+                "tool_count": tool_count,
+                "initialized": handler._initialized,
+            }
+
+        return self._create_json_endpoint(get_health_data)
+
+    def _create_tools_list_endpoint(
+        self,
+    ) -> Callable[[Request], Coroutine[object, object, JSONResponse]]:
+        """Create tools list endpoint with explicit handler binding.
+
+        Returns a coroutine function that closes over `self` explicitly,
+        avoiding fragile closure patterns with intermediate variables.
+
+        Returns:
+            Async function suitable for Starlette Route.
+        """
+        # Capture reference explicitly in closure scope
+        handler = self
+
+        async def get_tools_data() -> dict[str, object]:
+            """Return list of available MCP tools."""
+            if handler._lifecycle and handler._lifecycle.registry:
+                tools = await handler._lifecycle.registry.list_tools()
+                return {
+                    "tools": [
+                        {
+                            "name": t.name,
+                            "description": t.description,
+                            "endpoint": t.endpoint,
+                        }
+                        for t in tools
+                    ]
+                }
+            return {"tools": []}
+
+        return self._create_json_endpoint(get_tools_data)
+
+    async def _wait_for_server_ready(
+        self,
+        host: str,
+        port: int,
+        timeout: float = 2.0,
+        poll_interval: float = 0.05,
+    ) -> None:
+        """Wait for server to be ready by polling TCP connect.
+
+        Args:
+            host: Server host
+            port: Server port
+            timeout: Maximum time to wait
+            poll_interval: Time between connection attempts
+
+        Raises:
+            ProtocolConfigurationError: If server doesn't start within timeout
+
+        Note:
+            Circuit Breaker Failures Are NOT Recorded Here
+
+            This method is for startup verification, not runtime health checking.
+            TCP connect failures during startup are expected and transient - the
+            server is still spinning up and will become available shortly.
+
+            Circuit breaker tracking is intentionally omitted because:
+
+            1. Startup retries are bounded and transient - the method either succeeds
+               within the timeout or raises ProtocolConfigurationError, ending startup.
+
+            2. Recording startup failures would pollute circuit breaker metrics with
+               expected transient failures, potentially triggering an open circuit
+               before the server even starts.
+
+            3. Circuit breakers are designed for runtime fault tolerance - detecting
+               when a previously-healthy service becomes unhealthy. Startup behavior
+               is fundamentally different: we expect failures until success.
+
+            4. If the server fails to start within timeout, we fail fast with
+               ProtocolConfigurationError rather than entering a degraded state.
+
+            Circuit breaker tracking should occur during runtime operations (e.g.,
+            tool execution, health checks) where failures indicate actual service
+            degradation rather than expected startup latency.
+        """
+        import socket
+
+        start_time = time.perf_counter()
+        last_error: Exception | None = None
+
+        while time.perf_counter() - start_time < timeout:
+            # Check if server task has failed
+            if self._server_task is not None and self._server_task.done():
+                exc = self._server_task.exception()
+                if exc:
+                    ctx = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.MCP,
+                        operation="server_startup",
+                        target_name="mcp_handler",
+                    )
+                    raise ProtocolConfigurationError(
+                        f"Server failed to start: {exc}",
+                        context=ctx,
+                    ) from exc
+
+            # Try TCP connect
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(poll_interval)
+                # TCP PROTOCOL REQUIREMENT (NOT a config fallback):
+                # When a server binds to 0.0.0.0 (INADDR_ANY), it listens on all
+                # interfaces but you cannot connect() to 0.0.0.0 - it's not a
+                # routable address. TCP requires connecting to a specific interface.
+                # Using 127.0.0.1 (loopback) is the correct way to reach a local
+                # server that bound to 0.0.0.0. This is standard TCP/IP behavior,
+                # not an environment configuration fallback.
+                effective_host = "127.0.0.1" if host == "0.0.0.0" else host  # noqa: S104
+                result = sock.connect_ex((effective_host, port))
+                sock.close()
+                if result == 0:
+                    return  # Server is ready
+            except Exception as e:
+                last_error = e
+
+            await asyncio.sleep(poll_interval)
+
+        # Timeout reached
+        ctx = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.MCP,
+            operation="server_startup",
+            target_name="mcp_handler",
+        )
+        raise ProtocolConfigurationError(
+            f"Server failed to start within {timeout}s. Last error: {last_error}",
+            context=ctx,
+        )
+
     async def initialize(self, config: dict[str, object]) -> None:
-        """Initialize MCP handler with configuration.
+        """Initialize MCP handler with configuration and optionally start uvicorn server.
+
+        This method performs the following steps:
+        1. Parse and validate handler configuration
+        2. Initialize MCPServerLifecycle for tool discovery (unless skip_server=True)
+        3. Create Starlette app with /health and /mcp/tools endpoints
+        4. Start uvicorn server in a background task (unless skip_server=True)
 
         Args:
             config: Configuration dict containing:
@@ -199,9 +476,19 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 - json_response: Return JSON responses (default: True)
                 - timeout_seconds: Tool execution timeout (default: 30.0)
                 - max_tools: Maximum tools to expose (default: 100)
+                - consul_host: Consul server hostname (REQUIRED - no default)
+                - consul_port: Consul server port (REQUIRED - no default)
+                - kafka_enabled: Whether to enable Kafka hot reload (REQUIRED - no default)
+                - dev_mode: Whether to run in development mode (REQUIRED - no default)
+                - contracts_dir: Directory for contract scanning in dev mode (optional)
+                - skip_server: Skip starting uvicorn server (default: False).
+                    Use for unit testing to avoid port binding.
 
         Raises:
-            ProtocolConfigurationError: If configuration is invalid.
+            ProtocolConfigurationError: If configuration is invalid or required
+                config values (consul_host, consul_port, kafka_enabled, dev_mode)
+                are missing. Per CLAUDE.md, .env is the single source of truth -
+                no hardcoded fallbacks are used.
         """
         init_correlation_id = uuid4()
 
@@ -232,22 +519,166 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 transport_type=EnumInfraTransportType.MCP,
             )
 
-            # Note: The MCP server is created lazily when start_server() is called
-            # This allows the handler to be initialized before tools are registered
+            # Check if server startup should be skipped (for unit testing)
+            skip_server_val = config.get("skip_server")
+            skip_server: bool = (
+                skip_server_val if isinstance(skip_server_val, bool) else False
+            )
+            self._skip_server = skip_server
+
+            if not skip_server:
+                # Build MCPServerConfig from handler config (OMN-1282)
+                # Map handler config fields to lifecycle config fields
+                #
+                # Per CLAUDE.md: .env is the SINGLE SOURCE OF TRUTH.
+                # No hardcoded fallbacks - all required config must be explicit.
+                # The _require_config_value helper validates type, cast() is for mypy.
+                consul_host = _require_config_value(
+                    config, "consul_host", str, init_correlation_id
+                )
+                consul_port = _require_config_value(
+                    config, "consul_port", int, init_correlation_id
+                )
+                kafka_enabled = _require_config_value(
+                    config, "kafka_enabled", bool, init_correlation_id
+                )
+                dev_mode = _require_config_value(
+                    config, "dev_mode", bool, init_correlation_id
+                )
+                # contracts_dir is optional - only used when dev_mode=True
+                contracts_dir_val = config.get("contracts_dir")
+                contracts_dir: str | None = (
+                    contracts_dir_val if isinstance(contracts_dir_val, str) else None
+                )
+
+                server_config = ModelMCPServerConfig(
+                    consul_host=consul_host,
+                    consul_port=consul_port,
+                    kafka_enabled=kafka_enabled,
+                    http_host=self._config.host,
+                    http_port=self._config.port,
+                    default_timeout=self._config.timeout_seconds,
+                    dev_mode=dev_mode,
+                    contracts_dir=contracts_dir,
+                )
+
+                # Wrap entire server startup in try/except to ensure cleanup
+                # if ANY step fails after lifecycle starts. This prevents:
+                # - Orphan lifecycle resources (registry, executor, sync)
+                # - Orphan server tasks
+                # - Resource leaks from partial initialization
+                try:
+                    # Create and start MCPServerLifecycle for tool discovery
+                    self._lifecycle = MCPServerLifecycle(config=server_config, bus=None)
+                    await self._lifecycle.start()
+
+                    # Update MCP registry and executor references from lifecycle
+                    if self._lifecycle.registry is not None:
+                        self._mcp_registry = self._lifecycle.registry
+                    if self._lifecycle.executor is not None:
+                        self._mcp_executor = self._lifecycle.executor
+
+                    # Create Starlette app with HTTP endpoints (OMN-1282)
+                    # Use factory methods for explicit handler reference binding
+                    health_endpoint = self._create_health_endpoint()
+                    tools_list_endpoint = self._create_tools_list_endpoint()
+
+                    app = Starlette(
+                        routes=[
+                            Route("/health", health_endpoint, methods=["GET"]),
+                            Route("/mcp/tools", tools_list_endpoint, methods=["GET"]),
+                        ],
+                    )
+
+                    # Create uvicorn server config and server
+                    uvicorn_config = uvicorn.Config(
+                        app=app,
+                        host=self._config.host,
+                        port=self._config.port,
+                        log_level="info",
+                    )
+                    self._server = uvicorn.Server(uvicorn_config)
+
+                    # Start server in background task
+                    self._server_task = asyncio.create_task(self._server.serve())
+
+                    # Wait for server to be ready before marking as initialized
+                    await self._wait_for_server_ready(
+                        self._config.host,
+                        self._config.port,
+                        timeout=self.startup_timeout,
+                    )
+                    self._server_started_at = time.time()
+
+                except Exception as startup_error:
+                    # Any failure during server startup - clean up all resources
+                    # This handles failures in:
+                    # - lifecycle.start() (Consul/contract discovery)
+                    # - Starlette app creation
+                    # - uvicorn config/server creation
+                    # - server task creation
+                    # - server readiness check
+                    logger.exception(
+                        "MCP server startup failed, cleaning up resources",
+                        extra={
+                            "host": self._config.host,
+                            "port": self._config.port,
+                            "lifecycle_created": self._lifecycle is not None,
+                            "server_created": self._server is not None,
+                            "server_task_created": self._server_task is not None,
+                            "correlation_id": str(init_correlation_id),
+                        },
+                    )
+                    # shutdown() safely handles partially initialized state:
+                    # - Checks each component before cleanup
+                    # - Safe to call even if components weren't created
+                    await self.shutdown()
+                    ctx = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.MCP,
+                        operation="initialize",
+                        target_name="mcp_handler",
+                        correlation_id=init_correlation_id,
+                    )
+                    raise ProtocolConfigurationError(
+                        f"MCP server startup failed: {startup_error}",
+                        context=ctx,
+                    ) from startup_error
+
             self._initialized = True
 
-            logger.info(
-                "%s initialized successfully",
-                self.__class__.__name__,
-                extra={
-                    "handler": self.__class__.__name__,
-                    "host": self._config.host,
-                    "port": self._config.port,
-                    "path": self._config.path,
-                    "stateless": self._config.stateless,
-                    "correlation_id": str(init_correlation_id),
-                },
-            )
+            tool_count = 0
+            if self._lifecycle and self._lifecycle.registry:
+                tool_count = self._lifecycle.registry.tool_count
+
+            if skip_server:
+                logger.info(
+                    "%s initialized successfully (server skipped)",
+                    self.__class__.__name__,
+                    extra={
+                        "handler": self.__class__.__name__,
+                        "host": self._config.host,
+                        "port": self._config.port,
+                        "path": self._config.path,
+                        "stateless": self._config.stateless,
+                        "skip_server": True,
+                        "correlation_id": str(init_correlation_id),
+                    },
+                )
+            else:
+                logger.info(
+                    "%s initialized successfully - uvicorn server running",
+                    self.__class__.__name__,
+                    extra={
+                        "handler": self.__class__.__name__,
+                        "host": self._config.host,
+                        "port": self._config.port,
+                        "path": self._config.path,
+                        "stateless": self._config.stateless,
+                        "tool_count": tool_count,
+                        "url": f"http://{self._config.host}:{self._config.port}",
+                        "correlation_id": str(init_correlation_id),
+                    },
+                )
 
         except ValidationError as e:
             ctx = ModelInfraErrorContext(
@@ -271,11 +702,102 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             ) from e
 
     async def shutdown(self) -> None:
-        """Shutdown MCP handler and release resources."""
+        """Shutdown MCP handler with timeout protection.
+
+        This method performs graceful shutdown with timeout protection:
+        1. Signal uvicorn server to stop
+        2. Wait for server task with timeout (max 5s graceful, 1s forced)
+        3. Shutdown MCPServerLifecycle (registry, discovery, sync)
+        4. Clear tool registry and reset state
+
+        Safe to call multiple times. Never hangs indefinitely (max ~6s with defaults).
+
+        Note:
+            Timeouts are configurable via class attributes:
+            - shutdown_timeout: Graceful shutdown timeout (default: 5.0s)
+            - cancel_timeout: Forced cancellation timeout (default: 1.0s)
+        """
+        shutdown_correlation_id = uuid4()
+
+        logger.info(
+            "Shutting down %s",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(shutdown_correlation_id),
+            },
+        )
+
+        # Stop uvicorn server with timeout protection (OMN-1282)
+        if (
+            self._server is not None
+            and self._server_task is not None
+            and not self._skip_server
+        ):
+            # Signal server to stop
+            self._server.should_exit = True
+
+            try:
+                # Wait for graceful shutdown with timeout
+                logger.debug(
+                    "Waiting for server task to complete",
+                    extra={
+                        "timeout_seconds": self.shutdown_timeout,
+                        "correlation_id": str(shutdown_correlation_id),
+                    },
+                )
+                await asyncio.wait_for(self._server_task, timeout=self.shutdown_timeout)
+            except TimeoutError:
+                logger.warning(
+                    "Server shutdown timed out, forcing cancellation",
+                    extra={
+                        "timeout_seconds": self.shutdown_timeout,
+                        "correlation_id": str(shutdown_correlation_id),
+                    },
+                )
+                self._server_task.cancel()
+                try:
+                    await asyncio.wait_for(
+                        self._server_task, timeout=self.cancel_timeout
+                    )
+                except (TimeoutError, asyncio.CancelledError):
+                    pass  # Best effort
+            except asyncio.CancelledError:
+                logger.debug(
+                    "Server task was cancelled",
+                    extra={"correlation_id": str(shutdown_correlation_id)},
+                )
+
+        # Shutdown lifecycle (registry, discovery, sync)
+        if self._lifecycle is not None:
+            logger.debug(
+                "Shutting down MCPServerLifecycle",
+                extra={"correlation_id": str(shutdown_correlation_id)},
+            )
+            await self._lifecycle.shutdown()
+            self._lifecycle = None
+
+        # Clear registry and executor references
+        self._mcp_registry = None
+        self._mcp_executor = None
+
+        # Clear all state
         self._tool_registry.clear()
         self._config = None
         self._initialized = False
-        logger.info("HandlerMCP shutdown complete")
+        self._server = None
+        self._server_task = None
+        self._skip_server = False
+        self._server_started_at = None
+
+        logger.info(
+            "%s shutdown complete",
+            self.__class__.__name__,
+            extra={
+                "handler": self.__class__.__name__,
+                "correlation_id": str(shutdown_correlation_id),
+            },
+        )
 
     async def execute(
         self, envelope: dict[str, object]
@@ -769,7 +1291,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         Returns:
             dict containing handler type, category, transport type,
-            supported operations, configuration, and tool count.
+            supported operations, configuration, tool count, and server state.
         """
         config_dict: dict[str, object] = {}
         if self._config:
@@ -783,28 +1305,116 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 "max_tools": self._config.max_tools,
             }
 
+        # Include lifecycle tool count if available (OMN-1282)
+        tool_count = len(self._tool_registry)
+        if self._lifecycle and self._lifecycle.registry:
+            tool_count = self._lifecycle.registry.tool_count
+
         return {
             "handler_type": self.handler_type.value,
             "handler_category": self.handler_category.value,
             "transport_type": self.transport_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
-            "tool_count": len(self._tool_registry),
+            "tool_count": tool_count,
             "config": config_dict,
             "initialized": self._initialized,
+            "server_running": self._server is not None
+            and self._server_task is not None,
+            "lifecycle_running": self._lifecycle is not None
+            and self._lifecycle.is_running,
             "version": "0.1.0-mvp",
         }
 
     async def health_check(self) -> dict[str, object]:
-        """Check handler health and connectivity.
+        """Check handler health and server status.
 
-        Returns:
-            Health status including initialization state and tool count.
+        Returns unhealthy if:
+        - Not initialized
+        - Server task has crashed/completed unexpectedly
+        - Server task was cancelled
+
+        Note:
+            When skip_server=True was used during initialization, the handler is
+            considered healthy if initialized, even without a running server.
+            This enables unit testing without actual port binding.
         """
+        if not self._initialized:
+            return {
+                "healthy": False,
+                "reason": "not_initialized",
+                "transport_type": self.transport_type.value,
+            }
+
+        if self._skip_server:
+            return {
+                "healthy": True,
+                "skip_server": True,
+                "transport_type": self.transport_type.value,
+                "initialized": True,
+            }
+
+        # Capture server task reference once to avoid TOCTOU race conditions.
+        # If _server_task is reassigned (e.g., by concurrent shutdown()),
+        # we work with the captured reference consistently.
+        server_task = self._server_task
+
+        # Check server task state
+        if server_task is None:
+            return {
+                "healthy": False,
+                "reason": "server_task_missing",
+                "transport_type": self.transport_type.value,
+                "initialized": True,
+            }
+
+        if server_task.done():
+            # Task completed - check why
+            if server_task.cancelled():
+                return {
+                    "healthy": False,
+                    "reason": "server_cancelled",
+                    "transport_type": self.transport_type.value,
+                    "initialized": True,
+                }
+
+            exc = server_task.exception()
+            if exc is not None:
+                return {
+                    "healthy": False,
+                    "reason": "server_crashed",
+                    "error": str(exc)[:_ERROR_MESSAGE_MAX_LENGTH],
+                    "transport_type": self.transport_type.value,
+                    "initialized": True,
+                }
+
+            # Exited cleanly but unexpectedly
+            return {
+                "healthy": False,
+                "reason": "server_exited",
+                "transport_type": self.transport_type.value,
+                "initialized": True,
+            }
+
+        # Task is still running - healthy
+        # Include lifecycle tool count if available (OMN-1282)
+        tool_count = len(self._tool_registry)
+        if self._lifecycle and self._lifecycle.registry:
+            tool_count = self._lifecycle.registry.tool_count
+
+        lifecycle_running = self._lifecycle is not None and self._lifecycle.is_running
+
         return {
-            "healthy": self._initialized,
-            "initialized": self._initialized,
-            "tool_count": len(self._tool_registry),
+            "healthy": True,
+            "initialized": True,
+            "server_running": True,
+            "tool_count": tool_count,
             "transport_type": self.transport_type.value,
+            "lifecycle_running": lifecycle_running,
+            "uptime_seconds": (
+                time.time() - self._server_started_at
+                if self._server_started_at is not None
+                else None
+            ),
         }
 
 

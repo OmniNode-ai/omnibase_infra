@@ -122,12 +122,14 @@ from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
+from omnibase_infra.handlers.handler_mcp import HandlerMCP
 from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_CONSUL,
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
+    HANDLER_TYPE_MCP,
     HANDLER_TYPE_VAULT,
     RegistryEventBusBinding,
     RegistryProtocolBinding,
@@ -169,6 +171,7 @@ _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
     HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_HTTP: (HandlerHttpRest, "HTTP REST protocol handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
+    HANDLER_TYPE_MCP: (HandlerMCP, "Model Context Protocol handler for AI agents"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
 }
 
@@ -195,6 +198,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
         - CONSUL: HandlerConsul for HashiCorp Consul service discovery
         - DB: HandlerDb for PostgreSQL database operations
         - HTTP: HandlerHttpRest for HTTP/REST protocol operations
+        - MCP: HandlerMCP for Model Context Protocol AI agent integration
         - VAULT: HandlerVault for HashiCorp Vault secret management
 
     Registered Event Buses:
@@ -217,7 +221,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
     Example:
         >>> summary = wire_default_handlers()
         >>> print(summary)
-        {'handlers': ['consul', 'db', 'http', 'vault'], 'event_buses': ['inmemory']}
+        {'handlers': ['consul', 'db', 'http', 'mcp', 'vault'], 'event_buses': ['inmemory']}
 
     Note:
         This function uses the singleton registries returned by

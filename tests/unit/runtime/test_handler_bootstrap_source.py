@@ -5,7 +5,7 @@ Unit tests for HandlerBootstrapSource hardcoded handler registration.
 
 Tests the HandlerBootstrapSource functionality including:
 - Protocol compliance with ProtocolContractSource
-- Bootstrap handler discovery (consul, db, http, vault)
+- Bootstrap handler discovery (consul, db, http, mcp, vault)
 - ModelHandlerDescriptor validation for all bootstrap handlers
 - Graceful mode behavior (API consistency)
 - Idempotency of discover_handlers() calls
@@ -18,7 +18,7 @@ Related:
 Expected Behavior:
     HandlerBootstrapSource implements ProtocolContractSource from omnibase_infra.
     It provides hardcoded handler descriptors for core infrastructure handlers
-    (Consul, Database, HTTP, Vault) without requiring contract.yaml files.
+    (Consul, Database, HTTP, MCP, Vault) without requiring contract.yaml files.
 
     The source_type property returns "BOOTSTRAP" as per the implementation.
     All handlers have handler_kind="effect" since they perform external I/O.
@@ -49,6 +49,7 @@ EXPECTED_HANDLER_IDS = frozenset(
         "bootstrap.consul",
         "bootstrap.db",
         "bootstrap.http",
+        "bootstrap.mcp",
         "bootstrap.vault",
     }
 )
@@ -60,7 +61,18 @@ EXPECTED_HANDLER_KIND = "effect"
 EXPECTED_VERSION = "1.0.0"
 
 # Expected count of bootstrap handlers
-EXPECTED_HANDLER_COUNT = 4
+EXPECTED_HANDLER_COUNT = 5
+
+# Performance threshold: 20ms allows for contract YAML file I/O during handler
+# discovery. Pre-OMN-1282 threshold was 10ms when no contract files were loaded.
+# Current overhead comes from:
+# - Reading handler_contract.yaml for each bootstrap handler (5 handlers)
+# - YAML parsing via yaml.safe_load()
+# - Path resolution and symlink handling
+# - CI environment disk I/O variance
+# See: OMN-1282 for contract-driven handler configuration migration
+PERFORMANCE_THRESHOLD_MS = 20.0
+PERFORMANCE_THRESHOLD_SECONDS = PERFORMANCE_THRESHOLD_MS / 1000.0
 
 
 # =============================================================================
@@ -169,13 +181,14 @@ class TestHandlerBootstrapSourceDiscovery:
         assert hasattr(result, "validation_errors")
 
     @pytest.mark.asyncio
-    async def test_discovers_exactly_four_handlers(self) -> None:
-        """discover_handlers() should return exactly 4 bootstrap handlers.
+    async def test_discovers_exactly_five_handlers(self) -> None:
+        """discover_handlers() should return exactly 5 bootstrap handlers.
 
         The bootstrap handlers are:
         - bootstrap.consul: HashiCorp Consul service discovery
         - bootstrap.db: PostgreSQL database operations
         - bootstrap.http: HTTP REST protocol
+        - bootstrap.mcp: Model Context Protocol for AI agent integration
         - bootstrap.vault: HashiCorp Vault secret management
         """
         source = HandlerBootstrapSource()
@@ -192,7 +205,7 @@ class TestHandlerBootstrapSourceDiscovery:
         """All discovered handlers should have expected handler_id values.
 
         Handler IDs must follow the pattern "bootstrap.<service_name>" where
-        service_name is one of: consul, db, http, vault.
+        service_name is one of: consul, db, http, mcp, vault.
         """
         source = HandlerBootstrapSource()
 
@@ -257,20 +270,35 @@ class TestHandlerBootstrapSourceDiscovery:
             assert descriptor.version.patch == 0
 
     @pytest.mark.asyncio
-    async def test_all_handlers_have_contract_path_none(self) -> None:
-        """All bootstrap handlers should have contract_path=None.
+    async def test_all_handlers_have_valid_contract_paths(self) -> None:
+        """All bootstrap handlers should have valid contract_path values.
 
-        Bootstrap handlers are hardcoded and don't come from contract files,
-        so their contract_path should always be None.
+        Bootstrap handlers now load their configuration from contract YAML files.
+        Each handler should have a contract_path that points to an existing file.
+
+        Basic handlers use: contracts/handlers/<type>/handler_contract.yaml
+        MCP uses rich contract: src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml
         """
         source = HandlerBootstrapSource()
 
         result = await source.discover_handlers()
 
+        expected_paths = {
+            "bootstrap.consul": "contracts/handlers/consul/handler_contract.yaml",
+            "bootstrap.db": "contracts/handlers/db/handler_contract.yaml",
+            "bootstrap.http": "contracts/handlers/http/handler_contract.yaml",
+            "bootstrap.vault": "contracts/handlers/vault/handler_contract.yaml",
+            "bootstrap.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
+        }
+
         for descriptor in result.descriptors:
-            assert descriptor.contract_path is None, (
+            assert descriptor.contract_path is not None, (
+                f"Handler '{descriptor.handler_id}' has contract_path=None, expected a path"
+            )
+            expected = expected_paths.get(descriptor.handler_id)
+            assert descriptor.contract_path == expected, (
                 f"Handler '{descriptor.handler_id}' has contract_path="
-                f"'{descriptor.contract_path}', expected None"
+                f"'{descriptor.contract_path}', expected '{expected}'"
             )
 
     @pytest.mark.asyncio
@@ -512,6 +540,30 @@ class TestHandlerBootstrapSourceDescriptors:
         assert descriptor.name == "Vault Handler"
         assert "vault" in descriptor.description.lower()
         assert descriptor.handler_kind == "effect"
+
+    @pytest.mark.asyncio
+    async def test_mcp_handler_descriptor_content(self) -> None:
+        """Verify the MCP handler descriptor has expected content."""
+        source = HandlerBootstrapSource()
+
+        result = await source.discover_handlers()
+
+        mcp_descriptors = [
+            d for d in result.descriptors if d.handler_id == "bootstrap.mcp"
+        ]
+
+        assert len(mcp_descriptors) == 1, "Should have exactly one MCP handler"
+
+        descriptor = mcp_descriptors[0]
+        assert descriptor.name == "MCP Handler"
+        assert descriptor.handler_kind == "effect"
+        assert (
+            descriptor.description
+            == "Model Context Protocol handler for AI agent integration"
+        )
+        assert (
+            descriptor.handler_class == "omnibase_infra.handlers.handler_mcp.HandlerMCP"
+        )
 
 
 # =============================================================================
@@ -982,7 +1034,7 @@ class TestHandlerBootstrapSourceThreadSafety:
 
         # Verify all results are valid
         for i, result in enumerate(results):
-            assert len(result.descriptors) == 4, (
+            assert len(result.descriptors) == EXPECTED_HANDLER_COUNT, (
                 f"Result {i + 1} has wrong handler count: {len(result.descriptors)}"
             )
             assert result.validation_errors == [], (
@@ -998,18 +1050,32 @@ class TestHandlerBootstrapSourceThreadSafety:
 class TestHandlerBootstrapSourcePerformance:
     """Tests for performance characteristics.
 
-    These tests verify the documented performance guarantees:
-    - No filesystem or network I/O required
-    - Constant time O(1) discovery
-    - Typical performance: <1ms for all handlers
+    These tests verify performance guarantees for handler discovery:
+    - No network I/O required (all local file operations)
+    - Constant time O(1) discovery (fixed set of 5 handlers)
+    - Typical performance: <20ms for all handlers
+
+    Note on I/O overhead (OMN-1282):
+        Since OMN-1282, bootstrap handlers load configuration from contract
+        YAML files rather than using hardcoded values. This adds file I/O
+        overhead but enables contract-driven configuration. The threshold
+        was increased from 10ms to 20ms to accommodate:
+        - Reading handler_contract.yaml for each bootstrap handler
+        - YAML parsing via yaml.safe_load()
+        - Path resolution and symlink handling
+        - CI environment disk I/O variance
     """
 
     @pytest.mark.asyncio
     async def test_discovery_is_fast(self) -> None:
-        """discover_handlers() should complete quickly (no I/O).
+        """discover_handlers() should complete quickly even with contract I/O.
 
-        The bootstrap source should be very fast since it uses
-        hardcoded definitions with no filesystem or network I/O.
+        Since OMN-1282, contract YAML files are loaded during discovery,
+        adding file I/O. This test uses a generous 50ms bound to account
+        for CI environment variance and cold cache scenarios.
+
+        See test_multiple_rapid_calls_are_fast() and PERFORMANCE_THRESHOLD_MS
+        for more detailed performance expectations.
         """
         import time
 
@@ -1027,7 +1093,25 @@ class TestHandlerBootstrapSourcePerformance:
 
     @pytest.mark.asyncio
     async def test_multiple_rapid_calls_are_fast(self) -> None:
-        """Multiple rapid calls should all be fast."""
+        """Multiple rapid calls should all be fast despite contract I/O.
+
+        Performance threshold: 20ms (PERFORMANCE_THRESHOLD_MS)
+
+        Since OMN-1282, bootstrap handlers load configuration from contract
+        YAML files during discovery. This adds file I/O overhead compared to
+        the previous hardcoded approach (pre-OMN-1282 threshold was 10ms).
+
+        I/O operations contributing to overhead:
+        - Reading 5 handler_contract.yaml files (one per bootstrap handler)
+        - YAML parsing via yaml.safe_load() for each contract
+        - Path resolution and symlink handling for contract paths
+        - OS-level file system caching (first call slower than subsequent)
+
+        The 20ms threshold accommodates:
+        - Contract file loading overhead (~5-10ms typical)
+        - CI environment disk I/O variance
+        - Cold cache scenarios on first discovery
+        """
         import time
 
         source = HandlerBootstrapSource()
@@ -1040,9 +1124,11 @@ class TestHandlerBootstrapSourcePerformance:
 
         avg_duration = total_duration / call_count
 
-        # Average should be under 10ms per call
-        assert avg_duration < 0.01, (
-            f"Average call took {avg_duration * 1000:.2f}ms, expected < 10ms"
+        # Use constant from module top for threshold documentation
+        assert avg_duration < PERFORMANCE_THRESHOLD_SECONDS, (
+            f"Average call took {avg_duration * 1000:.2f}ms, "
+            f"expected < {PERFORMANCE_THRESHOLD_MS}ms. "
+            "See PERFORMANCE_THRESHOLD_MS comment for OMN-1282 context."
         )
 
 

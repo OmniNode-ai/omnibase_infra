@@ -5,7 +5,7 @@
 This module provides HandlerBootstrapSource, which centralizes all hardcoded handler
 wiring that was previously scattered in util_wiring.py. This source implements
 ProtocolContractSource and provides handler descriptors for the core infrastructure
-handlers (Consul, Database, HTTP, Vault) without requiring contract.yaml files.
+handlers (Consul, Database, HTTP, Vault, MCP).
 
 Part of OMN-1087: HandlerBootstrapSource for hardcoded handler registration.
 
@@ -13,11 +13,33 @@ The bootstrap source provides handler descriptors for effect handlers that inter
 with external infrastructure services. These handlers use envelope-based routing
 and are registered as the foundation of the ONEX runtime handler ecosystem.
 
+Contract Loading:
+    Bootstrap handlers now load their contract YAML files during discovery.
+    This enables:
+    - Security metadata (trusted_namespace, audit_logging, requires_authentication)
+    - Tags for handler discovery and filtering
+    - Validation that contract files exist and are well-formed
+
+    Contract file locations (relative to repo root):
+    - contracts/handlers/consul/handler_contract.yaml (basic contract)
+    - contracts/handlers/db/handler_contract.yaml (basic contract)
+    - contracts/handlers/http/handler_contract.yaml (basic contract)
+    - contracts/handlers/vault/handler_contract.yaml (basic contract)
+    - src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml (rich contract with transport config)
+
+    Basic contracts provide: name, handler_class, handler_type, tags, security
+    Rich contracts (MCP only) additionally provide: descriptor, metadata.transport, metadata.security
+
+    If a contract file is missing or invalid, discovery fails fast with
+    ProtocolConfigurationError. This ensures bootstrap handlers always have
+    valid configuration.
+
 Registered Handlers:
     - consul: HandlerConsul for HashiCorp Consul service discovery
     - db: HandlerDb for PostgreSQL database operations
     - http: HandlerHttpRest for HTTP/REST protocol operations
     - vault: HandlerVault for HashiCorp Vault secret management
+    - mcp: HandlerMCP for Model Context Protocol AI agent integration
 
 All handlers are registered with handler_kind="effect" as they perform external I/O
 operations with infrastructure services.
@@ -25,11 +47,17 @@ operations with infrastructure services.
 See Also:
     - ProtocolContractSource: Protocol definition for handler sources
     - HandlerContractSource: Filesystem-based contract discovery source
+    - handler_contract_config_loader: Loads and parses handler contract YAML files
     - util_wiring: Module that previously contained hardcoded handler wiring
     - ModelHandlerDescriptor: Descriptor model for discovered handlers
 
 .. versionadded:: 0.6.4
     Created as part of OMN-1087 bootstrap handler registration.
+
+.. versionchanged:: 0.6.5
+    Added contract loading support. Bootstrap handlers now load and validate
+    their contract YAML files during discovery, populating contract_config
+    in the descriptor.
 """
 
 from __future__ import annotations
@@ -39,11 +67,16 @@ import threading
 import time
 from typing import TypedDict, final
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
     ModelBootstrapHandlerDescriptor,
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
+)
+from omnibase_infra.runtime.handler_contract_config_loader import (
+    extract_handler_config,
+    load_handler_contract_config,
 )
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
@@ -59,6 +92,16 @@ class BootstrapEffectDefinition(TypedDict):
     Note that handler_class is a required field here, matching the
     ModelBootstrapHandlerDescriptor requirement that bootstrap handlers
     must always specify their implementation class.
+
+    Attributes:
+        handler_id: Unique identifier with "bootstrap." prefix.
+        name: Human-readable display name.
+        description: Handler purpose description.
+        handler_kind: ONEX handler archetype (all are "effect" for I/O handlers).
+        handler_class: Fully qualified Python class path for dynamic import.
+        input_model: Fully qualified path to input type.
+        output_model: Fully qualified path to output type.
+        contract_path: Relative path to handler_contract.yaml from repo root.
     """
 
     handler_id: str
@@ -68,6 +111,7 @@ class BootstrapEffectDefinition(TypedDict):
     handler_class: str
     input_model: str
     output_model: str
+    contract_path: str
 
 
 # =============================================================================
@@ -178,6 +222,7 @@ SOURCE_TYPE_BOOTSTRAP = "BOOTSTRAP"
 _HANDLER_TYPE_CONSUL = "consul"
 _HANDLER_TYPE_DATABASE = "db"
 _HANDLER_TYPE_HTTP = "http"
+_HANDLER_TYPE_MCP = "mcp"
 _HANDLER_TYPE_VAULT = "vault"
 
 # Bootstrap handler definitions.
@@ -213,6 +258,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "handler_class": "omnibase_infra.handlers.handler_consul.HandlerConsul",
         "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
+        "contract_path": "contracts/handlers/consul/handler_contract.yaml",
     },
     {
         "handler_id": f"bootstrap.{_HANDLER_TYPE_DATABASE}",
@@ -222,6 +268,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "handler_class": "omnibase_infra.handlers.handler_db.HandlerDb",
         "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
+        "contract_path": "contracts/handlers/db/handler_contract.yaml",
     },
     {
         "handler_id": f"bootstrap.{_HANDLER_TYPE_HTTP}",
@@ -231,6 +278,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "handler_class": "omnibase_infra.handlers.handler_http.HandlerHttpRest",
         "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
+        "contract_path": "contracts/handlers/http/handler_contract.yaml",
     },
     {
         "handler_id": f"bootstrap.{_HANDLER_TYPE_VAULT}",
@@ -240,6 +288,17 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "handler_class": "omnibase_infra.handlers.handler_vault.HandlerVault",
         "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
+        "contract_path": "contracts/handlers/vault/handler_contract.yaml",
+    },
+    {
+        "handler_id": f"bootstrap.{_HANDLER_TYPE_MCP}",
+        "name": "MCP Handler",
+        "description": "Model Context Protocol handler for AI agent integration",
+        "handler_kind": "effect",
+        "handler_class": "omnibase_infra.handlers.handler_mcp.HandlerMCP",
+        "input_model": "omnibase_infra.models.types.JsonDict",
+        "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
+        "contract_path": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
     },
 ]
 
@@ -340,6 +399,41 @@ class HandlerBootstrapSource(
         # Create descriptors from hardcoded definitions
         # Uses ModelBootstrapHandlerDescriptor to enforce handler_class requirement
         for handler_def in _BOOTSTRAP_HANDLER_DEFINITIONS:
+            contract_path = handler_def["contract_path"]
+            contract_config = None
+
+            # Load contract configuration if path is specified
+            try:
+                contract = load_handler_contract_config(
+                    contract_path,
+                    handler_def["handler_id"],
+                )
+                handler_type = handler_def["handler_id"].split(".")[-1]
+                # Bootstrap handlers get handler_class from _BOOTSTRAP_HANDLER_DEFINITIONS,
+                # not from the contract file. Rich contracts (like MCP) and basic contracts
+                # don't include handler_class since it would be redundant with the definition.
+                contract_config = extract_handler_config(
+                    contract, handler_type, require_basic_fields=False
+                )
+                logger.debug(
+                    "Loaded contract config for bootstrap handler",
+                    extra={
+                        "handler_id": handler_def["handler_id"],
+                        "contract_path": contract_path,
+                        "config_keys": list(contract_config.keys()),
+                    },
+                )
+            except ProtocolConfigurationError:
+                # Fail fast for bootstrap handlers - contracts must exist
+                logger.exception(
+                    "Failed to load contract config for bootstrap handler",
+                    extra={
+                        "handler_id": handler_def["handler_id"],
+                        "contract_path": contract_path,
+                    },
+                )
+                raise
+
             descriptor = ModelBootstrapHandlerDescriptor(
                 handler_id=handler_def["handler_id"],
                 name=handler_def["name"],
@@ -349,7 +443,8 @@ class HandlerBootstrapSource(
                 output_model=handler_def["output_model"],
                 description=handler_def["description"],
                 handler_class=handler_def["handler_class"],
-                contract_path=None,  # No contract file for bootstrap handlers
+                contract_path=contract_path,
+                contract_config=contract_config,
             )
             descriptors.append(descriptor)
 
@@ -359,6 +454,8 @@ class HandlerBootstrapSource(
                     "handler_id": descriptor.handler_id,
                     "handler_name": descriptor.name,
                     "handler_kind": descriptor.handler_kind,
+                    "contract_path": descriptor.contract_path,
+                    "has_contract_config": descriptor.contract_config is not None,
                     "source_type": SOURCE_TYPE_BOOTSTRAP,
                 },
             )

@@ -187,6 +187,14 @@ class ModelHandlerDescriptor(BaseModel):
         default=None,
         description="Path to the source contract file",
     )
+    contract_config: dict[str, JsonType] | None = Field(
+        default=None,
+        description=(
+            "Parsed configuration from the handler contract file. "
+            "Contains extracted values like security settings, tags, and handler metadata. "
+            "Populated during handler discovery when contract_path is set."
+        ),
+    )
 
 
 __all__ = ["LiteralHandlerKind", "ModelHandlerDescriptor"]
