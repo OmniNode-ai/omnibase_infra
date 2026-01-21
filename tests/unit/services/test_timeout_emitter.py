@@ -458,7 +458,9 @@ class TestServiceTimeoutEmitterAckTimeout:
         assert "node-registration-ack-timed-out" in call_args.kwargs["topic"]
 
         # Check event content - using canonical field names from consolidated model
-        event = call_args.kwargs["envelope"]
+        # Events are wrapped in ModelEventEnvelope, access payload for event fields
+        envelope = call_args.kwargs["envelope"]
+        event = envelope.payload
         assert event.node_id == node_id
         assert event.deadline_at == past_deadline  # Renamed from ack_deadline
         assert event.emitted_at == now  # Renamed from detected_at
@@ -560,8 +562,9 @@ class TestServiceTimeoutEmitterLivenessExpiration:
         # Check topic
         assert "node-liveness-expired" in call_args.kwargs["topic"]
 
-        # Check event content
-        event = call_args.kwargs["envelope"]
+        # Check event content - events are wrapped in ModelEventEnvelope
+        envelope = call_args.kwargs["envelope"]
+        event = envelope.payload
         assert event.node_id == node_id
         assert event.liveness_deadline == past_deadline
         assert event.detected_at == now
@@ -668,7 +671,9 @@ class TestServiceTimeoutEmitterLivenessExpiration:
         call_args = mock_event_bus.publish_envelope.call_args
 
         # CRITICAL: Verify last_heartbeat_at is correctly passed to event
-        event = call_args.kwargs["envelope"]
+        # Events are wrapped in ModelEventEnvelope, access payload for event fields
+        envelope = call_args.kwargs["envelope"]
+        event = envelope.payload
         assert event.last_heartbeat_at == last_hb, (
             f"Expected last_heartbeat_at={last_hb}, got {event.last_heartbeat_at}"
         )
@@ -713,7 +718,9 @@ class TestServiceTimeoutEmitterLivenessExpiration:
         call_args = mock_event_bus.publish_envelope.call_args
 
         # Verify None is correctly passed (event model allows None)
-        event = call_args.kwargs["envelope"]
+        # Events are wrapped in ModelEventEnvelope, access payload for event fields
+        envelope = call_args.kwargs["envelope"]
+        event = envelope.payload
         assert event.last_heartbeat_at is None
         assert event.liveness_deadline == past_deadline
         assert event.detected_at == now

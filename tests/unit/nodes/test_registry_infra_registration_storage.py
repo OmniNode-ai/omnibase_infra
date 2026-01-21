@@ -7,7 +7,7 @@ node dependencies, including handler registration, retrieval, and protocol
 metadata registration.
 
 Test Coverage:
-    - register(): Protocol metadata registration with container
+    - register(): Protocol metadata registration with module-level storage
     - register_handler(): Handler binding with type-based keys
     - get_handler(): Handler retrieval by type or default
     - Handler swapping via registry
@@ -16,6 +16,11 @@ Related:
     - OMN-1131: Capability-oriented node architecture
     - RegistryInfraRegistrationStorage: Registry implementation
     - PR #119: Test coverage for handler swapping
+
+Note:
+    The registry uses module-level storage (_HANDLER_STORAGE, _PROTOCOL_METADATA)
+    instead of container.service_registry. Tests must clear this storage between
+    runs to avoid test pollution.
 """
 
 from __future__ import annotations
@@ -31,18 +36,38 @@ from omnibase_infra.nodes.node_registration_storage_effect.registry import (
     RegistryInfraRegistrationStorage,
 )
 
+# Import module-level storage for testing
+from omnibase_infra.nodes.node_registration_storage_effect.registry.registry_infra_registration_storage import (
+    _HANDLER_STORAGE,
+    _PROTOCOL_METADATA,
+)
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
 
 
+@pytest.fixture(autouse=True)
+def clear_module_storage() -> None:
+    """Clear module-level storage before and after each test.
+
+    The registry uses module-level dicts for handler and metadata storage.
+    This fixture ensures test isolation by clearing the storage before
+    each test runs and after each test completes.
+    """
+    _HANDLER_STORAGE.clear()
+    _PROTOCOL_METADATA.clear()
+    yield
+    _HANDLER_STORAGE.clear()
+    _PROTOCOL_METADATA.clear()
+
+
 @pytest.fixture
 def mock_container() -> MagicMock:
-    """Create a mock container with service_registry dict.
+    """Create a mock container.
 
-    The real ModelONEXContainer has service_registry=None when the
-    ServiceRegistry module is not installed. We mock it to test
-    the registry behavior.
+    The registry uses module-level storage instead of container.service_registry,
+    so the container is primarily used for API compatibility.
     """
     container = MagicMock()
     container.service_registry = {}
@@ -89,11 +114,11 @@ class TestRegistryInfraRegistrationStorageRegister:
     """Tests for RegistryInfraRegistrationStorage.register() method."""
 
     def test_register_adds_protocol_metadata(self, mock_container: MagicMock) -> None:
-        """register() adds protocol metadata to container service_registry."""
+        """register() adds protocol metadata to module-level storage."""
         RegistryInfraRegistrationStorage.register(mock_container)
 
         protocol_key = RegistryInfraRegistrationStorage.PROTOCOL_KEY
-        assert protocol_key in mock_container.service_registry
+        assert protocol_key in _PROTOCOL_METADATA
 
     def test_register_metadata_contains_required_fields(
         self, mock_container: MagicMock
@@ -101,9 +126,7 @@ class TestRegistryInfraRegistrationStorageRegister:
         """register() metadata contains all required fields."""
         RegistryInfraRegistrationStorage.register(mock_container)
 
-        metadata = mock_container.service_registry[
-            RegistryInfraRegistrationStorage.PROTOCOL_KEY
-        ]
+        metadata = _PROTOCOL_METADATA[RegistryInfraRegistrationStorage.PROTOCOL_KEY]
 
         assert "protocol" in metadata
         assert metadata["protocol"] == "ProtocolRegistrationPersistence"
@@ -126,10 +149,7 @@ class TestRegistryInfraRegistrationStorageRegister:
         RegistryInfraRegistrationStorage.register(mock_container)
 
         # Should still have the metadata
-        assert (
-            RegistryInfraRegistrationStorage.PROTOCOL_KEY
-            in mock_container.service_registry
-        )
+        assert RegistryInfraRegistrationStorage.PROTOCOL_KEY in _PROTOCOL_METADATA
 
 
 # =============================================================================
@@ -149,8 +169,8 @@ class TestRegistryInfraRegistrationStorageRegisterHandler:
         RegistryInfraRegistrationStorage.register_handler(mock_container, mock_handler)
 
         expected_key = f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.mock"
-        assert expected_key in mock_container.service_registry
-        assert mock_container.service_registry[expected_key] is mock_handler
+        assert expected_key in _HANDLER_STORAGE
+        assert _HANDLER_STORAGE[expected_key] is mock_handler
 
     def test_register_handler_sets_default_for_postgresql(
         self,
@@ -164,12 +184,12 @@ class TestRegistryInfraRegistrationStorageRegisterHandler:
 
         # Typed key should exist
         typed_key = f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.postgresql"
-        assert typed_key in mock_container.service_registry
+        assert typed_key in _HANDLER_STORAGE
 
         # Default key should also exist for postgresql
         default_key = f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.default"
-        assert default_key in mock_container.service_registry
-        assert mock_container.service_registry[default_key] is mock_postgres_handler
+        assert default_key in _HANDLER_STORAGE
+        assert _HANDLER_STORAGE[default_key] is mock_postgres_handler
 
     def test_register_handler_no_default_for_non_postgresql(
         self,
@@ -181,11 +201,11 @@ class TestRegistryInfraRegistrationStorageRegisterHandler:
 
         # Typed key should exist
         typed_key = f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.mock"
-        assert typed_key in mock_container.service_registry
+        assert typed_key in _HANDLER_STORAGE
 
         # Default key should NOT exist for mock handler
         default_key = f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.default"
-        assert default_key not in mock_container.service_registry
+        assert default_key not in _HANDLER_STORAGE
 
     def test_register_handler_with_none_service_registry(
         self,
@@ -213,10 +233,10 @@ class TestRegistryInfraRegistrationStorageRegisterHandler:
         mock_key = f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.mock"
         postgres_key = f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.postgresql"
 
-        assert mock_key in mock_container.service_registry
-        assert postgres_key in mock_container.service_registry
-        assert mock_container.service_registry[mock_key] is mock_handler
-        assert mock_container.service_registry[postgres_key] is mock_postgres_handler
+        assert mock_key in _HANDLER_STORAGE
+        assert postgres_key in _HANDLER_STORAGE
+        assert _HANDLER_STORAGE[mock_key] is mock_handler
+        assert _HANDLER_STORAGE[postgres_key] is mock_postgres_handler
 
 
 # =============================================================================
@@ -284,7 +304,9 @@ class TestRegistryInfraRegistrationStorageGetHandler:
         self,
         container_with_none_registry: MagicMock,
     ) -> None:
-        """get_handler() returns None when service_registry is None."""
+        """get_handler() returns None when handler is not registered."""
+        # With module-level storage, the container's service_registry is not used.
+        # This test verifies that get_handler returns None for unregistered handlers.
         result = RegistryInfraRegistrationStorage.get_handler(
             container_with_none_registry, handler_type="mock"
         )
