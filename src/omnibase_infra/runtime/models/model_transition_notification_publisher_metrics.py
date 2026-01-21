@@ -133,19 +133,19 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         default=0,
         ge=0,
         description=(
-            "Total notifications attempted via publish_batch() calls. "
-            "This is the sum of all batch sizes, regardless of success/failure. "
-            "Compare with batch_notifications_total to see failure rate in batches."
+            "Total notifications attempted via publish_batch() calls (includes failures). "
+            "This is the sum of all batch sizes passed to publish_batch(), regardless of outcome. "
+            "Formula: batch_failure_rate = 1 - (batch_notifications_total / batch_notifications_attempted)."
         ),
     )
     batch_notifications_total: int = Field(
         default=0,
         ge=0,
         description=(
-            "Notifications SUCCESSFULLY published via publish_batch() "
-            "(SUBSET of notifications_published). "
-            "This count is already included in notifications_published, not additional. "
-            "Example: 100 published, 80 batch_total means 20 individual + 80 batch = 100 total."
+            "Successful batch publishes only (SUBSET of notifications_published). "
+            "Counts notifications that succeeded via publish_batch(), not total attempts. "
+            "Already included in notifications_published (not additional). "
+            "Formula: individual_publishes = notifications_published - batch_notifications_total."
         ),
     )
 

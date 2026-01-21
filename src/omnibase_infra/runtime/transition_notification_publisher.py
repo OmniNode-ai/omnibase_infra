@@ -393,13 +393,24 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             If any notification fails to publish, the error is raised after
             attempting all notifications. Partial success is possible.
 
+        Circuit Breaker Behavior:
+            The circuit breaker is checked only at the start of the batch
+            operation. However, individual publish() calls within the batch
+            can trip the circuit breaker if they fail. If the circuit breaker
+            opens mid-batch (due to accumulated failures from individual
+            publish calls), subsequent notifications in the batch will fail
+            with InfraUnavailableError. This is expected "partial success"
+            behavior - the batch continues attempting all notifications, but
+            failures are recorded and reported at the end.
+
         Args:
             notifications: List of notifications to publish.
 
         Raises:
             InfraConnectionError: If event bus connection fails.
             InfraTimeoutError: If publish operation times out.
-            InfraUnavailableError: If circuit breaker is open.
+            InfraUnavailableError: If circuit breaker is open (at batch start
+                or if tripped mid-batch by individual publish failures).
 
         Example:
             >>> notifications = [notification1, notification2, notification3]
