@@ -53,6 +53,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Maximum records to fetch when node_type filtering requires in-memory pagination.
+# The projection reader API doesn't support node_type filtering, so we fetch all
+# records matching the state filter and apply node_type filter in-memory.
+MAX_NODE_TYPE_FILTER_FETCH = 10000
+
 # Default config path relative to this module
 DEFAULT_WIDGET_MAPPING_PATH = (
     Path(__file__).parent.parent.parent / "configs" / "widget_mapping.yaml"
@@ -240,8 +245,7 @@ class ServiceRegistryDiscovery:
                 # since the projection reader doesn't support node_type filtering
                 if node_type:
                     # Fetch all matching records to get accurate count after filtering
-                    # Use a high limit to get all records (10000 is a reasonable max)
-                    fetch_limit = 10000
+                    fetch_limit = MAX_NODE_TYPE_FILTER_FETCH
                 else:
                     # No node_type filter - can use normal pagination
                     fetch_limit = limit + offset + 1  # +1 to detect has_more
