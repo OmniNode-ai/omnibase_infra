@@ -286,10 +286,11 @@ class RegistryContractSource(ProtocolContractSource):
                 raise ValueError(mismatch_msg)
             # Graceful mode: log warning and continue using contract's handler_id
             logger.warning(
-                "handler_id mismatch between key and contract content",
+                "handler_id mismatch between key and contract content; using contract's handler_id as authoritative",
                 extra={
                     "key_handler_id": handler_id,
                     "contract_handler_id": contract.handler_id,
+                    "used_handler_id": contract.handler_id,
                     "key": key,
                     "correlation_id": str(self._correlation_id),
                 },
@@ -337,7 +338,7 @@ class RegistryContractSource(ProtocolContractSource):
             ModelHandlerValidationError with parse error details.
         """
         handler_identity = ModelHandlerIdentifier.from_handler_id(
-            f"unknown@{handler_id}"
+            f"registry://{handler_id}"
         )
 
         return ModelHandlerValidationError(
@@ -427,6 +428,11 @@ def store_contract_in_consul(
         ... '''
         >>> store_contract_in_consul(contract, "effect.filesystem.handler")
         True
+
+    Note:
+        This is a synchronous function that makes blocking network calls.
+        Do not call from async code without wrapping in ``asyncio.to_thread()``.
+        For async usage, use ``RegistryContractSource.discover_handlers()`` instead.
     """
     client = _create_consul_client_from_env()
     key = f"{prefix}{handler_id}"
@@ -460,6 +466,10 @@ def list_contracts_in_consul(
 
     Returns:
         List of handler IDs found.
+
+    Note:
+        This is a synchronous function that makes blocking network calls.
+        Do not call from async code without wrapping in ``asyncio.to_thread()``.
     """
     client = _create_consul_client_from_env()
     _index, keys = client.kv.get(prefix, keys=True)

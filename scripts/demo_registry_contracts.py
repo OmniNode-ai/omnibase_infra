@@ -26,6 +26,8 @@ import os
 import sys
 from pathlib import Path
 
+import consul
+
 # Development only - for production use: poetry run python scripts/demo_registry_contracts.py
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -180,8 +182,6 @@ def list_existing_contracts() -> None:
 
 def cleanup_demo_contracts() -> None:
     """Remove demo contracts from Consul KV (uses env vars for connection)."""
-    import consul
-
     print("\n[CLEANUP] Removing demo contracts from Consul...")
 
     client = consul.Consul(
