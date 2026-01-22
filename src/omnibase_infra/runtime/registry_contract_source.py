@@ -308,24 +308,12 @@ class RegistryContractSource(ProtocolContractSource):
         contract = ModelHandlerContract.model_validate(contract_data)
 
         # Validate handler_id consistency between key and contract content
+        # NOTE: This is ALWAYS an error regardless of graceful_mode.
+        # Graceful mode only applies to connection/parse errors, not data integrity issues.
         if contract.handler_id != handler_id:
-            mismatch_msg = (
+            raise ValueError(
                 f"handler_id mismatch: key='{handler_id}' vs "
                 f"contract='{contract.handler_id}'"
-            )
-            if not self._graceful_mode:
-                # Strict mode: raise error on mismatch
-                raise ValueError(mismatch_msg)
-            # Graceful mode: log warning and continue using contract's handler_id
-            logger.warning(
-                "handler_id mismatch between key and contract content; using contract's handler_id as authoritative",
-                extra={
-                    "key_handler_id": handler_id,
-                    "contract_handler_id": contract.handler_id,
-                    "used_handler_id": contract.handler_id,
-                    "key": key,
-                    "correlation_id": str(self._correlation_id),
-                },
             )
 
         # Extract handler_class from metadata (canonical location per contract schema)

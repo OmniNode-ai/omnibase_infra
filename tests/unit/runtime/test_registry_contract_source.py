@@ -451,7 +451,7 @@ handler_id: "missing"
         with patch("consul.Consul", return_value=mock_client):
             source = RegistryContractSource(graceful_mode=False)
 
-            with pytest.raises(Exception):  # yaml.YAMLError or similar
+            with pytest.raises(ProtocolConfigurationError):
                 await source.discover_handlers()
 
     @pytest.mark.asyncio
@@ -513,12 +513,13 @@ version: "1.0.0"
                 await source.discover_handlers()
 
     @pytest.mark.asyncio
-    async def test_handler_id_mismatch_graceful_mode_logs_warning(self) -> None:
-        """handler_id mismatch in graceful mode should log warning and continue.
+    async def test_handler_id_mismatch_graceful_mode_still_errors(self) -> None:
+        """handler_id mismatch is ALWAYS an error, even in graceful mode.
 
-        When graceful_mode=True and the Consul key's handler_id doesn't match
-        the contract's handler_id, a warning should be logged but processing
-        continues using the contract's handler_id as authoritative.
+        Graceful mode only applies to connection errors and parse errors,
+        NOT to data integrity issues like handler_id mismatches. A mismatch
+        between the Consul key and contract content indicates a configuration
+        error that should never be silently ignored.
         """
         mock_client = MagicMock()
         mock_client.kv.get.return_value = (
@@ -536,10 +537,12 @@ version: "1.0.0"
             source = RegistryContractSource(graceful_mode=True)
             result = await source.discover_handlers()
 
-        # Should succeed in graceful mode, using contract's handler_id
-        assert len(result.descriptors) == 1
-        assert result.descriptors[0].handler_id == "effect.test.handler"
-        assert len(result.validation_errors) == 0
+        # handler_id mismatch is always a validation error, even in graceful mode
+        assert len(result.descriptors) == 0
+        assert len(result.validation_errors) == 1
+        error = result.validation_errors[0]
+        assert error.error_type == EnumHandlerErrorType.CONTRACT_PARSE_ERROR
+        assert "handler_id mismatch" in error.message
 
 
 # =============================================================================
