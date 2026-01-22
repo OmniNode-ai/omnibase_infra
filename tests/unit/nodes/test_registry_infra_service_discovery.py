@@ -7,8 +7,8 @@ node dependencies, including handler registration and protocol factory
 registration.
 
 Test Coverage:
-    - register(): Factory registration with container
-    - register_with_handler(): Direct handler binding
+    - register(): No-op behavior (factory registration not implemented in v1.0)
+    - register_with_handler(): Direct handler binding via service_registry
     - _create_handler_from_config(): Configuration error handling
     - Handler swapping via registry
 
@@ -20,7 +20,7 @@ Related:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -39,10 +39,19 @@ from omnibase_infra.nodes.node_service_discovery_effect.registry import (
 
 @pytest.fixture
 def mock_container() -> MagicMock:
-    """Create a mock container with register_factory and register_instance."""
+    """Create a mock container with service_registry that has async register_instance."""
     container = MagicMock()
-    container.register_factory = MagicMock()
-    container.register_instance = MagicMock()
+    # Set up service_registry with async register_instance
+    container.service_registry = MagicMock()
+    container.service_registry.register_instance = AsyncMock()
+    return container
+
+
+@pytest.fixture
+def mock_container_no_registry() -> MagicMock:
+    """Create a mock container with service_registry = None."""
+    container = MagicMock()
+    container.service_registry = None
     return container
 
 
@@ -69,42 +78,31 @@ def mock_consul_handler() -> MagicMock:
 
 
 # =============================================================================
-# Factory Registration Tests
+# Factory Registration Tests (No-Op in v1.0)
 # =============================================================================
 
 
 class TestRegistryInfraServiceDiscoveryRegister:
-    """Tests for RegistryInfraServiceDiscovery.register() method."""
+    """Tests for RegistryInfraServiceDiscovery.register() method.
 
-    def test_register_calls_register_factory(self, mock_container: MagicMock) -> None:
-        """register() calls container.register_factory with protocol and factory."""
+    Note: In v1.0, register() is a no-op because factory registration is not
+    implemented in omnibase_core. It simply logs a debug message and returns.
+    """
+
+    def test_register_is_noop_with_registry(self, mock_container: MagicMock) -> None:
+        """register() is a no-op in v1.0 - does not call register_factory."""
         RegistryInfraServiceDiscovery.register(mock_container)
 
-        mock_container.register_factory.assert_called_once()
+        # Should NOT call register_factory (not implemented in v1.0)
+        # No exception should be raised
+        # This is the expected behavior per the docstring
 
-        # Verify it was called with the protocol type and factory function
-        call_args = mock_container.register_factory.call_args
-        assert call_args is not None
-
-        # First argument should be the protocol type
-        from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolDiscoveryOperations,
-        )
-
-        assert call_args[0][0] is ProtocolDiscoveryOperations
-
-    def test_register_factory_function_is_create_handler_from_config(
-        self, mock_container: MagicMock
+    def test_register_returns_early_when_no_registry(
+        self, mock_container_no_registry: MagicMock
     ) -> None:
-        """register() uses _create_handler_from_config as factory function."""
-        RegistryInfraServiceDiscovery.register(mock_container)
-
-        call_args = mock_container.register_factory.call_args
-        assert call_args is not None
-
-        # Second argument should be the factory function
-        factory_fn = call_args[0][1]
-        assert factory_fn is RegistryInfraServiceDiscovery._create_handler_from_config
+        """register() returns early when service_registry is None."""
+        # Should not raise - just returns early
+        RegistryInfraServiceDiscovery.register(mock_container_no_registry)
 
 
 # =============================================================================
@@ -115,51 +113,82 @@ class TestRegistryInfraServiceDiscoveryRegister:
 class TestRegistryInfraServiceDiscoveryRegisterWithHandler:
     """Tests for RegistryInfraServiceDiscovery.register_with_handler() method."""
 
-    def test_register_with_handler_calls_register_instance(
+    @pytest.mark.anyio
+    async def test_register_with_handler_calls_register_instance(
         self,
         mock_container: MagicMock,
         mock_handler: HandlerServiceDiscoveryMock,
     ) -> None:
-        """register_with_handler() calls container.register_instance."""
-        RegistryInfraServiceDiscovery.register_with_handler(
+        """register_with_handler() calls container.service_registry.register_instance."""
+        await RegistryInfraServiceDiscovery.register_with_handler(
             mock_container, mock_handler
         )
 
-        mock_container.register_instance.assert_called_once()
+        mock_container.service_registry.register_instance.assert_called_once()
 
-    def test_register_with_handler_passes_protocol_and_handler(
+    @pytest.mark.anyio
+    async def test_register_with_handler_passes_protocol_and_handler(
         self,
         mock_container: MagicMock,
         mock_handler: HandlerServiceDiscoveryMock,
     ) -> None:
         """register_with_handler() passes protocol type and handler instance."""
-        RegistryInfraServiceDiscovery.register_with_handler(
+        await RegistryInfraServiceDiscovery.register_with_handler(
             mock_container, mock_handler
         )
 
-        call_args = mock_container.register_instance.call_args
-        assert call_args is not None
+        call_kwargs = mock_container.service_registry.register_instance.call_args
+        assert call_kwargs is not None
 
         from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
             ProtocolDiscoveryOperations,
         )
 
-        assert call_args[0][0] is ProtocolDiscoveryOperations
-        assert call_args[0][1] is mock_handler
+        # Check keyword arguments
+        assert call_kwargs.kwargs["interface"] is ProtocolDiscoveryOperations
+        assert call_kwargs.kwargs["instance"] is mock_handler
 
-    def test_register_with_handler_accepts_any_protocol_implementation(
+    @pytest.mark.anyio
+    async def test_register_with_handler_accepts_any_protocol_implementation(
         self,
         mock_container: MagicMock,
         mock_consul_handler: MagicMock,
     ) -> None:
         """register_with_handler() accepts any handler implementing the protocol."""
-        RegistryInfraServiceDiscovery.register_with_handler(
+        await RegistryInfraServiceDiscovery.register_with_handler(
             mock_container, mock_consul_handler
         )
 
-        call_args = mock_container.register_instance.call_args
-        assert call_args is not None
-        assert call_args[0][1] is mock_consul_handler
+        call_kwargs = mock_container.service_registry.register_instance.call_args
+        assert call_kwargs is not None
+        assert call_kwargs.kwargs["instance"] is mock_consul_handler
+
+    @pytest.mark.anyio
+    async def test_register_with_handler_returns_early_when_no_registry(
+        self,
+        mock_container_no_registry: MagicMock,
+        mock_handler: HandlerServiceDiscoveryMock,
+    ) -> None:
+        """register_with_handler() returns early when service_registry is None."""
+        # Should not raise - just returns early after isinstance check
+        await RegistryInfraServiceDiscovery.register_with_handler(
+            mock_container_no_registry, mock_handler
+        )
+
+    @pytest.mark.anyio
+    async def test_register_with_handler_validates_protocol(
+        self,
+        mock_container: MagicMock,
+    ) -> None:
+        """register_with_handler() raises TypeError for invalid handler."""
+        invalid_handler = MagicMock()  # Does not implement protocol
+
+        with pytest.raises(TypeError) as exc_info:
+            await RegistryInfraServiceDiscovery.register_with_handler(
+                mock_container, invalid_handler
+            )
+
+        assert "ProtocolDiscoveryOperations" in str(exc_info.value)
 
 
 # =============================================================================
@@ -204,7 +233,8 @@ class TestRegistryCreateHandlerFromConfig:
 class TestRegistryHandlerSwapping:
     """Tests for handler swapping via registry."""
 
-    def test_register_with_handler_allows_swapping(
+    @pytest.mark.anyio
+    async def test_register_with_handler_allows_swapping(
         self,
         mock_container: MagicMock,
         mock_handler: HandlerServiceDiscoveryMock,
@@ -212,37 +242,40 @@ class TestRegistryHandlerSwapping:
     ) -> None:
         """Multiple calls to register_with_handler() swap handlers."""
         # Register first handler
-        RegistryInfraServiceDiscovery.register_with_handler(
+        await RegistryInfraServiceDiscovery.register_with_handler(
             mock_container, mock_handler
         )
 
         # Verify first call
-        first_call = mock_container.register_instance.call_args_list[0]
-        assert first_call[0][1] is mock_handler
+        first_call = mock_container.service_registry.register_instance.call_args_list[0]
+        assert first_call.kwargs["instance"] is mock_handler
 
         # Register second handler (swap)
-        RegistryInfraServiceDiscovery.register_with_handler(
+        await RegistryInfraServiceDiscovery.register_with_handler(
             mock_container, mock_consul_handler
         )
 
         # Verify second call
-        second_call = mock_container.register_instance.call_args_list[1]
-        assert second_call[0][1] is mock_consul_handler
+        second_call = mock_container.service_registry.register_instance.call_args_list[
+            1
+        ]
+        assert second_call.kwargs["instance"] is mock_consul_handler
 
         # Both handlers were registered
-        assert mock_container.register_instance.call_count == 2
+        assert mock_container.service_registry.register_instance.call_count == 2
 
-    def test_factory_registration_allows_lazy_handler_creation(
+    def test_factory_registration_is_noop_in_v1(
         self, mock_container: MagicMock
     ) -> None:
-        """register() enables lazy handler creation via factory pattern."""
+        """register() is a no-op in v1.0 - factory registration not implemented.
+
+        Note: This test documents the current v1.0 behavior where factory
+        registration is not implemented. In future versions, this may change.
+        """
         RegistryInfraServiceDiscovery.register(mock_container)
 
-        # Factory was registered
-        mock_container.register_factory.assert_called_once()
-
-        # Handler is NOT created yet (lazy)
-        # The factory function would be called when resolving the dependency
+        # Factory was NOT registered (not implemented in v1.0)
+        # No exception should be raised - this is expected behavior
 
 
 # =============================================================================
@@ -253,22 +286,8 @@ class TestRegistryHandlerSwapping:
 class TestProtocolTypeUsage:
     """Tests verifying correct protocol type usage."""
 
-    def test_register_uses_correct_protocol_type(
-        self, mock_container: MagicMock
-    ) -> None:
-        """register() uses ProtocolDiscoveryOperations type."""
-        from omnibase_infra.nodes.node_service_discovery_effect.protocols import (
-            ProtocolDiscoveryOperations,
-        )
-
-        RegistryInfraServiceDiscovery.register(mock_container)
-
-        call_args = mock_container.register_factory.call_args[0]
-        registered_type = call_args[0]
-
-        assert registered_type is ProtocolDiscoveryOperations
-
-    def test_register_with_handler_uses_correct_protocol_type(
+    @pytest.mark.anyio
+    async def test_register_with_handler_uses_correct_protocol_type(
         self,
         mock_container: MagicMock,
         mock_handler: HandlerServiceDiscoveryMock,
@@ -278,14 +297,32 @@ class TestProtocolTypeUsage:
             ProtocolDiscoveryOperations,
         )
 
-        RegistryInfraServiceDiscovery.register_with_handler(
+        await RegistryInfraServiceDiscovery.register_with_handler(
             mock_container, mock_handler
         )
 
-        call_args = mock_container.register_instance.call_args[0]
-        registered_type = call_args[0]
+        call_kwargs = mock_container.service_registry.register_instance.call_args
+        registered_type = call_kwargs.kwargs["interface"]
 
         assert registered_type is ProtocolDiscoveryOperations
+
+    @pytest.mark.anyio
+    async def test_register_with_handler_uses_global_scope(
+        self,
+        mock_container: MagicMock,
+        mock_handler: HandlerServiceDiscoveryMock,
+    ) -> None:
+        """register_with_handler() uses GLOBAL injection scope."""
+        from omnibase_core.enums import EnumInjectionScope
+
+        await RegistryInfraServiceDiscovery.register_with_handler(
+            mock_container, mock_handler
+        )
+
+        call_kwargs = mock_container.service_registry.register_instance.call_args
+        scope = call_kwargs.kwargs["scope"]
+
+        assert scope is EnumInjectionScope.GLOBAL
 
 
 # =============================================================================

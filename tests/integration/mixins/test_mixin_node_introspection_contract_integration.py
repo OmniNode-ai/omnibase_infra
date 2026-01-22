@@ -30,6 +30,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.mixins import MixinNodeIntrospection
 from omnibase_infra.models.discovery import (
@@ -93,10 +94,21 @@ class MockEventBus:
 
         Args:
             envelope: Event envelope to publish. Uses BaseModel for type safety
-                since all event envelopes are Pydantic models.
+                since all event envelopes are Pydantic models. May be wrapped
+                in ModelEventEnvelope.
             topic: Event topic.
         """
-        if isinstance(envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent):
+        # Handle ModelEventEnvelope wrapping - extract payload for storage
+        if isinstance(envelope, ModelEventEnvelope):
+            payload = envelope.payload
+            if isinstance(
+                payload, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent
+            ):
+                self.published_envelopes.append((payload, topic))
+        # Also support direct event publishing (backwards compatibility)
+        elif isinstance(
+            envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent
+        ):
             self.published_envelopes.append((envelope, topic))
 
     async def publish(

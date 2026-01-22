@@ -322,6 +322,10 @@ class TestA1IntrospectionPublish:
         else:
             event_data = json.loads(introspection_events[-1].value.decode("utf-8"))
 
+        # Extract payload from ModelEventEnvelope if present
+        if "payload" in event_data:
+            event_data = event_data["payload"]
+
         # Verify required fields are present
         assert "node_id" in event_data, "Event must contain node_id"
         assert "node_type" in event_data, "Event must contain node_type"
@@ -368,6 +372,9 @@ class TestA1IntrospectionPublish:
         node_ids: list[str] = []
         for event in history:
             event_data = json.loads(event.value.decode("utf-8"))
+            # Extract payload from ModelEventEnvelope if present
+            if "payload" in event_data:
+                event_data = event_data["payload"]
             if "node_id" in event_data:
                 node_ids.append(event_data["node_id"])
 
@@ -414,6 +421,9 @@ class TestA1IntrospectionPublish:
 
             # Parse and verify (compare with enum value since JSON serializes to string)
             event_data = json.loads(history[-1].value.decode("utf-8"))
+            # Extract payload from ModelEventEnvelope if present
+            if "payload" in event_data:
+                event_data = event_data["payload"]
             assert event_data["node_type"] == node_type.value, (
                 f"node_type mismatch: expected {node_type.value}, got {event_data['node_type']}"
             )
@@ -434,6 +444,9 @@ class TestA1IntrospectionPublish:
         # Get event
         history = await event_bus.get_event_history(limit=10)
         event_data = json.loads(history[-1].value.decode("utf-8"))
+        # Extract payload from ModelEventEnvelope if present
+        if "payload" in event_data:
+            event_data = event_data["payload"]
 
         # Verify endpoints structure (should be dict or present)
         # Note: endpoints might be in different formats depending on serialization
@@ -552,6 +565,9 @@ class TestA2TwoWayIntrospectionLoop:
 
         # Verify response structure contains correlation_id
         response_data = json.loads(history[-1].value.decode("utf-8"))
+        # Extract payload from ModelEventEnvelope if present
+        if "payload" in response_data:
+            response_data = response_data["payload"]
         assert "correlation_id" in response_data, (
             "Response must include correlation_id for request tracing"
         )
@@ -657,6 +673,9 @@ class TestA2TwoWayIntrospectionLoop:
         node_ids: set[str] = set()
         for event in history:
             data = json.loads(event.value.decode("utf-8"))
+            # Extract payload from ModelEventEnvelope if present
+            if "payload" in data:
+                data = data["payload"]
             node_ids.add(data["node_id"])
 
         assert len(node_ids) == 3, (
@@ -706,6 +725,9 @@ class TestWorkflowIntegration:
         assert len(history) > 0, "Node should emit introspection"
 
         introspection_data = json.loads(history[-1].value.decode("utf-8"))
+        # Extract payload from ModelEventEnvelope if present
+        if "payload" in introspection_data:
+            introspection_data = introspection_data["payload"]
         node_id = UUID(introspection_data["node_id"])
         correlation_id = UUID(introspection_data["correlation_id"])
 
