@@ -281,7 +281,7 @@ class ServiceTimeoutEmitter:
 
         Example:
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> timeout_query = ServiceTimeoutScanner(reader)
+            >>> timeout_query = ServiceTimeoutScanner(container, reader)
             >>> bus = EventBusKafka.default()
             >>> projector = projector_loader.load("registration_projector")
             >>> emitter = ServiceTimeoutEmitter(

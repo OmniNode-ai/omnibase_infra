@@ -203,7 +203,7 @@ class TimeoutCoordinator:
 
     Usage in orchestrator:
         >>> # Wire dependencies
-        >>> timeout_query = ServiceTimeoutScanner(projection_reader)
+        >>> timeout_query = ServiceTimeoutScanner(container, projection_reader)
         >>> timeout_emission = ServiceTimeoutEmitter(
         ...     timeout_query=timeout_query,
         ...     event_bus=event_bus,
@@ -235,7 +235,7 @@ class TimeoutCoordinator:
 
         Example:
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> query = ServiceTimeoutScanner(reader)
+            >>> query = ServiceTimeoutScanner(container, reader)
             >>> emission = ServiceTimeoutEmitter(query, event_bus, projector)
             >>> coordinator = TimeoutCoordinator(query, emission)
         """

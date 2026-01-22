@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
 from omnibase_core.models.manifest.model_execution_manifest import (
@@ -226,13 +227,15 @@ class CorpusCapture:
     - Max executions enforcement with automatic state transitions
 
     Example:
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> container = ModelONEXContainer(...)  # Configure as needed
         >>> config = ModelCaptureConfig(
         ...     corpus_display_name="regression-suite-v1",
         ...     max_executions=50,
         ...     sample_rate=0.5,
         ...     handler_filter=("compute-handler",),
         ... )
-        >>> service = CorpusCapture()
+        >>> service = CorpusCapture(container)
         >>> service.create_corpus(config)
         >>> service.start_capture()
         >>>
@@ -249,17 +252,20 @@ class CorpusCapture:
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         persistence: ProtocolManifestPersistence | None = None,
     ) -> None:
         """
         Initialize the corpus capture service.
 
         Args:
+            container: ONEX container for dependency injection.
             persistence: Optional persistence handler for flushing manifests.
                 If provided, manifests can be persisted via flush_to_persistence()
                 or by calling close_corpus_async(flush=True). The synchronous
                 close_corpus() does NOT automatically flush.
         """
+        self._container = container
         self._state_machine = CaptureLifecycleFSM()
         self._config: ModelCaptureConfig | None = None
         self._corpus: ModelExecutionCorpus | None = None
