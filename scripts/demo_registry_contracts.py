@@ -8,10 +8,8 @@ This script demonstrates contract materialization from Consul KV:
 
 Usage:
     # Store and discover contracts (requires Consul running)
+    # Configure via CONSUL_HOST, CONSUL_PORT, CONSUL_TOKEN, CONSUL_SCHEME env vars
     python scripts/demo_registry_contracts.py
-
-    # With custom Consul address
-    python scripts/demo_registry_contracts.py --host 192.168.86.200 --port 28500
 
     # List existing contracts only
     python scripts/demo_registry_contracts.py --list-only

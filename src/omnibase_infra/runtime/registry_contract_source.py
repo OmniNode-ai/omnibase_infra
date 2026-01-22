@@ -112,19 +112,19 @@ class RegistryContractSource(ProtocolContractSource):
         self._graceful_mode = graceful_mode
         self._correlation_id = uuid4()
 
-        # Initialize Consul client
+        # Initialize Consul client with resolved configuration
         self._client = consul.Consul(
-            host=host,
-            port=port,
-            token=token,
-            scheme=scheme,
+            host=self._host,
+            port=self._port,
+            token=self._token,
+            scheme=self._scheme,
         )
 
         logger.info(
             "RegistryContractSource initialized",
             extra={
-                "host": host,
-                "port": port,
+                "host": self._host,
+                "port": self._port,
                 "prefix": prefix,
                 "correlation_id": str(self._correlation_id),
             },
@@ -272,8 +272,20 @@ class RegistryContractSource(ProtocolContractSource):
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(contract_data)
 
-        # Extract descriptor and metadata info
-        descriptor_data = contract_data.get("descriptor", {})
+        # Validate handler_id consistency between key and contract content
+        if contract.handler_id != handler_id:
+            logger.warning(
+                "handler_id mismatch between key and contract content",
+                extra={
+                    "key_handler_id": handler_id,
+                    "contract_handler_id": contract.handler_id,
+                    "key": key,
+                    "correlation_id": str(self._correlation_id),
+                },
+            )
+            # Use the contract's handler_id as authoritative
+
+        # Extract metadata for handler_class (raw dict access needed for optional field)
         metadata = contract_data.get("metadata", {})
 
         # handler_class can be in metadata or at top-level (for backwards compat)
@@ -281,11 +293,18 @@ class RegistryContractSource(ProtocolContractSource):
             "handler_class"
         )
 
+        # Use validated model for handler_kind when available, with fallback
+        handler_kind = (
+            contract.descriptor.handler_kind
+            if contract.descriptor and hasattr(contract.descriptor, "handler_kind")
+            else contract_data.get("descriptor", {}).get("handler_kind", "effect")
+        )
+
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
             name=contract.name,
             version=str(contract.version),
-            handler_kind=descriptor_data.get("handler_kind", "effect"),
+            handler_kind=handler_kind,
             input_model=contract.input_model,
             output_model=contract.output_model,
             description=contract.description,
