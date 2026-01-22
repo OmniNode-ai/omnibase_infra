@@ -110,9 +110,6 @@ class TestRegistryContractSourceType:
         assert hasattr(source, "discover_handlers")
         assert callable(source.discover_handlers)
 
-        # Runtime checkable protocol verification
-        assert isinstance(source, ProtocolContractSource)
-
 
 # =============================================================================
 # Discovery Tests

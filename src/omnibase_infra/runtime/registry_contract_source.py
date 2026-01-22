@@ -332,7 +332,10 @@ class RegistryContractSource(ProtocolContractSource):
         metadata = contract_data.get("metadata", {})
         handler_class = metadata.get("handler_class")
 
-        # Use validated model for handler_kind when available, with fallback
+        # Use validated model for handler_kind when available, with defensive fallback.
+        # The hasattr check guards against partial contracts where descriptor may be
+        # present but incomplete. Falls back to raw dict data with "effect" default
+        # for backwards compatibility with minimal contract formats.
         handler_kind = (
             contract.descriptor.handler_kind
             if contract.descriptor and hasattr(contract.descriptor, "handler_kind")
@@ -433,6 +436,7 @@ def store_contract_in_consul(
     contract_yaml: str,
     handler_id: str,
     prefix: str = DEFAULT_CONTRACT_PREFIX,
+    client: consul.Consul | None = None,
 ) -> bool:
     """Store a handler contract in Consul KV.
 
@@ -444,6 +448,8 @@ def store_contract_in_consul(
         contract_yaml: The full YAML contract content.
         handler_id: Handler ID (used as key suffix).
         prefix: KV prefix (default: onex/contracts/handlers/).
+        client: Optional Consul client. If None, creates a new client from
+            environment variables.
 
     Returns:
         True if successful.
@@ -466,11 +472,11 @@ def store_contract_in_consul(
         Do not call from async code without wrapping in ``asyncio.to_thread()``.
         For async usage, use ``RegistryContractSource.discover_handlers()`` instead.
 
-        This function creates a new Consul client for each call. For production
-        code with multiple operations, use ``RegistryContractSource`` directly
-        to benefit from connection reuse.
+        For batch operations, pass an existing ``client`` to avoid creating
+        a new connection for each call. This improves performance when
+        storing multiple contracts.
     """
-    client = _create_consul_client_from_env()
+    client = client or _create_consul_client_from_env()
     key = f"{prefix}{handler_id}"
 
     success: bool = client.kv.put(key, contract_yaml)
@@ -491,6 +497,7 @@ def store_contract_in_consul(
 
 def list_contracts_in_consul(
     prefix: str = DEFAULT_CONTRACT_PREFIX,
+    client: consul.Consul | None = None,
 ) -> list[str]:
     """List all contract keys in Consul KV.
 
@@ -499,6 +506,8 @@ def list_contracts_in_consul(
 
     Args:
         prefix: KV prefix (default: onex/contracts/handlers/).
+        client: Optional Consul client. If None, creates a new client from
+            environment variables.
 
     Returns:
         List of handler IDs found.
@@ -507,11 +516,11 @@ def list_contracts_in_consul(
         This is a synchronous function that makes blocking network calls.
         Do not call from async code without wrapping in ``asyncio.to_thread()``.
 
-        This function creates a new Consul client for each call. For production
-        code with multiple operations, use ``RegistryContractSource`` directly
-        to benefit from connection reuse.
+        For batch operations, pass an existing ``client`` to avoid creating
+        a new connection for each call. This improves performance when
+        listing and then fetching multiple contracts.
     """
-    client = _create_consul_client_from_env()
+    client = client or _create_consul_client_from_env()
     _index, keys = client.kv.get(prefix, keys=True)
 
     if keys is None:
