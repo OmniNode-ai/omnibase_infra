@@ -1,10 +1,29 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Test MCP error handling via HTTP/JSON-RPC.
+"""Mock-based MCP protocol tests for error handling.
 
-These tests verify that errors at both the MCP protocol level
-and ONEX execution level are properly handled and returned
-to clients in a structured format.
+IMPORTANT: These are NOT true integration tests. They use mock JSON-RPC handlers
+to test the MCP protocol error handling logic WITHOUT the real MCP SDK.
+
+What these tests verify:
+- JSON-RPC error response structure (code, message)
+- Unknown tool error handling
+- Malformed JSON error handling
+- Protocol validation errors (missing jsonrpc field)
+
+What these tests do NOT verify:
+- Real MCP SDK error handling
+- Actual network error conditions
+- Real ONEX node execution failures
+
+Why mocks are used:
+The MCP SDK's streamable_http_app() requires proper task group initialization
+via run() before handling requests, which is incompatible with direct ASGI
+testing via httpx. These mock tests provide fast, deterministic protocol
+validation without the SDK complexity.
+
+For real MCP SDK integration tests, see:
+    tests/integration/services/mcp/e2e/test_mcp_real_e2e.py
 
 Related Tickets:
     - OMN-1408: MCP E2E Integration Tests
@@ -16,14 +35,17 @@ import httpx
 import pytest
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.mcp_protocol,
     pytest.mark.asyncio,
     pytest.mark.timeout(10),
 ]
 
 
-class TestMCPRoutingErrors:
-    """MCP-level errors (tool not found, invalid routing)."""
+class TestMockMCPRoutingErrors:
+    """Mock-based MCP protocol tests for routing errors.
+
+    Uses mock JSON-RPC handlers (not real MCP SDK) to verify error response format.
+    """
 
     async def test_nonexistent_tool_returns_error(
         self,
@@ -66,8 +88,11 @@ class TestMCPRoutingErrors:
         )
 
 
-class TestMCPBasicFunctionality:
-    """Basic MCP functionality tests."""
+class TestMockMCPBasicFunctionality:
+    """Mock-based MCP protocol tests for basic functionality.
+
+    Uses mock JSON-RPC handlers (not real MCP SDK) to verify protocol compliance.
+    """
 
     async def test_tool_call_with_empty_arguments(
         self,
@@ -210,8 +235,11 @@ class TestMCPBasicFunctionality:
             )
 
 
-class TestMCPTimeoutHandling:
-    """MCP timeout handling tests."""
+class TestMockMCPTimeoutHandling:
+    """Mock-based MCP protocol tests for timeout handling.
+
+    Uses mock JSON-RPC handlers (not real MCP SDK) to verify timeout behavior.
+    """
 
     async def test_normal_execution_completes_within_timeout(
         self,
@@ -251,8 +279,11 @@ class TestMCPTimeoutHandling:
         )
 
 
-class TestMCPProtocolCompliance:
-    """MCP protocol compliance tests."""
+class TestMockMCPProtocolCompliance:
+    """Mock-based MCP JSON-RPC protocol compliance tests.
+
+    Uses mock JSON-RPC handlers (not real MCP SDK) to verify protocol compliance.
+    """
 
     async def test_json_rpc_format_required(
         self,

@@ -1,9 +1,29 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Test MCP tool invocation via HTTP/JSON-RPC.
+"""Mock-based MCP protocol tests for tool invocation.
 
-These tests verify that ONEX nodes can be invoked through the MCP
-protocol using the tools/call method.
+IMPORTANT: These are NOT true integration tests. They use mock JSON-RPC handlers
+to test the MCP protocol handling logic WITHOUT the real MCP SDK.
+
+What these tests verify:
+- JSON-RPC protocol compliance for tools/call method
+- Argument passing through the mock executor
+- Call history tracking and correlation IDs
+- Concurrent request handling
+
+What these tests do NOT verify:
+- Real MCP SDK server lifecycle (startup, shutdown, task groups)
+- Actual MCP client library behavior
+- Real ONEX node execution
+
+Why mocks are used:
+The MCP SDK's streamable_http_app() requires proper task group initialization
+via run() before handling requests, which is incompatible with direct ASGI
+testing via httpx. These mock tests provide fast, deterministic protocol
+validation without the SDK complexity.
+
+For real MCP SDK integration tests, see:
+    tests/integration/services/mcp/e2e/test_mcp_real_e2e.py
 
 Related Ticket: OMN-1408
 """
@@ -14,14 +34,17 @@ import httpx
 import pytest
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.mcp_protocol,
     pytest.mark.asyncio,
     pytest.mark.timeout(10),
 ]
 
 
-class TestMCPInvokeNode:
-    """MCP protocol invokes ONEX nodes exposed as tools."""
+class TestMockMCPInvokeNode:
+    """Mock-based MCP protocol tests for tool invocation.
+
+    Uses mock JSON-RPC handlers (not real MCP SDK) to verify protocol compliance.
+    """
 
     async def test_call_tool_returns_structured_result(
         self,
@@ -249,7 +272,10 @@ class TestMCPInvokeNode:
 
 
 class TestMCPInvokeWorkflow:
-    """MCP protocol invokes full ONEX workflow (requires infrastructure)."""
+    """MCP tool invocation with real infrastructure (Consul).
+
+    NOTE: Still uses mock JSON-RPC layer, but executes against real Consul services.
+    """
 
     async def test_invoke_registration_workflow(
         self,

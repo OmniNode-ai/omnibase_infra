@@ -1,16 +1,42 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""MCP E2E test fixtures with runtime infrastructure detection.
+"""Mock-based MCP protocol test fixtures.
 
-This module provides pytest fixtures for MCP E2E integration tests with:
-- Infrastructure detection at fixture time (NOT import time)
-- Mock JSON-RPC endpoint (bypasses MCP SDK lifecycle complexity)
-- Real Consul tool discovery when infrastructure is available
-- Direct ASGI testing without actual HTTP server
+IMPORTANT: These fixtures provide MOCK MCP endpoints, NOT real MCP SDK integration.
 
-The mock approach is used because the MCP SDK's streamable_http_app()
-requires proper task group initialization via run() before handling
-requests, which is incompatible with direct ASGI testing via httpx.
+What these fixtures provide:
+- Mock JSON-RPC handlers implementing MCP protocol methods (initialize, tools/list, tools/call)
+- Mock tool registry with deterministic behavior
+- Call history tracking for assertion verification
+- Infrastructure detection for conditional Consul integration
+
+What these fixtures do NOT provide:
+- Real MCP SDK server (mcp.server.fastmcp)
+- Real MCP client connections
+- Actual streamable HTTP transport
+
+Why mocks are necessary:
+The MCP SDK's streamable_http_app() requires proper task group initialization
+via run() before handling requests. This lifecycle management is incompatible
+with direct ASGI testing via httpx.ASGITransport because:
+1. The SDK expects to own its event loop and task groups
+2. Direct ASGI testing bypasses the SDK's connection lifecycle
+3. The SDK's internal state machines require proper initialization sequences
+
+The mock approach allows us to test:
+- JSON-RPC protocol compliance (request/response format)
+- Error handling (unknown tools, malformed JSON, missing fields)
+- Tool discovery and invocation flow
+- Argument passing and result structure
+
+For real MCP SDK integration tests, see:
+    tests/integration/services/mcp/e2e/test_mcp_real_e2e.py
+
+Fixture dependency graph:
+    infra_availability (session) - Detects Consul/PostgreSQL at fixture time
+    mcp_app_dev_mode (function) - Mock MCP app for basic protocol tests
+    mcp_http_client (function) - httpx client for mcp_app_dev_mode
+    mcp_app_full_infra (function) - Mock MCP app with real Consul discovery
 
 Related Ticket: OMN-1408
 """
@@ -57,7 +83,7 @@ class MCPFullInfraFixture(TypedDict):
 
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.mcp_protocol,
     pytest.mark.asyncio,
 ]
 

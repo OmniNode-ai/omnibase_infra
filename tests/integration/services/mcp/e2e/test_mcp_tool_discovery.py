@@ -1,9 +1,28 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Test MCP tool discovery via HTTP/JSON-RPC.
+"""Mock-based MCP protocol tests for tool discovery.
 
-These tests verify that ONEX nodes exposed via MCP can be discovered
-using the MCP protocol's tools/list method.
+IMPORTANT: These are NOT true integration tests. They use mock JSON-RPC handlers
+to test the MCP protocol handling logic WITHOUT the real MCP SDK.
+
+What these tests verify:
+- JSON-RPC protocol compliance for tools/list method
+- Response structure validation
+- Mock tool registry behavior
+
+What these tests do NOT verify:
+- Real MCP SDK server lifecycle (startup, shutdown, task groups)
+- Actual MCP client library behavior
+- Real network transport behavior
+
+Why mocks are used:
+The MCP SDK's streamable_http_app() requires proper task group initialization
+via run() before handling requests, which is incompatible with direct ASGI
+testing via httpx. These mock tests provide fast, deterministic protocol
+validation without the SDK complexity.
+
+For real MCP SDK integration tests, see:
+    tests/integration/services/mcp/e2e/test_mcp_real_e2e.py
 
 Related Ticket: OMN-1408
 """
@@ -14,14 +33,17 @@ import httpx
 import pytest
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.mcp_protocol,
     pytest.mark.asyncio,
     pytest.mark.timeout(10),
 ]
 
 
-class TestMCPToolDiscovery:
-    """MCP protocol discovers ONEX nodes exposed as tools."""
+class TestMockMCPToolDiscovery:
+    """Mock-based MCP protocol tests for tool discovery.
+
+    Uses mock JSON-RPC handlers (not real MCP SDK) to verify protocol compliance.
+    """
 
     async def test_list_tools_returns_discovered_nodes(
         self,
@@ -104,7 +126,10 @@ class TestMCPToolDiscovery:
 
 
 class TestMCPToolDiscoveryWithInfra:
-    """MCP tool discovery with real infrastructure (Consul)."""
+    """MCP tool discovery with real infrastructure (Consul).
+
+    NOTE: Still uses mock JSON-RPC layer, but discovers tools from real Consul.
+    """
 
     async def test_tool_discovery_with_real_consul(
         self,
