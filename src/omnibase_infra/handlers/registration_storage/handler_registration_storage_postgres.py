@@ -48,6 +48,7 @@ from uuid import UUID, uuid4
 # Import asyncpg at module level to avoid redundant imports inside methods
 import asyncpg
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -152,7 +153,10 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
         handler_type: Returns "postgresql" identifier.
 
     Example:
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> container = ModelONEXContainer(...)
         >>> handler = HandlerRegistrationStoragePostgres(
+        ...     container=container,
         ...     postgres_adapter=postgres_adapter,
         ...     circuit_breaker_config={"threshold": 5, "reset_timeout": 30.0},
         ... )
@@ -161,6 +165,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         postgres_adapter: ProtocolPostgresAdapter | None = None,
         dsn: str | None = None,
         host: str = "localhost",
@@ -178,6 +183,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
         """Initialize HandlerRegistrationStoragePostgres.
 
         Args:
+            container: ONEX dependency injection container (required).
             postgres_adapter: Optional existing PostgreSQL adapter (ProtocolPostgresAdapter).
                 If not provided, a new asyncpg connection pool will be created.
             dsn: Optional PostgreSQL connection DSN (overrides host/port/etc).
@@ -197,6 +203,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                 table on first connection. Default is False. Production deployments
                 should use database migrations instead of auto-creation.
         """
+        self._container = container
         # Normalize circuit breaker config to ModelCircuitBreakerConfig
         if isinstance(circuit_breaker_config, ModelCircuitBreakerConfig):
             cb_config = circuit_breaker_config
