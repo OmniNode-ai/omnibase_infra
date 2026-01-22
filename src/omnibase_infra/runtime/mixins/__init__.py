@@ -11,6 +11,7 @@ Exports:
 
 from omnibase_infra.runtime.mixins.mixin_projector_notification_publishing import (
     MixinProjectorNotificationPublishing,
+    ProtocolProjectorNotificationContext,
 )
 from omnibase_infra.runtime.mixins.mixin_projector_sql_operations import (
     MixinProjectorSqlOperations,
@@ -19,4 +20,5 @@ from omnibase_infra.runtime.mixins.mixin_projector_sql_operations import (
 __all__: list[str] = [
     "MixinProjectorNotificationPublishing",
     "MixinProjectorSqlOperations",
+    "ProtocolProjectorNotificationContext",
 ]

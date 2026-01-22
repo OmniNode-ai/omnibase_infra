@@ -23,7 +23,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -201,13 +201,13 @@ class TestModelProjectorNotificationConfig:
             state_column="current_state",
             aggregate_id_column="entity_id",
         )
-        with pytest.raises(Exception):  # Pydantic validation error
+        with pytest.raises(ValidationError):
             config.state_column = "new_value"  # type: ignore[misc]
 
     def test_state_column_validation(self) -> None:
         """Test state_column validation."""
         # Empty string should fail
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelProjectorNotificationConfig(
                 topic="test.fsm.state.transitions.v1",
                 state_column="",
@@ -217,7 +217,7 @@ class TestModelProjectorNotificationConfig:
     def test_aggregate_id_column_validation(self) -> None:
         """Test aggregate_id_column validation."""
         # Empty string should fail
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelProjectorNotificationConfig(
                 topic="test.fsm.state.transitions.v1",
                 state_column="current_state",

@@ -965,6 +965,7 @@ class TransitionNotificationOutbox:
             )
 
             self._notifications_sent_to_dlq += 1
+            self._notifications_processed += 1  # DLQ-handled counts as processed
 
             logger.warning(
                 "Notification moved to DLQ after exceeding max retries",

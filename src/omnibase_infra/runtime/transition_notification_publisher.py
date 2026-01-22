@@ -317,9 +317,11 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         )
 
         try:
-            # Create envelope wrapping the notification
-            envelope = ModelEventEnvelope(
-                payload=notification.model_dump(),
+            # Create envelope wrapping the notification model directly.
+            # ModelEventEnvelope[T] is generic and handles Pydantic models natively,
+            # serializing them lazily when needed via to_dict_lazy().
+            envelope = ModelEventEnvelope[ModelStateTransitionNotification](
+                payload=notification,
                 correlation_id=notification.correlation_id,
                 source_tool=self._publisher_id,
             )
@@ -467,6 +469,10 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         last_error: Exception | None = None
         failed_notifications: list[FailedNotificationRecord] = []
         truncation_occurred = False
+        # Track error types to determine most severe error for final raise.
+        # Severity order: InfraUnavailableError > InfraTimeoutError > InfraConnectionError
+        encountered_unavailable = False
+        encountered_timeout = False
 
         for notification in notifications:
             try:
@@ -478,6 +484,11 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 InfraUnavailableError,
             ) as e:
                 last_error = e
+                # Track error types for determining most severe error to raise
+                if isinstance(e, InfraUnavailableError):
+                    encountered_unavailable = True
+                elif isinstance(e, InfraTimeoutError):
+                    encountered_timeout = True
                 # Only track failures up to the limit to prevent unbounded memory growth
                 if len(failed_notifications) < self._max_tracked_failures:
                     failed_notifications.append(
@@ -589,10 +600,34 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
             if failure_count > 3:
                 failure_details += f" ... and {failure_count - 3} more"
 
-            raise InfraConnectionError(
+            error_message = (
                 f"Batch publish partially failed: {failure_count}/{len(notifications)} "
                 f"notifications failed ({success_count} succeeded). "
-                f"Failures: [{failure_details}]",
+                f"Failures: [{failure_details}]"
+            )
+
+            # Raise the most severe error type encountered during batch processing.
+            # Severity order: InfraUnavailableError > InfraTimeoutError > InfraConnectionError
+            # This preserves error semantics so callers can handle appropriately
+            # (e.g., retry on timeout, skip on unavailable).
+            if encountered_unavailable:
+                raise InfraUnavailableError(
+                    error_message,
+                    context=ctx,
+                ) from last_error
+            if encountered_timeout:
+                timeout_ctx = ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="publish_batch",
+                    target_name=self._topic,
+                    correlation_id=correlation_id,
+                )
+                raise InfraTimeoutError(
+                    error_message,
+                    context=timeout_ctx,
+                ) from last_error
+            raise InfraConnectionError(
+                error_message,
                 context=ctx,
             ) from last_error
 

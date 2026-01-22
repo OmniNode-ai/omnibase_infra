@@ -40,49 +40,17 @@ import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 from pydantic import BaseModel, Field
 
+from omnibase_core.models.notifications import ModelStateTransitionNotification
+from omnibase_infra.runtime.models import ModelTransitionNotificationOutboxMetrics
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-
-# =============================================================================
-# Test Models (TDD - defining expected interfaces)
-# =============================================================================
-
-
-class ModelStateTransitionNotification(BaseModel):
-    """State transition notification model for outbox storage.
-
-    This model represents a notification about a state transition that needs
-    to be reliably delivered to downstream consumers via the outbox pattern.
-
-    NOTE: This is a TDD placeholder - the actual model will be in omnibase_core.
-    """
-
-    aggregate_type: str = Field(
-        ..., description="Type of aggregate (e.g., 'registration', 'workflow')"
-    )
-    aggregate_id: UUID = Field(..., description="Unique identifier of the aggregate")
-    from_state: str = Field(..., description="State before transition")
-    to_state: str = Field(..., description="State after transition")
-    projection_version: int = Field(
-        ..., ge=1, description="Version of the projection after this transition"
-    )
-    correlation_id: UUID = Field(..., description="Correlation ID for request tracing")
-    causation_id: UUID = Field(
-        ..., description="ID of the event that caused this transition"
-    )
-    timestamp: datetime = Field(..., description="When the transition occurred")
-    metadata: dict[str, str] = Field(
-        default_factory=dict, description="Optional metadata for the notification"
-    )
-
-    model_config = {"frozen": True}
 
 
 class ModelOutboxConfig(BaseModel):
@@ -106,20 +74,6 @@ class ModelOutboxConfig(BaseModel):
     retry_backoff_seconds: float = Field(
         default=60.0, ge=1.0, description="Backoff before retrying failed notifications"
     )
-
-
-class ModelOutboxMetrics(BaseModel):
-    """Metrics for TransitionNotificationOutbox.
-
-    NOTE: This is a TDD placeholder for the expected metrics model.
-    """
-
-    notifications_stored: int = Field(default=0, ge=0)
-    notifications_processed: int = Field(default=0, ge=0)
-    notifications_failed: int = Field(default=0, ge=0)
-    notifications_retried: int = Field(default=0, ge=0)
-    last_processed_at: datetime | None = Field(default=None)
-    is_running: bool = Field(default=False)
 
 
 # =============================================================================
@@ -193,8 +147,8 @@ def sample_notification() -> ModelStateTransitionNotification:
 
 
 @pytest.fixture
-def sample_notification_with_metadata() -> ModelStateTransitionNotification:
-    """Create sample notification with metadata for testing."""
+def sample_notification_with_workflow_view() -> ModelStateTransitionNotification:
+    """Create sample notification with workflow_view for testing."""
     return ModelStateTransitionNotification(
         aggregate_type="workflow",
         aggregate_id=uuid4(),
@@ -204,7 +158,7 @@ def sample_notification_with_metadata() -> ModelStateTransitionNotification:
         correlation_id=uuid4(),
         causation_id=uuid4(),
         timestamp=datetime.now(UTC),
-        metadata={"node_id": "abc-123", "executor": "runtime-host"},
+        workflow_view={"node_id": "abc-123", "executor": "runtime-host"},
     )
 
 
@@ -1008,7 +962,7 @@ class TestTransitionNotificationOutboxMetrics:
         - notifications_processed: Successfully processed
         - notifications_failed: Failed to process
         """
-        metrics = ModelOutboxMetrics()
+        metrics = ModelTransitionNotificationOutboxMetrics(table_name="test_outbox")
 
         # Simulate storing notifications
         for _ in range(5):
@@ -1031,36 +985,55 @@ class TestTransitionNotificationOutboxMetrics:
         assert metrics.notifications_processed == 3
         assert metrics.notifications_failed == 2
 
-    async def test_metrics_track_retry_count(
+    async def test_metrics_track_dlq_count(
         self,
         mock_pool: AsyncMock,
         mock_publisher: AsyncMock,
     ) -> None:
-        """Metrics track notification retry attempts."""
-        metrics = ModelOutboxMetrics()
+        """Metrics track notifications sent to DLQ after max retries."""
+        metrics = ModelTransitionNotificationOutboxMetrics(
+            table_name="test_outbox",
+            max_retries=3,
+        )
 
-        # Simulate retries
+        # Simulate DLQ moves
         for _ in range(3):
             metrics = metrics.model_copy(
-                update={"notifications_retried": metrics.notifications_retried + 1}
+                update={
+                    "notifications_sent_to_dlq": metrics.notifications_sent_to_dlq + 1
+                }
             )
 
-        assert metrics.notifications_retried == 3
+        assert metrics.notifications_sent_to_dlq == 3
 
-    async def test_metrics_track_last_processed_timestamp(
+    async def test_metrics_dlq_needs_attention_helper(
         self,
         mock_pool: AsyncMock,
         mock_publisher: AsyncMock,
     ) -> None:
-        """Metrics track when last processing occurred."""
-        metrics = ModelOutboxMetrics()
-        assert metrics.last_processed_at is None
+        """Metrics provide dlq_needs_attention() helper method."""
+        # DLQ disabled - always returns False
+        metrics_no_dlq = ModelTransitionNotificationOutboxMetrics(
+            table_name="test_outbox",
+            max_retries=None,
+        )
+        assert metrics_no_dlq.dlq_needs_attention() is False
 
-        # Simulate processing
-        now = datetime.now(UTC)
-        metrics = metrics.model_copy(update={"last_processed_at": now})
+        # DLQ enabled but below threshold
+        metrics_below_threshold = ModelTransitionNotificationOutboxMetrics(
+            table_name="test_outbox",
+            max_retries=3,
+            dlq_publish_failures=2,  # Below DEFAULT_DLQ_ALERT_THRESHOLD of 3
+        )
+        assert metrics_below_threshold.dlq_needs_attention() is False
 
-        assert metrics.last_processed_at == now
+        # DLQ enabled and at/above threshold
+        metrics_at_threshold = ModelTransitionNotificationOutboxMetrics(
+            table_name="test_outbox",
+            max_retries=3,
+            dlq_publish_failures=3,  # At DEFAULT_DLQ_ALERT_THRESHOLD
+        )
+        assert metrics_at_threshold.dlq_needs_attention() is True
 
     async def test_metrics_track_running_state(
         self,
@@ -1068,7 +1041,7 @@ class TestTransitionNotificationOutboxMetrics:
         mock_publisher: AsyncMock,
     ) -> None:
         """Metrics track whether processor is running."""
-        metrics = ModelOutboxMetrics()
+        metrics = ModelTransitionNotificationOutboxMetrics(table_name="test_outbox")
         assert metrics.is_running is False
 
         # Simulate start
@@ -1275,15 +1248,15 @@ class TestTransitionNotificationOutboxIntegration:
         ]
         assert len(update_calls) == 1
 
-    async def test_notification_with_metadata_roundtrip(
+    async def test_notification_with_workflow_view_roundtrip(
         self,
         mock_pool: AsyncMock,
         mock_publisher: AsyncMock,
-        sample_notification_with_metadata: ModelStateTransitionNotification,
+        sample_notification_with_workflow_view: ModelStateTransitionNotification,
         outbox_config: ModelOutboxConfig,
     ) -> None:
-        """Test that metadata is preserved through store and process."""
-        notification = sample_notification_with_metadata
+        """Test that workflow_view is preserved through store and process."""
+        notification = sample_notification_with_workflow_view
 
         # Serialize
         payload_json = notification.model_dump_json()
@@ -1292,10 +1265,11 @@ class TestTransitionNotificationOutboxIntegration:
         parsed = json.loads(payload_json)
         restored = ModelStateTransitionNotification.model_validate(parsed)
 
-        # Verify metadata preserved
-        assert restored.metadata == notification.metadata
-        assert restored.metadata.get("node_id") == "abc-123"
-        assert restored.metadata.get("executor") == "runtime-host"
+        # Verify workflow_view preserved
+        assert restored.workflow_view == notification.workflow_view
+        assert restored.workflow_view is not None
+        assert restored.workflow_view.get("node_id") == "abc-123"
+        assert restored.workflow_view.get("executor") == "runtime-host"
 
 
 # =============================================================================
@@ -1839,9 +1813,6 @@ class TestTransitionNotificationOutboxDLQ:
         mock_dlq_publisher: AsyncMock,
     ) -> None:
         """Notifications exceeding max_retries are moved to DLQ."""
-        from omnibase_core.models.notifications import (
-            ModelStateTransitionNotification as CoreModelNotification,
-        )
         from omnibase_infra.runtime.transition_notification_outbox import (
             TransitionNotificationOutbox,
         )
@@ -2031,7 +2002,9 @@ class TestTransitionNotificationOutboxDLQ:
         mock_dlq_publisher.publish.assert_called_once()
 
         # Metrics should reflect this
-        assert outbox.notifications_processed == 2  # Normal processing increments this
+        assert (
+            outbox.notifications_processed == 3
+        )  # Normal + DLQ both count as processed
         assert outbox.notifications_sent_to_dlq == 1
 
     # =========================================================================

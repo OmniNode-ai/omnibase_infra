@@ -560,4 +560,7 @@ class MixinProjectorNotificationPublishing:
             )
 
 
-__all__: list[str] = ["MixinProjectorNotificationPublishing"]
+__all__: list[str] = [
+    "MixinProjectorNotificationPublishing",
+    "ProtocolProjectorNotificationContext",
+]

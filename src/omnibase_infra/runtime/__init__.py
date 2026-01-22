@@ -103,6 +103,9 @@ from omnibase_infra.runtime.protocols import (
     ProtocolRuntimeScheduler,
     ProtocolTransitionNotificationPublisher,
 )
+from omnibase_infra.runtime.mixins import (
+    ProtocolProjectorNotificationContext,
+)
 from omnibase_infra.runtime.registry import (
     MessageTypeRegistryError,
     ModelDomainConstraint,
@@ -256,6 +259,8 @@ __all__: list[str] = [
     "ProtocolRuntimeScheduler",
     # Transition notification (OMN-1139)
     "ProtocolTransitionNotificationPublisher",
+    # Projector notification context protocol (OMN-1139)
+    "ProtocolProjectorNotificationContext",
     # Error class
     "RegistryError",
     # Notification constants (OMN-1139)
