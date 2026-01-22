@@ -84,6 +84,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
 from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
@@ -268,7 +269,13 @@ def assert_no_bus_attributes(handler: object, handler_name: str) -> None:
 
 
 @pytest.fixture
-def http_handler() -> Generator[HandlerHttpRest, None, None]:
+def mock_container() -> MagicMock:
+    """Create a mock ModelONEXContainer for handler instantiation."""
+    return MagicMock(spec=ModelONEXContainer)
+
+
+@pytest.fixture
+def http_handler(mock_container: MagicMock) -> Generator[HandlerHttpRest, None, None]:
     """Create HandlerHttpRest with cleanup.
 
     Yields handler instance and ensures proper shutdown if initialized.
@@ -279,7 +286,7 @@ def http_handler() -> Generator[HandlerHttpRest, None, None]:
     uses yield with teardown code. See introspection_handler for the simpler
     return pattern when no cleanup is required.
     """
-    handler = HandlerHttpRest()
+    handler = HandlerHttpRest(container=mock_container)
     yield handler
     # Cleanup if handler was initialized (has httpx client)
     if hasattr(handler, "_initialized") and handler._initialized:
@@ -827,7 +834,7 @@ class TestHandlerNoPublishConstraintCrossValidation:
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
         [
-            (HandlerHttpRest, {}),
+            (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
             (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
         ],
     )
@@ -915,7 +922,11 @@ class TestHandlerNoPublishConstraintCrossValidation:
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs", "method_name"),
         [
-            (HandlerHttpRest, {}, "execute"),
+            (
+                HandlerHttpRest,
+                {"container": MagicMock(spec=ModelONEXContainer)},
+                "execute",
+            ),
             (HandlerNodeIntrospected, {"projection_reader": MagicMock()}, "handle"),
         ],
     )
@@ -1089,7 +1100,7 @@ class TestHandlerProtocolCompliance:
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
         [
-            (HandlerHttpRest, {}),
+            (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
             (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
         ],
     )
@@ -1125,7 +1136,7 @@ class TestHandlerProtocolCompliance:
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
         [
-            (HandlerHttpRest, {}),
+            (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
             (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
         ],
     )

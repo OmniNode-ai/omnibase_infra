@@ -79,11 +79,12 @@ class TestHandlerVaultInitialization:
     @pytest.mark.asyncio
     async def test_initialize_success(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful initialization with valid config."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -98,14 +99,14 @@ class TestHandlerVaultInitialization:
             mock_hvac_client.is_authenticated.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_initialize_missing_url(self) -> None:
+    async def test_initialize_missing_url(self, mock_container: MagicMock) -> None:
         """Test initialization fails with missing URL.
 
         Missing URL is a configuration validation error, so ProtocolConfigurationError
         is raised (not RuntimeHostError). This follows ONEX error patterns where
         configuration issues use ProtocolConfigurationError.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {"token": "s.test1234"}
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -116,14 +117,14 @@ class TestHandlerVaultInitialization:
         assert exc_info.value.model.error_code.name == "INVALID_CONFIGURATION"
 
     @pytest.mark.asyncio
-    async def test_initialize_missing_token(self) -> None:
+    async def test_initialize_missing_token(self, mock_container: MagicMock) -> None:
         """Test initialization fails with missing token.
 
         Missing token is a configuration validation error, so ProtocolConfigurationError
         is raised (not RuntimeHostError). This follows ONEX error patterns where
         configuration issues use ProtocolConfigurationError.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {"url": "https://vault.example.com:8200"}
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -135,11 +136,12 @@ class TestHandlerVaultInitialization:
     @pytest.mark.asyncio
     async def test_initialize_authentication_failure(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test initialization fails with authentication failure."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         mock_hvac_client.is_authenticated.return_value = False
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
@@ -153,10 +155,11 @@ class TestHandlerVaultInitialization:
     @pytest.mark.asyncio
     async def test_initialize_connection_failure(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
     ) -> None:
         """Test initialization fails with connection error."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             import hvac.exceptions
@@ -206,25 +209,27 @@ class TestHandlerVaultInitialization:
 class TestHandlerVaultType:
     """Test HandlerVault type and category properties."""
 
-    def test_handler_type_returns_infra_handler(self) -> None:
+    def test_handler_type_returns_infra_handler(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test handler_type property returns EnumHandlerType.INFRA_HANDLER.
 
         Infrastructure protocol handlers (Consul, Vault, Kafka, etc.) return
         INFRA_HANDLER as their architectural role. The transport-specific
         identification is provided by handler_category.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         handler_type = handler.handler_type
         assert handler_type == EnumHandlerType.INFRA_HANDLER
         assert handler_type.value == "infra_handler"
 
-    def test_handler_category_returns_effect(self) -> None:
+    def test_handler_category_returns_effect(self, mock_container: MagicMock) -> None:
         """Test handler_category property returns EnumHandlerTypeCategory.EFFECT.
 
         Vault handlers are EFFECT handlers because they perform side-effecting
         I/O operations (secret read/write, token renewal, etc.).
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         handler_category = handler.handler_category
         assert handler_category == EnumHandlerTypeCategory.EFFECT
         assert handler_category.value == "effect"
@@ -236,11 +241,12 @@ class TestHandlerVaultOperations:
     @pytest.mark.asyncio
     async def test_read_secret_success(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret read operation."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -281,11 +287,12 @@ class TestHandlerVaultOperations:
     @pytest.mark.asyncio
     async def test_write_secret_success(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret write operation."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -321,11 +328,12 @@ class TestHandlerVaultOperations:
     @pytest.mark.asyncio
     async def test_delete_secret_success(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret deletion."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -352,11 +360,12 @@ class TestHandlerVaultOperations:
     @pytest.mark.asyncio
     async def test_list_secrets_success(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret listing."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -388,11 +397,12 @@ class TestHandlerVaultOperations:
     @pytest.mark.asyncio
     async def test_operation_missing_path(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operation fails with missing path."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -416,11 +426,12 @@ class TestHandlerVaultTokenRenewal:
     @pytest.mark.asyncio
     async def test_renew_token_success(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful token renewal."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -446,11 +457,12 @@ class TestHandlerVaultTokenRenewal:
     @pytest.mark.asyncio
     async def test_renew_token_operation_envelope(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test token renewal via envelope operation."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -484,6 +496,7 @@ class TestHandlerVaultTokenRenewal:
     @pytest.mark.asyncio
     async def test_token_renewal_threshold_edge_case_exactly_at_threshold(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -501,7 +514,7 @@ class TestHandlerVaultTokenRenewal:
         Note: We set time_until_expiry slightly above threshold to ensure no renewal,
         as the strict < comparison should prevent renewal when exactly at threshold.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -552,6 +565,7 @@ class TestHandlerVaultTokenRenewal:
     @pytest.mark.asyncio
     async def test_token_renewal_threshold_edge_case_just_below_threshold(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -560,7 +574,7 @@ class TestHandlerVaultTokenRenewal:
         This tests that renewal DOES trigger when time_until_expiry is
         just below the threshold (e.g., threshold - 1 second).
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -603,6 +617,7 @@ class TestHandlerVaultTokenRenewal:
     @pytest.mark.asyncio
     async def test_token_renewal_threshold_edge_case_just_above_threshold(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -611,7 +626,7 @@ class TestHandlerVaultTokenRenewal:
         This tests that renewal does NOT trigger when time_until_expiry is
         just above the threshold (e.g., threshold + 1 second).
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -658,11 +673,12 @@ class TestHandlerVaultRetryLogic:
     @pytest.mark.asyncio
     async def test_retry_on_transient_failure(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test retry logic on transient failures."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -698,11 +714,12 @@ class TestHandlerVaultRetryLogic:
     @pytest.mark.asyncio
     async def test_retry_exhausted(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test retry logic when all attempts exhausted."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -729,11 +746,12 @@ class TestHandlerVaultRetryLogic:
     @pytest.mark.asyncio
     async def test_timeout_error(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operation timeout raises InfraTimeoutError."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -763,11 +781,12 @@ class TestHandlerVaultErrorHandling:
     @pytest.mark.asyncio
     async def test_authentication_error(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test authentication error handling."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -795,11 +814,12 @@ class TestHandlerVaultErrorHandling:
     @pytest.mark.asyncio
     async def test_secret_not_found(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test secret not found error handling."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -827,11 +847,12 @@ class TestHandlerVaultErrorHandling:
     @pytest.mark.asyncio
     async def test_vault_unavailable(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test Vault server unavailable error."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -863,11 +884,12 @@ class TestHandlerVaultDescribe:
     @pytest.mark.asyncio
     async def test_describe(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test describe returns handler metadata."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -893,11 +915,12 @@ class TestHandlerVaultShutdown:
     @pytest.mark.asyncio
     async def test_shutdown(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test handler shutdown releases resources."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -919,11 +942,12 @@ class TestHandlerVaultThreadPool:
     @pytest.mark.asyncio
     async def test_thread_pool_created_with_config_size(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool is created with configured size."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Set custom thread pool size
         vault_config["max_concurrent_operations"] = 15
@@ -938,11 +962,12 @@ class TestHandlerVaultThreadPool:
     @pytest.mark.asyncio
     async def test_thread_pool_default_size(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool uses default size when not specified."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Remove max_concurrent_operations to test default
         vault_config.pop("max_concurrent_operations", None)
@@ -957,11 +982,12 @@ class TestHandlerVaultThreadPool:
     @pytest.mark.asyncio
     async def test_thread_pool_shutdown_on_handler_shutdown(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool is properly shutdown when handler shuts down."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -981,11 +1007,12 @@ class TestHandlerVaultThreadPool:
     @pytest.mark.asyncio
     async def test_operations_use_thread_pool(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operations execute in thread pool executor."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1056,11 +1083,12 @@ class TestHandlerVaultCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_opens_after_threshold_failures(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit opens after threshold consecutive failures."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Configure circuit breaker with low threshold for testing
         vault_config["circuit_breaker_failure_threshold"] = 2
@@ -1093,11 +1121,12 @@ class TestHandlerVaultCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_blocks_requests_when_open(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit blocks requests when OPEN."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 2
 
@@ -1132,11 +1161,12 @@ class TestHandlerVaultCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_transitions_to_half_open_after_timeout(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit transitions to HALF_OPEN after reset timeout."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Minimum timeout for testing (1.0 seconds)
         vault_config["circuit_breaker_failure_threshold"] = 2
@@ -1193,11 +1223,12 @@ class TestHandlerVaultCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_closes_on_success_in_half_open_state(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit closes on successful request in HALF_OPEN state."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 2
         vault_config["circuit_breaker_reset_timeout_seconds"] = 1.0
@@ -1251,6 +1282,7 @@ class TestHandlerVaultCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_reopens_on_failure_in_half_open_state(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1260,7 +1292,7 @@ class TestHandlerVaultCircuitBreaker:
         to reach the threshold again to reopen. We use threshold=1 to test that
         a single failure in HALF_OPEN immediately reopens the circuit.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Use threshold=1 so single failure in HALF_OPEN reopens immediately
         vault_config["circuit_breaker_failure_threshold"] = 1
@@ -1309,11 +1341,12 @@ class TestHandlerVaultCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_breaker_can_be_disabled(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit breaker can be disabled via config."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Disable circuit breaker
         vault_config["circuit_breaker_enabled"] = False
@@ -1345,11 +1378,12 @@ class TestHandlerVaultCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_breaker_resets_on_shutdown(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit breaker state resets on handler shutdown."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 2
 
@@ -1438,11 +1472,13 @@ class TestHandlerVaultErrorCodes:
     """Test HandlerVault error code validation and consistency."""
 
     @pytest.mark.asyncio
-    async def test_protocol_configuration_error_for_validation(self) -> None:
+    async def test_protocol_configuration_error_for_validation(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test ProtocolConfigurationError is raised for Pydantic validation failures."""
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Invalid config should raise ProtocolConfigurationError
         invalid_config = {
@@ -1461,12 +1497,13 @@ class TestHandlerVaultErrorCodes:
     @pytest.mark.asyncio
     async def test_runtime_host_error_for_missing_url(
         self,
+        mock_container: MagicMock,
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test RuntimeHostError is raised for empty URL with correct error code."""
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Config with empty URL - this fails Pydantic validation
         config: dict[str, VaultConfigValue] = {
@@ -1488,11 +1525,12 @@ class TestHandlerVaultErrorCodes:
     @pytest.mark.asyncio
     async def test_infra_authentication_error_code(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test InfraAuthenticationError has correct error code."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1521,11 +1559,12 @@ class TestHandlerVaultErrorCodes:
     @pytest.mark.asyncio
     async def test_secret_resolution_error_code(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test SecretResolutionError has correct error code."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1558,11 +1597,12 @@ class TestHandlerVaultBoundedQueue:
     @pytest.mark.asyncio
     async def test_queue_size_configured_from_multiplier(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test queue size is calculated from multiplier."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Set custom multiplier
         vault_config["max_concurrent_operations"] = 10
@@ -1578,11 +1618,12 @@ class TestHandlerVaultBoundedQueue:
     @pytest.mark.asyncio
     async def test_queue_size_default_multiplier(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test queue size uses default multiplier when not specified."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["max_concurrent_operations"] = 10
         # Don't set max_queue_size_multiplier to test default
@@ -1630,12 +1671,13 @@ class TestHandlerVaultErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_validation_error_uses_protocol_configuration_error(
         self,
+        mock_container: MagicMock,
     ) -> None:
         """Test ValidationError raises ProtocolConfigurationError with correct error code."""
         from omnibase_core.enums import EnumCoreErrorCode
         from omnibase_infra.errors import ProtocolConfigurationError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Invalid configuration (missing required field)
         invalid_config: dict[str, VaultConfigValue] = {
@@ -1653,6 +1695,7 @@ class TestHandlerVaultErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_connection_error_uses_service_unavailable_code(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1662,7 +1705,7 @@ class TestHandlerVaultErrorCodeValidation:
         from omnibase_core.enums import EnumCoreErrorCode
         from omnibase_infra.errors import InfraConnectionError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1681,6 +1724,7 @@ class TestHandlerVaultErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_authentication_error_uses_authentication_error_code(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1688,7 +1732,7 @@ class TestHandlerVaultErrorCodeValidation:
         from omnibase_core.enums import EnumCoreErrorCode
         from omnibase_infra.errors import InfraAuthenticationError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1705,6 +1749,7 @@ class TestHandlerVaultErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_timeout_error_uses_timeout_error_code(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1712,7 +1757,7 @@ class TestHandlerVaultErrorCodeValidation:
         from omnibase_core.enums import EnumCoreErrorCode
         from omnibase_infra.errors import InfraTimeoutError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1740,6 +1785,7 @@ class TestHandlerVaultErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_unavailable_error_uses_service_unavailable_code(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1747,7 +1793,7 @@ class TestHandlerVaultErrorCodeValidation:
         from omnibase_core.enums import EnumCoreErrorCode
         from omnibase_infra.errors import InfraUnavailableError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1785,6 +1831,7 @@ class TestHandlerVaultErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_secret_resolution_error_uses_resource_not_found_code(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1794,7 +1841,7 @@ class TestHandlerVaultErrorCodeValidation:
         from omnibase_core.enums import EnumCoreErrorCode
         from omnibase_infra.errors import SecretResolutionError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1822,13 +1869,14 @@ class TestHandlerVaultErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_error_context_includes_namespace(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test all error contexts include Vault namespace per PR #38 feedback."""
         from omnibase_infra.errors import RuntimeHostError
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1853,6 +1901,7 @@ class TestHandlerVaultErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_all_error_codes_are_mapped_correctly(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1866,7 +1915,7 @@ class TestHandlerVaultErrorCodeValidation:
         verified_errors: list[str] = []
 
         # 1. Test ProtocolConfigurationError -> INVALID_CONFIGURATION
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.initialize({})
         assert (
@@ -1875,7 +1924,7 @@ class TestHandlerVaultErrorCodeValidation:
         verified_errors.append("ProtocolConfigurationError")
 
         # 2. Test InfraConnectionError -> SERVICE_UNAVAILABLE (Vault transport)
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
             mock_hvac_client.is_authenticated.side_effect = hvac.exceptions.VaultError(
@@ -1892,7 +1941,7 @@ class TestHandlerVaultErrorCodeValidation:
             mock_hvac_client.is_authenticated.return_value = True
 
         # 3. Test SecretResolutionError -> RESOURCE_NOT_FOUND
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
             await handler.initialize(vault_config)
@@ -1915,7 +1964,7 @@ class TestHandlerVaultErrorCodeValidation:
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
 
         # 4. Test InfraTimeoutError -> TIMEOUT_ERROR
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
             await handler.initialize(vault_config)
@@ -1936,7 +1985,7 @@ class TestHandlerVaultErrorCodeValidation:
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
 
         # 5. Test InfraAuthenticationError -> AUTHENTICATION_ERROR
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
             await handler.initialize(vault_config)
@@ -1960,7 +2009,7 @@ class TestHandlerVaultErrorCodeValidation:
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
 
         # 6. Test InfraUnavailableError -> SERVICE_UNAVAILABLE (circuit breaker)
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
             # Configure for quick circuit breaker trigger
@@ -2021,7 +2070,9 @@ class TestHandlerVaultURLValidation:
     """
 
     @pytest.mark.asyncio
-    async def test_empty_url_raises_protocol_configuration_error(self) -> None:
+    async def test_empty_url_raises_protocol_configuration_error(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test empty URL string raises ProtocolConfigurationError.
 
         Empty URL is a configuration validation failure (field_validator catches it),
@@ -2029,7 +2080,7 @@ class TestHandlerVaultURLValidation:
         """
         from omnibase_core.enums import EnumCoreErrorCode
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "",  # Empty string
             "token": "s.test1234",
@@ -2044,7 +2095,9 @@ class TestHandlerVaultURLValidation:
         assert "url" in str(error).lower() or "empty" in str(error).lower()
 
     @pytest.mark.asyncio
-    async def test_url_missing_scheme_raises_protocol_configuration_error(self) -> None:
+    async def test_url_missing_scheme_raises_protocol_configuration_error(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test URL without scheme raises ProtocolConfigurationError.
 
         URL must start with http:// or https:// - missing scheme is a
@@ -2052,7 +2105,7 @@ class TestHandlerVaultURLValidation:
         """
         from omnibase_core.enums import EnumCoreErrorCode
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "vault.example.com:8200",  # Missing http:// or https://
             "token": "s.test1234",
@@ -2067,14 +2120,16 @@ class TestHandlerVaultURLValidation:
         assert "http" in str(error).lower()
 
     @pytest.mark.asyncio
-    async def test_url_invalid_scheme_raises_protocol_configuration_error(self) -> None:
+    async def test_url_invalid_scheme_raises_protocol_configuration_error(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test URL with invalid scheme raises ProtocolConfigurationError.
 
         Only http:// and https:// schemes are valid for Vault URLs.
         """
         from omnibase_core.enums import EnumCoreErrorCode
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "ftp://vault.example.com:8200",  # Invalid scheme
             "token": "s.test1234",
@@ -2088,14 +2143,16 @@ class TestHandlerVaultURLValidation:
         assert "http" in str(error).lower()
 
     @pytest.mark.asyncio
-    async def test_url_scheme_only_raises_protocol_configuration_error(self) -> None:
+    async def test_url_scheme_only_raises_protocol_configuration_error(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test URL with scheme only (no host) raises ProtocolConfigurationError.
 
         URL must have format: scheme://host[:port] - scheme-only is invalid.
         """
         from omnibase_core.enums import EnumCoreErrorCode
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "https://",  # Scheme only, no host
             "token": "s.test1234",
@@ -2110,6 +2167,7 @@ class TestHandlerVaultURLValidation:
     @pytest.mark.asyncio
     async def test_valid_url_unreachable_raises_infra_connection_error(
         self,
+        mock_container: MagicMock,
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test valid URL but unreachable server raises InfraConnectionError.
@@ -2119,7 +2177,7 @@ class TestHandlerVaultURLValidation:
         """
         from omnibase_core.enums import EnumCoreErrorCode
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "https://unreachable-vault.example.com:8200",  # Valid format
             "token": "s.test1234",
@@ -2139,6 +2197,7 @@ class TestHandlerVaultURLValidation:
     @pytest.mark.asyncio
     async def test_valid_url_reachable_auth_fails_raises_infra_authentication_error(
         self,
+        mock_container: MagicMock,
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test valid URL, reachable server, but auth fails raises InfraAuthenticationError.
@@ -2148,7 +2207,7 @@ class TestHandlerVaultURLValidation:
         """
         from omnibase_core.enums import EnumCoreErrorCode
 
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "https://vault.example.com:8200",
             "token": "s.invalid_token",
@@ -2167,14 +2226,16 @@ class TestHandlerVaultURLValidation:
             assert "authentication" in str(error).lower()
 
     @pytest.mark.asyncio
-    async def test_url_error_includes_correlation_id(self) -> None:
+    async def test_url_error_includes_correlation_id(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test URL validation errors include correlation_id for tracing.
 
         All infrastructure errors should include correlation_id at the model level
         for distributed tracing. The correlation_id is a top-level field in the
         error model, not inside the context dictionary.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "invalid-url",  # No scheme
             "token": "s.test1234",
@@ -2192,12 +2253,14 @@ class TestHandlerVaultURLValidation:
         assert isinstance(error.model.context, dict)
 
     @pytest.mark.asyncio
-    async def test_url_error_context_includes_transport_type(self) -> None:
+    async def test_url_error_context_includes_transport_type(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test URL validation errors include transport_type in context.
 
         Error context should identify the transport type for debugging.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "",  # Empty URL
             "token": "s.test1234",
@@ -2213,12 +2276,14 @@ class TestHandlerVaultURLValidation:
         assert error.model.context.get("transport_type") == "vault"
 
     @pytest.mark.asyncio
-    async def test_url_error_context_includes_operation(self) -> None:
+    async def test_url_error_context_includes_operation(
+        self, mock_container: MagicMock
+    ) -> None:
         """Test URL validation errors include operation name in context.
 
         Error context should identify the operation for debugging.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
         config: dict[str, VaultConfigValue] = {
             "url": "not-a-url",  # Invalid format
             "token": "s.test1234",

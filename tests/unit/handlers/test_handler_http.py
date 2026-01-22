@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -37,6 +38,12 @@ from tests.helpers import (
     DeterministicIdGenerator,
     filter_handler_warnings,
 )
+
+
+@pytest.fixture
+def mock_container() -> MagicMock:
+    """Create a mock ModelONEXContainer for handler instantiation."""
+    return MagicMock(spec=ModelONEXContainer)
 
 
 def create_mock_streaming_response(
@@ -94,9 +101,9 @@ class TestHandlerHttpRestInitialization:
     """Test suite for HandlerHttpRest initialization."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     def test_handler_init_default_state(self, handler: HandlerHttpRest) -> None:
         """Test handler initializes in uninitialized state."""
@@ -149,9 +156,9 @@ class TestHandlerHttpRestGetOperations:
     """Test suite for HTTP GET operations."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_get_successful_response(self, handler: HandlerHttpRest) -> None:
@@ -312,9 +319,9 @@ class TestHandlerHttpRestPostOperations:
     """Test suite for HTTP POST operations."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_post_with_json_body(self, handler: HandlerHttpRest) -> None:
@@ -542,9 +549,9 @@ class TestHandlerHttpRestErrorHandling:
     """Test suite for error handling."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_timeout_error_raises_infra_timeout(
@@ -848,13 +855,13 @@ class TestHandlerHttpRestDescribe:
     """
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture for describe() tests.
 
         Returns:
             HandlerHttpRest: A new, uninitialized handler instance.
         """
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     def test_describe_returns_handler_metadata(self, handler: HandlerHttpRest) -> None:
         """Test describe() returns all three dimensions of the handler type system.
@@ -1056,9 +1063,9 @@ class TestHandlerHttpRestLifecycle:
     """Test suite for lifecycle management."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_shutdown_closes_client(self, handler: HandlerHttpRest) -> None:
@@ -1164,9 +1171,9 @@ class TestHandlerHttpRestCorrelationId:
     """Test suite for correlation ID handling."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_correlation_id_from_envelope_uuid(
@@ -1309,9 +1316,9 @@ class TestHandlerHttpRestResponseParsing:
     """Test suite for response parsing."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_json_response_parsed(self, handler: HandlerHttpRest) -> None:
@@ -1436,9 +1443,9 @@ class TestHandlerHttpRestSizeLimits:
     """Test suite for request/response size limits."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     def test_default_size_limits(self, handler: HandlerHttpRest) -> None:
         """Test default size limits are set correctly."""
@@ -1959,9 +1966,9 @@ class TestHandlerHttpRestLogWarnings:
     HANDLER_MODULE = "omnibase_infra.handlers.handler_http"
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_no_unexpected_warnings_during_normal_operation(
@@ -2114,9 +2121,9 @@ class TestHandlerHttpRestPrepareRequestContent:
     """Test suite for _prepare_request_content helper method."""
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.fixture
     def error_context(self) -> ModelInfraErrorContext:
@@ -2335,9 +2342,9 @@ class TestHandlerHttpRestDeterministicIntegration:
     """
 
     @pytest.fixture
-    def handler(self) -> HandlerHttpRest:
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
         """Create HandlerHttpRest fixture."""
-        return HandlerHttpRest()
+        return HandlerHttpRest(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_deterministic_correlation_id_in_full_flow(

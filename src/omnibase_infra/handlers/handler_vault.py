@@ -27,6 +27,7 @@ from uuid import uuid4
 
 import hvac
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -122,13 +123,18 @@ class HandlerVault(
         - MixinVaultToken: Token management and renewal
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerVault in uninitialized state.
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize HandlerVault with ONEX container for dependency injection.
 
-        Note: Circuit breaker is initialized during initialize() call when
-        configuration is available. The mixin's _init_circuit_breaker() method
-        is called there with the actual config values.
+        Args:
+            container: ONEX container for dependency injection.
+
+        Note:
+            Circuit breaker is initialized during initialize() call when
+            configuration is available. The mixin's _init_circuit_breaker() method
+            is called there with the actual config values.
         """
+        self._container = container
         self._client: hvac.Client | None = None
         self._config: ModelVaultHandlerConfig | None = None
         self._initialized: bool = False

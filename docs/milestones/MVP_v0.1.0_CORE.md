@@ -1204,9 +1204,9 @@ def postgres_container():
         yield postgres.get_connection_url()
 
 @pytest.fixture
-def db_handler(postgres_container):
+def db_handler(postgres_container, mock_container):
     """HandlerDb with real PostgreSQL."""
-    handler = HandlerDb()
+    handler = HandlerDb(mock_container)
     await handler.initialize({"connection_string": postgres_container})
     yield handler
     await handler.shutdown()
@@ -1224,9 +1224,9 @@ def inmemory_event_bus():
     await bus.shutdown()
 
 @pytest.fixture
-def mock_db_handler():
+def mock_db_handler(mock_container):
     """HandlerDb with mocked pool."""
-    handler = HandlerDb()
+    handler = HandlerDb(mock_container)
     handler._pool = AsyncMock()
     handler._pool.execute.return_value = [{"id": 1}]
     return handler

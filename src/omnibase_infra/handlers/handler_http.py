@@ -24,6 +24,7 @@ from uuid import UUID, uuid4
 
 import httpx
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -114,8 +115,13 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
         - Streaming body validation for chunked transfer encoding
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerHttpRest in uninitialized state."""
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize HandlerHttpRest with ONEX container for dependency injection.
+
+        Args:
+            container: ONEX container for dependency injection.
+        """
+        self._container = container
         self._client: httpx.AsyncClient | None = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._max_request_size: int = _DEFAULT_MAX_REQUEST_SIZE
