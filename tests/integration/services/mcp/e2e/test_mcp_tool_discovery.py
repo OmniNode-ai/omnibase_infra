@@ -54,6 +54,7 @@ class TestMCPToolDiscovery:
 
         # Parse and verify response structure
         data = response.json()
+        assert "error" not in data, f"Unexpected error in response: {data.get('error')}"
         assert "result" in data, f"Expected 'result' in response, got: {data}"
         result = data["result"]
         assert "tools" in result, f"Expected 'tools' in result, got: {result}"
@@ -91,11 +92,15 @@ class TestMCPToolDiscovery:
             headers={"Content-Type": "application/json"},
         )
 
-        # Initialize should succeed; 400 acceptable if protocol requires session setup first
-        # 307/404/405 indicate broken endpoint and should fail the test
-        assert response.status_code in (200, 400), (
-            f"Expected 200 or 400, got {response.status_code}"
+        # Initialize must succeed in dev mode
+        assert response.status_code == 200, (
+            f"Initialize must succeed in dev mode, got {response.status_code}"
         )
+
+        # Verify response structure
+        data = response.json()
+        assert "error" not in data, f"Unexpected error in response: {data.get('error')}"
+        assert "result" in data, f"Expected 'result' in response, got: {data}"
 
 
 class TestMCPToolDiscoveryWithInfra:
@@ -135,3 +140,12 @@ class TestMCPToolDiscoveryWithInfra:
             assert response.status_code == 200, (
                 f"Expected 200, got {response.status_code}"
             )
+
+            # Verify response structure
+            data = response.json()
+            assert "error" not in data, (
+                f"Unexpected error in response: {data.get('error')}"
+            )
+            assert "result" in data, f"Expected 'result' in response, got: {data}"
+            result = data["result"]
+            assert "tools" in result, f"Expected 'tools' in result, got: {result}"

@@ -55,9 +55,14 @@ class TestMCPInvokeNode:
         # Tool call should succeed
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
-        # Verify the result structure (mandatory)
+        # Verify successful result (not error) before validating structure
         data = response.json()
-        assert "result" in data, f"Expected 'result' in response, got: {data}"
+        assert "result" in data, (
+            f"Expected success result, got error: {data.get('error')}"
+        )
+        assert "error" not in data, f"Unexpected error in response: {data.get('error')}"
+
+        # Verify the result structure (mandatory)
         result = data["result"]
         # MCP tool result contains content array
         if "content" in result:
@@ -100,8 +105,16 @@ class TestMCPInvokeNode:
         # Request must succeed
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
+        # Verify successful result (not error)
+        data = response.json()
+        assert "result" in data, (
+            f"Expected success result, got error: {data.get('error')}"
+        )
+
         # Verify executor received the call (mandatory assertions)
-        assert len(call_history) > 0, "Expected call to be recorded in history"
+        assert len(call_history) == 1, (
+            f"Expected exactly 1 call, got {len(call_history)}"
+        )
         call = call_history[0]
         assert call["tool_name"] == "mock_compute"
         arguments = call["arguments"]
@@ -127,7 +140,7 @@ class TestMCPInvokeNode:
         call_history.clear()
 
         # Make multiple calls
-        await client.post(
+        response1 = await client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -141,7 +154,7 @@ class TestMCPInvokeNode:
             headers={"Content-Type": "application/json"},
         )
 
-        await client.post(
+        response2 = await client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -155,8 +168,24 @@ class TestMCPInvokeNode:
             headers={"Content-Type": "application/json"},
         )
 
+        # Both requests must succeed
+        assert response1.status_code == 200, (
+            f"First call failed: {response1.status_code}"
+        )
+        assert response2.status_code == 200, (
+            f"Second call failed: {response2.status_code}"
+        )
+
+        # Verify successful results (not errors)
+        data1 = response1.json()
+        data2 = response2.json()
+        assert "result" in data1, f"First call error: {data1.get('error')}"
+        assert "result" in data2, f"Second call error: {data2.get('error')}"
+
         # Both calls must be recorded (mandatory assertions)
-        assert len(call_history) >= 2, f"Expected 2+ calls, got {len(call_history)}"
+        assert len(call_history) == 2, (
+            f"Expected exactly 2 calls, got {len(call_history)}"
+        )
         args_0 = call_history[0]["arguments"]
         args_1 = call_history[1]["arguments"]
         assert isinstance(args_0, dict) and isinstance(args_1, dict)
@@ -202,4 +231,10 @@ class TestMCPInvokeWorkflow:
             # tools/list should succeed
             assert list_response.status_code == 200, (
                 f"Expected 200, got {list_response.status_code}"
+            )
+
+            # Verify successful result (not error)
+            list_data = list_response.json()
+            assert "result" in list_data, (
+                f"Expected success result, got error: {list_data.get('error')}"
             )

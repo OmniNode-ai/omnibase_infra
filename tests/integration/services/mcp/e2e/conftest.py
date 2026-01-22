@@ -84,9 +84,10 @@ def infra_availability() -> dict[str, bool]:
     consul_available = False
     if consul_host:
         try:
+            consul_port = int(os.getenv("CONSUL_PORT", "28500"))
             with socket.socket() as s:
                 s.settimeout(2.0)
-                consul_available = s.connect_ex((consul_host, 28500)) == 0
+                consul_available = s.connect_ex((consul_host, consul_port)) == 0
         except (OSError, TimeoutError):
             pass
 

@@ -33,6 +33,7 @@ class TestMCPRoutingErrors:
         """Calling nonexistent tool returns error response.
 
         The MCP protocol should return an error for unknown tools.
+        In dev-mode, this MUST return 200 with a JSON-RPC error response.
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
@@ -51,16 +52,18 @@ class TestMCPRoutingErrors:
             headers={"Content-Type": "application/json"},
         )
 
-        # Response should be valid (might be error or 404)
-        assert response.status_code in (200, 307, 400, 404)
+        # Dev-mode MUST return 200 with JSON-RPC error (not HTTP error codes)
+        assert response.status_code == 200, (
+            f"Expected 200 with JSON-RPC error, got HTTP {response.status_code}"
+        )
 
-        # If 200, check for error in JSON-RPC response
-        if response.status_code == 200:
-            data = response.json()
-            # For nonexistent tools, MCP MUST return an error
-            assert "error" in data, f"Expected error for nonexistent tool, got: {data}"
-            # JSON-RPC error response should have message or code
-            assert "message" in data["error"] or "code" in data["error"]
+        # MANDATORY: For nonexistent tools, MCP MUST return an error in the response
+        data = response.json()
+        assert "error" in data, f"Expected error for nonexistent tool, got: {data}"
+        # JSON-RPC error response MUST have message or code
+        assert "message" in data["error"] or "code" in data["error"], (
+            f"JSON-RPC error missing message/code: {data['error']}"
+        )
 
 
 class TestMCPBasicFunctionality:
@@ -92,8 +95,14 @@ class TestMCPBasicFunctionality:
             headers={"Content-Type": "application/json"},
         )
 
-        # Empty arguments should succeed
+        # Empty arguments should succeed with 200 status
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+
+        # Verify response contains result, not error (avoid false positive on error response)
+        data = response.json()
+        assert "result" in data, (
+            f"Expected success result, got error: {data.get('error')}"
+        )
 
     async def test_tool_call_records_to_history(
         self,
@@ -124,8 +133,15 @@ class TestMCPBasicFunctionality:
             headers={"Content-Type": "application/json"},
         )
 
-        # Tool call should succeed
+        # Tool call should succeed with 200 status
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+
+        # Verify response contains result, not error (before asserting history)
+        data = response.json()
+        assert "result" in data, (
+            f"Expected success result, got error: {data.get('error')}"
+        )
+
         # Call should be recorded in history
         assert len(call_history) > initial_count, (
             "Expected call to be recorded in history"
@@ -168,8 +184,14 @@ class TestMCPTimeoutHandling:
             headers={"Content-Type": "application/json"},
         )
 
-        # Normal execution should succeed
+        # Normal execution should succeed with 200 status
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+
+        # Verify response contains result, not error
+        data = response.json()
+        assert "result" in data, (
+            f"Expected success result, got error: {data.get('error')}"
+        )
 
 
 class TestMCPProtocolCompliance:
@@ -231,5 +253,20 @@ class TestMCPProtocolCompliance:
             headers={"Content-Type": "application/json"},
         )
 
-        # Initialize is a required MCP method, should succeed
+        # Initialize is a required MCP method, should succeed with 200 status
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+
+        # Verify response contains result with expected MCP initialize structure
+        data = response.json()
+        assert "result" in data, (
+            f"Expected success result, got error: {data.get('error')}"
+        )
+
+        # MCP initialize response MUST include protocolVersion and capabilities
+        result = data["result"]
+        assert "protocolVersion" in result, (
+            f"MCP initialize response missing protocolVersion: {result}"
+        )
+        assert "capabilities" in result, (
+            f"MCP initialize response missing capabilities: {result}"
+        )
