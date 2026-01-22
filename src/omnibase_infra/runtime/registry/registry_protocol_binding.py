@@ -65,7 +65,7 @@ from __future__ import annotations
 
 import threading
 import warnings
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
@@ -118,7 +118,7 @@ class RegistryError(RuntimeHostError):
         super().__init__(
             message=message,
             context=context,
-            **cast("dict[str, Any]", extra_context),
+            **extra_context,
         )
 
 

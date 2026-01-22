@@ -1023,7 +1023,7 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         # Get circuit breaker state if initialized
         cb_state: dict[str, JsonType] | None = None
         if self._circuit_breaker_initialized:
-            cb_state = self._get_circuit_breaker_state()  # type: ignore[assignment]
+            cb_state = self._get_circuit_breaker_state()
 
         return ModelDbDescribeResponse(
             handler_type=self.handler_type.value,

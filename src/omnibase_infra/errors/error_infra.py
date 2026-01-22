@@ -68,7 +68,6 @@ NOT_FOUND Classification Patterns:
     - Optional keys, cache lookups: Use discriminated union responses
 """
 
-from typing import Any, cast
 from uuid import uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
@@ -146,12 +145,11 @@ class RuntimeHostError(ModelOnexError):
             correlation_id = uuid4()
 
         # Initialize base error with default error code
-        # Cast to dict[str, Any] to satisfy mypy's kwargs type checking
         super().__init__(
             message=message,
             error_code=error_code or EnumCoreErrorCode.OPERATION_FAILED,
             correlation_id=correlation_id,
-            **cast("dict[str, Any]", structured_context),
+            **structured_context,
         )
 
 

@@ -105,27 +105,6 @@ logger = logging.getLogger(__name__)
 HANDLER_CONTRACT_FILENAME = "handler_contract.yaml"
 
 
-def _parse_semver(version_str: str) -> ModelSemVer:
-    """Parse a version string into a ModelSemVer object.
-
-    Args:
-        version_str: Semantic version string (e.g., "1.0.0", "1.2.3-beta.1").
-
-    Returns:
-        ModelSemVer object with major, minor, and patch components.
-
-    Note:
-        This is a simple parser that handles the basic "major.minor.patch" format.
-        Prerelease and build metadata are not currently parsed.
-    """
-    parts = version_str.split("-")[0].split("+")[0].split(".")
-    return ModelSemVer(
-        major=int(parts[0]) if len(parts) > 0 else 0,
-        minor=int(parts[1]) if len(parts) > 1 else 0,
-        patch=int(parts[2]) if len(parts) > 2 else 0,
-    )
-
-
 # Maximum contract file size (10MB) to prevent memory exhaustion
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024
 
@@ -402,7 +381,9 @@ class HandlerContractSource(ProtocolContractSource):
                     if not self._graceful_mode:
                         raise
 
-                    # Only handle file size limit errors (HANDLER_SOURCE_005) gracefully
+                    # Handle specific error codes gracefully:
+                    # - HANDLER_SOURCE_005: File size limit exceeded
+                    # - HANDLER_SOURCE_007: Invalid version string
                     # Other ModelOnexError types should be re-raised as they may indicate
                     # more serious issues (e.g., configuration errors, programming errors)
                     # Defensive check: error_code should always exist on ModelOnexError,
@@ -427,6 +408,26 @@ class HandlerContractSource(ProtocolContractSource):
                                 "contract_file": str(contract_file),
                                 "error_type": "size_limit_error",
                                 "error_code": error_code,
+                                "graceful_mode": self._graceful_mode,
+                                "paths_scanned": len(self._contract_paths),
+                            },
+                        )
+                        validation_errors.append(error)
+                    elif error_code == "HANDLER_SOURCE_007":
+                        # Invalid version string - extract version from error message
+                        error = self._create_version_parse_error(
+                            contract_file,
+                            str(e),
+                        )
+                        logger.warning(
+                            "Contract file %s has invalid version string, "
+                            "continuing in graceful mode",
+                            self._sanitize_path_for_logging(contract_file),
+                            extra={
+                                "contract_file": str(contract_file),
+                                "error_type": "version_parse_error",
+                                "error_code": error_code,
+                                "error_message": str(e),
                                 "graceful_mode": self._graceful_mode,
                                 "paths_scanned": len(self._contract_paths),
                             },
@@ -500,7 +501,8 @@ class HandlerContractSource(ProtocolContractSource):
             ModelHandlerDescriptor created from the contract.
 
         Raises:
-            ModelOnexError: If contract file exceeds MAX_CONTRACT_SIZE (10MB).
+            ModelOnexError: If contract file exceeds MAX_CONTRACT_SIZE (10MB),
+                or if the version string in the contract is invalid.
             yaml.YAMLError: If YAML parsing fails.
             ValidationError: If contract validation fails.
         """
@@ -549,11 +551,22 @@ class HandlerContractSource(ProtocolContractSource):
             raw_data.get("handler_class") if isinstance(raw_data, dict) else None
         )
 
+        # Parse version with proper error handling for graceful mode
+        # Uses ModelSemVer.parse() directly - the canonical semver parsing utility
+        try:
+            version = ModelSemVer.parse(contract.version)
+        except (ValueError, ModelOnexError) as e:
+            raise ModelOnexError(
+                f"Invalid version string '{contract.version}' in contract at "
+                f"{contract_path}: {e}",
+                error_code="HANDLER_SOURCE_007",
+            ) from e
+
         # Transform to descriptor
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
             name=contract.name,
-            version=_parse_semver(contract.version),
+            version=version,
             handler_kind=contract.descriptor.handler_kind,
             input_model=contract.input_model,
             output_model=contract.output_model,
@@ -691,6 +704,41 @@ class HandlerContractSource(ProtocolContractSource):
             source_type=EnumHandlerSourceType.CONTRACT,
             message=f"Failed to read contract file: {error_message}",
             remediation_hint="Check file permissions and ensure the file exists",
+            file_path=str(contract_path),
+        )
+
+    def _create_version_parse_error(
+        self,
+        contract_path: Path,
+        error_message: str,
+    ) -> ModelHandlerValidationError:
+        """Create a validation error for version string parse failures.
+
+        Args:
+            contract_path: Path to the contract file with invalid version.
+            error_message: The error message describing the version parse failure.
+
+        Returns:
+            ModelHandlerValidationError with version parse error details.
+        """
+        handler_identity = ModelHandlerIdentifier.from_handler_id(
+            f"unknown@{contract_path.name}"
+        )
+
+        return ModelHandlerValidationError(
+            error_type=EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR,
+            rule_id="CONTRACT-005",
+            handler_identity=handler_identity,
+            source_type=EnumHandlerSourceType.CONTRACT,
+            message=(
+                f"Invalid version string in contract "
+                f"{self._sanitize_path_for_logging(contract_path)}: {error_message}"
+            ),
+            remediation_hint=(
+                "Ensure the 'version' field uses semantic versioning format "
+                "(e.g., '1.0.0', '2.1.3-beta.1'). "
+                "Version components must be non-negative integers."
+            ),
             file_path=str(contract_path),
         )
 

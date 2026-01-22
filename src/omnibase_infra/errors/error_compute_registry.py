@@ -5,8 +5,6 @@
 This module defines the ComputeRegistryError for compute registry operations.
 """
 
-from typing import Any, cast
-
 from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -87,7 +85,7 @@ class ComputeRegistryError(RuntimeHostError):
         super().__init__(
             message=message,
             context=context,
-            **cast("dict[str, Any]", extra_context),
+            **extra_context,
         )
 
 

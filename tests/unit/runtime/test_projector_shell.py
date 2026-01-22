@@ -2642,6 +2642,129 @@ class TestProjectorShellPartialUpdate:
         assert "timeout" in call_kwargs.kwargs
         assert call_kwargs.kwargs["timeout"] == 5.0
 
+    @pytest.mark.asyncio
+    async def test_partial_update_rejects_composite_primary_key(
+        self,
+        sample_projector_behavior: ModelProjectorBehavior,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update raises ProtocolConfigurationError for composite PK.
+
+        Given: Contract with composite primary key ["entity_id", "domain"]
+        When: partial_update() called
+        Then: Raises ProtocolConfigurationError with actionable message
+
+        This guard prevents accidental multi-row updates when only part of
+        the composite key would match.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        # Create columns that include the composite PK columns
+        composite_pk_columns = [
+            ModelProjectorColumn(
+                name="entity_id",
+                type="UUID",
+                source="payload.entity_id",
+            ),
+            ModelProjectorColumn(
+                name="domain",
+                type="TEXT",
+                source="payload.domain",
+            ),
+            ModelProjectorColumn(
+                name="status",
+                type="TEXT",
+                source="payload.status",
+            ),
+        ]
+
+        # Create schema with composite primary key
+        composite_pk_schema = ModelProjectorSchema(
+            table="entity_states",
+            primary_key=["entity_id", "domain"],  # Composite PK
+            columns=composite_pk_columns,
+        )
+
+        composite_pk_contract = ModelProjectorContract(
+            projector_kind="materialized_view",
+            projector_id="entity-state-projector-v1",
+            name="Entity State Projector",
+            version="1.0.0",
+            aggregate_type="EntityState",
+            consumed_events=["entity.updated.v1"],
+            projection_schema=composite_pk_schema,
+            behavior=sample_projector_behavior,
+        )
+
+        projector = ProjectorShell(contract=composite_pk_contract, pool=mock_pool)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await projector.partial_update(
+                aggregate_id=uuid4(),
+                updates={"status": "confirmed"},
+                correlation_id=uuid4(),
+            )
+
+        # Verify error message is actionable
+        error_message = str(exc_info.value)
+        assert "composite primary key" in error_message.lower()
+        assert "entity_states" in error_message  # Table name for context
+        assert "_partial_upsert" in error_message  # Alternative suggestion
+        # Verify no database call was made
+        mock_pool.acquire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_partial_update_accepts_single_element_list_primary_key(
+        self,
+        sample_projector_columns: list[ModelProjectorColumn],
+        sample_projector_behavior: ModelProjectorBehavior,
+        mock_pool: AsyncMock,
+    ) -> None:
+        """partial_update accepts primary_key as single-element list.
+
+        Given: Contract with primary_key=["id"] (list with one element)
+        When: partial_update() called
+        Then: Works normally (not treated as composite)
+
+        This ensures backwards compatibility with schemas that define
+        primary_key as a list with a single element.
+        """
+        from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+        # Create schema with single-element list primary key
+        single_element_pk_schema = ModelProjectorSchema(
+            table="order_projections",
+            primary_key=["id"],  # Single-element list (not composite)
+            columns=sample_projector_columns,
+        )
+
+        single_pk_contract = ModelProjectorContract(
+            projector_kind="materialized_view",
+            projector_id="order-projector-v1",
+            name="Order Projector",
+            version="1.0.0",
+            aggregate_type="Order",
+            consumed_events=["order.created.v1"],
+            projection_schema=single_element_pk_schema,
+            behavior=sample_projector_behavior,
+        )
+
+        mock_conn = mock_pool._mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        projector = ProjectorShell(contract=single_pk_contract, pool=mock_pool)
+
+        # Should succeed without raising
+        result = await projector.partial_update(
+            aggregate_id=uuid4(),
+            updates={"status": "confirmed"},
+            correlation_id=uuid4(),
+        )
+
+        assert result is True
+        mock_pool.acquire.assert_called()
+
 
 __all__ = [
     "TestProjectorShellContractAccess",

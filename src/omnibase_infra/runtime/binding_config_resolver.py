@@ -245,7 +245,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         ...     instance=config,
         ...     scope=EnumInjectionScope.GLOBAL,
         ... )
-        >>> resolver = BindingConfigResolver(container)
+        >>> resolver = await BindingConfigResolver.create(container)
         >>> binding = resolver.resolve(
         ...     handler_type="db",
         ...     inline_config={"pool_size": 10}

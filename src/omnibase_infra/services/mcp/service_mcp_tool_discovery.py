@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -98,11 +98,35 @@ class ServiceMCPToolDiscovery:
 
         if container is not None:
             # Resolve Consul configuration from container
-            # Configuration() returns the underlying dict
+            # Configuration() returns the underlying dict or Mapping
             config_data = container.config()
-            consul_config = (
-                config_data.get("consul", {}) if isinstance(config_data, dict) else {}
-            )
+
+            # Handle both dict and Mapping types (e.g., MappingProxyType, ChainMap)
+            if isinstance(config_data, Mapping):
+                consul_config_raw = config_data.get("consul", {})
+                # consul_config may also be a Mapping, convert to dict for consistency
+                if isinstance(consul_config_raw, Mapping):
+                    consul_config: dict[str, object] = dict(consul_config_raw)
+                else:
+                    logger.warning(
+                        "Unexpected consul config type, expected Mapping",
+                        extra={
+                            "config_type": type(consul_config_raw).__name__,
+                            "config_value": repr(consul_config_raw)[:100],
+                        },
+                    )
+                    consul_config = {}
+            else:
+                logger.warning(
+                    "Unexpected config_data type from container.config(), "
+                    "Consul settings may be dropped",
+                    extra={
+                        "config_type": type(config_data).__name__,
+                        "expected_types": "dict or Mapping",
+                    },
+                )
+                consul_config = {}
+
             agent_url_raw = consul_config.get("agent_url", "http://localhost:8500")
             agent_url = str(agent_url_raw) if agent_url_raw else "http://localhost:8500"
 

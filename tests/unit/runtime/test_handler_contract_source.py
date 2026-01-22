@@ -2235,3 +2235,217 @@ output_model: "test.models.Output"
         assert "MAX_CONTRACT_SIZE" in handler_contract_source.__all__, (
             "MAX_CONTRACT_SIZE should be in __all__ for public export"
         )
+
+
+class TestHandlerContractSourceVersionValidation:
+    """Tests for version string validation in HandlerContractSource.
+
+    These tests verify that invalid version strings in contracts are handled
+    properly in both strict mode (raises) and graceful mode (collects errors).
+
+    Version validation occurs at two levels:
+    1. Pydantic validation in ModelHandlerContract (catches most invalid formats)
+    2. ModelSemVer.parse() validation (catches edge cases during semver parsing)
+
+    Related:
+        - PR #183: Handle invalid version strings without bypassing graceful mode
+    """
+
+    @pytest.mark.asyncio
+    async def test_invalid_version_raises_in_strict_mode(self, tmp_path: Path) -> None:
+        """Test that contracts with invalid versions raise ModelOnexError in strict mode.
+
+        Note: Invalid versions are caught by Pydantic validation first
+        (HANDLER_SOURCE_004), not by ModelSemVer.parse() (HANDLER_SOURCE_007).
+        This is correct behavior - Pydantic validates the contract structure
+        before we attempt to parse the version.
+        """
+        from omnibase_core.models.errors.model_onex_error import ModelOnexError
+        from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
+
+        # Create contract with invalid version (non-numeric)
+        contract_dir = tmp_path / "invalid_version"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "handler_contract.yaml"
+        contract_file.write_text("""
+handler_id: "test.handler.invalid_version"
+name: "Invalid Version Handler"
+version: "not-a-version"
+descriptor:
+  handler_kind: "compute"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+""")
+
+        source = HandlerContractSource(
+            contract_paths=[contract_dir],
+            graceful_mode=False,
+        )
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            await source.discover_handlers()
+
+        # Invalid versions are caught by Pydantic validation (CONTRACT_VALIDATION_ERROR)
+        # Error code depends on whether Pydantic or ModelSemVer.parse() catches it
+        assert exc_info.value.error_code in ("HANDLER_SOURCE_004", "HANDLER_SOURCE_007")
+
+    @pytest.mark.asyncio
+    async def test_invalid_version_handled_gracefully(self, tmp_path: Path) -> None:
+        """Test that contracts with invalid versions are handled in graceful mode.
+
+        Note: The error may come from Pydantic validation (CONTRACT-002)
+        or from ModelSemVer.parse() validation (CONTRACT-005), depending on which
+        layer catches the invalid version first.
+        """
+        from omnibase_infra.enums import EnumHandlerErrorType
+        from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
+
+        # Create contract with invalid version (non-numeric)
+        contract_dir = tmp_path / "invalid_version"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "handler_contract.yaml"
+        contract_file.write_text("""
+handler_id: "test.handler.invalid_version"
+name: "Invalid Version Handler"
+version: "abc.def.ghi"
+descriptor:
+  handler_kind: "compute"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+""")
+
+        source = HandlerContractSource(
+            contract_paths=[contract_dir],
+            graceful_mode=True,
+        )
+
+        result = await source.discover_handlers()
+
+        # Should have no valid descriptors
+        assert len(result.descriptors) == 0
+
+        # Should have one validation error (from either Pydantic or ModelSemVer.parse())
+        assert len(result.validation_errors) == 1
+        error = result.validation_errors[0]
+        assert error.error_type == EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR
+        # Error may be caught by Pydantic (CONTRACT-002) or ModelSemVer.parse() (CONTRACT-005)
+        assert error.rule_id in ("CONTRACT-002", "CONTRACT-005")
+
+    @pytest.mark.asyncio
+    async def test_empty_version_handled_gracefully(self, tmp_path: Path) -> None:
+        """Test that contracts with empty versions are handled in graceful mode."""
+        from omnibase_infra.enums import EnumHandlerErrorType
+        from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
+
+        # Create contract with empty version
+        contract_dir = tmp_path / "empty_version"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "handler_contract.yaml"
+        contract_file.write_text("""
+handler_id: "test.handler.empty_version"
+name: "Empty Version Handler"
+version: ""
+descriptor:
+  handler_kind: "compute"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+""")
+
+        source = HandlerContractSource(
+            contract_paths=[contract_dir],
+            graceful_mode=True,
+        )
+
+        result = await source.discover_handlers()
+
+        # Should have no valid descriptors
+        assert len(result.descriptors) == 0
+
+        # Should have one validation error
+        assert len(result.validation_errors) == 1
+        error = result.validation_errors[0]
+        assert error.error_type == EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR
+        assert "version" in error.message.lower() or "empty" in error.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_mixed_valid_and_invalid_versions_graceful(
+        self, tmp_path: Path
+    ) -> None:
+        """Test graceful mode handles mix of valid and invalid version contracts."""
+        from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
+
+        # Create valid contract
+        valid_dir = tmp_path / "valid"
+        valid_dir.mkdir()
+        valid_file = valid_dir / "handler_contract.yaml"
+        valid_file.write_text("""
+handler_id: "test.handler.valid"
+name: "Valid Handler"
+version: "1.0.0"
+descriptor:
+  handler_kind: "compute"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+""")
+
+        # Create invalid contract
+        invalid_dir = tmp_path / "invalid"
+        invalid_dir.mkdir()
+        invalid_file = invalid_dir / "handler_contract.yaml"
+        invalid_file.write_text("""
+handler_id: "test.handler.invalid"
+name: "Invalid Handler"
+version: "not.valid.version"
+descriptor:
+  handler_kind: "compute"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+""")
+
+        source = HandlerContractSource(
+            contract_paths=[valid_dir, invalid_dir],
+            graceful_mode=True,
+        )
+
+        result = await source.discover_handlers()
+
+        # Should have one valid descriptor
+        assert len(result.descriptors) == 1
+        assert result.descriptors[0].handler_id == "test.handler.valid"
+
+        # Should have one validation error
+        assert len(result.validation_errors) == 1
+        assert "test.handler.invalid" in str(
+            result.validation_errors[0].file_path
+        ) or "invalid" in str(result.validation_errors[0].file_path)
+
+    @pytest.mark.asyncio
+    async def test_version_with_prerelease_is_valid(self, tmp_path: Path) -> None:
+        """Test that version strings with prerelease metadata are valid."""
+        from omnibase_infra.runtime.handler_contract_source import HandlerContractSource
+
+        contract_dir = tmp_path / "prerelease"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "handler_contract.yaml"
+        contract_file.write_text("""
+handler_id: "test.handler.prerelease"
+name: "Prerelease Handler"
+version: "1.0.0-beta.1"
+descriptor:
+  handler_kind: "compute"
+input_model: "test.models.Input"
+output_model: "test.models.Output"
+""")
+
+        source = HandlerContractSource(
+            contract_paths=[contract_dir],
+            graceful_mode=False,
+        )
+
+        result = await source.discover_handlers()
+
+        # Should successfully parse
+        assert len(result.descriptors) == 1
+        assert result.descriptors[0].version.major == 1
+        assert result.descriptors[0].version.minor == 0
+        assert result.descriptors[0].version.patch == 0

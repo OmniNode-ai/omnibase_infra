@@ -81,7 +81,7 @@ class ProtocolPartialRetryRequest(Protocol):
 
     node_id: UUID
     node_type: EnumNodeKind
-    node_version: str
+    node_version: ModelSemVer
     target_backend: EnumBackendType
     idempotency_key: str | None
     service_name: str | None
@@ -89,23 +89,6 @@ class ProtocolPartialRetryRequest(Protocol):
     health_check_config: dict[str, str] | None
     endpoints: dict[str, str]
     metadata: dict[str, str]
-
-
-def _parse_semver(version_str: str) -> ModelSemVer:
-    """Parse a version string into a ModelSemVer object.
-
-    Args:
-        version_str: Semantic version string (e.g., "1.0.0", "1.2.3-beta.1").
-
-    Returns:
-        ModelSemVer object with major, minor, and patch components.
-    """
-    parts = version_str.split("-")[0].split("+")[0].split(".")
-    return ModelSemVer(
-        major=int(parts[0]) if len(parts) > 0 else 0,
-        minor=int(parts[1]) if len(parts) > 1 else 0,
-        patch=int(parts[2]) if len(parts) > 2 else 0,
-    )
 
 
 class HandlerPartialRetry:
@@ -349,7 +332,7 @@ class HandlerPartialRetry:
             result = await self._postgres_adapter.upsert(
                 node_id=request.node_id,
                 node_type=request.node_type,
-                node_version=_parse_semver(request.node_version),
+                node_version=request.node_version,
                 endpoints=request.endpoints,
                 metadata=request.metadata,
             )

@@ -91,7 +91,11 @@ class RegistryInfraRegistrationStorage:
         sets up the infrastructure but does not bind a specific handler.
 
         Args:
-            container: ONEX dependency injection container.
+            _container: ONEX dependency injection container. Currently unused
+                because ServiceRegistry v1.0 doesn't support dict-style access
+                for multi-handler routing. The parameter is retained for API
+                consistency with other registry methods and future migration
+                when ServiceRegistry supports the required access patterns.
 
         Example:
             >>> from omnibase_core.models.container import ModelONEXContainer
@@ -121,7 +125,11 @@ class RegistryInfraRegistrationStorage:
         The handler must implement ProtocolRegistrationPersistence.
 
         Args:
-            container: ONEX dependency injection container.
+            _container: ONEX dependency injection container. Currently unused
+                because ServiceRegistry v1.0 doesn't support dict-style access
+                for multi-handler routing. The parameter is retained for API
+                consistency and future migration when ServiceRegistry supports
+                the required access patterns.
             handler: Handler implementation to register.
 
         Raises:
@@ -178,7 +186,11 @@ class RegistryInfraRegistrationStorage:
         """Retrieve a registered storage handler from the container.
 
         Args:
-            container: ONEX dependency injection container.
+            _container: ONEX dependency injection container. Currently unused
+                because ServiceRegistry v1.0 doesn't support dict-style access
+                for multi-handler routing. The parameter is retained for API
+                consistency and future migration when ServiceRegistry supports
+                the required access patterns.
             handler_type: Specific handler type to retrieve. If None, returns default.
 
         Returns:
