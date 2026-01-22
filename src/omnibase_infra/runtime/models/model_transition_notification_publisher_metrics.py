@@ -111,9 +111,18 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         strict=True,
     )
 
-    # Health check threshold - matches default circuit breaker failure threshold.
-    # When consecutive_failures reaches this value, the circuit breaker opens,
-    # so is_healthy() returns False for both the threshold check and circuit state.
+    # Health check threshold - intentionally matches default circuit breaker threshold.
+    #
+    # Design Decision: This value is hardcoded rather than configurable because:
+    # 1. The health threshold MUST match the circuit breaker threshold for consistent
+    #    behavior - when consecutive_failures reaches this value, the circuit opens
+    # 2. Making this configurable independently would break the correlation between
+    #    is_healthy() returning False and the circuit breaker opening
+    # 3. If you need a different threshold, configure both circuit_breaker_threshold
+    #    in TransitionNotificationPublisher and accept that health checks will match
+    #
+    # The is_healthy() method checks both circuit_breaker_open AND consecutive_failures
+    # to provide early warning before the circuit actually opens (at N-1 failures).
     DEFAULT_HEALTH_FAILURE_THRESHOLD: ClassVar[int] = 5
 
     # Publisher identification

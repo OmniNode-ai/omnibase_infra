@@ -40,7 +40,13 @@ CREATE TABLE IF NOT EXISTS transition_notification_outbox (
 
     -- Timestamps
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    processed_at TIMESTAMPTZ,  -- NULL = pending, non-NULL = processed
+    -- processed_at encodes both "pending" and "processed" states in a single column:
+    --   NULL = pending (not yet processed, eligible for processing)
+    --   non-NULL = processed (successfully published, timestamp of completion)
+    -- Note: No separate "processed_implies_no_pending" constraint is needed because
+    -- the single-column semantic makes the states mutually exclusive by design -
+    -- a row cannot be both pending (NULL) and processed (non-NULL) simultaneously.
+    processed_at TIMESTAMPTZ,
 
     -- Retry Tracking
     retry_count INT NOT NULL DEFAULT 0,

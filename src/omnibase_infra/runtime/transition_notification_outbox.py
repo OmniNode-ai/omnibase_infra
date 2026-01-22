@@ -5,7 +5,24 @@
 This module implements the outbox pattern for state transition notifications.
 The outbox stores notifications in the same database transaction as projections,
 then processes them asynchronously via a background processor to ensure
-at-least-once delivery semantics. Consumers must handle idempotency.
+at-least-once delivery semantics.
+
+At-Least-Once Delivery Semantics:
+    This implementation guarantees that every notification will be delivered
+    **at least once**, but **duplicates are possible** during failure scenarios:
+
+    - If the publisher succeeds but the database update fails, the notification
+      will be re-published on the next processing cycle.
+    - If the processor crashes after publishing but before marking as processed,
+      the notification will be re-published when the processor restarts.
+    - Network partitions or timeouts can cause similar duplicate delivery.
+
+    **CRITICAL**: Consumers MUST implement idempotent message handling. This
+    typically means:
+
+    - Tracking processed notification IDs (using ``notification_id`` field)
+    - Using database upserts with conflict detection
+    - Designing state transitions to be idempotent (same transition twice = no-op)
 
 Database Schema (must be created before use):
     ```sql
@@ -86,7 +103,15 @@ class TransitionNotificationOutbox:
 
     Stores notifications in the same database transaction as projections,
     ensuring at-least-once semantics. A background processor publishes
-    pending notifications asynchronously. Consumers must handle idempotency.
+    pending notifications asynchronously.
+
+    Warning:
+        **Duplicate Delivery**: This implementation provides at-least-once
+        delivery, meaning **duplicates are possible** during failures. If the
+        publisher succeeds but the subsequent database update fails (marking
+        the notification as processed), the notification will be re-published
+        on the next processing cycle. Consumers MUST implement idempotent
+        message handling to safely handle duplicate notifications.
 
     The outbox pattern solves the dual-write problem: when you need to
     update a database AND publish an event, either operation could fail

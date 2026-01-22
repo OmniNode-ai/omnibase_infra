@@ -461,7 +461,12 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         correlation_id = notifications[0].correlation_id
         start_time = time.monotonic()
 
-        # Check circuit breaker before starting batch
+        # Batch-level circuit breaker check for fail-fast behavior.
+        # NOTE: This check is NOT redundant with the per-notification check in publish().
+        # - This check: Fail-fast before starting any work if circuit is already open
+        # - Per-notification checks in publish(): Handle circuit opening MID-batch due to
+        #   accumulated failures during batch processing (expected partial-success behavior)
+        # See docstring "Circuit Breaker Behavior" section for full explanation.
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("publish_batch", correlation_id)
 

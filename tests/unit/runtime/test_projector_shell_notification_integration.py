@@ -46,7 +46,14 @@ from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 
 class MockStateChangeEvent(BaseModel):
-    """Mock event payload for testing state transitions."""
+    """Mock event payload for testing state transitions.
+
+    Note:
+        This class intentionally does NOT follow the `Model*` naming convention.
+        It is a test fixture class, not a production model. The `Mock*` prefix
+        clearly communicates this is test infrastructure rather than application
+        code, following the common pattern for mock/stub/fake objects in tests.
+    """
 
     entity_id: UUID
     current_state: str
