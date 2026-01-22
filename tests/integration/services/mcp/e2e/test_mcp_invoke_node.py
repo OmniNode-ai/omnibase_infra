@@ -207,8 +207,16 @@ class TestMCPInvokeWorkflow:
         """MCP invokes real workflow end-to-end.
 
         This test requires full infrastructure (Consul + PostgreSQL)
-        and invokes real ONEX workflows.
+        and invokes real ONEX workflows through the registry.
+
+        Test flow:
+        1. List available tools from Consul-discovered registry
+        2. Select a discovered tool
+        3. Invoke the tool via tools/call
+        4. Verify the real executor returns structured response
         """
+        import json as json_module
+
         app = mcp_app_full_infra["app"]
         path = str(mcp_app_full_infra["path"])
 
@@ -217,7 +225,7 @@ class TestMCPInvokeWorkflow:
             base_url="http://testserver",
             follow_redirects=True,
         ) as client:
-            # First, list available tools
+            # Step 1: List available tools from Consul-discovered registry
             list_response = await client.post(
                 f"{path}/",
                 json={
@@ -228,13 +236,101 @@ class TestMCPInvokeWorkflow:
                 headers={"Content-Type": "application/json"},
             )
 
-            # tools/list should succeed
+            # tools/list must succeed
             assert list_response.status_code == 200, (
                 f"Expected 200, got {list_response.status_code}"
             )
 
-            # Verify successful result (not error)
             list_data = list_response.json()
             assert "result" in list_data, (
                 f"Expected success result, got error: {list_data.get('error')}"
+            )
+
+            tools = list_data["result"].get("tools", [])
+
+            # Step 2: Skip if no tools discovered (Consul may have no services)
+            if not tools:
+                pytest.skip(
+                    "No tools discovered from Consul. "
+                    "Ensure ONEX services are registered in Consul."
+                )
+
+            # Step 3: Select first discovered tool and invoke it
+            tool_name = str(tools[0]["name"])
+
+            invoke_response = await client.post(
+                f"{path}/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": tool_name,
+                        "arguments": {"test_input": "workflow_test"},
+                    },
+                    "id": 2,
+                },
+                headers={"Content-Type": "application/json"},
+            )
+
+            # tools/call must succeed
+            assert invoke_response.status_code == 200, (
+                f"Expected 200, got {invoke_response.status_code}"
+            )
+
+            invoke_data = invoke_response.json()
+            assert "result" in invoke_data, (
+                f"Expected success result, got error: {invoke_data.get('error')}"
+            )
+
+            # Step 4: Parse MCP content and verify executor response structure
+            result = invoke_data["result"]
+            assert "content" in result, "MCP result must contain content array"
+            assert len(result["content"]) >= 1, "Content array must not be empty"
+
+            # MCP wraps executor result as JSON string in content[0].text
+            content_item = result["content"][0]
+            assert content_item.get("type") == "text", (
+                f"Expected text content, got {content_item.get('type')}"
+            )
+
+            # Parse the JSON-stringified executor response
+            executor_result = json_module.loads(content_item["text"])
+
+            # Verify executor response structure (from real_executor in conftest)
+            assert "success" in executor_result, (
+                f"Executor result missing 'success': {executor_result}"
+            )
+            assert "tool_name" in executor_result, (
+                f"Executor result missing 'tool_name': {executor_result}"
+            )
+            assert executor_result["tool_name"] == tool_name, (
+                f"Tool name mismatch: expected {tool_name}, "
+                f"got {executor_result['tool_name']}"
+            )
+
+            # Verify source indicates where execution came from
+            assert "source" in executor_result, (
+                f"Executor result missing 'source': {executor_result}"
+            )
+            # Source is either "onex_dispatch" (real endpoint) or "integration_test"
+            assert executor_result["source"] in ("onex_dispatch", "integration_test"), (
+                f"Unexpected source: {executor_result['source']}"
+            )
+
+            # If integration_test mode, verify validation structure
+            if executor_result["source"] == "integration_test":
+                assert "validation" in executor_result, (
+                    "Integration test mode must include validation details"
+                )
+                validation = executor_result["validation"]
+                assert validation.get("tool_exists") is True, (
+                    "Tool must be validated as existing"
+                )
+                # Verify additional validation fields exist
+                assert "tool_version" in validation
+                assert "orchestrator_node_id" in validation
+
+            # Verify correlation_id is present (required for tracing)
+            assert "correlation_id" in executor_result, (
+                "Executor result must include correlation_id for tracing"
             )

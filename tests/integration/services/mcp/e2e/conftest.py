@@ -17,14 +17,17 @@ Related Ticket: OMN-1408
 
 from __future__ import annotations
 
+import json as json_module
 import os
 import socket
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import TYPE_CHECKING, TypedDict
 
 import httpx
 import pytest
 from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers.mcp import TransportMCPStreamableHttp
@@ -131,68 +134,39 @@ class MockToolDefinition:
 
 
 # ============================================================================
-# MCP APP FIXTURE (ASGI-based testing without real HTTP server)
+# JSON-RPC HANDLER FACTORY
 # ============================================================================
 
 
-@pytest.fixture
-async def mcp_app_dev_mode() -> MCPDevModeFixture:
-    """Create mock MCP app for dev mode testing.
+"""Type alias for sync or async executor callables."""
+SyncExecutor = Callable[[str, dict[str, object]], dict[str, object]]
+AsyncExecutor = Callable[[str, dict[str, object]], Awaitable[dict[str, object]]]
 
-    This fixture creates a simple mock Starlette app that handles MCP
-    JSON-RPC requests directly without the complex MCP SDK lifecycle.
 
-    The mock approach is used because the MCP SDK's streamable_http_app()
-    requires proper task group initialization via run() before handling
-    requests, which is incompatible with direct ASGI testing.
+def create_json_rpc_handler(
+    available_tools: list[dict[str, object]],
+    executor: SyncExecutor | AsyncExecutor,
+    server_name: str,
+    call_history: list[dict[str, object]] | None = None,
+) -> Callable[[Request], Awaitable[JSONResponse]]:
+    """Factory for JSON-RPC endpoint handlers.
 
-    Yields:
-        MCPDevModeFixture containing:
-            - app: The Starlette ASGI application
-            - call_history: List of recorded tool calls
-            - path: The MCP endpoint path
+    Creates an async handler function that implements the MCP JSON-RPC protocol
+    for testing purposes. This avoids the MCP SDK lifecycle complexity while
+    providing deterministic behavior for E2E tests.
+
+    Args:
+        available_tools: List of tool definitions with name, description, inputSchema.
+        executor: Callback to execute tool calls, receives (tool_name, arguments).
+            Can be either sync or async - async executors will be awaited.
+        server_name: Server name for MCP initialize response.
+        call_history: Optional list to track tool calls for testing.
+
+    Returns:
+        Async handler function compatible with Starlette Route.
     """
-    import json as json_module
-    from uuid import uuid4
-
-    from starlette.requests import Request
-    from starlette.responses import JSONResponse
-    from starlette.routing import Route
-
-    # Track tool calls for assertions
-    call_history: list[dict[str, object]] = []
-
-    # Define available tools
-    available_tools = [
-        {
-            "name": "mock_compute",
-            "description": "Mock compute tool - echoes input for deterministic testing",
-            "inputSchema": {"type": "object", "properties": {}},
-        }
-    ]
-
-    def mock_executor(
-        tool_name: str, arguments: dict[str, object]
-    ) -> dict[str, object]:
-        """Mock executor that returns deterministic results."""
-        correlation_id = str(uuid4())
-        call_history.append(
-            {
-                "tool_name": tool_name,
-                "arguments": arguments,
-                "correlation_id": correlation_id,
-            }
-        )
-
-        return {
-            "success": True,
-            "result": {
-                "status": "success",
-                "echo": arguments.get("input_value"),
-                "tool_name": tool_name,
-                "correlation_id": correlation_id,
-            },
-        }
+    import asyncio
+    import inspect
 
     async def mcp_endpoint(request: Request) -> JSONResponse:
         """Handle MCP JSON-RPC requests."""
@@ -234,7 +208,7 @@ async def mcp_app_dev_mode() -> MCPDevModeFixture:
                     "result": {
                         "protocolVersion": "2024-11-05",
                         "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "mock-mcp-server", "version": "1.0.0"},
+                        "serverInfo": {"name": server_name, "version": "1.0.0"},
                     },
                     "id": request_id,
                 }
@@ -254,7 +228,7 @@ async def mcp_app_dev_mode() -> MCPDevModeFixture:
             arguments = params.get("arguments", {})
 
             # Check if tool exists
-            tool_names = {t["name"] for t in available_tools}
+            tool_names = {str(t["name"]) for t in available_tools}
             if tool_name not in tool_names:
                 return JSONResponse(
                     {
@@ -267,8 +241,27 @@ async def mcp_app_dev_mode() -> MCPDevModeFixture:
                     }
                 )
 
-            # Execute mock tool
-            result = mock_executor(tool_name, arguments)
+            # Execute tool via callback (supports both sync and async executors)
+            result = executor(tool_name, arguments)
+            if asyncio.iscoroutine(result) or inspect.isawaitable(result):
+                result = await result
+
+            # Track call if history provided
+            if call_history is not None:
+                # Extract correlation_id from result if available (nested in result.result)
+                correlation_id = None
+                if isinstance(result, dict):
+                    inner_result = result.get("result")
+                    if isinstance(inner_result, dict):
+                        correlation_id = inner_result.get("correlation_id")
+
+                call_history.append(
+                    {
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                        "correlation_id": correlation_id,
+                    }
+                )
 
             # Return MCP tool result format
             return JSONResponse(
@@ -295,6 +288,70 @@ async def mcp_app_dev_mode() -> MCPDevModeFixture:
                 "id": request_id,
             }
         )
+
+    return mcp_endpoint
+
+
+# ============================================================================
+# MCP APP FIXTURE (ASGI-based testing without real HTTP server)
+# ============================================================================
+
+
+@pytest.fixture
+async def mcp_app_dev_mode() -> MCPDevModeFixture:
+    """Create mock MCP app for dev mode testing.
+
+    This fixture creates a simple mock Starlette app that handles MCP
+    JSON-RPC requests directly without the complex MCP SDK lifecycle.
+
+    The mock approach is used because the MCP SDK's streamable_http_app()
+    requires proper task group initialization via run() before handling
+    requests, which is incompatible with direct ASGI testing.
+
+    Yields:
+        MCPDevModeFixture containing:
+            - app: The Starlette ASGI application
+            - call_history: List of recorded tool calls
+            - path: The MCP endpoint path
+    """
+    from uuid import uuid4
+
+    from starlette.routing import Route
+
+    # Track tool calls for assertions
+    call_history: list[dict[str, object]] = []
+
+    # Define available tools
+    available_tools: list[dict[str, object]] = [
+        {
+            "name": "mock_compute",
+            "description": "Mock compute tool - echoes input for deterministic testing",
+            "inputSchema": {"type": "object", "properties": {}},
+        }
+    ]
+
+    def mock_executor(
+        tool_name: str, arguments: dict[str, object]
+    ) -> dict[str, object]:
+        """Mock executor that returns deterministic results."""
+        correlation_id = str(uuid4())
+        return {
+            "success": True,
+            "result": {
+                "status": "success",
+                "echo": arguments.get("input_value"),
+                "tool_name": tool_name,
+                "correlation_id": correlation_id,
+            },
+        }
+
+    # Create handler using shared factory
+    mcp_endpoint = create_json_rpc_handler(
+        available_tools=available_tools,
+        executor=mock_executor,
+        server_name="mock-mcp-server",
+        call_history=call_history,
+    )
 
     # Create Starlette app with the MCP endpoint
     app = Starlette(
@@ -375,10 +432,6 @@ async def mcp_app_full_infra(
             f"PostgreSQL: {infra_availability['postgres']}"
         )
 
-    import json as json_module
-
-    from starlette.requests import Request
-    from starlette.responses import JSONResponse
     from starlette.routing import Route
 
     from omnibase_infra.handlers.mcp import TransportMCPStreamableHttp
@@ -411,102 +464,107 @@ async def mcp_app_full_infra(
                 }
             )
 
-    # Real executor that routes to ONEX
-    def real_executor(
+    # Real executor that routes to ONEX nodes via the MCP infrastructure
+    async def real_executor(
         tool_name: str, arguments: dict[str, object]
     ) -> dict[str, object]:
-        """Real executor that routes to ONEX nodes."""
-        return {"status": "success", "tool_name": tool_name}
+        """Execute MCP tool by routing to ONEX nodes via lifecycle infrastructure.
 
-    async def mcp_endpoint(request: Request) -> JSONResponse:
-        """Handle MCP JSON-RPC requests with real tool discovery."""
-        try:
-            body = await request.json()
-        except json_module.JSONDecodeError:
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32700, "message": "Parse error"},
-                    "id": None,
-                },
-                status_code=400,
-            )
+        This executor validates tools against the registry (discovered from Consul)
+        and dispatches to ONEX orchestrators when endpoints are available.
 
-        if "jsonrpc" not in body:
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32600, "message": "Invalid Request"},
-                    "id": body.get("id"),
-                },
-                status_code=200,
-            )
+        Args:
+            tool_name: Name of the tool to execute.
+            arguments: Tool arguments from the MCP call.
 
-        method = body.get("method", "")
-        params = body.get("params", {})
-        request_id = body.get("id", 1)
+        Returns:
+            Execution result dictionary with:
+                - success: Whether execution succeeded
+                - result: Execution result from ONEX (if dispatched)
+                - tool_name: Name of the executed tool
+                - source: Indicates execution source ("onex_dispatch" or "integration_test")
+                - validation: Tool validation details (for integration test mode)
 
-        if method == "initialize":
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "onex-mcp-server", "version": "1.0.0"},
-                    },
-                    "id": request_id,
-                }
-            )
+        Raises:
+            ValueError: If tool not found in registry.
+        """
+        import logging
+        from uuid import uuid4
 
-        if method == "tools/list":
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "result": {"tools": available_tools},
-                    "id": request_id,
-                }
-            )
+        logger = logging.getLogger(__name__)
+        correlation_id = uuid4()
 
-        if method == "tools/call":
-            tool_name = params.get("name", "")
-            arguments = params.get("arguments", {})
-
-            tool_names = {str(t["name"]) for t in available_tools}
-            if tool_name not in tool_names:
-                return JSONResponse(
-                    {
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32602,
-                            "message": f"Unknown tool: {tool_name}",
-                        },
-                        "id": request_id,
-                    }
-                )
-
-            result = real_executor(tool_name, arguments)
-
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "content": [
-                            {"type": "text", "text": json_module.dumps(result)}
-                        ],
-                        "isError": False,
-                    },
-                    "id": request_id,
-                }
-            )
-
-        return JSONResponse(
-            {
-                "jsonrpc": "2.0",
-                "error": {"code": -32601, "message": f"Method not found: {method}"},
-                "id": request_id,
+        # Validate tool exists in registry (discovered from Consul)
+        if lifecycle.registry is None:
+            return {
+                "success": False,
+                "error": "Registry not available",
+                "tool_name": tool_name,
             }
+
+        tool = await lifecycle.registry.get_tool(tool_name)
+        if tool is None:
+            raise ValueError(f"Tool not found in registry: {tool_name}")
+
+        # If tool has an endpoint, dispatch to ONEX orchestrator via HTTP
+        if tool.endpoint and lifecycle.executor is not None:
+            logger.info(
+                "Dispatching tool to ONEX orchestrator",
+                extra={
+                    "tool_name": tool_name,
+                    "endpoint": tool.endpoint,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+            result = await lifecycle.executor.execute(
+                tool=tool,
+                arguments=arguments,
+                correlation_id=correlation_id,
+            )
+
+            return {
+                "success": result.get("success", False),
+                "result": result.get("result"),
+                "error": result.get("error"),
+                "tool_name": tool_name,
+                "source": "onex_dispatch",
+                "correlation_id": str(correlation_id),
+            }
+
+        # No endpoint (local dev mode or Consul-discovered without endpoint)
+        # Return structured response indicating integration test mode with validation
+        logger.info(
+            "Tool validated but no endpoint - integration test mode",
+            extra={
+                "tool_name": tool_name,
+                "orchestrator_node_id": tool.orchestrator_node_id,
+                "correlation_id": str(correlation_id),
+            },
         )
+
+        return {
+            "success": True,
+            "tool_name": tool_name,
+            "source": "integration_test",
+            "validation": {
+                "tool_exists": True,
+                "tool_version": tool.version,
+                "orchestrator_node_id": tool.orchestrator_node_id,
+                "orchestrator_service_id": tool.orchestrator_service_id,
+                "has_endpoint": False,
+                "timeout_seconds": tool.timeout_seconds,
+            },
+            "arguments_received": arguments,
+            "correlation_id": str(correlation_id),
+        }
+
+    # Create handler using shared factory
+    mcp_endpoint = create_json_rpc_handler(
+        available_tools=available_tools,
+        executor=real_executor,
+        server_name="onex-mcp-server",
+    )
 
     # Create mock Starlette app with real tool discovery
     app = Starlette(
