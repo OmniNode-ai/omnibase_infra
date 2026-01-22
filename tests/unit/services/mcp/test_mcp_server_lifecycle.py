@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -207,6 +208,7 @@ class TestMCPServerLifecycleInit:
 
     def test_init_creates_instance_with_config(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
     ) -> None:
         """Should create instance with provided configuration.
@@ -215,8 +217,9 @@ class TestMCPServerLifecycleInit:
         When: MCPServerLifecycle is instantiated
         Then: Instance is created with correct initial state
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
+        assert lifecycle._container is mock_container
         assert lifecycle._config == dev_mode_config
         assert lifecycle._started is False
         assert lifecycle._registry is None
@@ -224,6 +227,7 @@ class TestMCPServerLifecycleInit:
 
     def test_is_running_returns_false_before_start(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
     ) -> None:
         """Should return False for is_running before start().
@@ -232,12 +236,13 @@ class TestMCPServerLifecycleInit:
         When: is_running is accessed
         Then: Returns False
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         assert lifecycle.is_running is False
 
     def test_registry_returns_none_before_start(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
     ) -> None:
         """Should return None for registry before start().
@@ -246,12 +251,13 @@ class TestMCPServerLifecycleInit:
         When: registry is accessed
         Then: Returns None
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         assert lifecycle.registry is None
 
     def test_executor_returns_none_before_start(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
     ) -> None:
         """Should return None for executor before start().
@@ -260,7 +266,7 @@ class TestMCPServerLifecycleInit:
         When: executor is accessed
         Then: Returns None
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         assert lifecycle.executor is None
 
@@ -272,6 +278,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_in_dev_mode_creates_registry(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -281,7 +288,7 @@ class TestMCPServerLifecycleDevModeStart:
         When: start() is called
         Then: Registry is created and accessible
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -292,6 +299,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_in_dev_mode_creates_executor(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -301,7 +309,7 @@ class TestMCPServerLifecycleDevModeStart:
         When: start() is called
         Then: Executor is created and accessible
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -311,6 +319,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_discovers_mcp_enabled_orchestrator(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -325,7 +334,7 @@ class TestMCPServerLifecycleDevModeStart:
             "test-node",
             MCP_ENABLED_ORCHESTRATOR_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -342,6 +351,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_uses_fallback_values_for_minimal_contract(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -356,7 +366,7 @@ class TestMCPServerLifecycleDevModeStart:
             "minimal-node",
             MCP_ENABLED_ORCHESTRATOR_MINIMAL,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -377,6 +387,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_skips_contract_without_mcp_config(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -391,7 +402,7 @@ class TestMCPServerLifecycleDevModeStart:
             "no-mcp-node",
             MCP_DISABLED_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -402,6 +413,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_skips_contract_with_mcp_expose_false(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -416,7 +428,7 @@ class TestMCPServerLifecycleDevModeStart:
             "disabled-mcp-node",
             MCP_EXPOSE_FALSE_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -427,6 +439,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_skips_non_orchestrator_with_mcp_expose(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
         caplog: pytest.LogCaptureFixture,
@@ -442,7 +455,7 @@ class TestMCPServerLifecycleDevModeStart:
             "effect-node",
             NON_ORCHESTRATOR_WITH_MCP,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         with caplog.at_level(logging.DEBUG):
             await lifecycle.start()
@@ -458,6 +471,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_skips_compute_node_with_mcp(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -472,7 +486,7 @@ class TestMCPServerLifecycleDevModeStart:
             "compute-node",
             COMPUTE_WITH_MCP,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -483,6 +497,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_skips_reducer_node_with_mcp(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -497,7 +512,7 @@ class TestMCPServerLifecycleDevModeStart:
             "reducer-node",
             REDUCER_WITH_MCP,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -508,6 +523,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_discovers_multiple_orchestrators(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -527,7 +543,7 @@ class TestMCPServerLifecycleDevModeStart:
             "node-b",
             MCP_ENABLED_ORCHESTRATOR_MINIMAL,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -538,6 +554,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_filters_mixed_node_types(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -565,7 +582,7 @@ class TestMCPServerLifecycleDevModeStart:
             "compute-node",
             COMPUTE_WITH_MCP,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -576,6 +593,7 @@ class TestMCPServerLifecycleDevModeStart:
 
     async def test_start_is_idempotent(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -590,7 +608,7 @@ class TestMCPServerLifecycleDevModeStart:
             "test-node",
             MCP_ENABLED_ORCHESTRATOR_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
         first_registry = lifecycle.registry
@@ -613,6 +631,7 @@ class TestDiscoverFromContracts:
 
     async def test_discover_with_empty_contracts_dir(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -622,7 +641,7 @@ class TestDiscoverFromContracts:
         When: start() is called in dev mode
         Then: Registry has 0 tools
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -633,6 +652,7 @@ class TestDiscoverFromContracts:
 
     async def test_discover_with_nonexistent_contracts_dir(
         self,
+        mock_container: MagicMock,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -647,7 +667,7 @@ class TestDiscoverFromContracts:
             contracts_dir=str(tmp_path / "nonexistent"),
             kafka_enabled=False,
         )
-        lifecycle = MCPServerLifecycle(config)
+        lifecycle = MCPServerLifecycle(mock_container, config)
 
         with caplog.at_level(logging.WARNING):
             await lifecycle.start()
@@ -660,6 +680,7 @@ class TestDiscoverFromContracts:
 
     async def test_discover_with_no_contracts_dir_config(
         self,
+        mock_container: MagicMock,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Should log warning when dev_mode=True but no contracts_dir.
@@ -673,7 +694,7 @@ class TestDiscoverFromContracts:
             contracts_dir=None,
             kafka_enabled=False,
         )
-        lifecycle = MCPServerLifecycle(config)
+        lifecycle = MCPServerLifecycle(mock_container, config)
 
         with caplog.at_level(logging.WARNING):
             await lifecycle.start()
@@ -688,6 +709,7 @@ class TestDiscoverFromContracts:
 
     async def test_discover_skips_invalid_yaml(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
         caplog: pytest.LogCaptureFixture,
@@ -703,7 +725,7 @@ class TestDiscoverFromContracts:
             "invalid-node",
             INVALID_YAML_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         with caplog.at_level(logging.WARNING):
             await lifecycle.start()
@@ -719,6 +741,7 @@ class TestDiscoverFromContracts:
 
     async def test_discover_skips_empty_contract_file(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -733,7 +756,7 @@ class TestDiscoverFromContracts:
             "empty-node",
             EMPTY_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -744,6 +767,7 @@ class TestDiscoverFromContracts:
 
     async def test_discover_skips_partial_mcp_config(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -758,7 +782,7 @@ class TestDiscoverFromContracts:
             "partial-mcp-node",
             CONTRACT_WITH_PARTIAL_MCP,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -769,6 +793,7 @@ class TestDiscoverFromContracts:
 
     async def test_discover_includes_metadata_in_tool_definition(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -783,7 +808,7 @@ class TestDiscoverFromContracts:
             "metadata-test",
             MCP_ENABLED_ORCHESTRATOR_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -798,6 +823,7 @@ class TestDiscoverFromContracts:
 
     async def test_discover_handles_nested_directory_structure(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -813,7 +839,7 @@ class TestDiscoverFromContracts:
         contract_file = nested_dir / "contract.yaml"
         contract_file.write_text(MCP_ENABLED_ORCHESTRATOR_CONTRACT)
 
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         await lifecycle.start()
 
@@ -830,6 +856,7 @@ class TestMCPServerLifecycleShutdown:
 
     async def test_shutdown_clears_registry(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -844,7 +871,7 @@ class TestMCPServerLifecycleShutdown:
             "test-node",
             MCP_ENABLED_ORCHESTRATOR_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
         await lifecycle.start()
         assert lifecycle.registry is not None
 
@@ -855,6 +882,7 @@ class TestMCPServerLifecycleShutdown:
 
     async def test_shutdown_clears_executor(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -864,7 +892,7 @@ class TestMCPServerLifecycleShutdown:
         When: shutdown() is called
         Then: Executor is set to None
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
         await lifecycle.start()
         assert lifecycle.executor is not None
 
@@ -874,6 +902,7 @@ class TestMCPServerLifecycleShutdown:
 
     async def test_shutdown_is_idempotent(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -883,7 +912,7 @@ class TestMCPServerLifecycleShutdown:
         When: shutdown() is called again
         Then: Returns without error
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
         await lifecycle.start()
 
         await lifecycle.shutdown()
@@ -895,6 +924,7 @@ class TestMCPServerLifecycleShutdown:
 
     async def test_shutdown_before_start_is_safe(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
     ) -> None:
         """Should handle shutdown() before start() gracefully.
@@ -903,7 +933,7 @@ class TestMCPServerLifecycleShutdown:
         When: shutdown() is called
         Then: Returns without error
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         # Should not raise
         await lifecycle.shutdown()
@@ -917,6 +947,7 @@ class TestMCPServerLifecycleDescribe:
 
     def test_describe_before_start(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
     ) -> None:
         """Should return metadata with started=False before start.
@@ -925,7 +956,7 @@ class TestMCPServerLifecycleDescribe:
         When: describe() is called
         Then: Returns metadata with started=False and 0 tools
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
 
         metadata = lifecycle.describe()
 
@@ -938,6 +969,7 @@ class TestMCPServerLifecycleDescribe:
     @pytest.mark.asyncio
     async def test_describe_after_start(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -952,7 +984,7 @@ class TestMCPServerLifecycleDescribe:
             "test-node",
             MCP_ENABLED_ORCHESTRATOR_CONTRACT,
         )
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
         await lifecycle.start()
 
         metadata = lifecycle.describe()
@@ -967,6 +999,7 @@ class TestMCPServerLifecycleDescribe:
     @pytest.mark.asyncio
     async def test_describe_after_shutdown(
         self,
+        mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
@@ -976,7 +1009,7 @@ class TestMCPServerLifecycleDescribe:
         When: describe() is called
         Then: Returns metadata with started=False
         """
-        lifecycle = MCPServerLifecycle(dev_mode_config)
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
         await lifecycle.start()
         await lifecycle.shutdown()
 

@@ -131,11 +131,13 @@ def create_timeout_emission_service(
     Returns:
         ServiceTimeoutEmitter configured with mocks
     """
+    mock_container = MagicMock(spec=ModelONEXContainer)
     config = ModelTimeoutEmissionConfig(
         environment=environment,
         namespace=namespace,
     )
     return ServiceTimeoutEmitter(
+        container=mock_container,
         timeout_query=query_service,
         event_bus=event_bus,  # type: ignore[arg-type]
         projector=projector,  # type: ignore[arg-type]

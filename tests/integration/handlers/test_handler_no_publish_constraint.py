@@ -1313,7 +1313,7 @@ class TestOrchestratorBusAccessVerification:
 
         This proves that the service layer, used by orchestrator coordinators,
         has bus access. The orchestrator pattern is:
-        Orchestrator -> TimeoutCoordinator -> ServiceTimeoutEmitter(event_bus=...)
+        Orchestrator -> TimeoutCoordinator -> ServiceTimeoutEmitter(container, event_bus=...)
         """
         from omnibase_infra.services.service_timeout_emitter import (
             ServiceTimeoutEmitter,
@@ -1321,6 +1321,12 @@ class TestOrchestratorBusAccessVerification:
 
         sig = inspect.signature(ServiceTimeoutEmitter.__init__)
         params = list(sig.parameters.keys())
+
+        # ServiceTimeoutEmitter MUST accept container parameter (first)
+        assert "container" in params, (
+            "ServiceTimeoutEmitter must accept 'container' parameter - "
+            "this is the ONEX DI pattern"
+        )
 
         # ServiceTimeoutEmitter MUST accept event_bus parameter
         assert "event_bus" in params, (
@@ -1454,15 +1460,25 @@ class TestOrchestratorBusAccessVerification:
         )
 
         # Create mock dependencies
+        mock_container = MagicMock(spec=ModelONEXContainer)
         mock_query = MagicMock()
         mock_bus = MagicMock()
         mock_projector = MagicMock()
 
-        # Create emitter with event_bus
+        # Create emitter with container and event_bus
         emitter = ServiceTimeoutEmitter(
+            container=mock_container,
             timeout_query=mock_query,
             event_bus=mock_bus,
             projector=mock_projector,
+        )
+
+        # Verify container is stored (as private attribute per ONEX patterns)
+        assert hasattr(emitter, "_container"), (
+            "ServiceTimeoutEmitter must store container as _container"
+        )
+        assert emitter._container is mock_container, (
+            "ServiceTimeoutEmitter._container must be the injected container"
         )
 
         # Verify event_bus is stored (as private attribute per ONEX patterns)

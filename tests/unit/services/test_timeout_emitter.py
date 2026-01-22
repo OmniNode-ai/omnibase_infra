@@ -39,12 +39,13 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
@@ -161,7 +162,14 @@ def mock_projector() -> AsyncMock:
 
 
 @pytest.fixture
+def mock_container() -> MagicMock:
+    """Create a mock ModelONEXContainer."""
+    return MagicMock(spec=ModelONEXContainer)
+
+
+@pytest.fixture
 def processor(
+    mock_container: MagicMock,
     mock_timeout_query: AsyncMock,
     mock_event_bus: AsyncMock,
     mock_projector: AsyncMock,
@@ -169,6 +177,7 @@ def processor(
     """Create a ServiceTimeoutEmitter instance with mocked dependencies."""
     config = ModelTimeoutEmissionConfig(environment="test", namespace="omnitest")
     return ServiceTimeoutEmitter(
+        container=mock_container,
         timeout_query=mock_timeout_query,
         event_bus=mock_event_bus,
         projector=mock_projector,
@@ -183,29 +192,34 @@ class TestServiceTimeoutEmitterBasics:
 
     async def test_processor_instantiation(
         self,
+        mock_container: MagicMock,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
         """Test that processor initializes correctly with dependencies."""
         processor = ServiceTimeoutEmitter(
+            container=mock_container,
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
         )
 
+        assert processor._container is mock_container
         assert processor._timeout_query is mock_timeout_query
         assert processor._event_bus is mock_event_bus
         assert processor._projector is mock_projector
 
     async def test_processor_default_environment_and_namespace(
         self,
+        mock_container: MagicMock,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
     ) -> None:
         """Test default environment and namespace values."""
         processor = ServiceTimeoutEmitter(
+            container=mock_container,
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
@@ -216,6 +230,7 @@ class TestServiceTimeoutEmitterBasics:
 
     async def test_processor_custom_environment_and_namespace_via_config(
         self,
+        mock_container: MagicMock,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -223,6 +238,7 @@ class TestServiceTimeoutEmitterBasics:
         """Test custom environment and namespace via config model."""
         config = ModelTimeoutEmissionConfig(environment="prod", namespace="myapp")
         processor = ServiceTimeoutEmitter(
+            container=mock_container,
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
@@ -1121,6 +1137,7 @@ class TestServiceTimeoutEmitterTopicBuilding:
 
     async def test_ack_timeout_topic_format(
         self,
+        mock_container: MagicMock,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -1128,6 +1145,7 @@ class TestServiceTimeoutEmitterTopicBuilding:
         """Test ack timeout topic is correctly formatted."""
         config = ModelTimeoutEmissionConfig(environment="prod", namespace="myservice")
         processor = ServiceTimeoutEmitter(
+            container=mock_container,
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
@@ -1157,6 +1175,7 @@ class TestServiceTimeoutEmitterTopicBuilding:
 
     async def test_liveness_expired_topic_format(
         self,
+        mock_container: MagicMock,
         mock_timeout_query: AsyncMock,
         mock_event_bus: AsyncMock,
         mock_projector: AsyncMock,
@@ -1164,6 +1183,7 @@ class TestServiceTimeoutEmitterTopicBuilding:
         """Test liveness expired topic is correctly formatted."""
         config = ModelTimeoutEmissionConfig(environment="staging", namespace="testapp")
         processor = ServiceTimeoutEmitter(
+            container=mock_container,
             timeout_query=mock_timeout_query,
             event_bus=mock_event_bus,
             projector=mock_projector,
