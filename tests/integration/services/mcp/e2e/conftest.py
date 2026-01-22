@@ -63,6 +63,14 @@ if TYPE_CHECKING:
 
 
 # ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# MCP Protocol version - update when MCP SDK upgrades protocol
+MCP_PROTOCOL_VERSION = "2024-11-05"
+
+
+# ============================================================================
 # TYPE DEFINITIONS FOR FIXTURES
 # ============================================================================
 
@@ -129,6 +137,38 @@ def assert_mcp_content_valid(result: JsonDict) -> None:
             f"Content item {i} must be dict, got: {type(item)}"
         )
         assert "type" in item, f"Content item {i} missing required 'type' field: {item}"
+
+
+def build_jsonrpc_request(
+    method: str,
+    params: JsonDict | None = None,
+    request_id: int = 1,
+) -> JsonDict:
+    """Build a JSON-RPC 2.0 request payload for MCP protocol testing.
+
+    This helper reduces repetition when constructing MCP JSON-RPC requests
+    across test files.
+
+    Args:
+        method: The JSON-RPC method name (e.g., "initialize", "tools/list", "tools/call").
+        params: Optional parameters for the method.
+        request_id: The JSON-RPC request ID (defaults to 1).
+
+    Returns:
+        A properly formatted JSON-RPC 2.0 request dictionary.
+
+    Example:
+        >>> build_jsonrpc_request("tools/call", {"name": "echo", "arguments": {}})
+        {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "echo", "arguments": {}}, "id": 1}
+    """
+    request: JsonDict = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "id": request_id,
+    }
+    if params is not None:
+        request["params"] = params
+    return request
 
 
 # ============================================================================
@@ -281,7 +321,7 @@ def create_json_rpc_handler(
                 {
                     "jsonrpc": "2.0",
                     "result": {
-                        "protocolVersion": "2024-11-05",
+                        "protocolVersion": MCP_PROTOCOL_VERSION,
                         "capabilities": {"tools": {"listChanged": False}},
                         "serverInfo": {"name": server_name, "version": "1.0.0"},
                     },

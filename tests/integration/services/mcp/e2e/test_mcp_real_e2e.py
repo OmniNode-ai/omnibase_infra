@@ -125,6 +125,7 @@ class MCPServerFixture:
         self.host = host
         self.port = port or find_available_port()
         self.tools_executed: list[dict[str, object]] = []
+        self._tools_lock = threading.Lock()
         self._server_thread: threading.Thread | None = None
         self._server: object | None = None  # uvicorn.Server instance
 
@@ -135,6 +136,15 @@ class MCPServerFixture:
         The MCP SDK creates a route at /mcp, so the client URL includes /mcp.
         """
         return f"http://{self.host}:{self.port}/mcp"
+
+    def record_tool_execution(self, record: dict[str, object]) -> None:
+        """Thread-safe method to record a tool execution.
+
+        Args:
+            record: Tool execution record with tool_name, arguments, etc.
+        """
+        with self._tools_lock:
+            self.tools_executed.append(record)
 
     def start(self) -> None:
         """Start the MCP server in a background thread."""
@@ -189,7 +199,7 @@ class MCPServerFixture:
                 Echoed message with metadata.
             """
             correlation_id = str(uuid4())
-            parent.tools_executed.append(
+            parent.record_tool_execution(
                 {
                     "tool_name": "echo_tool",
                     "arguments": {"message": message},
@@ -211,7 +221,7 @@ class MCPServerFixture:
                 Sum result as string.
             """
             result = a + b
-            parent.tools_executed.append(
+            parent.record_tool_execution(
                 {
                     "tool_name": "compute_sum",
                     "arguments": {"a": a, "b": b},
@@ -521,14 +531,14 @@ class TestRealMCPConcurrency:
             assert len(mcp_server_fixture.tools_executed) == 5
 
             # All messages should be present (order may vary due to concurrency)
-            messages: set[object] = set()
+            messages: set[str] = set()
             for exec_record in mcp_server_fixture.tools_executed:
                 args = exec_record.get("arguments")
                 if isinstance(args, dict):
                     msg = args.get("message")
-                    if msg is not None:
+                    if isinstance(msg, str):  # Explicit str check for type safety
                         messages.add(msg)
-            expected: set[object] = {f"Concurrent {i}" for i in range(5)}
+            expected: set[str] = {f"Concurrent {i}" for i in range(5)}
             assert messages == expected, f"Expected {expected}, got {messages}"
 
 
