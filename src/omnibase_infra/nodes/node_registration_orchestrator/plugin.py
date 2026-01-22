@@ -515,7 +515,7 @@ class PluginRegistration:
             # Deferred import: Only load HandlerConsul when Consul is configured
             from omnibase_infra.handlers import HandlerConsul
 
-            self._consul_handler = HandlerConsul()
+            self._consul_handler = HandlerConsul(config.container)
             await self._consul_handler.initialize(
                 {"host": consul_host, "port": consul_port}
             )

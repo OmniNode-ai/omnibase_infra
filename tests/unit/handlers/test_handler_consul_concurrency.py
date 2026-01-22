@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 import consul
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -34,6 +35,12 @@ ConsulConfigValue = str | int | float | bool | dict[str, str | int | float | boo
 
 # Type alias for handler response
 HandlerResponse = dict[str, str | UUID | dict[str, str | int | bool | None]]
+
+
+@pytest.fixture
+def mock_container() -> MagicMock:
+    """Create mock ONEX container for handler tests."""
+    return MagicMock(spec=ModelONEXContainer)
 
 
 @pytest.fixture
@@ -94,6 +101,7 @@ class TestHandlerConsulConcurrentRetry:
         self,
         consul_config: dict[str, ConsulConfigValue],
         mock_consul_client: MagicMock,
+        mock_container: MagicMock,
     ) -> None:
         """Verify concurrent operations have isolated retry state.
 
@@ -101,7 +109,7 @@ class TestHandlerConsulConcurrentRetry:
         simultaneously, each maintains its own independent retry count
         and backoff state. No shared mutable state should cause interference.
         """
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
 
         # Use higher retry threshold to allow more concurrent failures
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
@@ -198,13 +206,14 @@ class TestHandlerConsulConcurrentRetry:
         self,
         consul_config: dict[str, ConsulConfigValue],
         mock_consul_client: MagicMock,
+        mock_container: MagicMock,
     ) -> None:
         """Test mixed success/failure operations don't interfere with retry state.
 
         Some operations succeed immediately, others fail and retry.
         Each operation's retry logic should be independent.
         """
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
 
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -287,13 +296,14 @@ class TestHandlerConsulConcurrentRetry:
         self,
         consul_config: dict[str, ConsulConfigValue],
         mock_consul_client: MagicMock,
+        mock_container: MagicMock,
     ) -> None:
         """Test all concurrent operations retrying to exhaustion independently.
 
         When all operations fail repeatedly, each should track its own
         retry count and all should exhaust retries independently.
         """
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
 
         # Set threshold high enough for concurrent testing
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
@@ -347,13 +357,14 @@ class TestHandlerConsulConcurrentRetry:
         self,
         consul_config: dict[str, ConsulConfigValue],
         mock_consul_client: MagicMock,
+        mock_container: MagicMock,
     ) -> None:
         """Test concurrent retry across different operation types.
 
         Multiple operation types (kv_get, kv_put, register) running
         concurrently should each have isolated retry state.
         """
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
 
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -479,6 +490,7 @@ class TestHandlerConsulConcurrentRetry:
         self,
         consul_config: dict[str, ConsulConfigValue],
         mock_consul_client: MagicMock,
+        mock_container: MagicMock,
     ) -> None:
         """Test that multiple handler instances have completely isolated retry state.
 
@@ -524,8 +536,8 @@ class TestHandlerConsulConcurrentRetry:
                 return success_response
 
             # Create two handlers
-            handler1 = HandlerConsul()
-            handler2 = HandlerConsul()
+            handler1 = HandlerConsul(mock_container)
+            handler2 = HandlerConsul(mock_container)
 
             mock_consul_client.kv.get.side_effect = get_response_handler1
             await handler1.initialize(consul_config)
@@ -647,13 +659,14 @@ class TestHandlerConsulConcurrentRetry:
         self,
         consul_config: dict[str, ConsulConfigValue],
         mock_consul_client: MagicMock,
+        mock_container: MagicMock,
     ) -> None:
         """Stress test with high concurrency to detect race conditions.
 
         Launch many concurrent operations with mixed success/failure
         to stress test the retry state isolation under load.
         """
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
 
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
         consul_config["max_concurrent_operations"] = 50
@@ -736,13 +749,14 @@ class TestHandlerConsulConcurrentRetry:
         self,
         consul_config: dict[str, ConsulConfigValue],
         mock_consul_client: MagicMock,
+        mock_container: MagicMock,
     ) -> None:
         """Test concurrent timeout scenarios have isolated retry state.
 
         Multiple operations timing out should each track their own
         retry attempts independently.
         """
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
 
         consul_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
         consul_config["timeout_seconds"] = 1.0  # Minimum allowed

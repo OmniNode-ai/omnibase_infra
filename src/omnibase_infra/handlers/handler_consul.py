@@ -33,6 +33,7 @@ from uuid import UUID, uuid4
 
 import consul
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -190,13 +191,18 @@ class HandlerConsul(
         target_name=f"consul.{self._config.datacenter or 'default'}"
     """
 
-    def __init__(self) -> None:
+    def __init__(self, container: ModelONEXContainer) -> None:
         """Initialize HandlerConsul in uninitialized state.
+
+        Args:
+            container: ONEX container for dependency injection. Required for
+                consistent handler initialization pattern across all handlers.
 
         Note: Circuit breaker is initialized during initialize() call when
         configuration is available. The mixin's _init_circuit_breaker() method
         is called there with the actual config values.
         """
+        self._container = container
         self._client: consul.Consul | None = None
         self._config: ModelConsulHandlerConfig | None = None
         self._initialized: bool = False

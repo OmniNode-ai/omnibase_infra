@@ -54,12 +54,14 @@ from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+from unittest.mock import MagicMock
 from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import pytest
 from dotenv import load_dotenv
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
@@ -93,7 +95,6 @@ elif _project_env_file.exists():
 if TYPE_CHECKING:
     import asyncpg
 
-    from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator import (
@@ -550,11 +551,22 @@ async def ensure_test_topic_exists(
 
 
 @pytest.fixture
-async def real_consul_handler() -> AsyncGenerator[HandlerConsul, None]:
+def mock_container() -> MagicMock:
+    """Create mock ONEX container for handler tests."""
+    return MagicMock(spec=ModelONEXContainer)
+
+
+@pytest.fixture
+async def real_consul_handler(
+    mock_container: MagicMock,
+) -> AsyncGenerator[HandlerConsul, None]:
     """Connected HandlerConsul with cleanup.
 
     This fixture creates a HandlerConsul connected to the real Consul
     server on the infrastructure server.
+
+    Args:
+        mock_container: ONEX container mock for dependency injection.
 
     Yields:
         HandlerConsul: Initialized handler ready for operations.
@@ -567,7 +579,7 @@ async def real_consul_handler() -> AsyncGenerator[HandlerConsul, None]:
     if not CONSUL_AVAILABLE:
         pytest.skip("Consul not available (CONSUL_HOST not set or unreachable)")
 
-    handler = HandlerConsul()
+    handler = HandlerConsul(mock_container)
     await handler.initialize(
         {
             "host": CONSUL_HOST,

@@ -35,9 +35,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers.service_discovery.handler_service_discovery_consul import (
     HandlerServiceDiscoveryConsul,
 )
@@ -82,7 +84,9 @@ def consul_handler() -> HandlerServiceDiscoveryConsul:
     Note: This creates the handler without initializing the connection.
     Protocol compliance tests only verify interface structure, not runtime behavior.
     """
+    mock_container = MagicMock(spec=ModelONEXContainer)
     return HandlerServiceDiscoveryConsul(
+        container=mock_container,
         consul_host="localhost",
         consul_port=8500,
         consul_scheme="http",
@@ -443,6 +447,7 @@ class TestCrossHandlerProtocolCompliance:
             (
                 HandlerServiceDiscoveryConsul,
                 {
+                    "container": MagicMock(spec=ModelONEXContainer),
                     "consul_host": "localhost",
                     "consul_port": 8500,
                     "consul_scheme": "http",
@@ -471,6 +476,7 @@ class TestCrossHandlerProtocolCompliance:
             (
                 HandlerServiceDiscoveryConsul,
                 {
+                    "container": MagicMock(spec=ModelONEXContainer),
                     "consul_host": "localhost",
                     "consul_port": 8500,
                     "consul_scheme": "http",
@@ -499,6 +505,7 @@ class TestCrossHandlerProtocolCompliance:
             (
                 HandlerServiceDiscoveryConsul,
                 {
+                    "container": MagicMock(spec=ModelONEXContainer),
                     "consul_host": "localhost",
                     "consul_port": 8500,
                     "consul_scheme": "http",
@@ -527,6 +534,7 @@ class TestCrossHandlerProtocolCompliance:
             (
                 HandlerServiceDiscoveryConsul,
                 {
+                    "container": MagicMock(spec=ModelONEXContainer),
                     "consul_host": "localhost",
                     "consul_port": 8500,
                     "consul_scheme": "http",
@@ -576,6 +584,7 @@ class TestTypeAnnotationCompleteness:
             (
                 HandlerServiceDiscoveryConsul,
                 {
+                    "container": MagicMock(spec=ModelONEXContainer),
                     "consul_host": "localhost",
                     "consul_port": 8500,
                     "consul_scheme": "http",
@@ -605,6 +614,7 @@ class TestTypeAnnotationCompleteness:
             (
                 HandlerServiceDiscoveryConsul,
                 {
+                    "container": MagicMock(spec=ModelONEXContainer),
                     "consul_host": "localhost",
                     "consul_port": 8500,
                     "consul_scheme": "http",

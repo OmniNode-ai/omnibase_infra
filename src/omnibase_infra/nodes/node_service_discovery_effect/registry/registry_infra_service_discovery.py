@@ -86,7 +86,10 @@ class RegistryInfraServiceDiscovery:
             RegistryInfraServiceDiscovery.register(container)
 
             # Explicit handler registration
-            consul_handler = HandlerServiceDiscoveryConsul(config)
+            consul_handler = HandlerServiceDiscoveryConsul(
+                container=container,
+                consul_host="localhost",
+            )
             RegistryInfraServiceDiscovery.register_with_handler(
                 container,
                 handler=consul_handler,

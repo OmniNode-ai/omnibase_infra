@@ -755,6 +755,7 @@ def unique_service_name() -> str:
 @pytest.fixture
 async def initialized_consul_handler(
     consul_config: dict[str, JsonType],
+    mock_container: MagicMock,
 ) -> AsyncGenerator[HandlerConsul, None]:
     """Provide an initialized HandlerConsul instance with automatic cleanup.
 
@@ -775,13 +776,14 @@ async def initialized_consul_handler(
 
     Args:
         consul_config: Consul configuration fixture.
+        mock_container: ONEX container mock for dependency injection.
 
     Yields:
         Initialized HandlerConsul ready for Consul operations.
     """
     from omnibase_infra.handlers import HandlerConsul
 
-    handler = HandlerConsul()
+    handler = HandlerConsul(mock_container)
     await handler.initialize(consul_config)
 
     yield handler
