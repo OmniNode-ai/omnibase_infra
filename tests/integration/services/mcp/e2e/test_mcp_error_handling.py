@@ -57,10 +57,10 @@ class TestMCPRoutingErrors:
         # If 200, check for error in JSON-RPC response
         if response.status_code == 200:
             data = response.json()
-            # Error could be in "error" field (JSON-RPC error) or in "result"
-            if "error" in data:
-                # JSON-RPC error response
-                assert "message" in data["error"] or "code" in data["error"]
+            # For nonexistent tools, MCP MUST return an error
+            assert "error" in data, f"Expected error for nonexistent tool, got: {data}"
+            # JSON-RPC error response should have message or code
+            assert "message" in data["error"] or "code" in data["error"]
 
 
 class TestMCPBasicFunctionality:
