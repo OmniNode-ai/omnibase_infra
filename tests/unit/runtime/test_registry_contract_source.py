@@ -234,7 +234,8 @@ class TestRegistryContractSourceDiscovery:
                     "Value": None,
                 },
                 {
-                    "Key": f"{DEFAULT_CONTRACT_PREFIX}valid.handler",
+                    # Key must match contract's handler_id (strict mode enforces this)
+                    "Key": f"{DEFAULT_CONTRACT_PREFIX}effect.test.handler",
                     "Value": VALID_HANDLER_CONTRACT_YAML.encode("utf-8"),
                 },
             ],
@@ -259,7 +260,8 @@ class TestRegistryContractSourceDiscovery:
                     "Value": None,  # Empty/deleted key
                 },
                 {
-                    "Key": f"{DEFAULT_CONTRACT_PREFIX}valid.handler",
+                    # Key must match contract's handler_id (strict mode enforces this)
+                    "Key": f"{DEFAULT_CONTRACT_PREFIX}effect.test.handler",
                     "Value": VALID_HANDLER_CONTRACT_YAML.encode("utf-8"),
                 },
             ],
@@ -451,6 +453,60 @@ version: "1.0.0"
         error = result.validation_errors[0]
         assert error.error_type == EnumHandlerErrorType.CONTRACT_PARSE_ERROR
 
+    @pytest.mark.asyncio
+    async def test_handler_id_mismatch_strict_mode_raises_error(self) -> None:
+        """handler_id mismatch in strict mode should raise ValueError.
+
+        When graceful_mode=False (default) and the Consul key's handler_id
+        doesn't match the contract's handler_id, a ValueError should be raised.
+        """
+        mock_client = MagicMock()
+        mock_client.kv.get.return_value = (
+            1,
+            [
+                {
+                    # Key has different handler_id than contract content
+                    "Key": f"{DEFAULT_CONTRACT_PREFIX}mismatched.handler",
+                    "Value": VALID_HANDLER_CONTRACT_YAML.encode("utf-8"),
+                },
+            ],
+        )
+
+        with patch("consul.Consul", return_value=mock_client):
+            source = RegistryContractSource(graceful_mode=False)
+
+            with pytest.raises(ValueError, match="handler_id mismatch"):
+                await source.discover_handlers()
+
+    @pytest.mark.asyncio
+    async def test_handler_id_mismatch_graceful_mode_logs_warning(self) -> None:
+        """handler_id mismatch in graceful mode should log warning and continue.
+
+        When graceful_mode=True and the Consul key's handler_id doesn't match
+        the contract's handler_id, a warning should be logged but processing
+        continues using the contract's handler_id as authoritative.
+        """
+        mock_client = MagicMock()
+        mock_client.kv.get.return_value = (
+            1,
+            [
+                {
+                    # Key has different handler_id than contract content
+                    "Key": f"{DEFAULT_CONTRACT_PREFIX}mismatched.handler",
+                    "Value": VALID_HANDLER_CONTRACT_YAML.encode("utf-8"),
+                },
+            ],
+        )
+
+        with patch("consul.Consul", return_value=mock_client):
+            source = RegistryContractSource(graceful_mode=True)
+            result = await source.discover_handlers()
+
+        # Should succeed in graceful mode, using contract's handler_id
+        assert len(result.descriptors) == 1
+        assert result.descriptors[0].handler_id == "effect.test.handler"
+        assert len(result.validation_errors) == 0
+
 
 # =============================================================================
 # Configuration Tests
@@ -607,7 +663,8 @@ class TestRegistryContractSourceContractPath:
             1,
             [
                 {
-                    "Key": f"{DEFAULT_CONTRACT_PREFIX}test.handler",
+                    # Key must match contract's handler_id (strict mode enforces this)
+                    "Key": f"{DEFAULT_CONTRACT_PREFIX}effect.test.handler",
                     "Value": VALID_HANDLER_CONTRACT_YAML.encode("utf-8"),
                 },
             ],
@@ -622,7 +679,7 @@ class TestRegistryContractSourceContractPath:
         assert contract_path.startswith("consul://")
         assert "consul.local" in contract_path
         assert "8500" in contract_path
-        assert "test.handler" in contract_path
+        assert "effect.test.handler" in contract_path
 
 
 # =============================================================================

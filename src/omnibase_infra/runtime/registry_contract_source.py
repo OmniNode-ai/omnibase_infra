@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from asyncio import to_thread
 from uuid import uuid4
 
 import consul
@@ -152,7 +152,10 @@ class RegistryContractSource(ProtocolContractSource):
 
         try:
             # Fetch all keys under prefix (recurse=True)
-            _index, data = self._client.kv.get(self._prefix, recurse=True)
+            # Wrap synchronous Consul client call to avoid blocking the event loop
+            _index, data = await to_thread(
+                self._client.kv.get, self._prefix, recurse=True
+            )
 
             if data is None:
                 logger.info(
@@ -274,6 +277,14 @@ class RegistryContractSource(ProtocolContractSource):
 
         # Validate handler_id consistency between key and contract content
         if contract.handler_id != handler_id:
+            mismatch_msg = (
+                f"handler_id mismatch: key='{handler_id}' vs "
+                f"contract='{contract.handler_id}'"
+            )
+            if not self._graceful_mode:
+                # Strict mode: raise error on mismatch
+                raise ValueError(mismatch_msg)
+            # Graceful mode: log warning and continue using contract's handler_id
             logger.warning(
                 "handler_id mismatch between key and contract content",
                 extra={
@@ -283,15 +294,10 @@ class RegistryContractSource(ProtocolContractSource):
                     "correlation_id": str(self._correlation_id),
                 },
             )
-            # Use the contract's handler_id as authoritative
 
-        # Extract metadata for handler_class (raw dict access needed for optional field)
+        # Extract handler_class from metadata (canonical location per contract schema)
         metadata = contract_data.get("metadata", {})
-
-        # handler_class can be in metadata or at top-level (for backwards compat)
-        handler_class = metadata.get("handler_class") or contract_data.get(
-            "handler_class"
-        )
+        handler_class = metadata.get("handler_class")
 
         # Use validated model for handler_kind when available, with fallback
         handler_kind = (
