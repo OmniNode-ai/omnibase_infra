@@ -86,14 +86,17 @@ class TestMockMCPToolDiscovery:
             f"Expected 'mock_compute' in tools, got: {tool_names}"
         )
 
-    async def test_mcp_endpoint_accessible(
+    async def test_initialize_returns_mcp_protocol_fields(
         self,
         mcp_http_client: object,
         mcp_app_dev_mode: dict[str, object],
     ) -> None:
-        """MCP endpoint is accessible via HTTP.
+        """MCP initialize returns required protocol fields.
 
-        Verifies the MCP endpoint responds to requests.
+        Verifies:
+        - Initialize request succeeds with status 200
+        - Response contains protocolVersion, capabilities, serverInfo
+        - serverInfo contains name and version fields
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])

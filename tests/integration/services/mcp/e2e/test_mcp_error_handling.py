@@ -82,9 +82,16 @@ class TestMockMCPRoutingErrors:
         # MANDATORY: For nonexistent tools, MCP MUST return an error in the response
         data = response.json()
         assert "error" in data, f"Expected error for nonexistent tool, got: {data}"
-        # JSON-RPC error response MUST have message or code
-        assert "message" in data["error"] or "code" in data["error"], (
-            f"JSON-RPC error missing message/code: {data['error']}"
+        assert "result" not in data, (
+            f"Error response should not contain result field: {data}"
+        )
+
+        # JSON-RPC error response MUST have both code and message per spec
+        error = data["error"]
+        assert "code" in error, f"JSON-RPC error missing code field: {error}"
+        assert "message" in error, f"JSON-RPC error missing message field: {error}"
+        assert isinstance(error["code"], int), (
+            f"JSON-RPC error code must be integer, got: {type(error['code'])}"
         )
 
 
@@ -130,6 +137,18 @@ class TestMockMCPBasicFunctionality:
         data = response.json()
         assert "result" in data, (
             f"Expected success result, got error: {data.get('error')}"
+        )
+        assert "error" not in data, (
+            f"Success response should not contain error field: {data}"
+        )
+
+        # MANDATORY: MCP tool call result MUST contain content array per spec
+        result = data["result"]
+        assert "content" in result, (
+            f"MCP tool call result missing content array: {result}"
+        )
+        assert isinstance(result["content"], list), (
+            f"MCP result content must be array, got: {type(result['content'])}"
         )
 
         # Verify call was recorded in history (prevents false positive if executor not called)
@@ -177,6 +196,18 @@ class TestMockMCPBasicFunctionality:
         data = response.json()
         assert "result" in data, (
             f"Expected success result, got error: {data.get('error')}"
+        )
+        assert "error" not in data, (
+            f"Success response should not contain error field: {data}"
+        )
+
+        # MANDATORY: MCP tool call result MUST contain content array per spec
+        result = data["result"]
+        assert "content" in result, (
+            f"MCP tool call result missing content array: {result}"
+        )
+        assert isinstance(result["content"], list), (
+            f"MCP result content must be array, got: {type(result['content'])}"
         )
 
         # Call should be recorded in history
@@ -242,15 +273,26 @@ class TestMockMCPBasicFunctionality:
             f"Response should not have both result and error: {data}"
         )
 
-        # If error, verify it's a proper JSON-RPC error structure
+        # If error, verify it's a proper JSON-RPC error structure with BOTH code and message
         if has_error:
             error = data["error"]
-            assert "message" in error or "code" in error, (
-                f"JSON-RPC error missing message/code: {error}"
+            assert "code" in error, f"JSON-RPC error missing code field: {error}"
+            assert "message" in error, f"JSON-RPC error missing message field: {error}"
+            assert isinstance(error["code"], int), (
+                f"JSON-RPC error code must be integer, got: {type(error['code'])}"
             )
 
-        # If success, verify call was recorded in history
+        # If success, verify call was recorded in history and result structure
         if has_result:
+            # MANDATORY: MCP tool call result MUST contain content array per spec
+            result = data["result"]
+            assert "content" in result, (
+                f"MCP tool call result missing content array: {result}"
+            )
+            assert isinstance(result["content"], list), (
+                f"MCP result content must be array, got: {type(result['content'])}"
+            )
+
             assert len(call_history) > initial_count, (
                 "Expected call to be recorded in history on successful execution"
             )
@@ -269,19 +311,24 @@ class TestMockMCPBasicFunctionality:
 class TestMockMCPAsyncExecution:
     """Mock-based MCP protocol tests for async execution behavior.
 
-    Uses mock JSON-RPC handlers (not real MCP SDK) to verify async execution.
-    Note: This class tests normal async execution, not timeout error scenarios.
+    Uses mock JSON-RPC handlers (not real MCP SDK) to verify async execution
+    completes successfully. This class tests the happy path of async execution,
+    not timeout or error scenarios.
     """
 
-    async def test_normal_execution_completes_successfully(
+    async def test_async_execution_completes_successfully(
         self,
         mcp_http_client: object,
         mcp_app_dev_mode: dict[str, object],
     ) -> None:
-        """Tool execution completes successfully via async handler.
+        """Async tool execution completes successfully and returns valid response.
 
-        This test verifies async execution works correctly and returns
-        a valid response within the test timeout.
+        This test verifies:
+        1. Async execution completes within test timeout
+        2. Response has correct HTTP 200 status
+        3. Response contains valid MCP result structure with content array
+        4. Call history is updated (executor was invoked)
+        5. Arguments are passed through correctly
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
@@ -297,7 +344,7 @@ class TestMockMCPAsyncExecution:
                 "method": "tools/call",
                 "params": {
                     "name": "mock_compute",
-                    "arguments": {"input_value": "timeout_test"},
+                    "arguments": {"input_value": "async_execution_test"},
                 },
                 "id": 1,
             },
@@ -312,6 +359,18 @@ class TestMockMCPAsyncExecution:
         assert "result" in data, (
             f"Expected success result, got error: {data.get('error')}"
         )
+        assert "error" not in data, (
+            f"Success response should not contain error field: {data}"
+        )
+
+        # MANDATORY: MCP tool call result MUST contain content array per spec
+        result = data["result"]
+        assert "content" in result, (
+            f"MCP tool call result missing content array: {result}"
+        )
+        assert isinstance(result["content"], list), (
+            f"MCP result content must be array, got: {type(result['content'])}"
+        )
 
         # Verify call was recorded in history (ensures executor was actually invoked)
         assert len(call_history) > initial_count, (
@@ -324,8 +383,8 @@ class TestMockMCPAsyncExecution:
         # Verify arguments were passed through correctly
         arguments = latest_call["arguments"]
         assert isinstance(arguments, dict), f"Expected dict, got {type(arguments)}"
-        assert arguments.get("input_value") == "timeout_test", (
-            f"Expected input_value='timeout_test', got {arguments}"
+        assert arguments.get("input_value") == "async_execution_test", (
+            f"Expected input_value='async_execution_test', got {arguments}"
         )
 
 
@@ -365,18 +424,22 @@ class TestMockMCPProtocolCompliance:
         assert "error" in data, (
             f"Expected JSON-RPC error for missing jsonrpc field, got: {data}"
         )
-
-        # Verify error has proper JSON-RPC structure (code and/or message)
-        error = data["error"]
-        assert "message" in error or "code" in error, (
-            f"JSON-RPC error missing message/code: {error}"
+        assert "result" not in data, (
+            f"Error response should not contain result field: {data}"
         )
 
-        # Verify error code is -32600 (Invalid Request) per JSON-RPC 2.0 spec
-        if "code" in error:
-            assert error["code"] == -32600, (
-                f"Expected error code -32600 (Invalid Request), got: {error['code']}"
-            )
+        # Verify error has proper JSON-RPC structure - BOTH code AND message required
+        error = data["error"]
+        assert "code" in error, f"JSON-RPC error missing code field: {error}"
+        assert "message" in error, f"JSON-RPC error missing message field: {error}"
+        assert isinstance(error["code"], int), (
+            f"JSON-RPC error code must be integer, got: {type(error['code'])}"
+        )
+
+        # MANDATORY: error code MUST be -32600 (Invalid Request) per JSON-RPC 2.0 spec
+        assert error["code"] == -32600, (
+            f"Expected error code -32600 (Invalid Request), got: {error['code']}"
+        )
 
     async def test_initialize_method_supported(
         self,
@@ -386,6 +449,10 @@ class TestMockMCPProtocolCompliance:
         """MCP initialize method is supported.
 
         The initialize method is required by MCP protocol.
+        This test verifies:
+        1. HTTP 200 status returned
+        2. Response contains result (not error)
+        3. Result contains required MCP fields (protocolVersion, capabilities)
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
@@ -413,6 +480,9 @@ class TestMockMCPProtocolCompliance:
         assert "result" in data, (
             f"Expected success result, got error: {data.get('error')}"
         )
+        assert "error" not in data, (
+            f"Success response should not contain error field: {data}"
+        )
 
         # MCP initialize response MUST include protocolVersion and capabilities
         result = data["result"]
@@ -421,6 +491,10 @@ class TestMockMCPProtocolCompliance:
         )
         assert "capabilities" in result, (
             f"MCP initialize response missing capabilities: {result}"
+        )
+        # Verify capabilities is a dict (can be empty but must be present)
+        assert isinstance(result["capabilities"], dict), (
+            f"MCP capabilities must be dict, got: {type(result['capabilities'])}"
         )
 
     async def test_malformed_json_returns_parse_error(
@@ -449,8 +523,21 @@ class TestMockMCPProtocolCompliance:
 
         data = response.json()
         assert "error" in data, f"Expected error for malformed JSON, got: {data}"
-        assert data["error"]["code"] == -32700, (
-            f"Expected parse error code -32700, got: {data['error']['code']}"
+        assert "result" not in data, (
+            f"Error response should not contain result field: {data}"
+        )
+
+        # Verify error has proper JSON-RPC structure - BOTH code AND message required
+        error = data["error"]
+        assert "code" in error, f"JSON-RPC error missing code field: {error}"
+        assert "message" in error, f"JSON-RPC error missing message field: {error}"
+        assert isinstance(error["code"], int), (
+            f"JSON-RPC error code must be integer, got: {type(error['code'])}"
+        )
+
+        # MANDATORY: parse error code MUST be -32700 per JSON-RPC 2.0 spec
+        assert error["code"] == -32700, (
+            f"Expected parse error code -32700, got: {error['code']}"
         )
 
     @pytest.mark.parametrize("method", ["initialize", "tools/list", "tools/call"])
@@ -491,16 +578,24 @@ class TestMockMCPProtocolCompliance:
         assert "error" in data, (
             f"Expected JSON-RPC error for missing jsonrpc field on {method}, got: {data}"
         )
-
-        # Verify error has proper JSON-RPC structure
-        error = data["error"]
-        assert "message" in error or "code" in error, (
-            f"JSON-RPC error missing message/code for {method}: {error}"
+        assert "result" not in data, (
+            f"Error response should not contain result field for {method}: {data}"
         )
 
-        # Verify error code is -32600 (Invalid Request) per JSON-RPC 2.0 spec
-        if "code" in error:
-            assert error["code"] == -32600, (
-                f"Expected error code -32600 (Invalid Request) for {method}, "
-                f"got: {error['code']}"
-            )
+        # Verify error has proper JSON-RPC structure - BOTH code AND message required
+        error = data["error"]
+        assert "code" in error, (
+            f"JSON-RPC error missing code field for {method}: {error}"
+        )
+        assert "message" in error, (
+            f"JSON-RPC error missing message field for {method}: {error}"
+        )
+        assert isinstance(error["code"], int), (
+            f"JSON-RPC error code must be integer for {method}, got: {type(error['code'])}"
+        )
+
+        # MANDATORY: error code MUST be -32600 (Invalid Request) per JSON-RPC 2.0 spec
+        assert error["code"] == -32600, (
+            f"Expected error code -32600 (Invalid Request) for {method}, "
+            f"got: {error['code']}"
+        )

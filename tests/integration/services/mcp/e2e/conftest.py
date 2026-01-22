@@ -56,6 +56,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from omnibase_core.models.errors import ModelOnexError
+from omnibase_infra.models.types import JsonDict
 
 if TYPE_CHECKING:
     from omnibase_infra.services.mcp import MCPServerLifecycle
@@ -70,7 +71,7 @@ class MCPDevModeFixture(TypedDict):
     """Type definition for mcp_app_dev_mode fixture result."""
 
     app: Starlette
-    call_history: list[dict[str, object]]
+    call_history: list[JsonDict]
     path: str
 
 
@@ -171,15 +172,15 @@ class MockToolDefinition:
 
 
 """Type alias for sync or async executor callables."""
-SyncExecutor = Callable[[str, dict[str, object]], dict[str, object]]
-AsyncExecutor = Callable[[str, dict[str, object]], Awaitable[dict[str, object]]]
+SyncExecutor = Callable[[str, JsonDict], JsonDict]
+AsyncExecutor = Callable[[str, JsonDict], Awaitable[JsonDict]]
 
 
 def create_json_rpc_handler(
-    available_tools: list[dict[str, object]],
+    available_tools: list[JsonDict],
     executor: SyncExecutor | AsyncExecutor,
     server_name: str,
-    call_history: list[dict[str, object]] | None = None,
+    call_history: list[JsonDict] | None = None,
 ) -> Callable[[Request], Awaitable[JSONResponse]]:
     """Factory for JSON-RPC endpoint handlers.
 
@@ -351,10 +352,10 @@ async def mcp_app_dev_mode() -> MCPDevModeFixture:
     from starlette.routing import Route
 
     # Track tool calls for assertions
-    call_history: list[dict[str, object]] = []
+    call_history: list[JsonDict] = []
 
     # Define available tools
-    available_tools: list[dict[str, object]] = [
+    available_tools: list[JsonDict] = [
         {
             "name": "mock_compute",
             "description": "Mock compute tool - echoes input for deterministic testing",
@@ -362,9 +363,7 @@ async def mcp_app_dev_mode() -> MCPDevModeFixture:
         }
     ]
 
-    def mock_executor(
-        tool_name: str, arguments: dict[str, object]
-    ) -> dict[str, object]:
+    def mock_executor(tool_name: str, arguments: JsonDict) -> JsonDict:
         """Mock executor that returns deterministic results."""
         correlation_id = str(uuid4())
         return {
@@ -489,7 +488,7 @@ async def mcp_app_full_infra(
     await lifecycle.start()
 
     # Get discovered tools from registry and convert to dict format
-    available_tools: list[dict[str, object]] = []
+    available_tools: list[JsonDict] = []
     if lifecycle.registry:
         registry_tools = await lifecycle.registry.list_tools()
         for tool in registry_tools:
@@ -502,9 +501,7 @@ async def mcp_app_full_infra(
             )
 
     # Real executor that routes to ONEX nodes via the MCP infrastructure
-    async def real_executor(
-        tool_name: str, arguments: dict[str, object]
-    ) -> dict[str, object]:
+    async def real_executor(tool_name: str, arguments: JsonDict) -> JsonDict:
         """Execute MCP tool by routing to ONEX nodes via lifecycle infrastructure.
 
         This executor validates tools against the registry (discovered from Consul)

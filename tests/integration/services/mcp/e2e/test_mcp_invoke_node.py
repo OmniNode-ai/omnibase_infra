@@ -140,11 +140,12 @@ class TestMockMCPInvokeNode:
         # Request must succeed
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
-        # Verify successful result (not error)
+        # Verify successful result (not error) before validating structure
         data = response.json()
         assert "result" in data, (
             f"Expected success result, got error: {data.get('error')}"
         )
+        assert "error" not in data, f"Unexpected error in response: {data.get('error')}"
 
         # Verify executor received the call (mandatory assertions)
         assert len(call_history) == 1, (
@@ -209,11 +210,17 @@ class TestMockMCPInvokeNode:
             f"Second call failed: {response2.status_code}"
         )
 
-        # Verify successful results (not errors)
+        # Verify successful results (not errors) before validating structure
         data1 = response1.json()
         data2 = response2.json()
         assert "result" in data1, f"First call error: {data1.get('error')}"
         assert "result" in data2, f"Second call error: {data2.get('error')}"
+        assert "error" not in data1, (
+            f"First call unexpected error: {data1.get('error')}"
+        )
+        assert "error" not in data2, (
+            f"Second call unexpected error: {data2.get('error')}"
+        )
 
         # Both calls must be recorded (mandatory assertions)
         assert len(call_history) == 2, (
@@ -268,13 +275,16 @@ class TestMockMCPInvokeNode:
             make_call("concurrent_5"),
         )
 
-        # All requests must succeed
+        # All requests must succeed and return valid results (not errors)
         for i, response in enumerate(responses):
             assert response.status_code == 200, (
                 f"Call {i + 1} failed: {response.status_code}"
             )
             data = response.json()
             assert "result" in data, f"Call {i + 1} error: {data.get('error')}"
+            assert "error" not in data, (
+                f"Call {i + 1} unexpected error: {data.get('error')}"
+            )
 
         # All calls must be recorded
         assert len(call_history) == 5, f"Expected 5 calls, got {len(call_history)}"
