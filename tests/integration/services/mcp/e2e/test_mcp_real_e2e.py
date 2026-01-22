@@ -96,11 +96,11 @@ def wait_for_server(host: str, port: int, timeout: float = 10.0) -> bool:
 
 
 # ============================================================================
-# REAL MCP SERVER FIXTURE
+# MCP SERVER FIXTURE
 # ============================================================================
 
 
-class RealMCPServer:
+class MCPServerFixture:
     """Wrapper for a real FastMCP server running in a background thread.
 
     This class manages the lifecycle of a real MCP server using the MCP SDK's
@@ -235,13 +235,13 @@ class RealMCPServer:
 
 
 @pytest.fixture
-async def real_mcp_server() -> AsyncIterator[RealMCPServer]:
+async def mcp_server_fixture() -> AsyncIterator[MCPServerFixture]:
     """Fixture providing a real running MCP server.
 
     Yields:
-        RealMCPServer instance with the server running.
+        MCPServerFixture instance with the server running.
     """
-    server = RealMCPServer()
+    server = MCPServerFixture()
     server.start()
     yield server
     server.stop()
@@ -282,7 +282,7 @@ class TestRealMCPInitialize:
 
     async def test_initialize_handshake_succeeds(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Real MCP initialize handshake succeeds.
 
@@ -291,7 +291,7 @@ class TestRealMCPInitialize:
         - Initialize handshake completes successfully
         - Server capabilities are returned
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             # If we get here, initialization succeeded
             # Check server capabilities
             capabilities = session.get_server_capabilities()
@@ -305,7 +305,7 @@ class TestRealMCPToolDiscovery:
 
     async def test_list_tools_returns_registered_tools(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Real MCP tools/list returns registered tools.
 
@@ -313,7 +313,7 @@ class TestRealMCPToolDiscovery:
         - tools/list returns the registered test tools
         - Tool metadata (name, description) is correct
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             result = await session.list_tools()
 
             # Should have tools
@@ -328,13 +328,13 @@ class TestRealMCPToolDiscovery:
 
     async def test_tool_has_correct_metadata(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Tools have correct metadata (name, description).
 
         Verifies the MCP SDK correctly exposes tool metadata.
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             result = await session.list_tools()
 
             # Find echo_tool and verify its metadata
@@ -351,7 +351,7 @@ class TestRealMCPToolInvocation:
 
     async def test_call_tool_returns_result(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Real MCP tools/call returns tool result.
 
@@ -360,7 +360,7 @@ class TestRealMCPToolInvocation:
         - Result is returned correctly
         - Tool execution is tracked on server side
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             result = await session.call_tool("echo_tool", {"message": "Hello MCP!"})
 
             # Should have content
@@ -375,23 +375,23 @@ class TestRealMCPToolInvocation:
             )
 
             # Verify tool was actually executed on server
-            assert len(real_mcp_server.tools_executed) == 1, (
+            assert len(mcp_server_fixture.tools_executed) == 1, (
                 "Tool should be executed exactly once"
             )
-            assert real_mcp_server.tools_executed[0]["tool_name"] == "echo_tool"
-            args = real_mcp_server.tools_executed[0]["arguments"]
+            assert mcp_server_fixture.tools_executed[0]["tool_name"] == "echo_tool"
+            args = mcp_server_fixture.tools_executed[0]["arguments"]
             assert isinstance(args, dict)
             assert args["message"] == "Hello MCP!"
 
     async def test_call_compute_tool_with_arguments(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Real MCP can invoke tool with typed arguments.
 
         Verifies argument passing and typed parameter handling.
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             result = await session.call_tool("compute_sum", {"a": 5, "b": 7})
 
             # Should have content
@@ -403,42 +403,42 @@ class TestRealMCPToolInvocation:
             )
 
             # Verify execution on server
-            assert len(real_mcp_server.tools_executed) == 1
-            exec_record = real_mcp_server.tools_executed[0]
+            assert len(mcp_server_fixture.tools_executed) == 1
+            exec_record = mcp_server_fixture.tools_executed[0]
             assert exec_record["tool_name"] == "compute_sum"
             assert exec_record["result"] == 12
 
     async def test_multiple_tool_calls_are_independent(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Multiple tool calls are tracked independently.
 
         Verifies each call has its own tracking entry.
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             # Make multiple calls
             await session.call_tool("echo_tool", {"message": "First"})
             await session.call_tool("echo_tool", {"message": "Second"})
             await session.call_tool("compute_sum", {"a": 1, "b": 2})
 
             # Should have 3 execution records
-            assert len(real_mcp_server.tools_executed) == 3, (
-                f"Expected 3 calls, got {len(real_mcp_server.tools_executed)}"
+            assert len(mcp_server_fixture.tools_executed) == 3, (
+                f"Expected 3 calls, got {len(mcp_server_fixture.tools_executed)}"
             )
 
             # Verify order and content
-            assert real_mcp_server.tools_executed[0]["tool_name"] == "echo_tool"
-            first_args = real_mcp_server.tools_executed[0]["arguments"]
+            assert mcp_server_fixture.tools_executed[0]["tool_name"] == "echo_tool"
+            first_args = mcp_server_fixture.tools_executed[0]["arguments"]
             assert isinstance(first_args, dict)
             assert first_args["message"] == "First"
 
-            assert real_mcp_server.tools_executed[1]["tool_name"] == "echo_tool"
-            second_args = real_mcp_server.tools_executed[1]["arguments"]
+            assert mcp_server_fixture.tools_executed[1]["tool_name"] == "echo_tool"
+            second_args = mcp_server_fixture.tools_executed[1]["arguments"]
             assert isinstance(second_args, dict)
             assert second_args["message"] == "Second"
 
-            assert real_mcp_server.tools_executed[2]["tool_name"] == "compute_sum"
+            assert mcp_server_fixture.tools_executed[2]["tool_name"] == "compute_sum"
 
 
 class TestRealMCPErrorHandling:
@@ -446,7 +446,7 @@ class TestRealMCPErrorHandling:
 
     async def test_nonexistent_tool_returns_error_result(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Calling nonexistent tool returns error result.
 
@@ -454,7 +454,7 @@ class TestRealMCPErrorHandling:
         unknown tools, rather than raising an exception. This test
         verifies this behavior.
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             result = await session.call_tool("nonexistent_tool_xyz_12345", {})
 
             # The SDK returns a result with isError=True
@@ -468,13 +468,13 @@ class TestRealMCPErrorHandling:
 
     async def test_tool_with_default_arguments(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Tool with default arguments works when arguments omitted.
 
         Verifies default argument handling through real MCP protocol.
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             # Call echo_tool without message - should use default
             result = await session.call_tool("echo_tool", {})
 
@@ -492,13 +492,13 @@ class TestRealMCPConcurrency:
 
     async def test_concurrent_tool_calls(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Concurrent tool calls are handled correctly.
 
         Verifies the real MCP server handles concurrent requests.
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             # Make concurrent calls
             tasks = [
                 session.call_tool("echo_tool", {"message": f"Concurrent {i}"})
@@ -513,11 +513,11 @@ class TestRealMCPConcurrency:
                 assert len(result.content) > 0
 
             # All should be tracked
-            assert len(real_mcp_server.tools_executed) == 5
+            assert len(mcp_server_fixture.tools_executed) == 5
 
             # All messages should be present (order may vary due to concurrency)
             messages: set[object] = set()
-            for exec_record in real_mcp_server.tools_executed:
+            for exec_record in mcp_server_fixture.tools_executed:
                 args = exec_record.get("arguments")
                 if isinstance(args, dict):
                     msg = args.get("message")
@@ -532,7 +532,7 @@ class TestRealMCPProtocolCompliance:
 
     async def test_server_reports_protocol_version(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Server reports MCP protocol version.
 
@@ -541,7 +541,7 @@ class TestRealMCPProtocolCompliance:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
-        async with streamable_http_client(real_mcp_server.url) as (
+        async with streamable_http_client(mcp_server_fixture.url) as (
             read_stream,
             write_stream,
             _,
@@ -560,7 +560,7 @@ class TestRealMCPProtocolCompliance:
 
     async def test_server_reports_server_info(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Server reports server info.
 
@@ -569,7 +569,7 @@ class TestRealMCPProtocolCompliance:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
-        async with streamable_http_client(real_mcp_server.url) as (
+        async with streamable_http_client(mcp_server_fixture.url) as (
             read_stream,
             write_stream,
             _,
@@ -588,13 +588,13 @@ class TestRealMCPProtocolCompliance:
 
     async def test_tool_input_schema_is_valid_json_schema(
         self,
-        real_mcp_server: RealMCPServer,
+        mcp_server_fixture: MCPServerFixture,
     ) -> None:
         """Tool input schemas are valid JSON schemas.
 
         Verifies the MCP SDK generates valid JSON schemas for tools.
         """
-        async with create_mcp_client(real_mcp_server.url) as session:
+        async with create_mcp_client(mcp_server_fixture.url) as session:
             result = await session.list_tools()
 
             for tool in result.tools:
@@ -610,11 +610,11 @@ class TestRealMCPProtocolCompliance:
 
 
 # ============================================================================
-# CONSUL-BASED MCP SERVER FIXTURE
+# MCP CONSUL SERVER FIXTURE
 # ============================================================================
 
 
-class RealMCPServerWithConsul:
+class MCPConsulServerFixture:
     """Wrapper for a real FastMCP server that discovers tools from Consul.
 
     This class manages the lifecycle of a real MCP server that discovers
@@ -835,9 +835,9 @@ class RealMCPServerWithConsul:
 
 
 @pytest.fixture
-async def real_mcp_server_with_consul(
+async def mcp_consul_server_fixture(
     infra_availability: dict[str, bool],
-) -> AsyncIterator[RealMCPServerWithConsul]:
+) -> AsyncIterator[MCPConsulServerFixture]:
     """Fixture providing a real MCP server that discovers tools from Consul.
 
     This fixture requires Consul to be available. If Consul is not reachable,
@@ -847,14 +847,14 @@ async def real_mcp_server_with_consul(
         infra_availability: Infrastructure availability flags from conftest.
 
     Yields:
-        RealMCPServerWithConsul instance with the server running.
+        MCPConsulServerFixture instance with the server running.
     """
     if not infra_availability.get("consul", False):
         pytest.skip(
             "Consul not available. Set CONSUL_HOST and ensure Consul is running."
         )
 
-    server = RealMCPServerWithConsul()
+    server = MCPConsulServerFixture()
     await server.discover_tools()
     server.start()
     yield server
@@ -882,7 +882,7 @@ class TestRealMCPWithConsul:
 
     async def test_consul_discovery_populates_registry(
         self,
-        real_mcp_server_with_consul: RealMCPServerWithConsul,
+        mcp_consul_server_fixture: MCPConsulServerFixture,
     ) -> None:
         """Consul discovery populates the tool registry.
 
@@ -893,28 +893,28 @@ class TestRealMCPWithConsul:
         """
         # The fixture has already performed discovery
         # Just verify the discovery happened (even if empty)
-        assert real_mcp_server_with_consul.discovered_tools is not None
+        assert mcp_consul_server_fixture.discovered_tools is not None
 
-        if not real_mcp_server_with_consul.discovered_tools:
+        if not mcp_consul_server_fixture.discovered_tools:
             pytest.skip(
                 "No MCP-enabled tools discovered from Consul. "
                 "Register services with tags: mcp-enabled, node-type:orchestrator, mcp-tool:<name>"
             )
 
         # Verify discovered tools have required fields
-        for tool in real_mcp_server_with_consul.discovered_tools:
+        for tool in mcp_consul_server_fixture.discovered_tools:
             assert "name" in tool, "Tool must have name"
             assert "description" in tool, "Tool must have description"
             assert tool["name"], "Tool name must not be empty"
 
         logger.info(
             "Consul discovery test passed",
-            extra={"tool_count": len(real_mcp_server_with_consul.discovered_tools)},
+            extra={"tool_count": len(mcp_consul_server_fixture.discovered_tools)},
         )
 
     async def test_list_tools_returns_consul_discovered_tools(
         self,
-        real_mcp_server_with_consul: RealMCPServerWithConsul,
+        mcp_consul_server_fixture: MCPConsulServerFixture,
     ) -> None:
         """MCP tools/list returns Consul-discovered tools.
 
@@ -922,10 +922,10 @@ class TestRealMCPWithConsul:
         - Real MCP client can connect to server with Consul-discovered tools
         - tools/list returns the tools discovered from Consul
         """
-        if not real_mcp_server_with_consul.discovered_tools:
+        if not mcp_consul_server_fixture.discovered_tools:
             pytest.skip("No MCP-enabled tools discovered from Consul")
 
-        async with create_mcp_client(real_mcp_server_with_consul.url) as session:
+        async with create_mcp_client(mcp_consul_server_fixture.url) as session:
             result = await session.list_tools()
 
             # Should have tools from Consul
@@ -934,7 +934,7 @@ class TestRealMCPWithConsul:
             # Verify discovered tools are present
             returned_names = {tool.name for tool in result.tools}
             expected_names = {
-                str(t["name"]) for t in real_mcp_server_with_consul.discovered_tools
+                str(t["name"]) for t in mcp_consul_server_fixture.discovered_tools
             }
 
             # All expected tools should be in returned tools
@@ -946,7 +946,7 @@ class TestRealMCPWithConsul:
 
     async def test_consul_discovered_tool_has_correct_metadata(
         self,
-        real_mcp_server_with_consul: RealMCPServerWithConsul,
+        mcp_consul_server_fixture: MCPConsulServerFixture,
     ) -> None:
         """Consul-discovered tools have correct metadata.
 
@@ -955,10 +955,10 @@ class TestRealMCPWithConsul:
         - Tool has description
         - Tool has input schema
         """
-        if not real_mcp_server_with_consul.discovered_tools:
+        if not mcp_consul_server_fixture.discovered_tools:
             pytest.skip("No MCP-enabled tools discovered from Consul")
 
-        async with create_mcp_client(real_mcp_server_with_consul.url) as session:
+        async with create_mcp_client(mcp_consul_server_fixture.url) as session:
             result = await session.list_tools()
             assert result.tools, "Expected tools"
 
@@ -973,7 +973,7 @@ class TestRealMCPWithConsul:
 
     async def test_call_consul_discovered_tool(
         self,
-        real_mcp_server_with_consul: RealMCPServerWithConsul,
+        mcp_consul_server_fixture: MCPConsulServerFixture,
     ) -> None:
         """Can call a Consul-discovered tool via MCP protocol.
 
@@ -982,14 +982,14 @@ class TestRealMCPWithConsul:
         - Result contains expected fields from our test handler
         - Correlation ID is included for tracing
         """
-        if not real_mcp_server_with_consul.discovered_tools:
+        if not mcp_consul_server_fixture.discovered_tools:
             pytest.skip("No MCP-enabled tools discovered from Consul")
 
         # Get first discovered tool
-        first_tool = real_mcp_server_with_consul.discovered_tools[0]
+        first_tool = mcp_consul_server_fixture.discovered_tools[0]
         tool_name = str(first_tool["name"])
 
-        async with create_mcp_client(real_mcp_server_with_consul.url) as session:
+        async with create_mcp_client(mcp_consul_server_fixture.url) as session:
             result = await session.call_tool(tool_name, {"input_data": "test from E2E"})
 
             # Should have content
@@ -1018,7 +1018,7 @@ class TestRealMCPWithConsul:
 
     async def test_multiple_consul_tools_are_independent(
         self,
-        real_mcp_server_with_consul: RealMCPServerWithConsul,
+        mcp_consul_server_fixture: MCPConsulServerFixture,
     ) -> None:
         """Multiple Consul-discovered tools can be called independently.
 
@@ -1026,15 +1026,15 @@ class TestRealMCPWithConsul:
         - Each tool returns its own metadata
         - Tools don't interfere with each other
         """
-        if len(real_mcp_server_with_consul.discovered_tools) < 2:
+        if len(mcp_consul_server_fixture.discovered_tools) < 2:
             pytest.skip("Need at least 2 MCP-enabled tools in Consul for this test")
 
         import json
 
-        async with create_mcp_client(real_mcp_server_with_consul.url) as session:
+        async with create_mcp_client(mcp_consul_server_fixture.url) as session:
             # Call first two tools
-            tool1 = str(real_mcp_server_with_consul.discovered_tools[0]["name"])
-            tool2 = str(real_mcp_server_with_consul.discovered_tools[1]["name"])
+            tool1 = str(mcp_consul_server_fixture.discovered_tools[0]["name"])
+            tool2 = str(mcp_consul_server_fixture.discovered_tools[1]["name"])
 
             result1 = await session.call_tool(tool1, {"input_data": "call1"})
             result2 = await session.call_tool(tool2, {"input_data": "call2"})
@@ -1061,16 +1061,16 @@ class TestRealMCPWithConsul:
 
     async def test_server_reports_consul_tool_count_in_capabilities(
         self,
-        real_mcp_server_with_consul: RealMCPServerWithConsul,
+        mcp_consul_server_fixture: MCPConsulServerFixture,
     ) -> None:
         """Server with Consul tools reports tools capability.
 
         Verifies the MCP server correctly reports it supports tools.
         """
-        if not real_mcp_server_with_consul.discovered_tools:
+        if not mcp_consul_server_fixture.discovered_tools:
             pytest.skip("No MCP-enabled tools discovered from Consul")
 
-        async with create_mcp_client(real_mcp_server_with_consul.url) as session:
+        async with create_mcp_client(mcp_consul_server_fixture.url) as session:
             capabilities = session.get_server_capabilities()
             assert capabilities is not None, "Server must return capabilities"
             assert capabilities.tools is not None, "Server must support tools"
@@ -1088,7 +1088,7 @@ class TestRealMCPWithConsul:
             pytest.skip("Consul not available")
 
         # Create server with discovery (may find no tools)
-        server = RealMCPServerWithConsul()
+        server = MCPConsulServerFixture()
         await server.discover_tools()
 
         # If tools were discovered, skip this test
