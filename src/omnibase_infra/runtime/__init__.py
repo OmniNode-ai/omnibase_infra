@@ -212,6 +212,14 @@ from omnibase_infra.runtime.transition_notification_outbox import (
     TransitionNotificationOutbox,
 )
 
+# Registry contract source (OMN-1100)
+from omnibase_infra.runtime.registry_contract_source import (
+    DEFAULT_CONTRACT_PREFIX,
+    RegistryContractSource,
+    list_contracts_in_consul,
+    store_contract_in_consul,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -343,4 +351,9 @@ __all__: list[str] = [
     # Transition notification publisher and outbox (OMN-1139)
     "TransitionNotificationOutbox",
     "TransitionNotificationPublisher",
+    # Registry contract source (OMN-1100)
+    "DEFAULT_CONTRACT_PREFIX",
+    "RegistryContractSource",
+    "list_contracts_in_consul",
+    "store_contract_in_consul",
 ]
