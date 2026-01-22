@@ -152,6 +152,63 @@ class TestMCPBasicFunctionality:
         assert isinstance(arguments, dict), f"Expected dict, got {type(arguments)}"
         assert arguments["test_key"] == "test_value"
 
+    async def test_tool_call_with_missing_required_argument(
+        self,
+        mcp_http_client: object,
+        mcp_app_dev_mode: dict[str, object],
+    ) -> None:
+        """Tool call with missing required argument handles gracefully.
+
+        Verifies the MCP layer handles partial arguments correctly,
+        either by using defaults or returning a structured error.
+        This differs from empty arguments - here we provide some fields
+        but potentially omit others that may be required.
+        """
+        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
+        path = str(mcp_app_dev_mode["path"])
+
+        # Call with partial arguments - some fields present, others missing
+        # The tool may expect certain fields; we intentionally provide incomplete data
+        response = await client.post(
+            f"{path}/",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "mock_compute",
+                    "arguments": {
+                        # Provide only one field, potentially missing required fields
+                        "partial_field": "partial_value",
+                    },
+                },
+                "id": 1,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+
+        # System should handle gracefully: either succeed (lenient) or return error
+        assert response.status_code == 200, (
+            f"Expected 200 (graceful handling), got {response.status_code}"
+        )
+
+        data = response.json()
+        # Response must be well-formed JSON-RPC: either result or error, not both
+        has_result = "result" in data
+        has_error = "error" in data
+        assert has_result or has_error, (
+            f"Expected either result or error in response, got: {data}"
+        )
+        assert not (has_result and has_error), (
+            f"Response should not have both result and error: {data}"
+        )
+
+        # If error, verify it's a proper JSON-RPC error structure
+        if has_error:
+            error = data["error"]
+            assert "message" in error or "code" in error, (
+                f"JSON-RPC error missing message/code: {error}"
+            )
+
 
 class TestMCPTimeoutHandling:
     """MCP timeout handling tests."""
@@ -300,3 +357,41 @@ class TestMCPProtocolCompliance:
         assert data["error"]["code"] == -32700, (
             f"Expected parse error code -32700, got: {data['error']['code']}"
         )
+
+    @pytest.mark.parametrize("method", ["initialize", "tools/list", "tools/call"])
+    async def test_missing_jsonrpc_field_returns_error(
+        self,
+        mcp_http_client: object,
+        mcp_app_dev_mode: dict[str, object],
+        method: str,
+    ) -> None:
+        """Missing jsonrpc field returns error for {method}.
+
+        JSON-RPC 2.0 requires the jsonrpc field to be present.
+        Testing across multiple MCP methods ensures consistent validation.
+        """
+        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
+        path = str(mcp_app_dev_mode["path"])
+
+        # Build request without jsonrpc field
+        request_body: dict[str, object] = {"method": method, "id": 1}
+        if method == "tools/call":
+            request_body["params"] = {"name": "mock_compute", "arguments": {}}
+
+        response = await client.post(
+            f"{path}/",
+            json=request_body,
+            headers={"Content-Type": "application/json"},
+        )
+
+        # Should return error for invalid JSON-RPC (either 400 or 200 with error)
+        assert response.status_code in (200, 400), (
+            f"Expected 200 or 400 for missing jsonrpc, got {response.status_code}"
+        )
+
+        # If 200, the response MUST contain an error for invalid JSON-RPC
+        if response.status_code == 200:
+            data = response.json()
+            assert "error" in data, (
+                f"Expected error for missing jsonrpc field on {method}, got: {data}"
+            )

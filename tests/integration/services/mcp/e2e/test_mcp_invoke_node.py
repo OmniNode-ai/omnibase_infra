@@ -190,6 +190,63 @@ class TestMCPInvokeNode:
             "Each invocation must have unique correlation_id"
         )
 
+    async def test_concurrent_invocations_are_independent(
+        self,
+        mcp_http_client: object,
+        mcp_app_dev_mode: dict[str, object],
+    ) -> None:
+        """Concurrent tool invocations are independent and tracked.
+
+        Unlike sequential tests, this verifies the MCP server correctly
+        handles multiple simultaneous requests without race conditions.
+        """
+        import asyncio
+
+        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
+        path = str(mcp_app_dev_mode["path"])
+        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+
+        async def make_call(value: str) -> httpx.Response:
+            return await client.post(
+                f"{path}/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "mock_compute",
+                        "arguments": {"input_value": value},
+                    },
+                    "id": 1,
+                },
+                headers={"Content-Type": "application/json"},
+            )
+
+        # Make 5 concurrent calls
+        responses = await asyncio.gather(
+            make_call("concurrent_1"),
+            make_call("concurrent_2"),
+            make_call("concurrent_3"),
+            make_call("concurrent_4"),
+            make_call("concurrent_5"),
+        )
+
+        # All requests must succeed
+        for i, response in enumerate(responses):
+            assert response.status_code == 200, (
+                f"Call {i + 1} failed: {response.status_code}"
+            )
+            data = response.json()
+            assert "result" in data, f"Call {i + 1} error: {data.get('error')}"
+
+        # All calls must be recorded
+        assert len(call_history) == 5, f"Expected 5 calls, got {len(call_history)}"
+
+        # All correlation_ids must be unique
+        correlation_ids = [call["correlation_id"] for call in call_history]
+        assert len(set(correlation_ids)) == 5, (
+            "Each concurrent call must have unique correlation_id"
+        )
+
 
 class TestMCPInvokeWorkflow:
     """MCP protocol invokes full ONEX workflow (requires infrastructure)."""
