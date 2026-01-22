@@ -21,6 +21,7 @@ from uuid import uuid4
 import consul
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError
 from omnibase_infra.handlers.service_discovery import HandlerServiceDiscoveryConsul
 from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_status import (
@@ -118,7 +119,9 @@ class TestListAllServices:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful listing of all services from Consul catalog."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -140,7 +143,9 @@ class TestListAllServices:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test listing services filtered by tag."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -160,7 +165,9 @@ class TestListAllServices:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test listing services filtered by 'db' tag."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -180,7 +187,9 @@ class TestListAllServices:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test listing services with tag that doesn't exist returns empty."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -197,7 +206,9 @@ class TestListAllServices:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test list_all_services with explicit correlation ID."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -215,7 +226,9 @@ class TestListAllServices:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test list_all_services raises InfraTimeoutError on timeout."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
             timeout_seconds=0.001,  # Very short timeout
         )
@@ -240,7 +253,9 @@ class TestListAllServices:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test list_all_services raises InfraConnectionError on Consul error."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -264,7 +279,9 @@ class TestListAllServices:
         shutdown() doesn't clear the client reference. To test the shutdown
         protection, we manually set _consul_client to None after shutdown.
         """
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -287,7 +304,9 @@ class TestGetAllServiceInstances:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test getting all instances including unhealthy ones."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -346,7 +365,9 @@ class TestGetAllServiceInstances:
             ],
         )
 
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -372,7 +393,9 @@ class TestGetAllServiceInstances:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test that health output is captured from Consul checks."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -403,7 +426,9 @@ class TestGetAllServiceInstances:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test that service metadata is captured."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -424,7 +449,9 @@ class TestGetAllServiceInstances:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test that service tags are captured."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -445,7 +472,9 @@ class TestGetAllServiceInstances:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test that valid UUID service IDs are preserved."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -503,7 +532,9 @@ class TestGetAllServiceInstances:
             ],
         )
 
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -528,7 +559,9 @@ class TestGetAllServiceInstances:
         """Test get_all_service_instances returns empty list for unknown service."""
         mock_consul_client.health.service.return_value = (0, [])
 
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -547,7 +580,9 @@ class TestGetAllServiceInstances:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test get_all_service_instances with explicit correlation ID."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -570,7 +605,9 @@ class TestGetAllServiceInstances:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test get_all_service_instances raises InfraTimeoutError on timeout."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
             timeout_seconds=0.001,  # Very short timeout
         )
@@ -598,7 +635,9 @@ class TestGetAllServiceInstances:
         mock_consul_client: MagicMock,
     ) -> None:
         """Test get_all_service_instances raises InfraConnectionError on Consul error."""
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -625,7 +664,9 @@ class TestGetAllServiceInstances:
         shutdown() doesn't clear the client reference. To test the shutdown
         protection, we manually set _consul_client to None after shutdown.
         """
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_client=mock_consul_client,
         )
 
@@ -675,7 +716,10 @@ class TestHealthStatusMapping:
             ],
         )
 
-        handler = HandlerServiceDiscoveryConsul(consul_client=mock_consul_client)
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        handler = HandlerServiceDiscoveryConsul(
+            container=mock_container, consul_client=mock_consul_client
+        )
         instances = await handler.get_all_service_instances(
             service_name="test-service",
             include_unhealthy=True,
@@ -716,7 +760,10 @@ class TestHealthStatusMapping:
             ],
         )
 
-        handler = HandlerServiceDiscoveryConsul(consul_client=mock_consul_client)
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        handler = HandlerServiceDiscoveryConsul(
+            container=mock_container, consul_client=mock_consul_client
+        )
         instances = await handler.get_all_service_instances(
             service_name="test-service",
             include_unhealthy=True,
@@ -757,7 +804,10 @@ class TestHealthStatusMapping:
             ],
         )
 
-        handler = HandlerServiceDiscoveryConsul(consul_client=mock_consul_client)
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        handler = HandlerServiceDiscoveryConsul(
+            container=mock_container, consul_client=mock_consul_client
+        )
         instances = await handler.get_all_service_instances(
             service_name="test-service",
             include_unhealthy=True,
@@ -798,7 +848,10 @@ class TestHealthStatusMapping:
             ],
         )
 
-        handler = HandlerServiceDiscoveryConsul(consul_client=mock_consul_client)
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        handler = HandlerServiceDiscoveryConsul(
+            container=mock_container, consul_client=mock_consul_client
+        )
         instances = await handler.get_all_service_instances(
             service_name="test-service",
             include_unhealthy=True,
@@ -833,7 +886,10 @@ class TestHealthStatusMapping:
             ],
         )
 
-        handler = HandlerServiceDiscoveryConsul(consul_client=mock_consul_client)
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        handler = HandlerServiceDiscoveryConsul(
+            container=mock_container, consul_client=mock_consul_client
+        )
         instances = await handler.get_all_service_instances(
             service_name="test-service",
             include_unhealthy=True,

@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -27,13 +28,19 @@ from omnibase_infra.handlers.handler_db import HandlerDb
 from tests.helpers import filter_handler_warnings
 
 
+@pytest.fixture
+def mock_container() -> MagicMock:
+    """Create mock ONEX container for HandlerDb tests."""
+    return MagicMock(spec=ModelONEXContainer)
+
+
 class TestHandlerDbInitialization:
     """Test suite for HandlerDb initialization."""
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     def test_handler_init_default_state(self, handler: HandlerDb) -> None:
         """Test handler initializes in uninitialized state."""
@@ -163,9 +170,9 @@ class TestHandlerDbQueryOperations:
     """Test suite for db.query operations."""
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -286,9 +293,9 @@ class TestHandlerDbExecuteOperations:
     """Test suite for db.execute operations."""
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -427,9 +434,9 @@ class TestHandlerDbErrorHandling:
     """Test suite for error handling."""
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -827,9 +834,9 @@ class TestHandlerDbDescribe:
     """Test suite for describe operations."""
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     def test_describe_returns_handler_metadata(self, handler: HandlerDb) -> None:
         """Test describe returns correct handler metadata."""
@@ -873,9 +880,9 @@ class TestHandlerDbLifecycle:
     """Test suite for lifecycle management."""
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -999,9 +1006,9 @@ class TestHandlerDbCorrelationId:
     """Test suite for correlation ID handling."""
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -1116,9 +1123,9 @@ class TestHandlerDbDsnSecurity:
     """
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     def test_sanitize_dsn_removes_password(self, handler: HandlerDb) -> None:
         """Test _sanitize_dsn replaces password with asterisks."""
@@ -1201,9 +1208,9 @@ class TestHandlerDbRowCountParsing:
     """Test suite for row count parsing."""
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     def test_parse_insert_row_count(self, handler: HandlerDb) -> None:
         """Test parsing INSERT row count."""
@@ -1241,9 +1248,9 @@ class TestHandlerDbLogWarnings:
     HANDLER_MODULE = "omnibase_infra.handlers.handler_db"
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -1308,9 +1315,9 @@ class TestHandlerDbMapPostgresError:
     """
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     @pytest.fixture
     def error_context(self) -> ModelInfraErrorContext:
@@ -1477,9 +1484,9 @@ class TestHandlerDbTransientErrorClassification:
     """
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     # --- Transient error tests (should return True) ---
 
@@ -1723,9 +1730,9 @@ class TestHandlerDbCircuitBreakerErrorClassification:
     """
 
     @pytest.fixture
-    def handler(self) -> HandlerDb:
+    def handler(self, mock_container: MagicMock) -> HandlerDb:
         """Create HandlerDb fixture."""
-        return HandlerDb()
+        return HandlerDb(mock_container)
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:

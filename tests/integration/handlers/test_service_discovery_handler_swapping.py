@@ -39,10 +39,12 @@ import os
 import socket
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers.service_discovery.handler_service_discovery_mock import (
     HandlerServiceDiscoveryMock,
 )
@@ -441,7 +443,9 @@ class TestHandlerFactoryPattern:
                 HandlerServiceDiscoveryConsul,
             )
 
+            mock_container = MagicMock(spec=ModelONEXContainer)
             return HandlerServiceDiscoveryConsul(
+                container=mock_container,
                 consul_host=os.getenv("CONSUL_HOST", "localhost"),
                 consul_port=int(os.getenv("CONSUL_PORT", "8500")),
                 consul_scheme=os.getenv("CONSUL_SCHEME", "http"),
@@ -636,7 +640,9 @@ class TestConsulHandlerSwapping(BaseHandlerSwappingTests):
             HandlerServiceDiscoveryConsul,
         )
 
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerServiceDiscoveryConsul(
+            container=mock_container,
             consul_host=os.getenv("CONSUL_HOST", "localhost"),
             consul_port=int(os.getenv("CONSUL_PORT", "8500")),
             consul_scheme=os.getenv("CONSUL_SCHEME", "http"),

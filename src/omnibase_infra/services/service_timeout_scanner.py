@@ -31,6 +31,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
@@ -126,7 +127,7 @@ class ServiceTimeoutScanner:
 
     Usage:
         >>> reader = ProjectionReaderRegistration(pool)
-        >>> scanner = ServiceTimeoutScanner(reader)
+        >>> scanner = ServiceTimeoutScanner(container, reader)
         >>> result = await scanner.find_overdue_entities(now=tick.now)
         >>>
         >>> for projection in result.ack_timeouts:
@@ -152,12 +153,14 @@ class ServiceTimeoutScanner:
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration,
         batch_size: int | None = None,
     ) -> None:
-        """Initialize with projection reader dependency.
+        """Initialize the timeout scanner service.
 
         Args:
+            container: ONEX container for dependency injection.
             projection_reader: The projection reader for database queries.
                 Must be initialized with an asyncpg connection pool.
             batch_size: Maximum entities to return per query type.
@@ -166,8 +169,9 @@ class ServiceTimeoutScanner:
         Example:
             >>> pool = await asyncpg.create_pool(dsn)
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> scanner = ServiceTimeoutScanner(reader)
+            >>> scanner = ServiceTimeoutScanner(container, reader)
         """
+        self._container = container
         self._reader = projection_reader
         self._batch_size = batch_size or self.DEFAULT_BATCH_SIZE
 

@@ -686,13 +686,18 @@ async def container_with_handler_registry(
 
 
 @pytest.fixture
-async def cleanup_consul_test_services() -> AsyncGenerator[None, None]:
+async def cleanup_consul_test_services(
+    mock_container: MagicMock,
+) -> AsyncGenerator[None, None]:
     """Clean up orphaned Consul service registrations after each test.
 
     This fixture provides comprehensive Consul cleanup by:
     1. Yielding to let the test run
     2. After the test, querying all registered services
     3. Deregistering any services matching test patterns
+
+    Args:
+        mock_container: ONEX container mock for dependency injection.
 
     Test Service Identification Patterns:
         - Service ID starts with "test-"
@@ -741,7 +746,7 @@ async def cleanup_consul_test_services() -> AsyncGenerator[None, None]:
     try:
         from omnibase_infra.handlers import HandlerConsul
 
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
         await handler.initialize(
             {
                 "host": consul_host,

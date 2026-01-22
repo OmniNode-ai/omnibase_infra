@@ -74,6 +74,7 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_circuit_breaker_state_updates(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -85,7 +86,7 @@ class TestHandlerVaultConcurrency:
         2. Verifying the circuit breaker failure count matches observed failures
         3. Ensuring no RuntimeError from race conditions occurs
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 10
 
@@ -202,11 +203,12 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_successful_operations(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent successful operations don't cause race conditions."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Configure larger queue size to handle concurrent requests
         vault_config["max_concurrent_operations"] = 20
@@ -244,11 +246,12 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_failures_trigger_circuit_correctly(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent failures correctly trigger circuit breaker."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 3
 
@@ -284,11 +287,12 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_mixed_write_operations(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent write operations are thread-safe."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -325,6 +329,7 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_shutdown_during_concurrent_operations(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -336,7 +341,7 @@ class TestHandlerVaultConcurrency:
         3. Handler state is properly cleaned up after shutdown
         4. All tasks complete (either successfully or with expected errors)
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -417,11 +422,12 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_thread_pool_handles_concurrent_load(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool correctly handles concurrent operation load."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Set thread pool size to 5 and queue multiplier to handle 25 requests
         # Queue size = 5 * 10 = 50, which can handle 25 concurrent requests
@@ -458,11 +464,12 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_circuit_breaker_lock_prevents_race_conditions(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test asyncio.Lock prevents race conditions in circuit breaker state updates."""
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 5
 
@@ -504,6 +511,7 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_circuit_breaker_state_transition_race_open_to_half_open(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -513,7 +521,7 @@ class TestHandlerVaultConcurrency:
         does not cause race conditions when multiple concurrent requests attempt
         to transition the circuit breaker state after the reset timeout.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 1
         vault_config["circuit_breaker_reset_timeout_seconds"] = (
@@ -601,6 +609,7 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_executor_shutdown_robustness(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -612,7 +621,7 @@ class TestHandlerVaultConcurrency:
         3. Shutdown is safe even when tasks are in progress
         4. Double shutdown is handled gracefully
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -654,6 +663,7 @@ class TestHandlerVaultConcurrency:
     @pytest.mark.asyncio
     async def test_circuit_breaker_concurrent_half_open_recovery(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -663,7 +673,7 @@ class TestHandlerVaultConcurrency:
         in HALF_OPEN state simultaneously, only one succeeds in transitioning
         the circuit back to CLOSED state without race conditions.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 1
         vault_config["circuit_breaker_reset_timeout_seconds"] = (
@@ -767,6 +777,7 @@ class TestHandlerVaultConcurrentRetry:
     @pytest.mark.asyncio
     async def test_concurrent_retry_operations_isolated_state(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -776,7 +787,7 @@ class TestHandlerVaultConcurrentRetry:
         simultaneously, each maintains its own independent retry count
         and backoff state. No shared mutable state should cause interference.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -866,6 +877,7 @@ class TestHandlerVaultConcurrentRetry:
     @pytest.mark.asyncio
     async def test_concurrent_mixed_success_failure_isolated_retry(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -874,7 +886,7 @@ class TestHandlerVaultConcurrentRetry:
         Some operations succeed immediately, others fail and retry.
         Each operation's retry logic should be independent.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -952,6 +964,7 @@ class TestHandlerVaultConcurrentRetry:
     @pytest.mark.asyncio
     async def test_concurrent_all_operations_retry_to_exhaustion(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -960,7 +973,7 @@ class TestHandlerVaultConcurrentRetry:
         When all operations fail repeatedly, each should track its own
         retry count and all should exhaust retries independently.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         # Set threshold high enough for concurrent testing
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
@@ -1010,6 +1023,7 @@ class TestHandlerVaultConcurrentRetry:
     @pytest.mark.asyncio
     async def test_concurrent_retry_with_different_operations(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1018,7 +1032,7 @@ class TestHandlerVaultConcurrentRetry:
         Multiple operation types (read_secret, write_secret, delete_secret)
         running concurrently should each have isolated retry state.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
 
@@ -1138,6 +1152,7 @@ class TestHandlerVaultConcurrentRetry:
     @pytest.mark.asyncio
     async def test_high_concurrency_retry_stress_test(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1146,7 +1161,7 @@ class TestHandlerVaultConcurrentRetry:
         Launch many concurrent operations with mixed success/failure
         to stress test the retry state isolation under load.
         """
-        handler = HandlerVault()
+        handler = HandlerVault(mock_container)
 
         vault_config["circuit_breaker_failure_threshold"] = 20  # Max allowed
         vault_config["max_concurrent_operations"] = 50
@@ -1224,6 +1239,7 @@ class TestHandlerVaultConcurrentRetry:
     @pytest.mark.asyncio
     async def test_concurrent_retry_no_state_leakage_between_handlers(
         self,
+        mock_container: MagicMock,
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
@@ -1268,8 +1284,8 @@ class TestHandlerVaultConcurrentRetry:
                 return success_response
 
             # Create two handlers
-            handler1 = HandlerVault()
-            handler2 = HandlerVault()
+            handler1 = HandlerVault(mock_container)
+            handler2 = HandlerVault(mock_container)
 
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
                 get_response_handler1

@@ -3,13 +3,13 @@
 """Protocol Binding Registry - SINGLE SOURCE OF TRUTH for handler registration.
 
 This module provides the RegistryProtocolBinding class which implements the
-ProtocolHandlerRegistry protocol from omnibase_spi. It serves as the
+ProtocolContainerAwareRegistry protocol from omnibase_spi. It serves as the
 centralized location for registering and resolving protocol handlers
 in the omnibase_infra layer.
 
 The registry is responsible for:
-- Registering protocol handlers by protocol type identifier
-- Resolving handler classes for protocol types
+- Registering infrastructure handlers by protocol type identifier
+- Resolving handler classes for protocol types (requires ProtocolContainerAware)
 - Thread-safe registration operations
 - Listing all registered protocol types
 
@@ -70,7 +70,7 @@ from typing import TYPE_CHECKING, Any, cast
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
 if TYPE_CHECKING:
-    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
+    from omnibase_infra.protocols import ProtocolContainerAware
 
 
 # =============================================================================
@@ -131,11 +131,11 @@ class RegistryError(RuntimeHostError):
 class RegistryProtocolBinding:
     """SINGLE SOURCE OF TRUTH for handler registration in omnibase_infra.
 
-    Thread-safe registry for protocol handlers. Implements ProtocolHandlerRegistry
+    Thread-safe registry for protocol handlers. Implements ProtocolContainerAwareRegistry
     protocol from omnibase_spi.
 
     The registry maintains a mapping from protocol type identifiers (strings like
-    "http", "db", "kafka") to handler classes that implement the ProtocolHandler
+    "http", "db", "kafka") to handler classes that implement the ProtocolContainerAware
     protocol.
 
     TODO(OMN-40): Migrate handler signature from tuple[str, str] to structured model.
@@ -163,13 +163,13 @@ class RegistryProtocolBinding:
 
     def __init__(self) -> None:
         """Initialize an empty handler registry with thread lock."""
-        self._registry: dict[str, type[ProtocolHandler]] = {}
+        self._registry: dict[str, type[ProtocolContainerAware]] = {}
         self._lock: threading.Lock = threading.Lock()
 
     def register(
         self,
         protocol_type: str,
-        handler_cls: type[ProtocolHandler],
+        handler_cls: type[ProtocolContainerAware],
     ) -> None:
         """Register a protocol handler.
 
@@ -219,10 +219,10 @@ class RegistryProtocolBinding:
         Args:
             protocol_type: Protocol type identifier (e.g., 'http', 'db', 'kafka').
                           Should be one of the HANDLER_TYPE_* constants.
-            handler_cls: Handler class implementing the ProtocolHandler protocol.
+            handler_cls: Handler class implementing the ProtocolContainerAware protocol.
 
         Raises:
-            RegistryError: If handler_cls does not implement the ProtocolHandler protocol
+            RegistryError: If handler_cls does not implement the ProtocolContainerAware protocol
                           (missing or non-callable execute()/handle() method).
 
         Example:
@@ -230,7 +230,7 @@ class RegistryProtocolBinding:
             >>> registry.register(HANDLER_TYPE_HTTP, HttpHandler)
             >>> registry.register(HANDLER_TYPE_DATABASE, PostgresHandler)
         """
-        # Runtime type validation: Ensure handler_cls implements ProtocolHandler protocol
+        # Runtime type validation: Ensure handler_cls implements ProtocolContainerAware protocol
         # Check if execute() or handle() method exists and is callable
         # Following RegistryEventBusBinding pattern of supporting alternative methods
         has_execute = hasattr(handler_cls, "execute")
@@ -240,7 +240,7 @@ class RegistryProtocolBinding:
             raise RegistryError(
                 f"Handler class {handler_cls.__name__!r} for protocol type "
                 f"{protocol_type!r} is missing 'execute()' or 'handle()' method "
-                f"from ProtocolHandler protocol",
+                f"from ProtocolContainerAware protocol",
                 protocol_type=protocol_type,
                 context=ModelInfraErrorContext.with_correlation(
                     operation="register",
@@ -279,7 +279,7 @@ class RegistryProtocolBinding:
     def get(
         self,
         protocol_type: str,
-    ) -> type[ProtocolHandler]:
+    ) -> type[ProtocolContainerAware]:
         """Get handler class for protocol type.
 
         Resolves the handler class registered for the given protocol type.

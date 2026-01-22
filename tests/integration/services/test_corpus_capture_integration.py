@@ -11,9 +11,11 @@ Tests the full pipeline integration: ManifestGenerator callback -> CorpusCapture
 """
 
 import inspect
+from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_execution_status import EnumExecutionStatus
 from omnibase_core.enums.enum_handler_execution_phase import EnumHandlerExecutionPhase
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
@@ -40,10 +42,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture
+def mock_container() -> MagicMock:
+    """Create a mock ONEX container for testing."""
+    return MagicMock(spec=ModelONEXContainer)
+
+
 class TestManifestGeneratorIntegration:
     """Tests for ManifestGenerator callback integration."""
 
-    def test_callback_on_init(self) -> None:
+    def test_callback_on_init(self, mock_container: MagicMock) -> None:
         """CorpusCapture can be registered as callback in ManifestGenerator __init__."""
         # Setup capture service
         config = ModelCaptureConfig(
@@ -51,7 +59,7 @@ class TestManifestGeneratorIntegration:
             max_executions=10,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        capture_service = CorpusCapture()
+        capture_service = CorpusCapture(mock_container)
         capture_service.create_corpus(config)
         capture_service.start_capture()
 
@@ -87,14 +95,14 @@ class TestManifestGeneratorIntegration:
         assert capture_service.get_active_corpus() is not None
         assert capture_service.get_active_corpus().execution_count == 1
 
-    def test_callback_registered_dynamically(self) -> None:
+    def test_callback_registered_dynamically(self, mock_container: MagicMock) -> None:
         """CorpusCapture can be registered dynamically via register_on_build_callback."""
         # Setup capture service
         config = ModelCaptureConfig(
             corpus_display_name="dynamic-callback-test",
             max_executions=10,
         )
-        capture_service = CorpusCapture()
+        capture_service = CorpusCapture(mock_container)
         capture_service.create_corpus(config)
         capture_service.start_capture()
 
@@ -191,14 +199,14 @@ class TestManifestGeneratorIntegration:
 class TestEndToEndCaptureWorkflow:
     """Tests for complete capture workflow."""
 
-    def test_capture_multiple_executions(self) -> None:
+    def test_capture_multiple_executions(self, mock_container: MagicMock) -> None:
         """Multiple pipeline executions should all be captured."""
         config = ModelCaptureConfig(
             corpus_display_name="multi-execution-test",
             max_executions=50,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        capture_service = CorpusCapture()
+        capture_service = CorpusCapture(mock_container)
         capture_service.create_corpus(config)
         capture_service.start_capture()
 
@@ -225,7 +233,7 @@ class TestEndToEndCaptureWorkflow:
         assert corpus.execution_count == 5
         assert capture_service.state == EnumCaptureState.CLOSED
 
-    def test_filtering_in_callback_context(self) -> None:
+    def test_filtering_in_callback_context(self, mock_container: MagicMock) -> None:
         """Handler filtering should work correctly in callback context."""
         config = ModelCaptureConfig(
             corpus_display_name="filter-test",
@@ -233,7 +241,7 @@ class TestEndToEndCaptureWorkflow:
             handler_filter=["allowed-node"],
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        capture_service = CorpusCapture()
+        capture_service = CorpusCapture(mock_container)
         capture_service.create_corpus(config)
         capture_service.start_capture()
 
@@ -274,14 +282,14 @@ class TestEndToEndCaptureWorkflow:
         corpus = capture_service.close_corpus()
         assert corpus.execution_count == 1
 
-    def test_max_executions_stops_capture(self) -> None:
+    def test_max_executions_stops_capture(self, mock_container: MagicMock) -> None:
         """Capture should stop after max_executions is reached."""
         config = ModelCaptureConfig(
             corpus_display_name="max-test",
             max_executions=3,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        capture_service = CorpusCapture()
+        capture_service = CorpusCapture(mock_container)
         capture_service.create_corpus(config)
         capture_service.start_capture()
 

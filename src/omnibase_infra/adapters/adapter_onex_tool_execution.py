@@ -28,6 +28,7 @@ from uuid import UUID, uuid4
 
 import httpx
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -58,11 +59,12 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
     - Circuit breaker protection for external HTTP calls
 
     Attributes:
+        _container: ONEX container for dependency injection.
         _http_client: HTTP client for orchestrator dispatch.
         _default_timeout: Default timeout if tool definition doesn't specify one.
 
     Example:
-        >>> adapter = AdapterONEXToolExecution()
+        >>> adapter = AdapterONEXToolExecution(container=container)
         >>> result = await adapter.execute(
         ...     tool=tool_definition,
         ...     arguments={"input_data": "test"},
@@ -74,6 +76,7 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         http_client: httpx.AsyncClient | None = None,
         default_timeout: float = 30.0,
         circuit_breaker_threshold: int = 5,
@@ -82,12 +85,14 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
         """Initialize the execution adapter.
 
         Args:
+            container: ONEX container for dependency injection.
             http_client: Optional HTTP client. If not provided, one will be
                 created during execute() calls.
             default_timeout: Default timeout in seconds for orchestrator calls.
             circuit_breaker_threshold: Max failures before opening circuit (default: 5).
             circuit_breaker_reset_timeout: Seconds before automatic reset (default: 60.0).
         """
+        self._container = container
         self._http_client = http_client
         self._default_timeout = default_timeout
         self._owns_client = http_client is None

@@ -38,10 +38,12 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.handlers.registration_storage.handler_registration_storage_mock import (
@@ -440,7 +442,9 @@ class TestHandlerFactoryPattern:
                 HandlerRegistrationStoragePostgres,
             )
 
+            mock_container = MagicMock(spec=ModelONEXContainer)
             return HandlerRegistrationStoragePostgres(
+                container=mock_container,
                 host=os.getenv("POSTGRES_HOST", "localhost"),
                 port=int(os.getenv("POSTGRES_PORT", "5432")),
                 database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
@@ -653,7 +657,9 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
             HandlerRegistrationStoragePostgres,
         )
 
+        mock_container = MagicMock(spec=ModelONEXContainer)
         handler = HandlerRegistrationStoragePostgres(
+            container=mock_container,
             host=os.getenv("POSTGRES_HOST", "localhost"),
             port=int(os.getenv("POSTGRES_PORT", "5432")),
             database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),

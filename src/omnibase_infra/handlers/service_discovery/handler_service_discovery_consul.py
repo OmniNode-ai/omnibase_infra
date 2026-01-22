@@ -30,6 +30,7 @@ from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
 import consul
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -91,7 +92,10 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
         handler_type: Returns "consul" identifier.
 
     Example:
+        >>> from unittest.mock import MagicMock
+        >>> container = MagicMock(spec=ModelONEXContainer)
         >>> handler = HandlerServiceDiscoveryConsul(
+        ...     container=container,
         ...     consul_client=consul_client,
         ...     circuit_breaker_config=ModelCircuitBreakerConfig(threshold=5),
         ... )
@@ -100,6 +104,7 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         consul_client: ProtocolConsulClient | None = None,
         consul_host: str = "localhost",
         consul_port: int = 8500,
@@ -114,6 +119,7 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
         """Initialize HandlerServiceDiscoveryConsul.
 
         Args:
+            container: ONEX container for dependency injection and service resolution.
             consul_client: Optional existing Consul client (ProtocolConsulClient).
                 If not provided, a new python-consul client will be created.
             consul_host: Consul server hostname (default: "localhost").
@@ -129,6 +135,7 @@ class HandlerServiceDiscoveryConsul(MixinAsyncCircuitBreaker):
             max_workers: Thread pool max workers (default: 10).
             timeout_seconds: Operation timeout in seconds (default: 30.0).
         """
+        self._container = container
         # Parse circuit breaker configuration using ModelCircuitBreakerConfig
         if isinstance(circuit_breaker_config, ModelCircuitBreakerConfig):
             cb_config = circuit_breaker_config

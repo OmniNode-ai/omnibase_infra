@@ -77,11 +77,9 @@ class ServiceRegistryDiscovery:
         showing complete errors.
 
     Dependency Injection:
-        This service accepts a ModelONEXContainer for ONEX-style dependency
+        This service requires a ModelONEXContainer for ONEX-style dependency
         injection. Dependencies can also be provided directly via constructor
-        parameters for testing or when the container is not available.
-
-        Priority: Direct parameters > Container resolution > None (with warnings)
+        parameters for testing flexibility.
 
     Thread Safety:
         This service is coroutine-safe. All methods are async and
@@ -89,12 +87,13 @@ class ServiceRegistryDiscovery:
         concurrency requirements.
 
     Example:
-        >>> # Using container for DI
+        >>> # Using container for DI (container is required)
         >>> service = ServiceRegistryDiscovery(container=container)
         >>> response = await service.get_discovery()
         >>>
-        >>> # Using direct dependencies (for testing)
+        >>> # With explicit dependencies (for testing)
         >>> service = ServiceRegistryDiscovery(
+        ...     container=container,
         ...     projection_reader=reader,
         ...     consul_handler=handler,
         ... )
@@ -110,7 +109,7 @@ class ServiceRegistryDiscovery:
 
     def __init__(
         self,
-        container: ModelONEXContainer | None = None,
+        container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration | None = None,
         consul_handler: HandlerServiceDiscoveryConsul | None = None,
         widget_mapping_path: Path | None = None,
@@ -118,21 +117,14 @@ class ServiceRegistryDiscovery:
         """Initialize the registry discovery service.
 
         Args:
-            container: Optional ONEX container for dependency injection.
-                When provided, dependencies will be resolved from the container
-                if not explicitly passed via other parameters.
+            container: ONEX container for dependency injection. Required for
+                ONEX DI pattern compliance.
             projection_reader: Optional projection reader for node registrations.
-                If not provided, will attempt to resolve from container.
-                If still None, node queries will return empty results with warnings.
+                If not provided, node queries will return empty results with warnings.
             consul_handler: Optional Consul handler for live instances.
-                If not provided, will attempt to resolve from container.
-                If still None, instance queries will return empty results with warnings.
+                If not provided, instance queries will return empty results with warnings.
             widget_mapping_path: Path to widget mapping YAML file.
                 Defaults to configs/widget_mapping.yaml relative to package.
-
-        Note:
-            Direct dependency parameters take precedence over container resolution.
-            This allows easy mocking in tests while supporting full DI in production.
         """
         self._container = container
 
@@ -157,7 +149,6 @@ class ServiceRegistryDiscovery:
         logger.info(
             "ServiceRegistryDiscovery initialized",
             extra={
-                "has_container": container is not None,
                 "has_projection_reader": self._projection_reader is not None,
                 "has_consul_handler": self._consul_handler is not None,
                 "widget_mapping_path": str(self._widget_mapping_path),

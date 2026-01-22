@@ -7,13 +7,18 @@ Provides factory function for flexible instantiation with different
 backend configurations.
 
 Usage:
-    # Create app with default settings (no backends)
-    app = create_app()
+    # Create app with container (required)
+    from omnibase_core.container import ModelONEXContainer
+
+    container = ModelONEXContainer()
+    app = create_app(container=container, cors_origins=["http://localhost:3000"])
 
     # Create app with full backends
     app = create_app(
+        container=container,
         projection_reader=reader,
         consul_handler=handler,
+        cors_origins=["http://localhost:3000"],
     )
 
     # Run with uvicorn
@@ -35,6 +40,7 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.services.registry_api.routes import router
@@ -117,6 +123,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(
+    container: ModelONEXContainer,
     projection_reader: ProjectionReaderRegistration | None = None,
     consul_handler: HandlerServiceDiscoveryConsul | None = None,
     widget_mapping_path: Path | None = None,
@@ -129,6 +136,8 @@ def create_app(
     return partial data with warnings when backends are unavailable.
 
     Args:
+        container: ONEX container for dependency injection. Required for
+            ONEX DI pattern compliance.
         projection_reader: Optional projection reader for node registrations.
         consul_handler: Optional Consul handler for live instances.
         widget_mapping_path: Optional path to widget mapping YAML.
@@ -145,7 +154,9 @@ def create_app(
 
     Example:
         >>> from omnibase_infra.services.registry_api import create_app
-        >>> app = create_app()
+        >>> from omnibase_core.container import ModelONEXContainer
+        >>> container = ModelONEXContainer()
+        >>> app = create_app(container=container)
         >>> # Run with: uvicorn module:app --host 0.0.0.0 --port 8000
     """
     app = FastAPI(
@@ -195,6 +206,7 @@ def create_app(
 
     # Create and attach service
     service = ServiceRegistryDiscovery(
+        container=container,
         projection_reader=projection_reader,
         consul_handler=consul_handler,
         widget_mapping_path=widget_mapping_path,
@@ -226,18 +238,24 @@ def create_app(
     return app
 
 
-# Default app instance for direct uvicorn usage
-# Example: uvicorn omnibase_infra.services.registry_api.main:app --host 0.0.0.0 --port 8000
-# Note: This creates an app with no backends configured. For production,
-# use create_app() directly with proper backend configuration (projection_reader,
-# consul_handler). Tests should also use create_app() for controlled app creation.
+# Module-level app instance is not supported since container is required.
+# For production usage, use create_app() with proper configuration:
 #
-# IMPORTANT: CORS_ORIGINS environment variable MUST be set for module-level app creation.
-# If CORS_ORIGINS is not set, the module can still be imported but `app` will be None.
-# Use create_app(cors_origins=["..."]) directly for programmatic usage.
+# Example:
+#     from omnibase_core.container import ModelONEXContainer
+#     from omnibase_infra.services.registry_api import create_app
+#
+#     container = ModelONEXContainer()
+#     app = create_app(
+#         container=container,
+#         projection_reader=reader,
+#         consul_handler=handler,
+#         cors_origins=["http://localhost:3000"],
+#     )
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
+#
+# For uvicorn CLI usage, create a launcher module that instantiates the container.
 app: FastAPI | None = None
-if os.environ.get("CORS_ORIGINS") is not None:
-    app = create_app()
 
 
 __all__ = ["app", "create_app"]

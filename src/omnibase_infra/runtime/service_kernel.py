@@ -830,7 +830,7 @@ async def bootstrap() -> int:
                         # when Consul integration is disabled, reducing startup time.
                         from omnibase_infra.handlers import HandlerConsul
 
-                        consul_handler = HandlerConsul()
+                        consul_handler = HandlerConsul(container)
                         await consul_handler.initialize(
                             {
                                 "host": consul_host,

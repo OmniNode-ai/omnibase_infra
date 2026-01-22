@@ -48,6 +48,7 @@ Related Ticket: OMN-816
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -452,7 +453,7 @@ class TestHandlerConsulErrorHandling:
 
     @pytest.mark.asyncio
     async def test_execute_without_initialize_raises_error(
-        self, consul_config: dict[str, JsonType]
+        self, consul_config: dict[str, JsonType], mock_container: MagicMock
     ) -> None:
         """Test that executing without initialization raises appropriate error.
 
@@ -463,7 +464,7 @@ class TestHandlerConsulErrorHandling:
         from omnibase_infra.errors import RuntimeHostError
         from omnibase_infra.handlers import HandlerConsul
 
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
         # Don't initialize
 
         envelope = {
@@ -590,7 +591,7 @@ class TestHandlerConsulLifecycle:
 
     @pytest.mark.asyncio
     async def test_shutdown_and_reinitialize(
-        self, consul_config: dict[str, JsonType]
+        self, consul_config: dict[str, JsonType], mock_container: MagicMock
     ) -> None:
         """Test that handler can be shutdown and reinitialized.
 
@@ -601,7 +602,7 @@ class TestHandlerConsulLifecycle:
         """
         from omnibase_infra.handlers import HandlerConsul
 
-        handler = HandlerConsul()
+        handler = HandlerConsul(mock_container)
 
         # First initialization
         await handler.initialize(consul_config)

@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.errors import OnexError
 from omnibase_core.models.manifest.model_contract_identity import ModelContractIdentity
@@ -39,6 +40,12 @@ except ImportError:
 
 
 # === Test Fixtures ===
+
+
+@pytest.fixture
+def mock_container() -> MagicMock:
+    """Create a mock ONEX container for testing."""
+    return MagicMock(spec=ModelONEXContainer)
 
 
 @pytest.fixture
@@ -106,14 +113,14 @@ class TestHandlerFiltering:
     """Tests for handler whitelist filtering."""
 
     def test_capture_allowed_when_no_filter_configured(
-        self, sample_manifest: ModelExecutionManifest
+        self, mock_container: MagicMock, sample_manifest: ModelExecutionManifest
     ) -> None:
         """All handlers should be captured when handler_filter is None."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             handler_filter=None,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -122,13 +129,15 @@ class TestHandlerFiltering:
         assert result.was_captured
         assert result.outcome == EnumCaptureOutcome.CAPTURED
 
-    def test_capture_allowed_when_handler_in_whitelist(self) -> None:
+    def test_capture_allowed_when_handler_in_whitelist(
+        self, mock_container: MagicMock
+    ) -> None:
         """Handler in whitelist should be captured."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             handler_filter=["handler-a", "handler-b", "handler-c"],
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -138,13 +147,15 @@ class TestHandlerFiltering:
         assert result.was_captured
         assert result.outcome == EnumCaptureOutcome.CAPTURED
 
-    def test_capture_skipped_when_handler_not_in_whitelist(self) -> None:
+    def test_capture_skipped_when_handler_not_in_whitelist(
+        self, mock_container: MagicMock
+    ) -> None:
         """Handler not in whitelist should be skipped."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             handler_filter=["handler-a", "handler-b"],
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -160,7 +171,7 @@ class TestTimeWindowFiltering:
     """Tests for time window filtering."""
 
     def test_capture_allowed_when_no_time_window_configured(
-        self, sample_manifest: ModelExecutionManifest
+        self, mock_container: MagicMock, sample_manifest: ModelExecutionManifest
     ) -> None:
         """All timestamps should be allowed when no time window configured."""
         config = ModelCaptureConfig(
@@ -168,7 +179,7 @@ class TestTimeWindowFiltering:
             time_window_start=None,
             time_window_end=None,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -176,7 +187,9 @@ class TestTimeWindowFiltering:
 
         assert result.was_captured
 
-    def test_capture_allowed_when_within_time_window(self) -> None:
+    def test_capture_allowed_when_within_time_window(
+        self, mock_container: MagicMock
+    ) -> None:
         """Manifest within time window should be captured."""
         now = datetime.now(UTC)
         config = ModelCaptureConfig(
@@ -184,7 +197,7 @@ class TestTimeWindowFiltering:
             time_window_start=now - timedelta(hours=1),
             time_window_end=now + timedelta(hours=1),
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -193,7 +206,9 @@ class TestTimeWindowFiltering:
 
         assert result.was_captured
 
-    def test_capture_skipped_when_before_time_window(self) -> None:
+    def test_capture_skipped_when_before_time_window(
+        self, mock_container: MagicMock
+    ) -> None:
         """Manifest before time window should be skipped."""
         now = datetime.now(UTC)
         config = ModelCaptureConfig(
@@ -201,7 +216,7 @@ class TestTimeWindowFiltering:
             time_window_start=now,
             time_window_end=now + timedelta(hours=1),
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -213,7 +228,9 @@ class TestTimeWindowFiltering:
         assert result.was_skipped
         assert result.outcome == EnumCaptureOutcome.SKIPPED_TIME_WINDOW
 
-    def test_capture_skipped_when_after_time_window(self) -> None:
+    def test_capture_skipped_when_after_time_window(
+        self, mock_container: MagicMock
+    ) -> None:
         """Manifest after time window should be skipped."""
         now = datetime.now(UTC)
         config = ModelCaptureConfig(
@@ -221,7 +238,7 @@ class TestTimeWindowFiltering:
             time_window_start=now - timedelta(hours=1),
             time_window_end=now,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -238,14 +255,16 @@ class TestTimeWindowFiltering:
 class TestSampleRateFiltering:
     """Tests for sample rate filtering."""
 
-    def test_all_captured_when_sample_rate_is_1(self) -> None:
+    def test_all_captured_when_sample_rate_is_1(
+        self, mock_container: MagicMock
+    ) -> None:
         """All executions should be captured when sample_rate is 1.0."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             sample_rate=1.0,
             max_executions=100,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -258,13 +277,15 @@ class TestSampleRateFiltering:
 
         assert captured_count == 20
 
-    def test_none_captured_when_sample_rate_is_0(self) -> None:
+    def test_none_captured_when_sample_rate_is_0(
+        self, mock_container: MagicMock
+    ) -> None:
         """No executions should be captured when sample_rate is 0."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             sample_rate=0.0,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -277,14 +298,16 @@ class TestSampleRateFiltering:
 
         assert captured_count == 0
 
-    def test_approximately_half_captured_when_sample_rate_is_half(self) -> None:
+    def test_approximately_half_captured_when_sample_rate_is_half(
+        self, mock_container: MagicMock
+    ) -> None:
         """Approximately half should be captured when sample_rate is 0.5."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             sample_rate=0.5,
             max_executions=200,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -309,14 +332,14 @@ class TestSampleRateFiltering:
 class TestDeduplication:
     """Tests for deduplication strategies."""
 
-    def test_no_dedup_when_strategy_is_none(self) -> None:
+    def test_no_dedup_when_strategy_is_none(self, mock_container: MagicMock) -> None:
         """All executions should be captured when dedupe_strategy is NONE."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.NONE,
             max_executions=100,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -329,13 +352,15 @@ class TestDeduplication:
         captured_count = sum(1 for r in results if r.was_captured)
         assert captured_count == 5
 
-    def test_input_hash_dedup_skips_duplicate_inputs(self) -> None:
+    def test_input_hash_dedup_skips_duplicate_inputs(
+        self, mock_container: MagicMock
+    ) -> None:
         """Duplicate inputs should be skipped with INPUT_HASH strategy."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.INPUT_HASH,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -350,13 +375,15 @@ class TestDeduplication:
         assert result2.was_skipped
         assert result2.outcome == EnumCaptureOutcome.SKIPPED_DUPLICATE
 
-    def test_input_hash_allows_different_handlers(self) -> None:
+    def test_input_hash_allows_different_handlers(
+        self, mock_container: MagicMock
+    ) -> None:
         """Different handlers should not be considered duplicates."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.INPUT_HASH,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -369,7 +396,9 @@ class TestDeduplication:
         assert result_a.was_captured
         assert result_b.was_captured
 
-    def test_full_manifest_hash_deduplicates_same_content(self) -> None:
+    def test_full_manifest_hash_deduplicates_same_content(
+        self, mock_container: MagicMock
+    ) -> None:
         """Identical content manifests should be deduplicated with FULL_MANIFEST_HASH.
 
         FULL_MANIFEST_HASH excludes unique identifiers (manifest_id, created_at,
@@ -379,7 +408,7 @@ class TestDeduplication:
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.FULL_MANIFEST_HASH,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -395,13 +424,15 @@ class TestDeduplication:
         assert result2.was_skipped
         assert result2.outcome == EnumCaptureOutcome.SKIPPED_DUPLICATE
 
-    def test_full_manifest_hash_allows_different_handlers(self) -> None:
+    def test_full_manifest_hash_allows_different_handlers(
+        self, mock_container: MagicMock
+    ) -> None:
         """Different handlers should not be deduplicated with FULL_MANIFEST_HASH."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             dedupe_strategy=EnumDedupeStrategy.FULL_MANIFEST_HASH,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -424,16 +455,16 @@ class TestDeduplication:
 class TestLifecycleTransitions:
     """Tests for corpus lifecycle state transitions."""
 
-    def test_initial_state_is_idle(self) -> None:
+    def test_initial_state_is_idle(self, mock_container: MagicMock) -> None:
         """Service should start in IDLE state."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         assert service.state == EnumCaptureState.IDLE
 
     def test_create_corpus_transitions_to_ready(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """create_corpus() should transition from IDLE to READY."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         assert service.state == EnumCaptureState.IDLE
 
         service.create_corpus(basic_config)
@@ -441,10 +472,10 @@ class TestLifecycleTransitions:
         assert service.state == EnumCaptureState.READY
 
     def test_start_capture_transitions_to_capturing(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """start_capture() should transition from READY to CAPTURING."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
 
         service.start_capture()
@@ -452,10 +483,10 @@ class TestLifecycleTransitions:
         assert service.state == EnumCaptureState.CAPTURING
 
     def test_pause_capture_transitions_to_paused(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """pause_capture() should transition from CAPTURING to PAUSED."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -464,10 +495,10 @@ class TestLifecycleTransitions:
         assert service.state == EnumCaptureState.PAUSED
 
     def test_resume_capture_transitions_to_capturing(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """resume_capture() should transition from PAUSED to CAPTURING."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
         service.pause_capture()
@@ -477,10 +508,10 @@ class TestLifecycleTransitions:
         assert service.state == EnumCaptureState.CAPTURING
 
     def test_close_corpus_transitions_to_closed(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """close_corpus() should transition to CLOSED from any active state."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -489,14 +520,16 @@ class TestLifecycleTransitions:
         assert service.state == EnumCaptureState.CLOSED
         assert corpus is not None
 
-    def test_max_executions_triggers_full_state(self) -> None:
+    def test_max_executions_triggers_full_state(
+        self, mock_container: MagicMock
+    ) -> None:
         """Reaching max_executions should transition to FULL."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             max_executions=3,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -508,10 +541,13 @@ class TestLifecycleTransitions:
         assert service.state == EnumCaptureState.FULL
 
     def test_capture_skipped_when_not_capturing(
-        self, sample_manifest: ModelExecutionManifest, basic_config: ModelCaptureConfig
+        self,
+        mock_container: MagicMock,
+        sample_manifest: ModelExecutionManifest,
+        basic_config: ModelCaptureConfig,
     ) -> None:
         """Capture should be skipped when not in CAPTURING state."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         # Note: NOT calling start_capture()
 
@@ -520,14 +556,14 @@ class TestLifecycleTransitions:
         assert result.was_skipped
         assert result.outcome == EnumCaptureOutcome.SKIPPED_NOT_CAPTURING
 
-    def test_capture_skipped_when_corpus_full(self) -> None:
+    def test_capture_skipped_when_corpus_full(self, mock_container: MagicMock) -> None:
         """Capture should be skipped when corpus is FULL."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             max_executions=2,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -548,25 +584,25 @@ class TestLifecycleTransitions:
 class TestInvalidTransitions:
     """Tests for invalid state transitions (should raise errors)."""
 
-    def test_start_capture_from_idle_raises(self) -> None:
+    def test_start_capture_from_idle_raises(self, mock_container: MagicMock) -> None:
         """start_capture() from IDLE should raise an error."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
 
         with pytest.raises(OnexError):
             service.start_capture()
 
-    def test_pause_capture_from_idle_raises(self) -> None:
+    def test_pause_capture_from_idle_raises(self, mock_container: MagicMock) -> None:
         """pause_capture() from IDLE should raise an error."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
 
         with pytest.raises(OnexError):
             service.pause_capture()
 
     def test_resume_capture_without_pause_raises(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """resume_capture() without prior pause should raise an error."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -574,10 +610,10 @@ class TestInvalidTransitions:
             service.resume_capture()
 
     def test_create_corpus_when_active_raises(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """create_corpus() when already active should raise an error."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -592,14 +628,16 @@ class TestInvalidTransitions:
 class TestMaxExecutionsEnforcement:
     """Tests for max_executions hard cap and eviction."""
 
-    def test_corpus_count_respects_max_executions(self) -> None:
+    def test_corpus_count_respects_max_executions(
+        self, mock_container: MagicMock
+    ) -> None:
         """Corpus should never exceed max_executions."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             max_executions=5,
             dedupe_strategy=EnumDedupeStrategy.NONE,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -612,10 +650,10 @@ class TestMaxExecutionsEnforcement:
         assert corpus.execution_count <= 5
 
     def test_get_active_corpus_returns_current_corpus(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """get_active_corpus() should return the active corpus."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
 
         corpus = service.get_active_corpus()
@@ -633,10 +671,13 @@ class TestAsyncCapture:
 
     @pytest.mark.asyncio
     async def test_capture_async_succeeds(
-        self, sample_manifest: ModelExecutionManifest, basic_config: ModelCaptureConfig
+        self,
+        mock_container: MagicMock,
+        sample_manifest: ModelExecutionManifest,
+        basic_config: ModelCaptureConfig,
     ) -> None:
         """capture_async() should successfully capture manifests."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -647,14 +688,14 @@ class TestAsyncCapture:
 
     @pytest.mark.asyncio
     async def test_capture_async_uses_config_timeout(
-        self, sample_manifest: ModelExecutionManifest
+        self, mock_container: MagicMock, sample_manifest: ModelExecutionManifest
     ) -> None:
         """capture_async() should use timeout from config."""
         config = ModelCaptureConfig(
             corpus_display_name="test-corpus",
             capture_timeout_ms=100.0,
         )
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(config)
         service.start_capture()
 
@@ -664,10 +705,13 @@ class TestAsyncCapture:
 
     @pytest.mark.asyncio
     async def test_capture_async_respects_explicit_timeout(
-        self, sample_manifest: ModelExecutionManifest, basic_config: ModelCaptureConfig
+        self,
+        mock_container: MagicMock,
+        sample_manifest: ModelExecutionManifest,
+        basic_config: ModelCaptureConfig,
     ) -> None:
         """capture_async() should respect explicit timeout parameter."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -677,10 +721,10 @@ class TestAsyncCapture:
 
     @pytest.mark.asyncio
     async def test_capture_async_tracks_metrics(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """capture_async() should track capture metrics."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -694,10 +738,10 @@ class TestAsyncCapture:
 
     @pytest.mark.asyncio
     async def test_get_metrics_returns_all_counters(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """get_metrics() should return all counter values."""
-        service = CorpusCapture()
+        service = CorpusCapture(mock_container)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -723,10 +767,10 @@ class TestPersistence:
 
     @pytest.mark.asyncio
     async def test_flush_without_persistence_raises(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """flush_to_persistence() should raise if no handler configured."""
-        service = CorpusCapture()  # No persistence handler
+        service = CorpusCapture(mock_container)  # No persistence handler
         service.create_corpus(basic_config)
 
         with pytest.raises(OnexError, match="No persistence handler configured"):
@@ -734,7 +778,7 @@ class TestPersistence:
 
     @pytest.mark.asyncio
     async def test_flush_with_persistence_stores_manifests(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """flush_to_persistence() should call handler for each manifest."""
 
@@ -745,7 +789,7 @@ class TestPersistence:
         mock_persistence = MagicMock()
         mock_persistence.execute = mock_execute
 
-        service = CorpusCapture(persistence=mock_persistence)
+        service = CorpusCapture(mock_container, persistence=mock_persistence)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -761,7 +805,7 @@ class TestPersistence:
 
     @pytest.mark.asyncio
     async def test_close_corpus_async_flushes_by_default(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """close_corpus_async() should flush when persistence configured."""
 
@@ -771,7 +815,7 @@ class TestPersistence:
         mock_persistence = MagicMock()
         mock_persistence.execute = mock_execute
 
-        service = CorpusCapture(persistence=mock_persistence)
+        service = CorpusCapture(mock_container, persistence=mock_persistence)
         service.create_corpus(basic_config)
         service.start_capture()
 
@@ -786,7 +830,7 @@ class TestPersistence:
 
     @pytest.mark.asyncio
     async def test_close_corpus_async_can_skip_flush(
-        self, basic_config: ModelCaptureConfig
+        self, mock_container: MagicMock, basic_config: ModelCaptureConfig
     ) -> None:
         """close_corpus_async(flush=False) should not flush."""
 
@@ -796,7 +840,7 @@ class TestPersistence:
         mock_persistence = MagicMock()
         mock_persistence.execute = mock_execute
 
-        service = CorpusCapture(persistence=mock_persistence)
+        service = CorpusCapture(mock_container, persistence=mock_persistence)
         service.create_corpus(basic_config)
         service.start_capture()
 

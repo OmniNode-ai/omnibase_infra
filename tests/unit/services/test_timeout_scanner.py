@@ -35,12 +35,13 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import (
@@ -102,6 +103,12 @@ def create_mock_projection(
 
 
 @pytest.fixture
+def mock_container() -> MagicMock:
+    """Create a mock ONEX container."""
+    return MagicMock(spec=ModelONEXContainer)
+
+
+@pytest.fixture
 def mock_reader() -> AsyncMock:
     """Create a mock projection reader."""
     reader = AsyncMock()
@@ -111,9 +118,11 @@ def mock_reader() -> AsyncMock:
 
 
 @pytest.fixture
-def service(mock_reader: AsyncMock) -> ServiceTimeoutScanner:
-    """Create a ServiceTimeoutScanner instance with mocked reader."""
-    return ServiceTimeoutScanner(projection_reader=mock_reader)
+def service(mock_container: MagicMock, mock_reader: AsyncMock) -> ServiceTimeoutScanner:
+    """Create a ServiceTimeoutScanner instance with mocked dependencies."""
+    return ServiceTimeoutScanner(
+        container=mock_container, projection_reader=mock_reader
+    )
 
 
 @pytest.mark.unit
@@ -121,17 +130,25 @@ def service(mock_reader: AsyncMock) -> ServiceTimeoutScanner:
 class TestServiceTimeoutScannerBasics:
     """Test basic service instantiation and configuration."""
 
-    async def test_service_instantiation(self, mock_reader: AsyncMock) -> None:
-        """Test that service initializes correctly with reader."""
-        service = ServiceTimeoutScanner(projection_reader=mock_reader)
+    async def test_service_instantiation(
+        self, mock_container: MagicMock, mock_reader: AsyncMock
+    ) -> None:
+        """Test that service initializes correctly with container and reader."""
+        service = ServiceTimeoutScanner(
+            container=mock_container, projection_reader=mock_reader
+        )
 
+        assert service._container is mock_container
         assert service._reader is mock_reader
         assert service.batch_size == ServiceTimeoutScanner.DEFAULT_BATCH_SIZE
 
-    async def test_service_custom_batch_size(self, mock_reader: AsyncMock) -> None:
+    async def test_service_custom_batch_size(
+        self, mock_container: MagicMock, mock_reader: AsyncMock
+    ) -> None:
         """Test that service accepts custom batch size."""
         custom_batch = 50
         service = ServiceTimeoutScanner(
+            container=mock_container,
             projection_reader=mock_reader,
             batch_size=custom_batch,
         )
@@ -689,11 +706,13 @@ class TestServiceTimeoutScannerBatchSize:
 
     async def test_custom_batch_size_used_in_queries(
         self,
+        mock_container: MagicMock,
         mock_reader: AsyncMock,
     ) -> None:
         """Test custom batch size is passed to reader queries."""
         custom_batch = 25
         service = ServiceTimeoutScanner(
+            container=mock_container,
             projection_reader=mock_reader,
             batch_size=custom_batch,
         )
@@ -709,10 +728,12 @@ class TestServiceTimeoutScannerBatchSize:
 
     async def test_batch_size_none_uses_default(
         self,
+        mock_container: MagicMock,
         mock_reader: AsyncMock,
     ) -> None:
         """Test None batch size uses default."""
         service = ServiceTimeoutScanner(
+            container=mock_container,
             projection_reader=mock_reader,
             batch_size=None,
         )

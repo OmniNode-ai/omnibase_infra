@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -33,6 +34,7 @@ pytest.importorskip("pytest_httpserver")
 # werkzeug is a transitive dependency of pytest-httpserver, used for Response handling
 from werkzeug import Response
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.errors import InfraTimeoutError, InfraUnavailableError
 from omnibase_infra.handlers import HandlerHttpRest
 
@@ -47,7 +49,10 @@ class TestHttpGetSuccess:
     """Integration tests for successful HTTP GET operations."""
 
     async def test_http_get_success(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test successful HTTP GET request returns correct response structure.
 
@@ -62,7 +67,7 @@ class TestHttpGetSuccess:
         httpserver.expect_request("/api/resource").respond_with_json(expected_response)
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -94,7 +99,10 @@ class TestHttpGetWithHeaders:
     """Integration tests for HTTP GET operations with custom headers."""
 
     async def test_http_get_with_headers(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET request passes custom headers to server.
 
@@ -129,7 +137,7 @@ class TestHttpGetWithHeaders:
         )
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -161,7 +169,10 @@ class TestHttpPostJson:
     """Integration tests for HTTP POST operations with JSON body."""
 
     async def test_http_post_json(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP POST request with JSON body.
 
@@ -197,7 +208,7 @@ class TestHttpPostJson:
         )
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -231,7 +242,10 @@ class TestHttpPostWithHeaders:
     """Integration tests for HTTP POST operations with custom headers."""
 
     async def test_http_post_with_headers(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP POST request with custom headers.
 
@@ -263,7 +277,7 @@ class TestHttpPostWithHeaders:
         )
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -299,7 +313,10 @@ class TestHttpGet404:
     """Integration tests for HTTP 404 error responses."""
 
     async def test_http_get_404(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET request handles 404 Not Found response.
 
@@ -315,7 +332,7 @@ class TestHttpGet404:
         )
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -342,7 +359,10 @@ class TestHttpGet500:
     """Integration tests for HTTP 500 error responses."""
 
     async def test_http_get_500(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET request handles 500 Internal Server Error response.
 
@@ -362,7 +382,7 @@ class TestHttpGet500:
         )
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -397,7 +417,10 @@ class TestHttpTimeout:
         reason="pytest-httpserver does not support response delays for timeout testing"
     )
     async def test_http_timeout(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET request timeout handling.
 
@@ -419,7 +442,7 @@ class TestHttpTimeout:
             # Note: timeout cannot be configured via initialize() in MVP
         }
 
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(short_timeout_config)
 
         try:
@@ -442,7 +465,10 @@ class TestHttpResponseSizeLimit:
     """Integration tests for response size limit enforcement."""
 
     async def test_http_response_size_limit(
-        self, httpserver: HTTPServer, small_response_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        small_response_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET enforces response size limits.
 
@@ -457,7 +483,7 @@ class TestHttpResponseSizeLimit:
         httpserver.expect_request("/api/large").respond_with_json(large_response_data)
 
         # Initialize handler with small response size limit
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(small_response_config)
 
         try:
@@ -478,7 +504,10 @@ class TestHttpResponseSizeLimit:
             await handler.shutdown()
 
     async def test_http_response_within_size_limit_succeeds(
-        self, httpserver: HTTPServer, small_response_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        small_response_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET succeeds when response is within size limit.
 
@@ -492,7 +521,7 @@ class TestHttpResponseSizeLimit:
         httpserver.expect_request("/api/small").respond_with_json(small_response)
 
         # Initialize handler with small response size limit
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(small_response_config)
 
         try:
@@ -518,7 +547,10 @@ class TestHttpTextResponse:
     """Integration tests for non-JSON HTTP responses."""
 
     async def test_http_get_text_response(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET handles text/plain response correctly.
 
@@ -532,7 +564,7 @@ class TestHttpTextResponse:
         )
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -559,7 +591,10 @@ class TestHttpQueryParameters:
     """Integration tests for HTTP GET with query parameters."""
 
     async def test_http_get_with_query_params(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET with URL query parameters.
 
@@ -588,7 +623,7 @@ class TestHttpQueryParameters:
         httpserver.expect_request("/api/items").respond_with_handler(query_handler)
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -621,7 +656,10 @@ class TestHttpEmptyResponse:
     """Integration tests for HTTP responses with empty body."""
 
     async def test_http_get_empty_body(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP GET handles empty response body (204 No Content).
 
@@ -633,7 +671,7 @@ class TestHttpEmptyResponse:
         httpserver.expect_request("/api/ping").respond_with_data("", status=204)
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -659,7 +697,10 @@ class TestHttpPostEmptyBody:
     """Integration tests for HTTP POST with no body."""
 
     async def test_http_post_no_body(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test HTTP POST request with no body (trigger/webhook style).
 
@@ -673,7 +714,7 @@ class TestHttpPostEmptyBody:
         )
 
         # Initialize handler
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:
@@ -699,7 +740,10 @@ class TestHttpMultipleRequests:
     """Integration tests for multiple sequential HTTP requests."""
 
     async def test_http_multiple_requests_reuse_handler(
-        self, httpserver: HTTPServer, http_handler_config: dict[str, object]
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
     ) -> None:
         """Test multiple HTTP requests using same handler instance.
 
@@ -714,7 +758,7 @@ class TestHttpMultipleRequests:
         httpserver.expect_request("/api/third").respond_with_json({"order": 3})
 
         # Initialize handler once
-        handler = HandlerHttpRest()
+        handler = HandlerHttpRest(container=mock_container)
         await handler.initialize(http_handler_config)
 
         try:

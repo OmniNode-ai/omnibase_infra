@@ -36,6 +36,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -217,6 +218,7 @@ class ServiceTimeoutEmitter:
 
     Usage:
         >>> emitter = ServiceTimeoutEmitter(
+        ...     container=container,
         ...     timeout_query=timeout_scanner,
         ...     event_bus=event_bus,
         ...     projector=projector,
@@ -262,6 +264,7 @@ class ServiceTimeoutEmitter:
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         timeout_query: ServiceTimeoutScanner,
         event_bus: ProtocolEventBus,
         projector: ProjectorShell,
@@ -270,6 +273,7 @@ class ServiceTimeoutEmitter:
         """Initialize with required dependencies.
 
         Args:
+            container: ONEX container for dependency injection.
             timeout_query: Scanner for querying overdue entities.
                 Must be initialized with a ProjectionReaderRegistration.
             event_bus: Event bus for publishing timeout events.
@@ -281,16 +285,18 @@ class ServiceTimeoutEmitter:
 
         Example:
             >>> reader = ProjectionReaderRegistration(pool)
-            >>> timeout_query = ServiceTimeoutScanner(reader)
+            >>> timeout_query = ServiceTimeoutScanner(container, reader)
             >>> bus = EventBusKafka.default()
             >>> projector = projector_loader.load("registration_projector")
             >>> emitter = ServiceTimeoutEmitter(
+            ...     container=container,
             ...     timeout_query=timeout_query,
             ...     event_bus=bus,
             ...     projector=projector,
             ...     config=ModelTimeoutEmissionConfig(environment="dev"),
             ... )
         """
+        self._container = container
         self._timeout_query = timeout_query
         self._event_bus = event_bus
         self._projector = projector

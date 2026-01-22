@@ -34,10 +34,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
@@ -102,7 +104,9 @@ def create_timeout_query_service(
     Returns:
         ServiceTimeoutScanner configured with mock reader
     """
+    mock_container = MagicMock(spec=ModelONEXContainer)
     return ServiceTimeoutScanner(
+        container=mock_container,
         projection_reader=reader,  # type: ignore[arg-type]
         batch_size=batch_size,
     )
@@ -127,11 +131,13 @@ def create_timeout_emission_service(
     Returns:
         ServiceTimeoutEmitter configured with mocks
     """
+    mock_container = MagicMock(spec=ModelONEXContainer)
     config = ModelTimeoutEmissionConfig(
         environment=environment,
         namespace=namespace,
     )
     return ServiceTimeoutEmitter(
+        container=mock_container,
         timeout_query=query_service,
         event_bus=event_bus,  # type: ignore[arg-type]
         projector=projector,  # type: ignore[arg-type]

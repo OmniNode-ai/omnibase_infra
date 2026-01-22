@@ -139,7 +139,7 @@ class RegistryInfraRegistrationStorage:
             >>> from omnibase_infra.handlers.registration_storage import (
             ...     HandlerRegistrationStoragePostgres,
             ... )
-            >>> handler = HandlerRegistrationStoragePostgres(pool, config)
+            >>> handler = HandlerRegistrationStoragePostgres(container, dsn="postgresql://...")
             >>> RegistryInfraRegistrationStorage.register_handler(container, handler)
         """
         # Import at runtime for isinstance check (protocol is @runtime_checkable)

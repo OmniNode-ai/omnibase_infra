@@ -75,6 +75,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import (
@@ -222,8 +223,13 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         - HALF_OPEN: Testing recovery after reset timeout, limited requests allowed
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerDb in uninitialized state."""
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize HandlerDb with ONEX container for dependency injection.
+
+        Args:
+            container: ONEX container for dependency injection.
+        """
+        self._container = container
         self._pool: asyncpg.Pool | None = None
         self._pool_size: int = _DEFAULT_POOL_SIZE
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS

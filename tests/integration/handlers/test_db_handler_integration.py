@@ -74,14 +74,17 @@ Related Ticket: OMN-816 - Create handler integration tests
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from tests.integration.handlers.conftest import POSTGRES_AVAILABLE
 
 if TYPE_CHECKING:
     from omnibase_core.types import JsonType
     from omnibase_infra.handlers import HandlerDb
+
 
 # =============================================================================
 # Test Configuration and Skip Conditions
@@ -112,11 +115,13 @@ class TestHandlerDbConnection:
     """Tests for HandlerDb connection and lifecycle management."""
 
     @pytest.mark.asyncio
-    async def test_db_describe(self, db_config: dict[str, JsonType]) -> None:
+    async def test_db_describe(
+        self, db_config: dict[str, JsonType], mock_container: MagicMock
+    ) -> None:
         """Verify describe() returns correct handler metadata."""
         from omnibase_infra.handlers import HandlerDb
 
-        handler = HandlerDb()
+        handler = HandlerDb(mock_container)
         await handler.initialize(db_config)
 
         try:
@@ -132,7 +137,9 @@ class TestHandlerDbConnection:
             await handler.shutdown()
 
     @pytest.mark.asyncio
-    async def test_db_shutdown_cleans_up(self, db_config: dict[str, JsonType]) -> None:
+    async def test_db_shutdown_cleans_up(
+        self, db_config: dict[str, JsonType], mock_container: MagicMock
+    ) -> None:
         """Verify shutdown properly closes connection pool.
 
         After shutdown, the handler should reject execute() calls with
@@ -141,7 +148,7 @@ class TestHandlerDbConnection:
         from omnibase_infra.errors import RuntimeHostError
         from omnibase_infra.handlers import HandlerDb
 
-        handler = HandlerDb()
+        handler = HandlerDb(mock_container)
         await handler.initialize(db_config)
 
         # Verify initialized by executing a simple query
@@ -688,12 +695,12 @@ class TestHandlerDbErrors:
             await initialized_db_handler.execute(drop_envelope)
 
     @pytest.mark.asyncio
-    async def test_db_execute_not_initialized(self) -> None:
+    async def test_db_execute_not_initialized(self, mock_container: MagicMock) -> None:
         """Verify execute fails when handler not initialized."""
         from omnibase_infra.errors import RuntimeHostError
         from omnibase_infra.handlers import HandlerDb
 
-        handler = HandlerDb()  # Not initialized
+        handler = HandlerDb(mock_container)  # Not initialized
 
         envelope = {
             "operation": "db.query",

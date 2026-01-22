@@ -15,7 +15,7 @@ Architecture:
 
 Usage:
     ```python
-    lifecycle = MCPServerLifecycle(config)
+    lifecycle = MCPServerLifecycle(container=container, config=config)
     await lifecycle.start()
     # ... server is running ...
     await lifecycle.shutdown()
@@ -28,6 +28,7 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.adapters.adapter_onex_tool_execution import (
     AdapterONEXToolExecution,
 )
@@ -68,6 +69,7 @@ class MCPServerLifecycle:
         3. shutdown(): Clean up all resources
 
     Attributes:
+        _container: ONEX container for dependency injection.
         _config: Server configuration.
         _registry: Tool registry instance.
         _discovery: Consul discovery service.
@@ -80,25 +82,28 @@ class MCPServerLifecycle:
         ...     consul_host="consul.local",
         ...     http_port=8090,
         ... )
-        >>> lifecycle = MCPServerLifecycle(config)
+        >>> lifecycle = MCPServerLifecycle(container=container, config=config)
         >>> await lifecycle.start()
-        >>> handler = lifecycle.get_handler(container)
+        >>> handler = lifecycle.get_handler()
         >>> # Use handler with uvicorn/transport
         >>> await lifecycle.shutdown()
     """
 
     def __init__(
         self,
+        container: ModelONEXContainer,
         config: ModelMCPServerConfig,
         bus: EventBusKafka | None = None,
     ) -> None:
         """Initialize the lifecycle manager.
 
         Args:
+            container: ONEX container for dependency injection.
             config: Server configuration.
             bus: Optional Kafka event bus for hot reload. If not provided,
                 Kafka subscription is skipped even if kafka_enabled=True.
         """
+        self._container = container
         self._config = config
         self._bus = bus
 
@@ -162,6 +167,7 @@ class MCPServerLifecycle:
         # Create services
         self._registry = ServiceMCPToolRegistry()
         self._executor = AdapterONEXToolExecution(
+            container=self._container,
             default_timeout=self._config.default_timeout,
         )
 

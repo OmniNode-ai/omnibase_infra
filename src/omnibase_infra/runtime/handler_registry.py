@@ -74,7 +74,7 @@ from omnibase_infra.runtime.registry.registry_protocol_binding import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
-    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
+    from omnibase_infra.protocols import ProtocolContainerAware
 
 # =============================================================================
 # Handler Type Constants
@@ -192,7 +192,7 @@ def get_event_bus_registry() -> RegistryEventBusBinding:
 # =============================================================================
 
 
-def get_handler_class(handler_type: str) -> type[ProtocolHandler]:
+def get_handler_class(handler_type: str) -> type[ProtocolContainerAware]:
     """Get handler class for the given type from the singleton registry.
 
     Convenience function that wraps get_handler_registry().get().
@@ -275,7 +275,7 @@ def register_handlers_from_config(
 
         TODO(OMN-41): Implement full handler resolution:
         1. Use importlib to resolve protocol_class string to actual class
-        2. Validate class implements ProtocolHandler protocol
+        2. Validate class implements ProtocolContainerAware protocol
         3. Register handler with runtime via get_handler_registry()
         4. Support handler instantiation options from config.options
     """

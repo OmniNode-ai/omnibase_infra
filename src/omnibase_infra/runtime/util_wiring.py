@@ -139,7 +139,7 @@ from omnibase_infra.runtime.handler_registry import (
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
-    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
+    from omnibase_infra.protocols import ProtocolContainerAware
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ logger = logging.getLogger(__name__)
 # NOTE: HandlerHttpRest and HandlerDb use legacy execute(envelope: dict) signature.
 # They will be migrated to ProtocolHandler.execute(request, operation_config) in future.
 # Type ignore comments suppress MyPy errors during MVP phase.
-_KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
+_KNOWN_HANDLERS: dict[str, tuple[type[ProtocolContainerAware], str]] = {
     # NOTE: Handlers implement ProtocolHandler structurally but concrete types differ from protocol.
     HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
@@ -487,7 +487,7 @@ def get_known_event_bus_kinds() -> list[str]:
 
 def wire_custom_handler(
     handler_type: str,
-    handler_cls: type[ProtocolHandler],
+    handler_cls: type[ProtocolContainerAware],
     registry: RegistryProtocolBinding | None = None,
 ) -> None:
     """Register a custom handler class with the registry.

@@ -84,6 +84,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
 from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
@@ -268,7 +269,7 @@ def assert_no_bus_attributes(handler: object, handler_name: str) -> None:
 
 
 @pytest.fixture
-def http_handler() -> Generator[HandlerHttpRest, None, None]:
+def http_handler(mock_container: MagicMock) -> Generator[HandlerHttpRest, None, None]:
     """Create HandlerHttpRest with cleanup.
 
     Yields handler instance and ensures proper shutdown if initialized.
@@ -279,7 +280,7 @@ def http_handler() -> Generator[HandlerHttpRest, None, None]:
     uses yield with teardown code. See introspection_handler for the simpler
     return pattern when no cleanup is required.
     """
-    handler = HandlerHttpRest()
+    handler = HandlerHttpRest(container=mock_container)
     yield handler
     # Cleanup if handler was initialized (has httpx client)
     if hasattr(handler, "_initialized") and handler._initialized:
@@ -827,7 +828,7 @@ class TestHandlerNoPublishConstraintCrossValidation:
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
         [
-            (HandlerHttpRest, {}),
+            (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
             (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
         ],
     )
@@ -915,7 +916,11 @@ class TestHandlerNoPublishConstraintCrossValidation:
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs", "method_name"),
         [
-            (HandlerHttpRest, {}, "execute"),
+            (
+                HandlerHttpRest,
+                {"container": MagicMock(spec=ModelONEXContainer)},
+                "execute",
+            ),
             (HandlerNodeIntrospected, {"projection_reader": MagicMock()}, "handle"),
         ],
     )
@@ -1089,7 +1094,7 @@ class TestHandlerProtocolCompliance:
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
         [
-            (HandlerHttpRest, {}),
+            (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
             (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
         ],
     )
@@ -1125,7 +1130,7 @@ class TestHandlerProtocolCompliance:
     @pytest.mark.parametrize(
         ("handler_class", "init_kwargs"),
         [
-            (HandlerHttpRest, {}),
+            (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
             (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
         ],
     )
@@ -1302,7 +1307,7 @@ class TestOrchestratorBusAccessVerification:
 
         This proves that the service layer, used by orchestrator coordinators,
         has bus access. The orchestrator pattern is:
-        Orchestrator -> TimeoutCoordinator -> ServiceTimeoutEmitter(event_bus=...)
+        Orchestrator -> TimeoutCoordinator -> ServiceTimeoutEmitter(container, event_bus=...)
         """
         from omnibase_infra.services.service_timeout_emitter import (
             ServiceTimeoutEmitter,
@@ -1310,6 +1315,12 @@ class TestOrchestratorBusAccessVerification:
 
         sig = inspect.signature(ServiceTimeoutEmitter.__init__)
         params = list(sig.parameters.keys())
+
+        # ServiceTimeoutEmitter MUST accept container parameter (first)
+        assert "container" in params, (
+            "ServiceTimeoutEmitter must accept 'container' parameter - "
+            "this is the ONEX DI pattern"
+        )
 
         # ServiceTimeoutEmitter MUST accept event_bus parameter
         assert "event_bus" in params, (
@@ -1443,15 +1454,25 @@ class TestOrchestratorBusAccessVerification:
         )
 
         # Create mock dependencies
+        mock_container = MagicMock(spec=ModelONEXContainer)
         mock_query = MagicMock()
         mock_bus = MagicMock()
         mock_projector = MagicMock()
 
-        # Create emitter with event_bus
+        # Create emitter with container and event_bus
         emitter = ServiceTimeoutEmitter(
+            container=mock_container,
             timeout_query=mock_query,
             event_bus=mock_bus,
             projector=mock_projector,
+        )
+
+        # Verify container is stored (as private attribute per ONEX patterns)
+        assert hasattr(emitter, "_container"), (
+            "ServiceTimeoutEmitter must store container as _container"
+        )
+        assert emitter._container is mock_container, (
+            "ServiceTimeoutEmitter._container must be the injected container"
         )
 
         # Verify event_bus is stored (as private attribute per ONEX patterns)

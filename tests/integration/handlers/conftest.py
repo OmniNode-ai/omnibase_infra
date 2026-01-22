@@ -104,9 +104,12 @@ import os
 import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from urllib.parse import quote_plus
 
 import pytest
+
+from omnibase_core.container import ModelONEXContainer
 
 # Module-level logger for test cleanup diagnostics
 logger = logging.getLogger(__name__)
@@ -289,6 +292,17 @@ def small_response_config() -> dict[str, object]:
 
 
 # =============================================================================
+# Common Mock Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def mock_container() -> MagicMock:
+    """Create mock ONEX container for handler tests."""
+    return MagicMock(spec=ModelONEXContainer)
+
+
+# =============================================================================
 # Database Handler Fixtures
 # =============================================================================
 
@@ -344,6 +358,7 @@ def unique_table_name() -> str:
 @pytest.fixture
 async def initialized_db_handler(
     db_config: dict[str, JsonType],
+    mock_container: MagicMock,
 ) -> AsyncGenerator[HandlerDb, None]:
     """Provide an initialized HandlerDb instance with automatic cleanup.
 
@@ -372,7 +387,7 @@ async def initialized_db_handler(
     """
     from omnibase_infra.handlers import HandlerDb
 
-    handler = HandlerDb()
+    handler = HandlerDb(mock_container)
     await handler.initialize(db_config)
 
     yield handler
@@ -578,6 +593,7 @@ def vault_config() -> dict[str, JsonType]:
 
 @pytest.fixture
 async def vault_handler(
+    mock_container: MagicMock,
     vault_config: dict[str, JsonType],
 ) -> AsyncGenerator[HandlerVault, None]:
     """Create and initialize HandlerVault for integration testing with automatic cleanup.
@@ -591,6 +607,7 @@ async def vault_handler(
         - Ignores cleanup errors to prevent test pollution
 
     Args:
+        mock_container: ONEX container mock for dependency injection.
         vault_config: Vault configuration fixture.
 
     Yields:
@@ -602,7 +619,7 @@ async def vault_handler(
     """
     from omnibase_infra.handlers import HandlerVault
 
-    handler = HandlerVault()
+    handler = HandlerVault(mock_container)
     await handler.initialize(vault_config)
 
     yield handler
@@ -738,6 +755,7 @@ def unique_service_name() -> str:
 @pytest.fixture
 async def initialized_consul_handler(
     consul_config: dict[str, JsonType],
+    mock_container: MagicMock,
 ) -> AsyncGenerator[HandlerConsul, None]:
     """Provide an initialized HandlerConsul instance with automatic cleanup.
 
@@ -758,13 +776,14 @@ async def initialized_consul_handler(
 
     Args:
         consul_config: Consul configuration fixture.
+        mock_container: ONEX container mock for dependency injection.
 
     Yields:
         Initialized HandlerConsul ready for Consul operations.
     """
     from omnibase_infra.handlers import HandlerConsul
 
-    handler = HandlerConsul()
+    handler = HandlerConsul(mock_container)
     await handler.initialize(consul_config)
 
     yield handler

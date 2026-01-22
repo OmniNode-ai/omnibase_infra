@@ -569,7 +569,16 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 # - Resource leaks from partial initialization
                 try:
                     # Create and start MCPServerLifecycle for tool discovery
-                    self._lifecycle = MCPServerLifecycle(config=server_config, bus=None)
+                    # Container is required for lifecycle initialization
+                    if self._container is None:
+                        raise ValueError(
+                            "Container required for MCPServerLifecycle initialization"
+                        )
+                    self._lifecycle = MCPServerLifecycle(
+                        container=self._container,
+                        config=server_config,
+                        bus=None,
+                    )
                     await self._lifecycle.start()
 
                     # Update MCP registry and executor references from lifecycle
