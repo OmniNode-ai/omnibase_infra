@@ -62,7 +62,10 @@ ProtocolHandlerDescriptor = ProtocolContractDescriptor
 MINIMAL_HANDLER_CONTRACT_YAML = """
 handler_id: "{handler_id}"
 name: "{name}"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -72,7 +75,10 @@ output_model: "test.models.Output"
 HANDLER_CONTRACT_WITH_METADATA_YAML = """
 handler_id: "{handler_id}"
 name: "{name}"
-version: "{version}"
+contract_version:
+  major: {version_major}
+  minor: {version_minor}
+  patch: {version_patch}
 descriptor:
   handler_kind: "{handler_kind}"
   description: "{description}"
@@ -646,7 +652,10 @@ class TestHandlerContractSourceValidation:
         return """\
 handler_id: "test.handler.valid"
 name: "Test Valid Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 description: "A valid test handler"
 descriptor:
   handler_kind: "compute"
@@ -660,7 +669,7 @@ output_model: "omnibase_infra.models.test.ModelTestOutput"
         return """\
 handler_id: "test.handler.malformed
 name: missing closing quote
-version: "1.0.0
+contract_version: "1.0.0
 """
 
     @pytest.fixture
@@ -668,7 +677,7 @@ version: "1.0.0
         """Return YAML with missing required fields."""
         return """\
 name: "Test Handler Without ID"
-# Missing: handler_id, version, descriptor, input_model, output_model
+# Missing: handler_id, contract_version, descriptor, input_model, output_model
 """
 
     @pytest.fixture
@@ -677,7 +686,7 @@ name: "Test Handler Without ID"
         return """\
 handler_id: "test.handler.invalid_version"
 name: "Test Handler Invalid Version"
-version: "not-a-semver"
+contract_version: "not-a-semver"
 description: "Handler with invalid version"
 descriptor:
   handler_kind: "compute"
@@ -1115,7 +1124,10 @@ class TestHandlerContractSourceCaseSensitivity:
         valid_yaml_template = """
 handler_id: "test.handler.{variant}"
 name: "{variant} Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -1182,7 +1194,10 @@ output_model: "test.models.Output"
         valid_yaml_template = """
 handler_id: "test.handler.{variant}"
 name: "{variant} Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -1294,7 +1309,10 @@ class TestHandlerContractSourceSymlinkHandling:
         valid_yaml = """
 handler_id: "test.handler.symlinked"
 name: "Symlinked Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "effect"
 input_model: "test.models.Input"
@@ -1340,7 +1358,10 @@ output_model: "test.models.Output"
         valid_yaml = """
 handler_id: "test.handler.outside"
 name: "Outside Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "effect"
 input_model: "test.models.Input"
@@ -1385,7 +1406,10 @@ output_model: "test.models.Output"
         valid_yaml = """
 handler_id: "test.handler.dedup"
 name: "Deduplicated Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -1420,7 +1444,10 @@ output_model: "test.models.Output"
 HANDLER_CONTRACT_WITH_MULTI_SEGMENT_PATHS = """
 handler_id: "{handler_id}"
 name: "{name}"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "{input_model}"
@@ -1838,7 +1865,10 @@ class TestHandlerContractSourcePermissionErrors:
         valid_yaml = """
 handler_id: "test.handler.valid"
 name: "Valid Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -1922,7 +1952,10 @@ output_model: "test.models.Output"
         valid_yaml = """
 handler_id: "test.handler.unreadable"
 name: "Unreadable Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -1995,7 +2028,10 @@ class TestHandlerContractSourceFileSizeLimit:
         return """\
 handler_id: "test.handler.size_limit"
 name: "Size Limit Test Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -2270,7 +2306,7 @@ class TestHandlerContractSourceVersionValidation:
         contract_file.write_text("""
 handler_id: "test.handler.invalid_version"
 name: "Invalid Version Handler"
-version: "not-a-version"
+contract_version: "not-a-version"
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -2307,7 +2343,7 @@ output_model: "test.models.Output"
         contract_file.write_text("""
 handler_id: "test.handler.invalid_version"
 name: "Invalid Version Handler"
-version: "abc.def.ghi"
+contract_version: "abc.def.ghi"
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -2344,7 +2380,7 @@ output_model: "test.models.Output"
         contract_file.write_text("""
 handler_id: "test.handler.empty_version"
 name: "Empty Version Handler"
-version: ""
+contract_version: ""
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -2381,7 +2417,10 @@ output_model: "test.models.Output"
         valid_file.write_text("""
 handler_id: "test.handler.valid"
 name: "Valid Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -2395,7 +2434,7 @@ output_model: "test.models.Output"
         invalid_file.write_text("""
 handler_id: "test.handler.invalid"
 name: "Invalid Handler"
-version: "not.valid.version"
+contract_version: "not.valid.version"
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
@@ -2430,7 +2469,11 @@ output_model: "test.models.Output"
         contract_file.write_text("""
 handler_id: "test.handler.prerelease"
 name: "Prerelease Handler"
-version: "1.0.0-beta.1"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+  prerelease: ["beta", 1]
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"
