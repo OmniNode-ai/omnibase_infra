@@ -44,6 +44,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_core.models.notifications import ModelStateTransitionNotification
 from omnibase_infra.runtime.models import (
@@ -201,7 +202,7 @@ class TestTransitionNotificationOutboxFixtures:
         self, sample_notification: ModelStateTransitionNotification
     ) -> None:
         """Test that notification model is immutable."""
-        with pytest.raises(Exception):  # ValidationError for frozen model
+        with pytest.raises(ValidationError):
             sample_notification.to_state = "different"  # type: ignore[misc]
 
     def test_sample_notification_serializes_to_json(

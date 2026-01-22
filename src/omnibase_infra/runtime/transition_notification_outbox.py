@@ -771,9 +771,13 @@ class TransitionNotificationOutbox:
             >>> # Processor now running in background
         """
         async with self._lock:
-            if self._running:
+            # Check both _running flag and whether task exists and is not done
+            # This prevents starting a second loop if stop() is in progress
+            if self._running or (
+                self._processor_task is not None and not self._processor_task.done()
+            ):
                 logger.warning(
-                    "Outbox processor already running, ignoring start()",
+                    "Outbox processor already running or task still active, ignoring start()",
                     extra={"table_name": self._table_name},
                 )
                 return
@@ -801,10 +805,16 @@ class TransitionNotificationOutbox:
         Idempotency:
             Calling stop() on an already-stopped processor is a no-op.
 
+        Thread Safety:
+            The shutdown event is set and processor task captured while holding
+            the lock to prevent race conditions with concurrent start() calls.
+            The task is awaited outside the lock to avoid deadlock.
+
         Example:
             >>> await outbox.stop()
             >>> # Processor stopped, safe to shutdown
         """
+        # Capture task reference while holding lock to prevent race with start()
         async with self._lock:
             if not self._running:
                 logger.debug(
@@ -814,29 +824,32 @@ class TransitionNotificationOutbox:
                 return
 
             self._running = False
+            # Signal shutdown INSIDE lock to prevent race with start() clearing it
+            self._shutdown_event.set()
+            # Capture task reference INSIDE lock before releasing
+            processor_task = self._processor_task
 
-        # Signal shutdown to processor loop
-        self._shutdown_event.set()
-
-        # Wait for processor task to complete
-        if self._processor_task is not None:
+        # Wait for processor task to complete OUTSIDE lock to avoid deadlock
+        if processor_task is not None:
             try:
-                await asyncio.wait_for(
-                    self._processor_task, timeout=self._shutdown_timeout
-                )
+                await asyncio.wait_for(processor_task, timeout=self._shutdown_timeout)
             except TimeoutError:
                 logger.warning(
                     "Outbox processor did not complete within timeout, cancelling",
                     extra={"table_name": self._table_name},
                 )
-                self._processor_task.cancel()
+                processor_task.cancel()
                 try:
-                    await self._processor_task
+                    await processor_task
                 except asyncio.CancelledError:
                     pass
             except asyncio.CancelledError:
                 pass
-            self._processor_task = None
+
+        # Clear task reference safely - only if it's still the same task
+        async with self._lock:
+            if self._processor_task is processor_task:
+                self._processor_task = None
 
         logger.info(
             "Outbox processor stopped",

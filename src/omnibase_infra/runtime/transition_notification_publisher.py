@@ -359,6 +359,11 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
                 },
             )
 
+        except (InfraUnavailableError, InfraTimeoutError):
+            # Re-raise infrastructure errors without wrapping - preserve error semantics
+            await self._handle_failure("publish", correlation_id)
+            raise
+
         except TimeoutError as e:
             await self._handle_failure("publish", correlation_id)
             timeout_ctx = ModelTimeoutErrorContext(
