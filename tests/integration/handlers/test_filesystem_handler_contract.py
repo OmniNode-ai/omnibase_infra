@@ -63,7 +63,7 @@ FILESYSTEM_CONTRACT_PATH = CONTRACTS_DIR / "filesystem" / "handler_contract.yaml
 EXPECTED_HANDLER_ID = "effect.filesystem.handler"
 EXPECTED_HANDLER_KIND = "effect"
 EXPECTED_NAME = "FileSystem Handler"
-EXPECTED_VERSION = "1.0.0"
+EXPECTED_CONTRACT_VERSION = {"major": 1, "minor": 0, "patch": 0}
 EXPECTED_CAPABILITIES = [
     "filesystem.read",
     "filesystem.write",
@@ -167,9 +167,18 @@ class TestFilesystemHandlerContractDiscovery:
             f"Expected name '{EXPECTED_NAME}', got '{descriptor.name}'"
         )
 
-        # Verify version
-        assert str(descriptor.version) == EXPECTED_VERSION, (
-            f"Expected version '{EXPECTED_VERSION}', got '{descriptor.version}'"
+        # Verify version (ModelHandlerDescriptor uses 'version' field)
+        assert descriptor.version.major == EXPECTED_CONTRACT_VERSION["major"], (
+            f"Expected version.major {EXPECTED_CONTRACT_VERSION['major']}, "
+            f"got {descriptor.version.major}"
+        )
+        assert descriptor.version.minor == EXPECTED_CONTRACT_VERSION["minor"], (
+            f"Expected version.minor {EXPECTED_CONTRACT_VERSION['minor']}, "
+            f"got {descriptor.version.minor}"
+        )
+        assert descriptor.version.patch == EXPECTED_CONTRACT_VERSION["patch"], (
+            f"Expected version.patch {EXPECTED_CONTRACT_VERSION['patch']}, "
+            f"got {descriptor.version.patch}"
         )
 
     @pytest.mark.asyncio
@@ -226,7 +235,9 @@ class TestFilesystemHandlerContractSchema:
         # Verify key fields were parsed correctly
         assert contract.handler_id == EXPECTED_HANDLER_ID
         assert contract.name == EXPECTED_NAME
-        assert str(contract.version) == EXPECTED_VERSION
+        assert contract.contract_version.major == EXPECTED_CONTRACT_VERSION["major"]
+        assert contract.contract_version.minor == EXPECTED_CONTRACT_VERSION["minor"]
+        assert contract.contract_version.patch == EXPECTED_CONTRACT_VERSION["patch"]
         assert contract.descriptor.handler_kind == EXPECTED_HANDLER_KIND
 
     def test_filesystem_handler_contract_has_required_fields(
@@ -237,7 +248,7 @@ class TestFilesystemHandlerContractSchema:
         ModelHandlerContract requires:
         - handler_id
         - name
-        - version
+        - contract_version
         - descriptor (with handler_kind)
         - input_model
         - output_model
@@ -245,7 +256,7 @@ class TestFilesystemHandlerContractSchema:
         required_fields = [
             "handler_id",
             "name",
-            "version",
+            "contract_version",
             "descriptor",
             "input_model",
             "output_model",
@@ -464,4 +475,7 @@ class TestFilesystemHandlerContractDiscoveryIdempotency:
         assert desc1.handler_id == desc2.handler_id == desc3.handler_id
         assert desc1.handler_kind == desc2.handler_kind == desc3.handler_kind
         assert desc1.name == desc2.name == desc3.name
-        assert str(desc1.version) == str(desc2.version) == str(desc3.version)
+        # ModelHandlerDescriptor uses 'version' field
+        assert desc1.version.major == desc2.version.major == desc3.version.major
+        assert desc1.version.minor == desc2.version.minor == desc3.version.minor
+        assert desc1.version.patch == desc2.version.patch == desc3.version.patch
