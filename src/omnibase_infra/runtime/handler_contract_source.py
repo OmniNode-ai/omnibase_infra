@@ -729,22 +729,12 @@ class HandlerContractSource(ProtocolContractSource):
             raw_data.get("handler_class") if isinstance(raw_data, dict) else None
         )
 
-        # Parse version with proper error handling for graceful mode
-        # Uses ModelSemVer.parse() directly - the canonical semver parsing utility
-        try:
-            version = ModelSemVer.parse(contract.version)
-        except (ValueError, ModelOnexError) as e:
-            raise ModelOnexError(
-                f"Invalid version string '{contract.version}' in contract at "
-                f"{contract_path}: {e}",
-                error_code="HANDLER_SOURCE_007",
-            ) from e
-
+        # Use contract_version directly - it's already a ModelSemVer from Pydantic validation
         # Transform to descriptor
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
             name=contract.name,
-            version=version,
+            version=contract.contract_version,
             handler_kind=contract.descriptor.handler_kind,
             input_model=contract.input_model,
             output_model=contract.output_model,

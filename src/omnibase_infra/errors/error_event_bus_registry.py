@@ -5,6 +5,8 @@
 This module defines the EventBusRegistryError for event bus registry operations.
 """
 
+from typing import Any, cast
+
 from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -92,10 +94,11 @@ class EventBusRegistryError(RuntimeHostError):
         if existing_class is not None:
             extra_context["existing_class"] = existing_class
 
+        # NOTE: Cast required for mypy - **dict[str, object] doesn't satisfy **context: Any
         super().__init__(
             message=message,
             context=context,
-            **extra_context,
+            **cast("dict[str, Any]", extra_context),
         )
 
 
