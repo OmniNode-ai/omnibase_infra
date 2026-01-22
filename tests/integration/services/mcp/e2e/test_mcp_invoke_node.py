@@ -84,9 +84,6 @@ class TestMCPInvokeNode:
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
 
-        # Clear any previous calls
-        call_history.clear()
-
         # Send tool call request
         response = await client.post(
             f"{path}/",
@@ -136,8 +133,6 @@ class TestMCPInvokeNode:
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
-
-        call_history.clear()
 
         # Make multiple calls
         response1 = await client.post(

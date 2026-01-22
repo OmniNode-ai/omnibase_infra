@@ -270,3 +270,33 @@ class TestMCPProtocolCompliance:
         assert "capabilities" in result, (
             f"MCP initialize response missing capabilities: {result}"
         )
+
+    async def test_malformed_json_returns_parse_error(
+        self,
+        mcp_http_client: object,
+        mcp_app_dev_mode: dict[str, object],
+    ) -> None:
+        """Malformed JSON body returns JSON-RPC parse error.
+
+        The MCP protocol should return error code -32700 for invalid JSON.
+        This is a standard JSON-RPC error code for parse errors.
+        """
+        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
+        path = str(mcp_app_dev_mode["path"])
+
+        response = await client.post(
+            f"{path}/",
+            content="not valid json{",
+            headers={"Content-Type": "application/json"},
+        )
+
+        # Malformed JSON MUST return 400 with parse error
+        assert response.status_code == 400, (
+            f"Expected 400 for malformed JSON, got {response.status_code}"
+        )
+
+        data = response.json()
+        assert "error" in data, f"Expected error for malformed JSON, got: {data}"
+        assert data["error"]["code"] == -32700, (
+            f"Expected parse error code -32700, got: {data['error']['code']}"
+        )
