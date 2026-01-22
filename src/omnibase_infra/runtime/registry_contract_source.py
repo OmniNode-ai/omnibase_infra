@@ -309,7 +309,7 @@ class RegistryContractSource(ProtocolContractSource):
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
             name=contract.name,
-            version=str(contract.version),
+            version=contract.version,
             handler_kind=handler_kind,
             input_model=contract.input_model,
             output_model=contract.output_model,
