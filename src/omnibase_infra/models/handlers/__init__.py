@@ -16,10 +16,6 @@ and error reporting in ONEX handlers.
     Added ModelBootstrapHandlerDescriptor for OMN-1087 bootstrap handler
     validation with required handler_class field.
 
-.. versionchanged:: 0.7.0
-    Added ModelHandlerSourceConfig for OMN-1095 handler source mode
-    configuration with production hardening features.
-
 Note:
     ModelContractDiscoveryResult uses a forward reference to
     ModelHandlerValidationError to avoid circular imports. The forward
@@ -41,9 +37,6 @@ from omnibase_infra.models.handlers.model_handler_descriptor import (
 from omnibase_infra.models.handlers.model_handler_identifier import (
     ModelHandlerIdentifier,
 )
-from omnibase_infra.models.handlers.model_handler_source_config import (
-    ModelHandlerSourceConfig,
-)
 
 __all__ = [
     "LiteralHandlerKind",
@@ -51,5 +44,4 @@ __all__ = [
     "ModelContractDiscoveryResult",
     "ModelHandlerDescriptor",
     "ModelHandlerIdentifier",
-    "ModelHandlerSourceConfig",
 ]

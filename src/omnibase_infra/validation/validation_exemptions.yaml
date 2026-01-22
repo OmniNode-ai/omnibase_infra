@@ -1094,33 +1094,6 @@ pattern_exemptions:
       - CLAUDE.md (ONEX Architecture - Handler Types)
     ticket: OMN-1087
   # ==========================================================================
-  # Handler Source Mode Exemptions (OMN-1095)
-  # ==========================================================================
-  # EnumHandlerSourceMode and HandlerSourceResolver are part of the handler
-  # source mode feature flag implementation. The "Handler" in the names refers
-  # to ONEX handler concepts (how handlers are discovered/loaded), consistent
-  # with HandlerBootstrapSource and HandlerContractSource.
-  - file_pattern: 'enum_handler_source_mode\.py'
-    class_pattern: "Class name 'EnumHandlerSourceMode'"
-    violation_pattern: "contains anti-pattern 'Handler'"
-    reason: >
-      EnumHandlerSourceMode defines handler loading modes (BOOTSTRAP, CONTRACT, HYBRID). The "Handler" refers to ONEX handler concepts - how handlers are discovered and loaded at runtime. Consistent with HandlerBootstrapSource and HandlerContractSource naming.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-      - CLAUDE.md (ONEX Architecture - Handler Types)
-    ticket: OMN-1095
-  - file_pattern: 'handler_source_resolver\.py'
-    class_pattern: "Class name 'HandlerSourceResolver'"
-    violation_pattern: "contains anti-pattern 'Handler'"
-    reason: >
-      HandlerSourceResolver implements per-handler identity resolution between bootstrap and contract sources. The "Handler" refers to ONEX handler concepts - resolving which handler source takes precedence. Consistent with HandlerBootstrapSource and HandlerContractSource naming.
-
-    documentation:
-      - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
-      - CLAUDE.md (ONEX Architecture - Handler Types)
-    ticket: OMN-1095
-  # ==========================================================================
   # Handler Plugin Loader Exemptions (OMN-1132)
   # ==========================================================================
   # HandlerPluginLoader discovers and loads ONEX handlers from contract YAML files.

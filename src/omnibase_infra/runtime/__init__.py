@@ -160,9 +160,6 @@ from omnibase_infra.runtime.handler_bootstrap_source import (
     SOURCE_TYPE_BOOTSTRAP,
 )
 
-# Handler source resolver (OMN-1095)
-from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
-
 # Handler contract config loader
 from omnibase_infra.runtime.handler_contract_config_loader import (
     MAX_CONTRACT_SIZE_BYTES,
@@ -323,8 +320,6 @@ __all__: list[str] = [
     # Handler bootstrap source (OMN-1087)
     "HandlerBootstrapSource",
     "SOURCE_TYPE_BOOTSTRAP",
-    # Handler source resolver (OMN-1095)
-    "HandlerSourceResolver",
     # Handler contract config loader
     "MAX_CONTRACT_SIZE_BYTES",
     "extract_handler_config",
