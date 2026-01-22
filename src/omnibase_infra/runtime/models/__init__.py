@@ -47,12 +47,19 @@ Exports:
     ModelSecretResolverMetrics: Resolution metrics for observability
     ModelSecretSourceInfo: Non-sensitive source information for introspection
     ModelRetryPolicy: Retry policy configuration for handler operations
+    ModelTransitionNotificationPublisherMetrics: Metrics for transition notification publisher
+    ModelTransitionNotificationOutboxMetrics: Metrics for transition notification outbox
+    ModelTransitionNotificationOutboxConfig: Configuration for transition notification outbox
+    ModelStateTransitionNotification: State transition notification (re-export from omnibase_core)
+    ModelProjectorNotificationConfig: Configuration for projector notification publishing
     ModelBindingConfig: Configuration for binding a handler to the runtime
     ModelBindingConfigCacheStats: Cache statistics for BindingConfigResolver
     ModelBindingConfigResolverConfig: Configuration for BindingConfigResolver
     ModelConfigCacheEntry: Internal cache entry for BindingConfigResolver
 """
 
+# Re-export from omnibase_core for convenience
+from omnibase_core.models.notifications import ModelStateTransitionNotification
 from omnibase_infra.runtime.enums.enum_config_ref_scheme import EnumConfigRefScheme
 from omnibase_infra.runtime.models.model_batch_lifecycle_result import (
     ModelBatchLifecycleResult,
@@ -110,6 +117,9 @@ from omnibase_infra.runtime.models.model_policy_registration import (
 )
 from omnibase_infra.runtime.models.model_policy_result import ModelPolicyResult
 from omnibase_infra.runtime.models.model_policy_type_filter import ModelPolicyTypeFilter
+from omnibase_infra.runtime.models.model_projector_notification_config import (
+    ModelProjectorNotificationConfig,
+)
 from omnibase_infra.runtime.models.model_projector_plugin_loader_config import (
     ModelProjectorPluginLoaderConfig,
 )
@@ -142,6 +152,15 @@ from omnibase_infra.runtime.models.model_shutdown_batch_result import (
     ModelShutdownBatchResult,
 )
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
+from omnibase_infra.runtime.models.model_transition_notification_outbox_config import (
+    ModelTransitionNotificationOutboxConfig,
+)
+from omnibase_infra.runtime.models.model_transition_notification_outbox_metrics import (
+    ModelTransitionNotificationOutboxMetrics,
+)
+from omnibase_infra.runtime.models.model_transition_notification_publisher_metrics import (
+    ModelTransitionNotificationPublisherMetrics,
+)
 
 __all__: list[str] = [
     "EnumConfigRefScheme",
@@ -173,6 +192,7 @@ __all__: list[str] = [
     "ModelPolicyRegistration",
     "ModelPolicyResult",
     "ModelPolicyTypeFilter",
+    "ModelProjectorNotificationConfig",
     "ModelProjectorPluginLoaderConfig",
     "ModelProtocolRegistrationConfig",
     "ModelRetryPolicy",
@@ -188,5 +208,9 @@ __all__: list[str] = [
     "ModelSecretSourceSpec",
     "ModelShutdownBatchResult",
     "ModelShutdownConfig",
+    "ModelStateTransitionNotification",
+    "ModelTransitionNotificationOutboxConfig",
+    "ModelTransitionNotificationOutboxMetrics",
+    "ModelTransitionNotificationPublisherMetrics",
     "SecretSourceType",
 ]

@@ -12,22 +12,53 @@ Features:
     - Parameterized SQL queries for injection protection
     - Bulk state queries for N+1 optimization
     - Configurable query timeouts
+    - Optional state transition notification publishing
+
+Notification Publishing:
+    When configured with a notification_publisher and notification_config,
+    ProjectorShell will automatically publish state transition notifications
+    after successful projection commits. This enables the Observer pattern
+    for orchestrator coordination without tight coupling to reducers.
+
+    Example:
+        >>> from omnibase_infra.runtime import ProjectorShell, TransitionNotificationPublisher
+        >>> from omnibase_infra.runtime.models import ModelProjectorNotificationConfig
+        >>>
+        >>> publisher = TransitionNotificationPublisher(event_bus, topic="transitions.v1")
+        >>> config = ModelProjectorNotificationConfig(
+        ...     topic="transitions.v1",
+        ...     state_column="current_state",
+        ...     aggregate_id_column="entity_id",
+        ...     version_column="version",
+        ... )
+        >>> projector = ProjectorShell(
+        ...     contract=contract,
+        ...     pool=pool,
+        ...     notification_publisher=publisher,
+        ...     notification_config=config,
+        ... )
 
 See Also:
     - ProtocolEventProjector: Protocol definition from omnibase_infra.protocols
     - ModelProjectorContract: Contract model from omnibase_core
     - ProjectorPluginLoader: Loader that instantiates ProjectorShell
+    - TransitionNotificationPublisher: Publisher for state transition notifications
 
 Related Tickets:
     - OMN-1169: ProjectorShell contract-driven projections (implemented)
+    - OMN-1139: TransitionNotificationPublisher integration (implemented)
 
 .. versionadded:: 0.7.0
     Created as part of OMN-1169 projector shell implementation.
+
+.. versionchanged:: 0.8.0
+    Added notification publishing support as part of OMN-1139.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
@@ -37,6 +68,9 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.projectors import (
     ModelProjectionResult,
     ModelProjectorContract,
+)
+from omnibase_core.protocols.notifications import (
+    ProtocolTransitionNotificationPublisher,
 )
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -49,11 +83,17 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 from omnibase_infra.runtime.mixins import MixinProjectorSqlOperations
+from omnibase_infra.runtime.mixins.mixin_projector_notification_publishing import (
+    MixinProjectorNotificationPublishing,
+)
+from omnibase_infra.runtime.models.model_projector_notification_config import (
+    ModelProjectorNotificationConfig,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class ProjectorShell(MixinProjectorSqlOperations):
+class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOperations):
     """Generic contract-driven projector implementation.
 
     Transforms events into persistent state projections based on a
@@ -64,6 +104,22 @@ class ProjectorShell(MixinProjectorSqlOperations):
         - upsert: INSERT or UPDATE based on upsert_key (default)
         - insert_only: INSERT only, fail on conflict
         - append: Always INSERT, event-log style
+
+    Notification Publishing:
+        When configured with a notification_publisher and notification_config,
+        the projector will automatically publish state transition notifications
+        after successful projection commits. The notification includes:
+
+        - aggregate_type: From the projector contract
+        - aggregate_id: Extracted from projection values
+        - from_state: Previous state (fetched before projection)
+        - to_state: New state (extracted from projection values)
+        - projection_version: Version from projection values (if configured)
+        - correlation_id: Propagated from the incoming event
+        - causation_id: The envelope_id of the triggering event
+
+        Notifications are best-effort - publishing failures are logged but
+        do not cause the projection to fail.
 
     UniqueViolationError Handling:
         The projector handles ``asyncpg.UniqueViolationError`` differently based
@@ -181,6 +237,8 @@ class ProjectorShell(MixinProjectorSqlOperations):
         contract: ModelProjectorContract,
         pool: asyncpg.Pool,
         query_timeout_seconds: float | None = None,
+        notification_publisher: ProtocolTransitionNotificationPublisher | None = None,
+        notification_config: ModelProjectorNotificationConfig | None = None,
     ) -> None:
         """Initialize projector shell with contract and database pool.
 
@@ -192,6 +250,59 @@ class ProjectorShell(MixinProjectorSqlOperations):
             query_timeout_seconds: Timeout for individual database queries in
                 seconds. Defaults to 30.0 seconds. Set to None to disable
                 timeout (not recommended for production).
+            notification_publisher: Optional publisher for state transition
+                notifications. If provided along with notification_config,
+                notifications will be published after successful projections.
+            notification_config: Optional configuration for notification
+                publishing. Specifies which columns contain state, aggregate ID,
+                and version information for notification creation.
+
+        Note:
+            Both notification_publisher and notification_config must be provided
+            for notification publishing to be enabled. If only one is provided,
+            notifications will not be published (silent no-op).
+
+            **Topic Consistency**: When both notification_publisher and
+            notification_config are provided, be aware that:
+
+            - The ``notification_config.expected_topic`` field is for
+              **documentation and validation purposes only**
+            - The **actual topic** used for publishing is determined solely by
+              the ``notification_publisher``'s internal configuration (the topic
+              passed to ``TransitionNotificationPublisher.__init__``)
+            - A **warning is logged** if these values differ to catch configuration
+              errors early
+            - **Users should ensure these match** when configuring both components
+
+            Example of consistent configuration::
+
+                # Publisher determines actual destination
+                publisher = TransitionNotificationPublisher(event_bus, "transitions.v1")
+
+                # Config expected_topic should match for consistency validation
+                config = ModelProjectorNotificationConfig(
+                    expected_topic="transitions.v1",  # Match publisher's topic
+                    state_column="current_state",
+                    ...
+                )
+
+        Example:
+            >>> from omnibase_infra.runtime import TransitionNotificationPublisher
+            >>> from omnibase_infra.runtime.models import ModelProjectorNotificationConfig
+            >>>
+            >>> publisher = TransitionNotificationPublisher(event_bus, "transitions.v1")
+            >>> config = ModelProjectorNotificationConfig(
+            ...     expected_topic="transitions.v1",
+            ...     state_column="current_state",
+            ...     aggregate_id_column="entity_id",
+            ...     version_column="version",
+            ... )
+            >>> projector = ProjectorShell(
+            ...     contract=contract,
+            ...     pool=pool,
+            ...     notification_publisher=publisher,
+            ...     notification_config=config,
+            ... )
         """
         self._contract = contract
         self._pool = pool
@@ -200,6 +311,31 @@ class ProjectorShell(MixinProjectorSqlOperations):
             if query_timeout_seconds is not None
             else self.DEFAULT_QUERY_TIMEOUT_SECONDS
         )
+        self._notification_publisher = notification_publisher
+        self._notification_config = notification_config
+
+        # Validate notification config against contract schema if provided
+        if notification_config is not None:
+            self._validate_notification_config(notification_config)
+
+        # Warn if notification config expected_topic differs from publisher topic
+        # The config.expected_topic is for validation only; publisher determines destination
+        if (
+            notification_config is not None
+            and notification_publisher is not None
+            and hasattr(notification_publisher, "topic")
+            and notification_config.expected_topic != notification_publisher.topic
+        ):
+            logger.warning(
+                "Notification config expected_topic differs from publisher topic - "
+                "expected_topic is for validation only, publisher determines actual destination",
+                extra={
+                    "projector_id": contract.projector_id,
+                    "config_expected_topic": notification_config.expected_topic,
+                    "publisher_topic": notification_publisher.topic,
+                },
+            )
+
         logger.debug(
             "ProjectorShell initialized for projector '%s'",
             contract.projector_id,
@@ -209,8 +345,72 @@ class ProjectorShell(MixinProjectorSqlOperations):
                 "consumed_events": contract.consumed_events,
                 "mode": contract.behavior.mode,
                 "query_timeout_seconds": self._query_timeout,
+                "notifications_enabled": self._is_notification_enabled(),
             },
         )
+
+    def _validate_notification_config(
+        self,
+        config: ModelProjectorNotificationConfig,
+    ) -> None:
+        """Validate notification config against the contract schema.
+
+        Ensures that the configured column names exist in the projection schema.
+
+        Args:
+            config: The notification configuration to validate.
+
+        Raises:
+            ProtocolConfigurationError: If any configured column does not exist
+                in the projection schema.
+        """
+        schema = self._contract.projection_schema
+        column_names = {col.name for col in schema.columns}
+
+        # Check state_column
+        if config.state_column not in column_names:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_notification_config",
+                target_name=f"projector.{self._contract.projector_id}",
+            )
+            raise ProtocolConfigurationError(
+                f"notification_config.state_column '{config.state_column}' "
+                f"not found in projection schema. "
+                f"Available columns: {sorted(column_names)}",
+                context=context,
+            )
+
+        # Check aggregate_id_column
+        if config.aggregate_id_column not in column_names:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_notification_config",
+                target_name=f"projector.{self._contract.projector_id}",
+            )
+            raise ProtocolConfigurationError(
+                f"notification_config.aggregate_id_column '{config.aggregate_id_column}' "
+                f"not found in projection schema. "
+                f"Available columns: {sorted(column_names)}",
+                context=context,
+            )
+
+        # Check version_column if specified
+        if (
+            config.version_column is not None
+            and config.version_column not in column_names
+        ):
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_notification_config",
+                target_name=f"projector.{self._contract.projector_id}",
+            )
+            raise ProtocolConfigurationError(
+                f"notification_config.version_column '{config.version_column}' "
+                f"not found in projection schema. "
+                f"Available columns: {sorted(column_names)}",
+                context=context,
+            )
 
     @property
     def projector_id(self) -> str:
@@ -293,6 +493,20 @@ class ProjectorShell(MixinProjectorSqlOperations):
         # Extract column values from event
         values = self._extract_values(event, event_type)
 
+        # Extract notification-related values before projection
+        # These are needed for both fetching previous state and publishing notification
+        aggregate_id_for_notification = self._extract_aggregate_id_from_values(values)
+        from_state: str | None = None
+
+        # Fetch previous state if notifications are enabled
+        if (
+            self._is_notification_enabled()
+            and aggregate_id_for_notification is not None
+        ):
+            from_state = await self._fetch_current_state_for_notification(
+                aggregate_id_for_notification, correlation_id
+            )
+
         # Execute projection based on mode
         try:
             rows_affected = await self._execute_projection(
@@ -308,6 +522,20 @@ class ProjectorShell(MixinProjectorSqlOperations):
                     "correlation_id": str(correlation_id),
                 },
             )
+
+            # Publish transition notification if configured and projection succeeded
+            if rows_affected > 0 and aggregate_id_for_notification is not None:
+                to_state = self._extract_state_from_values(values)
+                if to_state is not None:
+                    projection_version = self._extract_version_from_values(values)
+                    await self._publish_transition_notification(
+                        event=event,
+                        from_state=from_state,
+                        to_state=to_state,
+                        projection_version=projection_version,
+                        aggregate_id=aggregate_id_for_notification,
+                        correlation_id=correlation_id,
+                    )
 
             return ModelProjectionResult(
                 success=True,

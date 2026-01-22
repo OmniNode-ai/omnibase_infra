@@ -90,13 +90,22 @@ from omnibase_infra.runtime.service_kernel import load_runtime_config
 from omnibase_infra.runtime.service_kernel import main as kernel_main
 from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.models import (
+    ModelProjectorNotificationConfig,
     ModelRuntimeSchedulerConfig,
     ModelRuntimeSchedulerMetrics,
     ModelRuntimeTick,
+    ModelStateTransitionNotification,
+    ModelTransitionNotificationPublisherMetrics,
 )
 from omnibase_infra.runtime.registry_policy import RegistryPolicy
 from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
-from omnibase_infra.runtime.protocols import ProtocolRuntimeScheduler
+from omnibase_infra.runtime.protocols import (
+    ProtocolRuntimeScheduler,
+    ProtocolTransitionNotificationPublisher,
+)
+from omnibase_infra.runtime.mixins import (
+    ProtocolProjectorNotificationContext,
+)
 from omnibase_infra.runtime.registry import (
     MessageTypeRegistryError,
     ModelDomainConstraint,
@@ -194,6 +203,15 @@ from omnibase_infra.runtime.security_metadata_validator import (
     validate_handler_security,
 )
 
+# Transition notification publisher and outbox (OMN-1139)
+from omnibase_infra.runtime.constants_notification import FROM_STATE_INITIAL
+from omnibase_infra.runtime.transition_notification_publisher import (
+    TransitionNotificationPublisher,
+)
+from omnibase_infra.runtime.transition_notification_outbox import (
+    TransitionNotificationOutbox,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -227,9 +245,12 @@ __all__: list[str] = [
     "MessageTypeRegistryError",
     "ModelDomainConstraint",
     "ModelMessageTypeEntry",
+    "ModelProjectorNotificationConfig",
     "ModelRuntimeSchedulerConfig",
     "ModelRuntimeSchedulerMetrics",
     "ModelRuntimeTick",
+    "ModelStateTransitionNotification",
+    "ModelTransitionNotificationPublisherMetrics",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
     # Registry classes
@@ -243,8 +264,14 @@ __all__: list[str] = [
     "RegistryDispatcher",
     # Runtime scheduler (OMN-953)
     "ProtocolRuntimeScheduler",
+    # Transition notification (OMN-1139)
+    "ProtocolTransitionNotificationPublisher",
+    # Projector notification context protocol (OMN-1139)
+    "ProtocolProjectorNotificationContext",
     # Error class
     "RegistryError",
+    # Notification constants (OMN-1139)
+    "FROM_STATE_INITIAL",
     # Runtime host
     "RuntimeHostProcess",
     "RuntimeScheduler",
@@ -313,4 +340,7 @@ __all__: list[str] = [
     # Security metadata validator (OMN-1137)
     "SecurityMetadataValidator",
     "validate_handler_security",
+    # Transition notification publisher and outbox (OMN-1139)
+    "TransitionNotificationOutbox",
+    "TransitionNotificationPublisher",
 ]
