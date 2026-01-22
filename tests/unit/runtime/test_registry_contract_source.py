@@ -30,6 +30,7 @@ from uuid import UUID
 import pytest
 
 from omnibase_infra.enums import EnumHandlerErrorType
+from omnibase_infra.errors import InfraConnectionError, ProtocolConfigurationError
 from omnibase_infra.models.handlers import (
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
@@ -331,7 +332,7 @@ class TestRegistryContractSourceErrorHandling:
         with patch("consul.Consul", return_value=mock_client):
             source = RegistryContractSource(graceful_mode=False)
 
-            with pytest.raises(consul.ConsulException, match="Connection refused"):
+            with pytest.raises(InfraConnectionError, match="Connection refused"):
                 await source.discover_handlers()
 
     @pytest.mark.asyncio
@@ -481,7 +482,7 @@ version: "1.0.0"
         with patch("consul.Consul", return_value=mock_client):
             source = RegistryContractSource(graceful_mode=False)
 
-            with pytest.raises(ValueError, match="handler_id mismatch"):
+            with pytest.raises(ProtocolConfigurationError, match="handler_id mismatch"):
                 await source.discover_handlers()
 
     @pytest.mark.asyncio

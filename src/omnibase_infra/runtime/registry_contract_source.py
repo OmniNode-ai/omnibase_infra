@@ -38,7 +38,16 @@ from pydantic import ValidationError
 
 from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
 from omnibase_core.models.errors import ModelOnexError
-from omnibase_infra.enums import EnumHandlerErrorType, EnumHandlerSourceType
+from omnibase_infra.enums import (
+    EnumHandlerErrorType,
+    EnumHandlerSourceType,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
     ModelContractDiscoveryResult,
@@ -223,7 +232,15 @@ class RegistryContractSource(ProtocolContractSource):
                             extra={"key": key, "error": str(e)},
                         )
                     else:
-                        raise
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=self._correlation_id,
+                            transport_type=EnumInfraTransportType.CONSUL,
+                            operation="parse_contract",
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Failed to parse contract from registry key '{key}': {e}",
+                            context=context,
+                        ) from e
 
         except consul.ConsulException as e:
             error_msg = f"Consul connection failed: {e}"
@@ -236,7 +253,15 @@ class RegistryContractSource(ProtocolContractSource):
                 },
             )
             if not self._graceful_mode:
-                raise
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=self._correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="discover_handlers",
+                )
+                raise InfraConnectionError(
+                    f"Consul connection failed: {e}",
+                    context=context,
+                ) from e
             validation_errors.append(self._create_connection_error(e))
 
         return ModelContractDiscoveryResult(
