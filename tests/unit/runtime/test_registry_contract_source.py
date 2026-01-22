@@ -101,9 +101,16 @@ class TestRegistryContractSourceType:
         The implementation must satisfy ProtocolContractSource with:
         - source_type property returning "REGISTRY"
         - async discover_handlers() method returning ModelContractDiscoveryResult
+
+        This test uses two complementary verification approaches:
+        1. isinstance() check - enabled by @runtime_checkable decorator on protocol
+        2. Duck typing checks - ONEX convention for explicit attribute verification
         """
         with patch("consul.Consul"):
             source = RegistryContractSource()
+
+        # Protocol compliance via runtime_checkable (structural subtyping)
+        assert isinstance(source, ProtocolContractSource)
 
         # Protocol compliance check via duck typing (ONEX convention)
         assert hasattr(source, "source_type")
