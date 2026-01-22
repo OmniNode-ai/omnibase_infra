@@ -90,6 +90,48 @@ pytestmark = [
 
 
 # ============================================================================
+# ASSERTION HELPERS
+# ============================================================================
+
+
+def assert_mcp_content_valid(result: JsonDict) -> None:
+    """Validate MCP tool call result content structure per MCP spec.
+
+    This helper validates the mandatory content array structure required
+    by the MCP protocol for successful tool call responses.
+
+    Args:
+        result: The 'result' field from a successful MCP JSON-RPC response.
+            Expected to be the value of data["result"] where data is the
+            full JSON-RPC response.
+
+    Raises:
+        AssertionError: If content structure is invalid with descriptive message.
+
+    MCP Spec Requirements:
+        - result MUST contain "content" key
+        - content MUST be a list (array)
+        - content MUST be non-empty (prevents false positive from empty array)
+        - Each content item MUST be a dict with a "type" field
+    """
+    # MANDATORY: MCP tool call result MUST contain content array per spec
+    assert "content" in result, f"MCP tool call result missing content array: {result}"
+    assert isinstance(result["content"], list), (
+        f"MCP result content must be array, got: {type(result['content'])}"
+    )
+    # Success response MUST have non-empty content (prevents false positive from empty array)
+    assert len(result["content"]) > 0, (
+        f"MCP tool call result content must be non-empty: {result}"
+    )
+    # Each content item MUST have a 'type' field per MCP spec
+    for i, item in enumerate(result["content"]):
+        assert isinstance(item, dict), (
+            f"Content item {i} must be dict, got: {type(item)}"
+        )
+        assert "type" in item, f"Content item {i} missing required 'type' field: {item}"
+
+
+# ============================================================================
 # INFRASTRUCTURE DETECTION (in fixture, not at import)
 # ============================================================================
 

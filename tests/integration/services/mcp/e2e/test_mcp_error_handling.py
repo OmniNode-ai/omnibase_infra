@@ -34,7 +34,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from .conftest import MCPDevModeFixture
+from .conftest import MCPDevModeFixture, assert_mcp_content_valid
 
 pytestmark = [
     pytest.mark.mcp_protocol,
@@ -143,25 +143,7 @@ class TestMockMCPBasicFunctionality:
         )
 
         # MANDATORY: MCP tool call result MUST contain content array per spec
-        result = data["result"]
-        assert "content" in result, (
-            f"MCP tool call result missing content array: {result}"
-        )
-        assert isinstance(result["content"], list), (
-            f"MCP result content must be array, got: {type(result['content'])}"
-        )
-        # Success response MUST have non-empty content (prevents false positive from empty array)
-        assert len(result["content"]) > 0, (
-            f"MCP tool call result content must be non-empty: {result}"
-        )
-        # Each content item MUST have a 'type' field per MCP spec
-        for i, item in enumerate(result["content"]):
-            assert isinstance(item, dict), (
-                f"Content item {i} must be dict, got: {type(item)}"
-            )
-            assert "type" in item, (
-                f"Content item {i} missing required 'type' field: {item}"
-            )
+        assert_mcp_content_valid(data["result"])
 
         # Verify call was recorded in history (prevents false positive if executor not called)
         # Use exact increment check to detect duplicate or missed recordings
@@ -215,25 +197,7 @@ class TestMockMCPBasicFunctionality:
         )
 
         # MANDATORY: MCP tool call result MUST contain content array per spec
-        result = data["result"]
-        assert "content" in result, (
-            f"MCP tool call result missing content array: {result}"
-        )
-        assert isinstance(result["content"], list), (
-            f"MCP result content must be array, got: {type(result['content'])}"
-        )
-        # Success response MUST have non-empty content (prevents false positive from empty array)
-        assert len(result["content"]) > 0, (
-            f"MCP tool call result content must be non-empty: {result}"
-        )
-        # Each content item MUST have a 'type' field per MCP spec
-        for i, item in enumerate(result["content"]):
-            assert isinstance(item, dict), (
-                f"Content item {i} must be dict, got: {type(item)}"
-            )
-            assert "type" in item, (
-                f"Content item {i} missing required 'type' field: {item}"
-            )
+        assert_mcp_content_valid(data["result"])
 
         # Call should be recorded in history - use exact increment check
         assert len(call_history) == initial_count + 1, (
@@ -310,25 +274,7 @@ class TestMockMCPBasicFunctionality:
         # If success, verify call was recorded in history and result structure
         if has_result:
             # MANDATORY: MCP tool call result MUST contain content array per spec
-            result = data["result"]
-            assert "content" in result, (
-                f"MCP tool call result missing content array: {result}"
-            )
-            assert isinstance(result["content"], list), (
-                f"MCP result content must be array, got: {type(result['content'])}"
-            )
-            # Success response MUST have non-empty content (prevents false positive)
-            assert len(result["content"]) > 0, (
-                f"MCP tool call result content must be non-empty: {result}"
-            )
-            # Each content item MUST have a 'type' field per MCP spec
-            for i, item in enumerate(result["content"]):
-                assert isinstance(item, dict), (
-                    f"Content item {i} must be dict, got: {type(item)}"
-                )
-                assert "type" in item, (
-                    f"Content item {i} missing required 'type' field: {item}"
-                )
+            assert_mcp_content_valid(data["result"])
 
             # Use exact increment check for call history
             assert len(call_history) == initial_count + 1, (
@@ -402,25 +348,7 @@ class TestMockMCPAsyncExecution:
         )
 
         # MANDATORY: MCP tool call result MUST contain content array per spec
-        result = data["result"]
-        assert "content" in result, (
-            f"MCP tool call result missing content array: {result}"
-        )
-        assert isinstance(result["content"], list), (
-            f"MCP result content must be array, got: {type(result['content'])}"
-        )
-        # Success response MUST have non-empty content (prevents false positive from empty array)
-        assert len(result["content"]) > 0, (
-            f"MCP tool call result content must be non-empty: {result}"
-        )
-        # Each content item MUST have a 'type' field per MCP spec
-        for i, item in enumerate(result["content"]):
-            assert isinstance(item, dict), (
-                f"Content item {i} must be dict, got: {type(item)}"
-            )
-            assert "type" in item, (
-                f"Content item {i} missing required 'type' field: {item}"
-            )
+        assert_mcp_content_valid(data["result"])
 
         # Verify call was recorded in history (ensures executor was actually invoked)
         # Use exact increment check to detect duplicate or missed recordings

@@ -33,7 +33,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from .conftest import MCPDevModeFixture
+from .conftest import MCPDevModeFixture, MCPFullInfraFixture, assert_mcp_content_valid
 
 pytestmark = [
     pytest.mark.mcp_protocol,
@@ -92,13 +92,8 @@ class TestMockMCPInvokeNode:
         assert "error" not in data, f"Unexpected error in response: {data.get('error')}"
 
         # Verify the result structure (mandatory assertions)
-        result = data["result"]
         # MCP tool result MUST contain content array
-        assert "content" in result, (
-            f"MCP result must contain 'content' array, got keys: {list(result.keys())}"
-        )
-        content = result["content"]
-        assert len(content) >= 1, "MCP content array must not be empty"
+        assert_mcp_content_valid(data["result"])
 
         # Verify call was recorded in executor history (prevents silent failures)
         # Check delta rather than absolute size to catch silent failures
@@ -341,7 +336,7 @@ class TestMCPInvokeWorkflow:
 
     async def test_invoke_registration_workflow(
         self,
-        mcp_app_full_infra: dict[str, object],
+        mcp_app_full_infra: MCPFullInfraFixture,
     ) -> None:
         """MCP invokes real workflow end-to-end.
 
@@ -425,9 +420,9 @@ class TestMCPInvokeWorkflow:
             )
 
             # Step 4: Parse MCP content and verify executor response structure
+            # Validate MCP content structure per spec
+            assert_mcp_content_valid(invoke_data["result"])
             result = invoke_data["result"]
-            assert "content" in result, "MCP result must contain content array"
-            assert len(result["content"]) >= 1, "Content array must not be empty"
 
             # MCP wraps executor result as JSON string in content[0].text
             content_item = result["content"][0]
