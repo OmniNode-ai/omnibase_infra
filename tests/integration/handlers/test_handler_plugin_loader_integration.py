@@ -87,12 +87,6 @@ def loader() -> HandlerPluginLoader:
 
 
 @pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ModelONEXContainer for handler instantiation."""
-    return MagicMock(spec=ModelONEXContainer)
-
-
-@pytest.fixture
 def http_handler_contract_path(tmp_path: Path) -> Path:
     """Create a valid handler contract pointing to HttpRestHandler.
 

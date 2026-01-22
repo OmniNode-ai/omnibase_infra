@@ -86,12 +86,6 @@ if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerDb
 
 
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create mock ONEX container for HandlerDb tests."""
-    return MagicMock(spec=ModelONEXContainer)
-
-
 # =============================================================================
 # Test Configuration and Skip Conditions
 # =============================================================================

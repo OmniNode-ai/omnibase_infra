@@ -45,12 +45,6 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.asyncio]
 
 
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ModelONEXContainer for handler instantiation."""
-    return MagicMock(spec=ModelONEXContainer)
-
-
 class TestHttpGetSuccess:
     """Integration tests for successful HTTP GET operations."""
 

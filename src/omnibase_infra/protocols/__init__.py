@@ -62,6 +62,7 @@ from omnibase_infra.protocols.protocol_capability_projection import (
     ProtocolCapabilityProjection,
 )
 from omnibase_infra.protocols.protocol_capability_query import ProtocolCapabilityQuery
+from omnibase_infra.protocols.protocol_container_aware import ProtocolContainerAware
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.protocols.protocol_event_projector import ProtocolEventProjector
 from omnibase_infra.protocols.protocol_idempotency_store import (
@@ -88,6 +89,7 @@ __all__: list[str] = [
     "ProtocolCapabilityQuery",
     "ProtocolEventBusLike",
     "ProtocolEventProjector",
+    "ProtocolContainerAware",
     "ProtocolIdempotencyStore",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",

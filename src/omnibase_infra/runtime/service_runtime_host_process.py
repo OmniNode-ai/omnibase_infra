@@ -82,10 +82,10 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.models.handlers import ModelHandlerDescriptor
     from omnibase_infra.nodes.architecture_validator import ProtocolArchitectureRule
+    from omnibase_infra.protocols import ProtocolContainerAware
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
-    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 from omnibase_infra.models.types import JsonDict
 
@@ -233,7 +233,7 @@ class RuntimeHostProcess:
 
                 Purpose:
                     Provides the registry that maps handler_type strings (e.g., "http", "db")
-                    to their corresponding ProtocolHandler classes. The registry is queried
+                    to their corresponding ProtocolContainerAware classes. The registry is queried
                     during start() to instantiate and initialize all registered handlers.
 
                 Resolution Order:
@@ -474,7 +474,7 @@ class RuntimeHostProcess:
 
         # Handler registry (handler_type -> handler instance)
         # This will be populated from the singleton registry during start()
-        self._handlers: dict[str, ProtocolHandler] = {}
+        self._handlers: dict[str, ProtocolContainerAware] = {}
 
         # Track failed handler instantiations (handler_type -> error message)
         # Used by health_check() to report degraded state
@@ -787,7 +787,7 @@ class RuntimeHostProcess:
                 "     - Look for: AMBIGUOUS_CONTRACT (HANDLER_LOADER_040)\n\n"
                 "  6. If using wire_handlers() manually:\n"
                 "     - Ensure wire_handlers() is called before RuntimeHostProcess.start()\n"
-                "     - Check that handlers implement ProtocolHandler interface\n\n"
+                "     - Check that handlers implement ProtocolContainerAware interface\n\n"
                 "  7. Docker/container environment:\n"
                 "     - Verify volume mounts include handler contract directories\n"
                 "     - Check ONEX_CONTRACTS_DIR is set in docker-compose.yml/Dockerfile\n"
@@ -1308,12 +1308,15 @@ class RuntimeHostProcess:
 
             try:
                 # Get handler class from singleton registry
-                handler_cls: type[ProtocolHandler] = handler_registry.get(handler_type)
+                handler_cls: type[ProtocolContainerAware] = handler_registry.get(
+                    handler_type
+                )
 
                 # Instantiate the handler with container for dependency injection
-                # NOTE: ProtocolHandler doesn't define __init__ with container,
-                # but all infra handlers (HandlerConsul, HandlerDb, etc.) require it
-                handler_instance: ProtocolHandler = handler_cls(container=container)  # type: ignore[call-arg]
+                # ProtocolContainerAware defines __init__(container: ModelONEXContainer)
+                handler_instance: ProtocolContainerAware = handler_cls(
+                    container=container
+                )
 
                 # Call initialize() if the handler has this method
                 # Handlers may require async initialization with config
@@ -1918,12 +1921,14 @@ class RuntimeHostProcess:
             "no_handlers_registered": no_handlers_registered,
         }
 
-    def register_handler(self, handler_type: str, handler: ProtocolHandler) -> None:
+    def register_handler(
+        self, handler_type: str, handler: ProtocolContainerAware
+    ) -> None:
         """Register a handler for a specific type.
 
         Args:
             handler_type: Protocol type identifier (e.g., "http", "db").
-            handler: Handler instance implementing the ProtocolHandler protocol.
+            handler: Handler instance implementing the ProtocolContainerAware protocol.
         """
         self._handlers[handler_type] = handler
         logger.debug(
@@ -1934,7 +1939,7 @@ class RuntimeHostProcess:
             },
         )
 
-    def get_handler(self, handler_type: str) -> ProtocolHandler | None:
+    def get_handler(self, handler_type: str) -> ProtocolContainerAware | None:
         """Get handler for type, returns None if not registered.
 
         Args:
@@ -2021,7 +2026,7 @@ class RuntimeHostProcess:
         # after validation in _populate_handlers_from_registry). We validate the
         # handler CLASSES from the registry, not handler instances.
         handler_registry = await self._get_handler_registry()
-        handler_classes: list[type[ProtocolHandler]] = []
+        handler_classes: list[type[ProtocolContainerAware]] = []
         for handler_type in handler_registry.list_protocols():
             try:
                 handler_cls = handler_registry.get(handler_type)

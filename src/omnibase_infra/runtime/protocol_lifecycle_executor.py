@@ -49,7 +49,7 @@ from omnibase_infra.runtime.models import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
+    from omnibase_infra.protocols import ProtocolContainerAware
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ class ProtocolLifecycleExecutor:
         return self._health_check_timeout_seconds
 
     @staticmethod
-    def get_shutdown_priority(handler: ProtocolHandler) -> int:
+    def get_shutdown_priority(handler: ProtocolContainerAware) -> int:
         """Get shutdown priority for a handler.
 
         Returns the shutdown priority for the given handler. Handlers with higher
@@ -225,7 +225,7 @@ class ProtocolLifecycleExecutor:
     async def shutdown_handler(
         self,
         handler_type: str,
-        handler: ProtocolHandler,
+        handler: ProtocolContainerAware,
     ) -> ModelLifecycleResult:
         """Shutdown a single handler with error handling.
 
@@ -267,7 +267,7 @@ class ProtocolLifecycleExecutor:
     async def check_handler_health(
         self,
         handler_type: str,
-        handler: ProtocolHandler,
+        handler: ProtocolContainerAware,
         timeout_seconds: float = -1.0,
     ) -> ModelHealthCheckResult:
         """Check health of a single handler with timeout.
@@ -329,7 +329,7 @@ class ProtocolLifecycleExecutor:
 
     async def shutdown_handlers_by_priority(
         self,
-        handlers: dict[str, ProtocolHandler],
+        handlers: dict[str, ProtocolContainerAware],
     ) -> ModelBatchLifecycleResult:
         """Shutdown all handlers grouped by priority (higher first, parallel within group).
 
@@ -359,7 +359,7 @@ class ProtocolLifecycleExecutor:
             return ModelBatchLifecycleResult.empty()
 
         # Group handlers by priority
-        priority_groups: dict[int, list[tuple[str, ProtocolHandler]]] = {}
+        priority_groups: dict[int, list[tuple[str, ProtocolContainerAware]]] = {}
         for handler_type, handler in handlers.items():
             priority = self.get_shutdown_priority(handler)
             if priority not in priority_groups:

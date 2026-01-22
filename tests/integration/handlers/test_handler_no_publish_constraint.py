@@ -269,12 +269,6 @@ def assert_no_bus_attributes(handler: object, handler_name: str) -> None:
 
 
 @pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ModelONEXContainer for handler instantiation."""
-    return MagicMock(spec=ModelONEXContainer)
-
-
-@pytest.fixture
 def http_handler(mock_container: MagicMock) -> Generator[HandlerHttpRest, None, None]:
     """Create HandlerHttpRest with cleanup.
 
