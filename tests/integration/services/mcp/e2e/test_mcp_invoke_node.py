@@ -52,18 +52,17 @@ class TestMCPInvokeNode:
             headers={"Content-Type": "application/json"},
         )
 
-        # Response should be valid
-        assert response.status_code in (200, 307, 400, 404)
+        # Tool call should succeed
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
-        # If we got 200, verify the result structure
-        if response.status_code == 200:
-            data = response.json()
-            if "result" in data:
-                result = data["result"]
-                # MCP tool result contains content array
-                if "content" in result:
-                    content = result["content"]
-                    assert len(content) >= 1
+        # Verify the result structure (mandatory)
+        data = response.json()
+        assert "result" in data, f"Expected 'result' in response, got: {data}"
+        result = data["result"]
+        # MCP tool result contains content array
+        if "content" in result:
+            content = result["content"]
+            assert len(content) >= 1
 
     async def test_executor_receives_correct_arguments(
         self,
@@ -98,12 +97,17 @@ class TestMCPInvokeNode:
             headers={"Content-Type": "application/json"},
         )
 
-        # If the request succeeded, verify executor received it
-        if response.status_code == 200 and len(call_history) > 0:
-            call = call_history[0]
-            assert call["tool_name"] == "mock_compute"
-            assert call["arguments"]["input_value"] == "arg_test"
-            assert call["arguments"]["extra_field"] == 42
+        # Request must succeed
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+
+        # Verify executor received the call (mandatory assertions)
+        assert len(call_history) > 0, "Expected call to be recorded in history"
+        call = call_history[0]
+        assert call["tool_name"] == "mock_compute"
+        arguments = call["arguments"]
+        assert isinstance(arguments, dict)
+        assert arguments["input_value"] == "arg_test"
+        assert arguments["extra_field"] == 42
 
     async def test_multiple_invocations_are_independent(
         self,
@@ -151,13 +155,16 @@ class TestMCPInvokeNode:
             headers={"Content-Type": "application/json"},
         )
 
-        # If calls were recorded, verify independence
-        if len(call_history) >= 2:
-            assert call_history[0]["arguments"]["input_value"] == "first"
-            assert call_history[1]["arguments"]["input_value"] == "second"
-            assert (
-                call_history[0]["correlation_id"] != call_history[1]["correlation_id"]
-            )
+        # Both calls must be recorded (mandatory assertions)
+        assert len(call_history) >= 2, f"Expected 2+ calls, got {len(call_history)}"
+        args_0 = call_history[0]["arguments"]
+        args_1 = call_history[1]["arguments"]
+        assert isinstance(args_0, dict) and isinstance(args_1, dict)
+        assert args_0["input_value"] == "first"
+        assert args_1["input_value"] == "second"
+        assert call_history[0]["correlation_id"] != call_history[1]["correlation_id"], (
+            "Each invocation must have unique correlation_id"
+        )
 
 
 class TestMCPInvokeWorkflow:
@@ -177,7 +184,7 @@ class TestMCPInvokeWorkflow:
         path = str(mcp_app_full_infra["path"])
 
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
+            transport=httpx.ASGITransport(app=app),  # type: ignore[arg-type]
             base_url="http://testserver",
             follow_redirects=True,
         ) as client:
@@ -192,5 +199,7 @@ class TestMCPInvokeWorkflow:
                 headers={"Content-Type": "application/json"},
             )
 
-            # Response should be valid
-            assert list_response.status_code in (200, 307, 400, 404)
+            # tools/list should succeed
+            assert list_response.status_code == 200, (
+                f"Expected 200, got {list_response.status_code}"
+            )

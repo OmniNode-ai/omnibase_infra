@@ -49,21 +49,19 @@ class TestMCPToolDiscovery:
             headers={"Content-Type": "application/json"},
         )
 
-        # Response should be valid
-        assert response.status_code in (200, 307, 400, 404)
+        # Tool listing should succeed
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
-        # If we got 200, parse the response
-        if response.status_code == 200:
-            data = response.json()
-            # MCP JSON-RPC response structure
-            if "result" in data:
-                result = data["result"]
-                if "tools" in result:
-                    tools = result["tools"]
-                    tool_names = {t.get("name") for t in tools}
-                    assert "mock_compute" in tool_names, (
-                        f"Expected 'mock_compute' in tools, got: {tool_names}"
-                    )
+        # Parse and verify response structure
+        data = response.json()
+        assert "result" in data, f"Expected 'result' in response, got: {data}"
+        result = data["result"]
+        assert "tools" in result, f"Expected 'tools' in result, got: {result}"
+        tools = result["tools"]
+        tool_names = {t.get("name") for t in tools}
+        assert "mock_compute" in tool_names, (
+            f"Expected 'mock_compute' in tools, got: {tool_names}"
+        )
 
     async def test_mcp_endpoint_accessible(
         self,
@@ -93,8 +91,11 @@ class TestMCPToolDiscovery:
             headers={"Content-Type": "application/json"},
         )
 
-        # Endpoint should respond (various codes are acceptable for protocol init)
-        assert response.status_code in (200, 307, 400, 404, 405)
+        # Initialize should succeed; 400 acceptable if protocol requires session setup first
+        # 307/404/405 indicate broken endpoint and should fail the test
+        assert response.status_code in (200, 400), (
+            f"Expected 200 or 400, got {response.status_code}"
+        )
 
 
 class TestMCPToolDiscoveryWithInfra:
@@ -103,7 +104,7 @@ class TestMCPToolDiscoveryWithInfra:
     async def test_tool_discovery_with_real_consul(
         self,
         infra_availability: dict[str, bool],
-        mcp_app_full_infra: dict[str, object],
+        mcp_app_full_infra: object,
     ) -> None:
         """When infrastructure available, real orchestrators are discovered.
 
@@ -111,11 +112,12 @@ class TestMCPToolDiscoveryWithInfra:
         It verifies that real ONEX nodes registered in Consul are
         discoverable via MCP.
         """
-        app = mcp_app_full_infra["app"]
-        path = str(mcp_app_full_infra["path"])
+        fixture: dict[str, object] = mcp_app_full_infra  # type: ignore[assignment]
+        app = fixture["app"]
+        path = str(fixture["path"])
 
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
+            transport=httpx.ASGITransport(app=app),  # type: ignore[arg-type]
             base_url="http://testserver",
             follow_redirects=True,
         ) as client:
@@ -129,5 +131,7 @@ class TestMCPToolDiscoveryWithInfra:
                 headers={"Content-Type": "application/json"},
             )
 
-            # Should get some response from the MCP endpoint
-            assert response.status_code in (200, 307, 400, 404)
+            # Tool listing should succeed when infrastructure is available
+            assert response.status_code == 200, (
+                f"Expected 200, got {response.status_code}"
+            )

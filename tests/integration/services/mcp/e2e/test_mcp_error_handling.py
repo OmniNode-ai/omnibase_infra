@@ -92,8 +92,8 @@ class TestMCPBasicFunctionality:
             headers={"Content-Type": "application/json"},
         )
 
-        # Response should be valid
-        assert response.status_code in (200, 307, 400, 404)
+        # Empty arguments should succeed
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
     async def test_tool_call_records_to_history(
         self,
@@ -124,11 +124,17 @@ class TestMCPBasicFunctionality:
             headers={"Content-Type": "application/json"},
         )
 
-        # If request succeeded, check call history
-        if response.status_code == 200 and len(call_history) > initial_count:
-            latest_call = call_history[-1]
-            assert latest_call["tool_name"] == "mock_compute"
-            assert latest_call["arguments"]["test_key"] == "test_value"
+        # Tool call should succeed
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+        # Call should be recorded in history
+        assert len(call_history) > initial_count, (
+            "Expected call to be recorded in history"
+        )
+        latest_call = call_history[-1]
+        assert latest_call["tool_name"] == "mock_compute"
+        arguments = latest_call["arguments"]
+        assert isinstance(arguments, dict), f"Expected dict, got {type(arguments)}"
+        assert arguments["test_key"] == "test_value"
 
 
 class TestMCPTimeoutHandling:
@@ -162,8 +168,8 @@ class TestMCPTimeoutHandling:
             headers={"Content-Type": "application/json"},
         )
 
-        # Response should be valid
-        assert response.status_code in (200, 307, 400, 404)
+        # Normal execution should succeed
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
 
 class TestMCPProtocolCompliance:
@@ -188,8 +194,15 @@ class TestMCPProtocolCompliance:
             headers={"Content-Type": "application/json"},
         )
 
-        # Should get some response (could be error or redirect)
-        assert response.status_code in (200, 307, 400, 404)
+        # Invalid JSON-RPC should return error (400) or be handled gracefully (200 with error)
+        assert response.status_code in (200, 400), (
+            f"Expected 200 or 400, got {response.status_code}"
+        )
+
+        # If 200, the response should contain an error for invalid JSON-RPC
+        if response.status_code == 200:
+            data = response.json()
+            assert "error" in data, f"Expected error for invalid JSON-RPC, got: {data}"
 
     async def test_initialize_method_supported(
         self,
@@ -218,5 +231,5 @@ class TestMCPProtocolCompliance:
             headers={"Content-Type": "application/json"},
         )
 
-        # Should get a response (initialize might require session context)
-        assert response.status_code in (200, 307, 400, 404)
+        # Initialize is a required MCP method, should succeed
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
