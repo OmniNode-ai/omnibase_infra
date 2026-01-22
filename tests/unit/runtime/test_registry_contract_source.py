@@ -278,6 +278,36 @@ class TestRegistryContractSourceDiscovery:
         assert len(result.descriptors) == 1
         assert result.descriptors[0].handler_id == "effect.test.handler"
 
+    @pytest.mark.asyncio
+    async def test_discover_handlers_skips_empty_content(self) -> None:
+        """discover_handlers should handle empty YAML content gracefully.
+
+        When Consul KV returns a key with empty bytes content, it should
+        be skipped (similar to None values) rather than causing parse errors.
+        """
+        mock_client = MagicMock()
+        mock_client.kv.get.return_value = (
+            1,
+            [
+                {
+                    "Key": f"{DEFAULT_CONTRACT_PREFIX}empty.handler",
+                    "Value": b"",  # Empty content
+                },
+                {
+                    "Key": f"{DEFAULT_CONTRACT_PREFIX}effect.test.handler",
+                    "Value": VALID_HANDLER_CONTRACT_YAML.encode("utf-8"),
+                },
+            ],
+        )
+
+        with patch("consul.Consul", return_value=mock_client):
+            source = RegistryContractSource()
+            result = await source.discover_handlers()
+
+        # Empty content should be skipped, valid contract should be discovered
+        assert len(result.descriptors) == 1
+        assert result.descriptors[0].handler_id == "effect.test.handler"
+
 
 # =============================================================================
 # Error Handling Tests
@@ -757,6 +787,89 @@ class TestRegistryContractSourceUtilities:
             result = list_contracts_in_consul()
 
         assert result == ["handler.one", "handler.two"]
+
+    def test_delete_contract_from_consul_success(self) -> None:
+        """delete_contract_from_consul should delete contract from Consul KV."""
+        from omnibase_infra.runtime.registry_contract_source import (
+            delete_contract_from_consul,
+        )
+
+        mock_client = MagicMock()
+        mock_client.kv.delete.return_value = True
+
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env",
+            return_value=mock_client,
+        ):
+            result = delete_contract_from_consul(handler_id="effect.test.handler")
+
+        assert result is True
+        mock_client.kv.delete.assert_called_once_with(
+            f"{DEFAULT_CONTRACT_PREFIX}effect.test.handler"
+        )
+
+    def test_delete_contract_from_consul_failure(self) -> None:
+        """delete_contract_from_consul should return False on failure."""
+        from omnibase_infra.runtime.registry_contract_source import (
+            delete_contract_from_consul,
+        )
+
+        mock_client = MagicMock()
+        mock_client.kv.delete.return_value = False
+
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env",
+            return_value=mock_client,
+        ):
+            result = delete_contract_from_consul(handler_id="nonexistent.handler")
+
+        assert result is False
+
+    def test_delete_contract_from_consul_custom_prefix(self) -> None:
+        """delete_contract_from_consul should use custom prefix when provided."""
+        from omnibase_infra.runtime.registry_contract_source import (
+            delete_contract_from_consul,
+        )
+
+        custom_prefix = "my/custom/prefix/"
+        mock_client = MagicMock()
+        mock_client.kv.delete.return_value = True
+
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env",
+            return_value=mock_client,
+        ):
+            result = delete_contract_from_consul(
+                handler_id="effect.test.handler",
+                prefix=custom_prefix,
+            )
+
+        assert result is True
+        mock_client.kv.delete.assert_called_once_with(
+            f"{custom_prefix}effect.test.handler"
+        )
+
+    def test_delete_contract_from_consul_with_existing_client(self) -> None:
+        """delete_contract_from_consul should use provided client."""
+        from omnibase_infra.runtime.registry_contract_source import (
+            delete_contract_from_consul,
+        )
+
+        mock_client = MagicMock()
+        mock_client.kv.delete.return_value = True
+
+        # Should not call _create_consul_client_from_env when client is provided
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env"
+        ) as mock_create:
+            result = delete_contract_from_consul(
+                handler_id="effect.test.handler",
+                client=mock_client,
+            )
+
+        assert result is True
+        mock_create.assert_not_called()
+        mock_client.kv.delete.assert_called_once()
 
 
 # =============================================================================

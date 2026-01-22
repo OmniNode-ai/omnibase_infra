@@ -216,6 +216,7 @@ from omnibase_infra.runtime.transition_notification_outbox import (
 from omnibase_infra.runtime.registry_contract_source import (
     DEFAULT_CONTRACT_PREFIX,
     RegistryContractSource,
+    delete_contract_from_consul,
     list_contracts_in_consul,
     store_contract_in_consul,
 )
@@ -354,6 +355,7 @@ __all__: list[str] = [
     # Registry contract source (OMN-1100)
     "DEFAULT_CONTRACT_PREFIX",
     "RegistryContractSource",
+    "delete_contract_from_consul",
     "list_contracts_in_consul",
     "store_contract_in_consul",
 ]

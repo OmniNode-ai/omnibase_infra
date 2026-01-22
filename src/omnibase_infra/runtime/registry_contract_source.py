@@ -332,15 +332,10 @@ class RegistryContractSource(ProtocolContractSource):
         metadata = contract_data.get("metadata", {})
         handler_class = metadata.get("handler_class")
 
-        # Use validated model for handler_kind when available, with defensive fallback.
-        # The hasattr check guards against partial contracts where descriptor may be
-        # present but incomplete. Falls back to raw dict data with "effect" default
-        # for backwards compatibility with minimal contract formats.
-        handler_kind = (
-            contract.descriptor.handler_kind
-            if contract.descriptor and hasattr(contract.descriptor, "handler_kind")
-            else contract_data.get("descriptor", {}).get("handler_kind", "effect")
-        )
+        # Access handler_kind directly from the validated Pydantic model.
+        # Both descriptor and handler_kind are required fields in the model schema,
+        # so they are guaranteed to exist after model_validate() succeeds.
+        handler_kind = contract.descriptor.handler_kind
 
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
@@ -533,9 +528,61 @@ def list_contracts_in_consul(
     return handler_ids
 
 
+def delete_contract_from_consul(
+    handler_id: str,
+    prefix: str = DEFAULT_CONTRACT_PREFIX,
+    client: consul.Consul | None = None,
+) -> bool:
+    """Delete a handler contract from Consul KV.
+
+    This is a utility function for removing contracts from Consul,
+    useful for cleanup and testing. Consul connection is configured
+    via environment variables (CONSUL_HOST, CONSUL_PORT, etc.).
+
+    Args:
+        handler_id: Handler ID (used as key suffix).
+        prefix: KV prefix (default: onex/contracts/handlers/).
+        client: Optional Consul client. If None, creates a new client from
+            environment variables.
+
+    Returns:
+        True if successful.
+
+    Example:
+        >>> delete_contract_from_consul("effect.filesystem.handler")
+        True
+
+    Note:
+        This is a synchronous function that makes blocking network calls.
+        Do not call from async code without wrapping in ``asyncio.to_thread()``.
+
+        For batch operations, pass an existing ``client`` to avoid creating
+        a new connection for each call. This improves performance when
+        deleting multiple contracts.
+    """
+    client = client or _create_consul_client_from_env()
+    key = f"{prefix}{handler_id}"
+
+    success: bool = client.kv.delete(key)
+
+    if success:
+        logger.info(
+            "Deleted contract from Consul",
+            extra={"key": key, "handler_id": handler_id},
+        )
+    else:
+        logger.error(
+            "Failed to delete contract from Consul",
+            extra={"key": key, "handler_id": handler_id},
+        )
+
+    return success
+
+
 __all__ = [
     "DEFAULT_CONTRACT_PREFIX",
     "RegistryContractSource",
+    "delete_contract_from_consul",
     "list_contracts_in_consul",
     "store_contract_in_consul",
 ]

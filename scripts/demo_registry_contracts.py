@@ -26,14 +26,13 @@ import os
 import sys
 from pathlib import Path
 
-import consul
-
 # Development only - for production use: poetry run python scripts/demo_registry_contracts.py
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from omnibase_infra.runtime import (
     DEFAULT_CONTRACT_PREFIX,
     RegistryContractSource,
+    delete_contract_from_consul,
     list_contracts_in_consul,
     store_contract_in_consul,
 )
@@ -184,16 +183,8 @@ def cleanup_demo_contracts() -> None:
     """Remove demo contracts from Consul KV (uses env vars for connection)."""
     print("\n[CLEANUP] Removing demo contracts from Consul...")
 
-    client = consul.Consul(
-        host=os.environ.get("CONSUL_HOST", "localhost"),
-        port=int(os.environ.get("CONSUL_PORT", "8500")),
-        token=os.environ.get("CONSUL_TOKEN"),
-        scheme=os.environ.get("CONSUL_SCHEME", "http"),
-    )
-
     for handler_id in SAMPLE_CONTRACTS:
-        key = f"{DEFAULT_CONTRACT_PREFIX}{handler_id}"
-        success = client.kv.delete(key)
+        success = delete_contract_from_consul(handler_id)
         status = "OK" if success else "FAILED"
         print(f"  [{status}] Deleted: {handler_id}")
 
