@@ -28,10 +28,12 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
+from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumHandlerTypeCategory
 from omnibase_infra.runtime.handler_plugin_loader import (
     CONTRACT_YAML_FILENAME,
@@ -82,6 +84,12 @@ capability_tags:
 def loader() -> HandlerPluginLoader:
     """Create a fresh HandlerPluginLoader instance."""
     return HandlerPluginLoader()
+
+
+@pytest.fixture
+def mock_container() -> MagicMock:
+    """Create a mock ModelONEXContainer for handler instantiation."""
+    return MagicMock(spec=ModelONEXContainer)
 
 
 @pytest.fixture
@@ -583,6 +591,7 @@ class TestRealHandlerInstantiation:
         self,
         loader: HandlerPluginLoader,
         tmp_path: Path,
+        mock_container: MagicMock,
         handler_name: str,
         handler_class: str,
         handler_type: str,
@@ -614,15 +623,18 @@ class TestRealHandlerInstantiation:
         module = importlib.import_module(module_path)
         handler_class_type = getattr(module, class_name)
 
-        # This should not raise
-        handler_instance = handler_class_type()
+        # This should not raise - handlers require container parameter
+        handler_instance = handler_class_type(mock_container)
 
         # Verify instance has expected attributes
         assert hasattr(handler_instance, "handler_type")
         assert hasattr(handler_instance, "describe")
 
     def test_instantiated_handler_describe_returns_dict(
-        self, loader: HandlerPluginLoader, http_handler_contract_path: Path
+        self,
+        loader: HandlerPluginLoader,
+        http_handler_contract_path: Path,
+        mock_container: MagicMock,
     ) -> None:
         """Verify instantiated handler's describe() returns a dict.
 
@@ -635,7 +647,7 @@ class TestRealHandlerInstantiation:
         module_path, class_name = result.handler_class.rsplit(".", 1)
         module = importlib.import_module(module_path)
         handler_class_type = getattr(module, class_name)
-        handler_instance = handler_class_type()
+        handler_instance = handler_class_type(mock_container)
 
         # describe() should return a dict
         description = handler_instance.describe()

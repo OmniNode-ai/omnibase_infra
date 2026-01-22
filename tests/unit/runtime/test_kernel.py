@@ -277,11 +277,21 @@ class TestBootstrap:
 
     @pytest.fixture
     def mock_event_bus(self) -> Generator[MagicMock, None, None]:
-        """Create a mock EventBusInmemory."""
+        """Create a mock EventBusInmemory.
+
+        Ensures async methods (start, subscribe, close) are AsyncMocks
+        to avoid 'object MagicMock can't be used in await expression' errors.
+        """
         with patch(
             "omnibase_infra.runtime.service_kernel.EventBusInmemory"
         ) as mock_cls:
             mock_instance = MagicMock()
+            # Event bus async methods must be AsyncMocks
+            mock_instance.start = AsyncMock()
+            mock_instance.close = AsyncMock()
+            # subscribe returns an async unsubscribe callback
+            mock_unsubscribe = AsyncMock()
+            mock_instance.subscribe = AsyncMock(return_value=mock_unsubscribe)
             mock_cls.return_value = mock_instance
             yield mock_cls
 
@@ -941,11 +951,21 @@ class TestHttpPortValidation:
 
     @pytest.fixture
     def mock_event_bus(self) -> Generator[MagicMock, None, None]:
-        """Create a mock EventBusInmemory."""
+        """Create a mock EventBusInmemory.
+
+        Ensures async methods (start, subscribe, close) are AsyncMocks
+        to avoid 'object MagicMock can't be used in await expression' errors.
+        """
         with patch(
             "omnibase_infra.runtime.service_kernel.EventBusInmemory"
         ) as mock_cls:
             mock_instance = MagicMock()
+            # Event bus async methods must be AsyncMocks
+            mock_instance.start = AsyncMock()
+            mock_instance.close = AsyncMock()
+            # subscribe returns an async unsubscribe callback
+            mock_unsubscribe = AsyncMock()
+            mock_instance.subscribe = AsyncMock(return_value=mock_unsubscribe)
             mock_cls.return_value = mock_instance
             yield mock_cls
 

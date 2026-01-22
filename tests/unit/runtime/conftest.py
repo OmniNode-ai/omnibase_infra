@@ -76,6 +76,12 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
             mock_service_registry.resolve_service = AsyncMock(
                 side_effect=mock_resolve_service
             )
+            # Also mock register_instance as AsyncMock to avoid
+            # "object MagicMock can't be used in 'await' expression" errors
+            # when wire_registration_handlers calls await register_instance(...)
+            mock_service_registry.register_instance = AsyncMock(
+                return_value="mock-uuid"
+            )
             mock_container.service_registry = mock_service_registry
             mock_container_cls.return_value = mock_container
             yield mock_wire

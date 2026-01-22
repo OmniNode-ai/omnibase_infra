@@ -1288,6 +1288,10 @@ class RuntimeHostProcess:
             },
         )
 
+        # Get or create container once for all handlers to share
+        # This ensures all handlers have access to the same DI container
+        container = self._get_or_create_container()
+
         for handler_type in registered_types:
             # Skip if handler is already registered (e.g., by tests or explicit registration)
             if handler_type in self._handlers:
@@ -1306,8 +1310,10 @@ class RuntimeHostProcess:
                 # Get handler class from singleton registry
                 handler_cls: type[ProtocolHandler] = handler_registry.get(handler_type)
 
-                # Instantiate the handler
-                handler_instance: ProtocolHandler = handler_cls()
+                # Instantiate the handler with container for dependency injection
+                # NOTE: ProtocolHandler doesn't define __init__ with container,
+                # but all infra handlers (HandlerConsul, HandlerDb, etc.) require it
+                handler_instance: ProtocolHandler = handler_cls(container=container)  # type: ignore[call-arg]
 
                 # Call initialize() if the handler has this method
                 # Handlers may require async initialization with config
@@ -2086,29 +2092,28 @@ class RuntimeHostProcess:
         )
 
     def _get_or_create_container(self) -> ModelONEXContainer:
-        """Get the injected container or create a new one.
+        """Get the injected container or create and cache a new one.
 
         Returns:
-            ModelONEXContainer instance for architecture validation.
+            ModelONEXContainer instance for dependency injection.
 
         Note:
-            If no container was provided at init, a new container is created.
-            This container provides basic infrastructure for node execution
-            but may not have all services wired.
+            If no container was provided at init, a new container is created
+            and cached in self._container. This ensures all handlers share
+            the same container instance. The container provides basic
+            infrastructure for node execution but may not have all services wired.
         """
         if self._container is not None:
             return self._container
 
-        # Create container for validation
+        # Create container and cache it for reuse
         from omnibase_core.models.container.model_onex_container import (
             ModelONEXContainer,
         )
 
-        logger.debug(
-            "Creating container for architecture validation "
-            "(no container provided at init)"
-        )
-        return ModelONEXContainer()
+        logger.debug("Creating and caching container (no container provided at init)")
+        self._container = ModelONEXContainer()
+        return self._container
 
     # =========================================================================
     # Idempotency Guard Methods (OMN-945)
