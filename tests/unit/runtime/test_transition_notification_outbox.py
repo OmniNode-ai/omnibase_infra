@@ -1170,7 +1170,7 @@ class TestTransitionNotificationOutboxMetrics:
         - notifications_processed: Successfully processed
         - notifications_failed: Failed to process
         """
-        metrics = ModelTransitionNotificationOutboxMetrics(outbox_table="test_outbox")
+        metrics = ModelTransitionNotificationOutboxMetrics(table_name="test_outbox")
 
         # Simulate storing notifications
         for _ in range(5):
@@ -1200,7 +1200,7 @@ class TestTransitionNotificationOutboxMetrics:
     ) -> None:
         """Metrics track notifications sent to DLQ after max retries."""
         metrics = ModelTransitionNotificationOutboxMetrics(
-            outbox_table="test_outbox",
+            table_name="test_outbox",
             max_retries=3,
         )
 
@@ -1222,14 +1222,14 @@ class TestTransitionNotificationOutboxMetrics:
         """Metrics provide dlq_needs_attention() helper method."""
         # DLQ disabled - always returns False
         metrics_no_dlq = ModelTransitionNotificationOutboxMetrics(
-            outbox_table="test_outbox",
+            table_name="test_outbox",
             max_retries=None,
         )
         assert metrics_no_dlq.dlq_needs_attention() is False
 
         # DLQ enabled but below threshold
         metrics_below_threshold = ModelTransitionNotificationOutboxMetrics(
-            outbox_table="test_outbox",
+            table_name="test_outbox",
             max_retries=3,
             dlq_publish_failures=2,  # Below DEFAULT_DLQ_ALERT_THRESHOLD of 3
         )
@@ -1237,7 +1237,7 @@ class TestTransitionNotificationOutboxMetrics:
 
         # DLQ enabled and at/above threshold
         metrics_at_threshold = ModelTransitionNotificationOutboxMetrics(
-            outbox_table="test_outbox",
+            table_name="test_outbox",
             max_retries=3,
             dlq_publish_failures=3,  # At DEFAULT_DLQ_ALERT_THRESHOLD
         )
@@ -1249,7 +1249,7 @@ class TestTransitionNotificationOutboxMetrics:
         mock_publisher: AsyncMock,
     ) -> None:
         """Metrics track whether processor is running."""
-        metrics = ModelTransitionNotificationOutboxMetrics(outbox_table="test_outbox")
+        metrics = ModelTransitionNotificationOutboxMetrics(table_name="test_outbox")
         assert metrics.is_running is False
 
         # Simulate start
