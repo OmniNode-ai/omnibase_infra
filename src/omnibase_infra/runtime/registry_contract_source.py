@@ -34,8 +34,10 @@ from uuid import uuid4
 
 import consul
 import yaml
+from pydantic import ValidationError
 
 from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
+from omnibase_core.models.errors import ModelOnexError
 from omnibase_infra.enums import EnumHandlerErrorType, EnumHandlerSourceType
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
@@ -207,7 +209,12 @@ class RegistryContractSource(ProtocolContractSource):
                                 "key": key,
                             },
                         )
-                except Exception as e:
+                except (
+                    yaml.YAMLError,
+                    ValidationError,
+                    ValueError,
+                    ModelOnexError,
+                ) as e:
                     error = self._create_parse_error(key, handler_id, e)
                     if self._graceful_mode:
                         validation_errors.append(error)
@@ -433,6 +440,10 @@ def store_contract_in_consul(
         This is a synchronous function that makes blocking network calls.
         Do not call from async code without wrapping in ``asyncio.to_thread()``.
         For async usage, use ``RegistryContractSource.discover_handlers()`` instead.
+
+        This function creates a new Consul client for each call. For production
+        code with multiple operations, use ``RegistryContractSource`` directly
+        to benefit from connection reuse.
     """
     client = _create_consul_client_from_env()
     key = f"{prefix}{handler_id}"
@@ -470,6 +481,10 @@ def list_contracts_in_consul(
     Note:
         This is a synchronous function that makes blocking network calls.
         Do not call from async code without wrapping in ``asyncio.to_thread()``.
+
+        This function creates a new Consul client for each call. For production
+        code with multiple operations, use ``RegistryContractSource`` directly
+        to benefit from connection reuse.
     """
     client = _create_consul_client_from_env()
     _index, keys = client.kv.get(prefix, keys=True)
