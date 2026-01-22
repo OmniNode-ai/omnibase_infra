@@ -514,6 +514,22 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
 
         failure_count = len(notifications) - success_count
 
+        # Log aggregate failure information when truncation occurs
+        if truncation_occurred:
+            failure_summary = self._summarize_failure_types(failed_notifications)
+            untracked_failures = failure_count - len(failed_notifications)
+            logger.warning(
+                "Batch publish failure tracking truncated",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "total_failures": failure_count,
+                    "tracked_failures": len(failed_notifications),
+                    "untracked_failures": untracked_failures,
+                    "max_tracked_failures": self._max_tracked_failures,
+                    "failure_type_summary": failure_summary,
+                },
+            )
+
         logger.info(
             "Batch publish completed",
             extra={
@@ -596,6 +612,38 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
 
         async with self._lock:
             self._notifications_failed += 1
+
+    def _summarize_failure_types(
+        self, failures: list[FailedNotificationRecord]
+    ) -> dict[str, int]:
+        """Summarize failure types by grouping error messages.
+
+        Groups failures by a simplified error pattern (first 50 characters of
+        the error message) to help operators understand what types of errors
+        are occurring, even when detailed failure records are truncated.
+
+        Args:
+            failures: List of failed notification records to summarize.
+
+        Returns:
+            Dictionary mapping error pattern (truncated error message) to
+            the count of failures with that pattern.
+
+        Example:
+            >>> failures = [
+            ...     FailedNotificationRecord("reg", "id1", "Connection refused to broker"),
+            ...     FailedNotificationRecord("reg", "id2", "Connection refused to broker"),
+            ...     FailedNotificationRecord("reg", "id3", "Timeout waiting for response"),
+            ... ]
+            >>> summary = publisher._summarize_failure_types(failures)
+            >>> # {"Connection refused to broker": 2, "Timeout waiting for response": 1}
+        """
+        summary: dict[str, int] = {}
+        for failure in failures:
+            # Use first 50 chars as the pattern key for grouping
+            pattern = failure.error_message[:50]
+            summary[pattern] = summary.get(pattern, 0) + 1
+        return summary
 
     def get_metrics(self) -> ModelTransitionNotificationPublisherMetrics:
         """Get current publisher metrics.

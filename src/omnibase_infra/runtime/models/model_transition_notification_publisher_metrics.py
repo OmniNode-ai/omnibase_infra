@@ -70,6 +70,28 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
         - Individual publishes = ``notifications_published - batch_notifications_total``
         - Batch failure rate = ``1 - (batch_notifications_total / batch_notifications_attempted)``
 
+    Derived Metrics Calculations:
+        The model provides convenience methods for calculating derived metrics from
+        the raw counters. These formulas are useful for monitoring and alerting:
+
+        **Batch Failure Rate** (via ``batch_failure_rate()`` method):
+            Formula: ``1 - (batch_notifications_total / batch_notifications_attempted)``
+            - Only valid when ``batch_notifications_attempted > 0``
+            - Returns 0.0 when no batch operations have been attempted
+            - A rate of 0.0 means all batch notifications succeeded
+            - A rate of 1.0 means all batch notifications failed
+
+        **Individual Publishes Count** (via ``individual_publish_count()`` method):
+            Formula: ``notifications_published - batch_notifications_total``
+            - Represents the count of single (non-batch) publish operations
+            - Always non-negative since batch_notifications_total is a subset
+
+        **Overall Failure Rate** (inverse of ``publish_success_rate()``):
+            Formula: ``notifications_failed / (notifications_published + notifications_failed)``
+            - Only valid when total attempts > 0
+            - Returns 0.0 when no notifications have been attempted
+            - Covers both individual and batch publish failures
+
     Example:
         >>> from datetime import datetime, UTC
         >>> metrics = ModelTransitionNotificationPublisherMetrics(
@@ -251,6 +273,76 @@ class ModelTransitionNotificationPublisherMetrics(BaseModel):
             not self.circuit_breaker_open
             and self.consecutive_failures < self.DEFAULT_HEALTH_FAILURE_THRESHOLD
         )
+
+    def batch_failure_rate(self) -> float:
+        """
+        Calculate the batch publish failure rate.
+
+        This metric indicates the proportion of notifications that failed when
+        publishing via batch operations. A high batch failure rate may indicate
+        issues with the message broker, serialization problems, or network
+        instability during batch operations.
+
+        Formula: ``1 - (batch_notifications_total / batch_notifications_attempted)``
+
+        Returns:
+            Failure rate as a float between 0.0 and 1.0.
+            Returns 0.0 if no batch operations have been attempted.
+
+        Note:
+            - A rate of 0.0 means all batch notifications succeeded
+            - A rate of 1.0 means all batch notifications failed
+            - This only covers batch operations; individual publish failures
+              are tracked separately via ``publish_success_rate()``
+
+        Example:
+            >>> metrics = ModelTransitionNotificationPublisherMetrics(
+            ...     publisher_id="test",
+            ...     topic="test.topic",
+            ...     batch_notifications_attempted=100,
+            ...     batch_notifications_total=95,
+            ... )
+            >>> metrics.batch_failure_rate()
+            0.05
+            >>> # 5% of batch notifications failed (5 out of 100)
+        """
+        if self.batch_notifications_attempted == 0:
+            return 0.0
+        return 1.0 - (
+            self.batch_notifications_total / self.batch_notifications_attempted
+        )
+
+    def individual_publish_count(self) -> int:
+        """
+        Calculate the count of individual (non-batch) publish operations.
+
+        This metric represents the number of notifications that were published
+        via single ``publish()`` calls rather than batch ``publish_batch()`` calls.
+        Useful for understanding the distribution of publish patterns and
+        optimizing batch usage.
+
+        Formula: ``notifications_published - batch_notifications_total``
+
+        Returns:
+            Count of individual publishes as a non-negative integer.
+
+        Note:
+            This value is always non-negative because ``batch_notifications_total``
+            is a subset of ``notifications_published`` (successful batch publishes
+            are counted in both fields).
+
+        Example:
+            >>> metrics = ModelTransitionNotificationPublisherMetrics(
+            ...     publisher_id="test",
+            ...     topic="test.topic",
+            ...     notifications_published=150,
+            ...     batch_notifications_total=100,
+            ... )
+            >>> metrics.individual_publish_count()
+            50
+            >>> # 50 notifications were published individually, 100 via batch
+        """
+        return self.notifications_published - self.batch_notifications_total
 
 
 __all__: list[str] = ["ModelTransitionNotificationPublisherMetrics"]

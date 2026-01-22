@@ -8,6 +8,8 @@ replacing the untyped dict return from get_metrics().
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -25,10 +27,35 @@ class ModelTransitionNotificationOutboxMetrics(BaseModel):
         notifications_failed: Total count of notifications that failed processing.
         notifications_sent_to_dlq: Total count of notifications sent to DLQ after
             exceeding max retry attempts.
+        dlq_publish_failures: Count of failed DLQ publish attempts.
         batch_size: Configured batch size for processing.
         poll_interval_seconds: Configured poll interval in seconds.
         max_retries: Configured maximum retry attempts before DLQ (None if DLQ disabled).
         dlq_topic: Configured DLQ topic name (None if DLQ disabled).
+
+    Class Variables:
+        DEFAULT_DLQ_ALERT_THRESHOLD: Recommended threshold for alerting on DLQ
+            unavailability. Non-zero dlq_publish_failures indicate the DLQ is
+            having issues; reaching this threshold suggests operator intervention
+            is needed.
+
+    Observability Helpers:
+        dlq_needs_attention(): Returns True when DLQ publish failures have reached
+            the alert threshold, indicating operator intervention may be needed.
+        pending_dlq_ratio(): Returns the ratio of notifications stuck in DLQ retry
+            state, helping operators understand what fraction of failures are
+            DLQ-related versus normal processing failures.
+    """
+
+    DEFAULT_DLQ_ALERT_THRESHOLD: ClassVar[int] = 3
+    """Recommended threshold for alerting on DLQ unavailability.
+
+    Non-zero dlq_publish_failures indicate the DLQ is having issues. When this
+    threshold is reached, it suggests the DLQ has been unavailable for multiple
+    consecutive attempts and operator intervention is needed to investigate:
+    - Network connectivity to the DLQ broker
+    - DLQ topic existence and permissions
+    - Broker availability and health
     """
 
     model_config = ConfigDict(
@@ -70,6 +97,44 @@ class ModelTransitionNotificationOutboxMetrics(BaseModel):
     dlq_topic: str | None = Field(
         default=None, description="DLQ topic name (None if DLQ disabled)"
     )
+
+    def dlq_needs_attention(self) -> bool:
+        """Check if DLQ publish failures have reached the alert threshold.
+
+        This method indicates when the DLQ is experiencing availability issues
+        that may require operator intervention. When True, it suggests:
+
+        - The DLQ has been unavailable for multiple consecutive attempts
+        - Notifications that exceeded max_retries are stuck in retry loops
+        - Operator should investigate DLQ broker connectivity and health
+
+        Returns:
+            False if DLQ is disabled (max_retries is None).
+            True if dlq_publish_failures >= DEFAULT_DLQ_ALERT_THRESHOLD.
+            False otherwise (DLQ is enabled but failures below threshold).
+        """
+        if self.max_retries is None:
+            return False
+        return self.dlq_publish_failures >= self.DEFAULT_DLQ_ALERT_THRESHOLD
+
+    def pending_dlq_ratio(self) -> float:
+        """Calculate the ratio of notifications stuck in DLQ retry state.
+
+        This metric helps operators understand what fraction of failed
+        notifications are DLQ-related versus normal processing failures.
+        A high ratio indicates DLQ availability is the bottleneck.
+
+        Returns:
+            0.0 if DLQ is disabled (max_retries is None).
+            0.0 if no notifications have failed (notifications_failed == 0).
+            Ratio of dlq_publish_failures to notifications_failed otherwise.
+            Formula: dlq_publish_failures / max(1, notifications_failed)
+        """
+        if self.max_retries is None:
+            return 0.0
+        if self.notifications_failed == 0:
+            return 0.0
+        return self.dlq_publish_failures / max(1, self.notifications_failed)
 
 
 __all__: list[str] = ["ModelTransitionNotificationOutboxMetrics"]
