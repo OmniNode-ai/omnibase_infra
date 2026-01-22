@@ -131,7 +131,7 @@ import time
 from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
 
 from pydantic import SecretStr
@@ -1847,7 +1847,9 @@ class SecretResolver:
         }
 
         try:
-            result = await self._vault_handler.execute(envelope)
+            result = await self._vault_handler.execute(
+                cast("dict[str, object]", envelope)
+            )
 
             # Extract secret data from handler response
             # Response format: {"status": "success", "payload": {"data": {...}, "metadata": {...}}}

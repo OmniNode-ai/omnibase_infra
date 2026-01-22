@@ -5,6 +5,8 @@
 This module defines the PolicyRegistryError for policy registry operations.
 """
 
+from typing import Any, cast
+
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
@@ -102,10 +104,11 @@ class PolicyRegistryError(RuntimeHostError):
                 else policy_type
             )
 
+        # NOTE: Cast required for mypy - **dict[str, object] doesn't satisfy **context: Any
         super().__init__(
             message=message,
             context=context,
-            **extra_context,
+            **cast("dict[str, Any]", extra_context),
         )
 
 

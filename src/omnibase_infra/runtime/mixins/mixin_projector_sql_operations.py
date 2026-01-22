@@ -513,8 +513,9 @@ class MixinProjectorSqlOperations:
         values = self._normalize_values(values)
 
         schema = self._contract.projection_schema
-        # schema.primary_key is a str field in omnibase_core.ModelProjectorSchema
-        pk_list = [schema.primary_key]
+        # Normalize primary_key to list (handles both str and list[str] from omnibase_core)
+        pk = schema.primary_key
+        pk_list: list[str] = pk if isinstance(pk, list) else [pk]
 
         # Determine conflict columns (single or composite)
         conflict_cols = conflict_columns if conflict_columns else pk_list
@@ -643,7 +644,10 @@ class MixinProjectorSqlOperations:
             False if no row was found matching the aggregate_id.
 
         Raises:
-            ProtocolConfigurationError: If updates dict is empty.
+            ProtocolConfigurationError: If updates dict is empty, or if the
+                schema has a composite primary key. Composite PK schemas
+                cannot use this method because using only part of the key
+                could cause unintended multi-row updates.
 
         Note:
             This method does NOT check whether column names exist in the contract
@@ -651,11 +655,11 @@ class MixinProjectorSqlOperations:
             enables updating columns that may not be in the projection schema
             (e.g., internal tracking columns like updated_at).
 
-            **Composite Primary Key Handling**: For schemas with composite primary
-            keys, this method uses only the first column for the WHERE clause.
-            This works when the first column is globally unique (e.g., UUID).
-            For true composite key updates, build a custom UPDATE query or use
-            ``_partial_upsert()`` with explicit ``conflict_columns``.
+            **Composite Primary Key Restriction**: Schemas with composite primary
+            keys (e.g., ``["entity_id", "domain"]``) are explicitly rejected to
+            prevent accidental multi-row updates. For composite key schemas, use
+            ``_partial_upsert()`` with explicit ``conflict_columns`` parameter,
+            or build a custom UPDATE query with a full WHERE clause.
 
         Example:
             >>> # Update heartbeat tracking fields
@@ -687,8 +691,25 @@ class MixinProjectorSqlOperations:
 
         schema = self._contract.projection_schema
         table_quoted = quote_identifier(schema.table)
-        # schema.primary_key is a str field in omnibase_core.ModelProjectorSchema
-        pk_quoted = quote_identifier(schema.primary_key)
+
+        # Validate primary key is single-column to prevent multi-row updates
+        pk = schema.primary_key
+        if isinstance(pk, list) and len(pk) > 1:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="partial_update",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                f"partial_update does not support composite primary keys. "
+                f"Schema '{schema.table}' has composite PK: {pk}. "
+                f"Use _partial_upsert() with explicit conflict_columns parameter instead, "
+                f"or build a custom UPDATE query with full WHERE clause.",
+                context=context,
+            )
+
+        pk_col = pk[0] if isinstance(pk, list) else pk
+        pk_quoted = quote_identifier(pk_col)
 
         # Build SET clause with parameterized placeholders
         # Column names are quoted for SQL safety; values use $1, $2, etc.

@@ -464,9 +464,11 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
                     try:
                         for query, params in queries:
                             query_start = time.perf_counter()
-                            result = await tx.run(query, dict(params) if params else {})
-                            records_data = await result.data()
-                            summary = await result.consume()
+                            tx_result = await tx.run(
+                                query, dict(params) if params else {}
+                            )
+                            records_data = await tx_result.data()
+                            summary = await tx_result.consume()
                             query_time_ms = (time.perf_counter() - query_start) * 1000
 
                             results.append(
@@ -497,8 +499,11 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
             else:
                 # Execute queries individually without transaction
                 for query, params in queries:
-                    result = await self.execute_query(query, params)
-                    results.append(result)
+                    # Type assertion: execute_query returns ModelGraphQueryResult in this handler
+                    query_result: ModelGraphQueryResult = await self.execute_query(
+                        query, params
+                    )  # type: ignore[assignment]
+                    results.append(query_result)
 
             return ModelGraphBatchResult(
                 results=results,

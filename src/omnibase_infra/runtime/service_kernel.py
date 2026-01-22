@@ -1376,24 +1376,32 @@ async def bootstrap() -> int:
 
     except ProtocolConfigurationError as e:
         # Configuration errors already have proper context and chaining
+        error_code = getattr(getattr(e, "model", None), "error_code", None)
+        error_code_name = getattr(error_code, "name", None)
         logger.exception(
             "ONEX runtime configuration failed (correlation_id=%s)",
             correlation_id,
             extra={
                 "error_type": type(e).__name__,
-                "error_code": e.model.error_code.name if hasattr(e, "model") else None,
+                "error_code": str(error_code_name)
+                if error_code_name is not None
+                else None,
             },
         )
         return 1
 
     except RuntimeHostError as e:
         # Runtime host errors already have proper structure
+        error_code = getattr(getattr(e, "model", None), "error_code", None)
+        error_code_name = getattr(error_code, "name", None)
         logger.exception(
             "ONEX runtime host error (correlation_id=%s)",
             correlation_id,
             extra={
                 "error_type": type(e).__name__,
-                "error_code": e.model.error_code.name if hasattr(e, "model") else None,
+                "error_code": str(error_code_name)
+                if error_code_name is not None
+                else None,
             },
         )
         return 1

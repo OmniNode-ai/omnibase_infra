@@ -1,7 +1,10 @@
 # Handler ID follows convention: {node_type}.{domain}.handler
 handler_id: effect.mcp.handler
 name: MCP Handler
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 description: >
   Effect handler for Model Context Protocol (MCP) integration. Exposes ONEX nodes as MCP tools for AI agent integration via streamable HTTP transport.
 

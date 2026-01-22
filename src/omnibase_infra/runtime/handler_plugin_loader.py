@@ -820,7 +820,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 # Extract error code if available
                 error_code: str | None = None
                 if hasattr(e, "model") and hasattr(e.model, "context"):
-                    error_code = e.model.context.get("loader_error")
+                    loader_error = e.model.context.get("loader_error")
+                    error_code = str(loader_error) if loader_error is not None else None
 
                 failed_handlers.append(
                     ModelFailedPluginLoad(
@@ -1126,7 +1127,8 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
                 # Extract error code if available
                 error_code: str | None = None
                 if hasattr(e, "model") and hasattr(e.model, "context"):
-                    error_code = e.model.context.get("loader_error")
+                    loader_error = e.model.context.get("loader_error")
+                    error_code = str(loader_error) if loader_error is not None else None
 
                 failed_handlers.append(
                     ModelFailedPluginLoad(

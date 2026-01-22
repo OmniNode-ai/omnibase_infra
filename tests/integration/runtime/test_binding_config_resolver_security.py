@@ -254,7 +254,7 @@ class TestPathTraversalIntegration:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Attempt to access secret file via path traversal
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -317,7 +317,7 @@ class TestPathTraversalIntegration:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Attempt deep traversal - should be blocked at parsing or resolution layer
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -368,7 +368,7 @@ class TestPathTraversalIntegration:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Attempt to use absolute path outside config_dir
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -414,7 +414,7 @@ class TestPathTraversalIntegration:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Legitimate relative path should work
         result = resolver.resolve(
@@ -542,7 +542,7 @@ class TestSymlinkSecurityIntegration:
             allow_symlinks=True,  # Symlinks allowed but must stay in config_dir
         )
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Should be blocked by post-resolution path traversal protection
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -600,7 +600,7 @@ class TestSymlinkSecurityIntegration:
             allow_symlinks=True,
         )
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Should succeed - symlink stays within boundary
         result = resolver.resolve(
@@ -648,7 +648,7 @@ class TestSymlinkSecurityIntegration:
             allow_symlinks=False,  # Symlinks disabled for strictest security
         )
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Should be blocked - symlinks not allowed regardless of target
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -710,7 +710,7 @@ class TestSymlinkSecurityIntegration:
             allow_symlinks=True,
         )
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Should succeed since entire chain stays within config_dir
         result = resolver.resolve(
@@ -774,7 +774,7 @@ class TestPathTraversalEdgeCases:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # URL-encoded traversal attempt: %2e = '.', %2f = '/'
         with pytest.raises(ProtocolConfigurationError):
@@ -814,7 +814,7 @@ class TestPathTraversalEdgeCases:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Various Unicode tricks that might normalize to traversal
         unicode_tricks = [
@@ -867,7 +867,7 @@ class TestPathTraversalEdgeCases:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # SECURITY NOTE: Python's pathlib rejects null bytes with ValueError.
         # This is a defense-in-depth protection from the standard library.
@@ -911,7 +911,7 @@ class TestPathTraversalEdgeCases:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Backslash traversal attempt
         with pytest.raises(ProtocolConfigurationError):
@@ -948,7 +948,7 @@ class TestPathTraversalEdgeCases:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         test_correlation_id = uuid4()
 
@@ -1003,7 +1003,7 @@ class TestPathTraversalEdgeCases:
 
         config = ModelBindingConfigResolverConfig(config_dir=config_dir)
         container = mock_container_factory(config)
-        resolver = BindingConfigResolver(container)
+        resolver = BindingConfigResolver(container, _config=config)
 
         # Attempt to access via case variation - should be blocked
         # regardless of filesystem case sensitivity

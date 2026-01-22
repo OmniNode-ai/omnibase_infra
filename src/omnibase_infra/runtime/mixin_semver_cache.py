@@ -23,7 +23,11 @@ from collections.abc import Callable
 
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.primitives import ModelSemVer
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.runtime.util_version import normalize_version
 
 
@@ -98,10 +102,15 @@ class MixinSemverCache:
         """
         with cls._semver_cache_lock:
             if cls._semver_cache is not None:
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="configure_semver_cache",
+                )
                 raise ProtocolConfigurationError(
                     "Cannot reconfigure semver cache after first use. "
                     "Set SEMVER_CACHE_SIZE before creating any "
-                    "registry instances, or use _reset_semver_cache() for testing."
+                    "registry instances, or use _reset_semver_cache() for testing.",
+                    context=context,
                 )
             cls.SEMVER_CACHE_SIZE = maxsize
 
@@ -219,14 +228,24 @@ class MixinSemverCache:
                 try:
                     return ModelSemVer.parse(normalized_version)
                 except ModelOnexError as e:
+                    context = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="parse_semver",
+                    )
                     raise ProtocolConfigurationError(
                         str(e),
                         version=normalized_version,
+                        context=context,
                     ) from e
                 except ValueError as e:
+                    context = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="parse_semver",
+                    )
                     raise ProtocolConfigurationError(
                         str(e),
                         version=normalized_version,
+                        context=context,
                     ) from e
 
             def _parse_semver_impl(version: str) -> ModelSemVer:
@@ -248,9 +267,14 @@ class MixinSemverCache:
                 try:
                     normalized = normalize_version(version)
                 except ValueError as e:
+                    context = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="normalize_version",
+                    )
                     raise ProtocolConfigurationError(
                         str(e),
                         version=version,
+                        context=context,
                     ) from e
 
                 # Now call the cached function with the NORMALIZED version

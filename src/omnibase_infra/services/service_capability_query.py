@@ -131,10 +131,10 @@ class ServiceCapabilityQuery(MixinAsyncCircuitBreaker):
         Dependency Injection Pattern: This service is a leaf infrastructure
         service that receives its dependencies directly via constructor
         parameters rather than resolving them from a container. Unlike
-        orchestrators that use ``container.resolve()`` to obtain services
-        dynamically, leaf services like this one are instantiated with
-        concrete dependencies (projection_reader, node_selector) and are
-        themselves resolved by higher-level components.
+        orchestrators that use ``container.service_registry.resolve_service()``
+        to obtain services dynamically, leaf services like this one are
+        instantiated with concrete dependencies (projection_reader, node_selector)
+        and are themselves resolved by higher-level components.
     """
 
     def __init__(

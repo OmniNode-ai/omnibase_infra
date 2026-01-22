@@ -56,10 +56,12 @@ Example:
         # Bootstrap container and register config
         container = ModelONEXContainer()
         config = ModelBindingConfigResolverConfig(env_prefix="HANDLER")
+        from omnibase_core.enums import EnumInjectionScope
+
         await container.service_registry.register_instance(
             interface=ModelBindingConfigResolverConfig,
             instance=config,
-            scope="global",
+            scope=EnumInjectionScope.GLOBAL,
         )
 
         # Create resolver with container injection
@@ -235,14 +237,15 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
     Example:
         >>> # Container setup (async context required)
+        >>> from omnibase_core.enums import EnumInjectionScope
         >>> container = ModelONEXContainer()
         >>> config = ModelBindingConfigResolverConfig(env_prefix="HANDLER")
         >>> await container.service_registry.register_instance(
         ...     interface=ModelBindingConfigResolverConfig,
         ...     instance=config,
-        ...     scope="global",
+        ...     scope=EnumInjectionScope.GLOBAL,
         ... )
-        >>> resolver = BindingConfigResolver(container)
+        >>> resolver = await BindingConfigResolver.create(container)
         >>> binding = resolver.resolve(
         ...     handler_type="db",
         ...     inline_config={"pool_size": 10}
@@ -252,6 +255,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
     def __init__(
         self,
         container: ModelONEXContainer,
+        *,
+        _config: ModelBindingConfigResolverConfig | None = None,
+        _secret_resolver: SecretResolver | None = None,
     ) -> None:
         """Initialize BindingConfigResolver with container-based dependency injection.
 
@@ -259,52 +265,37 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Config is resolved from container's service registry, and SecretResolver
         is resolved as an optional dependency.
 
+        Note:
+            Prefer using the async factory method ``create()`` for initialization,
+            which properly resolves dependencies from the container's service registry.
+            Direct ``__init__`` usage requires pre-resolved config and secret_resolver.
+
         Args:
             container: ONEX container for dependency resolution.
+            _config: Pre-resolved config (used by create() factory). If None, raises error.
+            _secret_resolver: Pre-resolved secret resolver (optional, used by create() factory).
 
         Raises:
-            ProtocolConfigurationError: If ModelBindingConfigResolverConfig is not registered
-                in the container's service registry.
+            ProtocolConfigurationError: If _config is not provided (use create() instead).
         """
         self._container = container
 
-        # Resolve config from container's service registry
-        try:
-            self._config: ModelBindingConfigResolverConfig = (
-                container.service_registry.resolve_service(
-                    ModelBindingConfigResolverConfig
-                )
-            )
-        except (LookupError, KeyError, TypeError, AttributeError) as e:
-            # LookupError/KeyError: service not registered
-            # TypeError: invalid interface specification
-            # AttributeError: container/registry missing expected methods
+        # Validate that config was provided (either via create() or directly)
+        if _config is None:
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="init",
                 target_name="binding_config_resolver",
             )
             raise ProtocolConfigurationError(
-                "Failed to resolve ModelBindingConfigResolverConfig from container. "
-                "Ensure config is registered via container.service_registry.register_instance().",
+                "BindingConfigResolver requires config to be provided. "
+                "Use the async factory method BindingConfigResolver.create(container) "
+                "for proper initialization with dependency resolution.",
                 context=context,
-            ) from e
-
-        # Resolve SecretResolver from container (optional dependency)
-        # This replaces the config.secret_resolver pattern
-        self._secret_resolver: SecretResolver | None = None
-        try:
-            from omnibase_infra.runtime.secret_resolver import SecretResolver
-
-            self._secret_resolver = container.service_registry.resolve_service(
-                SecretResolver
             )
-        except (ImportError, KeyError, AttributeError):
-            # SecretResolver is optional - if not registered, vault: schemes won't work
-            # ImportError: SecretResolver module not available
-            # KeyError: SecretResolver not registered in service registry
-            # AttributeError: service_registry missing resolve_service method (test mocks)
-            pass
+
+        self._config: ModelBindingConfigResolverConfig = _config
+        self._secret_resolver: SecretResolver | None = _secret_resolver
 
         # Use OrderedDict for LRU eviction support - entries are moved to end on access
         self._cache: OrderedDict[str, ModelConfigCacheEntry] = OrderedDict()
@@ -356,6 +347,80 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         # Timestamps track when each lock was created for periodic cleanup.
         self._async_key_locks: dict[str, asyncio.Lock] = {}
         self._async_key_lock_timestamps: dict[str, float] = {}
+
+    @classmethod
+    async def create(
+        cls,
+        container: ModelONEXContainer,
+    ) -> BindingConfigResolver:
+        """Async factory method for creating BindingConfigResolver with proper DI.
+
+        This is the preferred method for creating BindingConfigResolver instances.
+        It properly resolves dependencies from the container's async service registry.
+
+        Args:
+            container: ONEX container for dependency resolution.
+
+        Returns:
+            Fully initialized BindingConfigResolver instance.
+
+        Raises:
+            ProtocolConfigurationError: If ModelBindingConfigResolverConfig is not registered
+                in the container's service registry.
+
+        Example:
+            >>> from omnibase_core.enums import EnumInjectionScope
+            >>> container = ModelONEXContainer()
+            >>> config = ModelBindingConfigResolverConfig(env_prefix="HANDLER")
+            >>> await container.service_registry.register_instance(
+            ...     interface=ModelBindingConfigResolverConfig,
+            ...     instance=config,
+            ...     scope=EnumInjectionScope.GLOBAL,
+            ... )
+            >>> resolver = await BindingConfigResolver.create(container)
+        """
+        # Resolve config from container's service registry
+        try:
+            config: ModelBindingConfigResolverConfig = (
+                await container.service_registry.resolve_service(
+                    ModelBindingConfigResolverConfig
+                )
+            )
+        except (LookupError, KeyError, TypeError, AttributeError) as e:
+            # LookupError/KeyError: service not registered
+            # TypeError: invalid interface specification
+            # AttributeError: container/registry missing expected methods
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="create",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Failed to resolve ModelBindingConfigResolverConfig from container. "
+                "Ensure config is registered via container.service_registry.register_instance().",
+                context=context,
+            ) from e
+
+        # Resolve SecretResolver from container (optional dependency)
+        secret_resolver: SecretResolver | None = None
+        try:
+            from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+            secret_resolver = await container.service_registry.resolve_service(
+                SecretResolver
+            )
+        except (ImportError, KeyError, AttributeError):
+            # SecretResolver is optional - if not registered, vault: schemes won't work
+            # ImportError: SecretResolver module not available
+            # KeyError: SecretResolver not registered in service registry
+            # AttributeError: service_registry missing resolve_service method (test mocks)
+            pass
+
+        return cls(
+            container,
+            _config=config,
+            _secret_resolver=secret_resolver,
+        )
 
     # === Primary API (Sync) ===
 
@@ -533,7 +598,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             result = await self._resolve_config_async(
                 handler_type=handler_type,
                 config_ref=config_ref,
-                inline_config=inline_config,
+                inline_config=inline_config,  # type: ignore[arg-type]
                 correlation_id=correlation_id,
             )
 
@@ -917,7 +982,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
     def _describe_source(
         self,
         config_ref: str | None,
-        inline_config: dict[str, object] | None,
+        inline_config: dict[str, JsonType] | None,
     ) -> str:
         """Create a description of the configuration source for debugging.
 
@@ -945,7 +1010,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self,
         handler_type: str,
         config_ref: str | None,
-        inline_config: dict[str, object] | None,
+        inline_config: dict[str, JsonType] | None,
         correlation_id: UUID,
     ) -> ModelBindingConfig:
         """Resolve configuration from sources synchronously.

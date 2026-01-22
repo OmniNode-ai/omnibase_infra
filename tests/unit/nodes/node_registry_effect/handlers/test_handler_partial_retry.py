@@ -24,6 +24,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumBackendType
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 from omnibase_infra.nodes.node_registry_effect.handlers.handler_partial_retry import (
@@ -37,7 +38,7 @@ class MockPartialRetryRequest:
 
     node_id: UUID
     node_type: EnumNodeKind
-    node_version: str
+    node_version: ModelSemVer
     target_backend: EnumBackendType
     idempotency_key: str | None = None
     service_name: str | None = None
@@ -83,7 +84,7 @@ def create_retry_request(
     return MockPartialRetryRequest(
         node_id=node_id or uuid4(),
         node_type=node_type,
-        node_version="1.0.0",
+        node_version=ModelSemVer(major=1, minor=0, patch=0),
         target_backend=target_backend,
         idempotency_key=idempotency_key,
         service_name=service_name,
@@ -178,7 +179,7 @@ class TestHandlerPartialRetryPostgresSuccess:
         handler = HandlerPartialRetry(mock_consul, mock_postgres)
         node_id = uuid4()
         node_type = EnumNodeKind.COMPUTE
-        node_version = "2.0.0"
+        node_version = ModelSemVer(major=2, minor=0, patch=0)
         endpoints = {"grpc": "grpc://localhost:9090"}
         metadata = {"region": "us-west"}
         request = create_retry_request(
@@ -195,6 +196,7 @@ class TestHandlerPartialRetryPostgresSuccess:
         await handler.handle(request, correlation_id)
 
         # Assert
+        # Handler passes ModelSemVer directly to postgres adapter
         mock_postgres.upsert.assert_called_once_with(
             node_id=node_id,
             node_type=node_type,

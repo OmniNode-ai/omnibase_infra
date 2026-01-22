@@ -44,6 +44,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 # Test UUIDs - use deterministic values for reproducible tests
 TEST_NODE_UUID_1 = UUID("00000000-0000-0000-0000-000000000001")
@@ -106,7 +107,8 @@ class MockEventBus:
 
         Args:
             envelope: Event envelope to publish. Uses BaseModel for type safety
-                since all event envelopes are Pydantic models.
+                since all event envelopes are Pydantic models. The production code
+                wraps events in ModelEventEnvelope before publishing.
             topic: Event topic.
 
         Raises:
@@ -114,8 +116,17 @@ class MockEventBus:
         """
         if self.should_fail:
             raise RuntimeError("Event bus publish failed")
-        # Store envelopes - supports both introspection and heartbeat events
-        if isinstance(envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent):
+        # Handle ModelEventEnvelope - extract payload for storage
+        if isinstance(envelope, ModelEventEnvelope):
+            payload = envelope.payload
+            if isinstance(
+                payload, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent
+            ):
+                self.published_envelopes.append((payload, topic))
+        # Also support direct event publishing (backwards compatibility)
+        elif isinstance(
+            envelope, ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent
+        ):
             self.published_envelopes.append((envelope, topic))
 
     async def publish(

@@ -13,7 +13,7 @@ Handler Wiring (from contract.yaml):
     - ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat
 
 Handler Implementation:
-    All handlers implement ProtocolMessageHandler directly with:
+    All handlers implement ProtocolHandler directly with:
     - handler_id, category, message_types, node_kind properties
     - handle(envelope) -> ModelHandlerOutput signature
 
@@ -88,7 +88,7 @@ from __future__ import annotations
 import importlib
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from omnibase_core.services.service_handler_registry import ServiceHandlerRegistry
 from omnibase_infra.enums import EnumInfraTransportType
@@ -96,6 +96,7 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 from omnibase_infra.runtime.contract_loaders import (
     load_handler_class_info_from_contract,
 )
+from omnibase_spi.protocols.handlers import ProtocolHandler
 
 logger = logging.getLogger(__name__)
 
@@ -110,14 +111,14 @@ ALLOWED_NAMESPACES: tuple[str, ...] = (
 
 
 def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:
-    """Validate handler implements ProtocolMessageHandler via duck typing.
+    """Validate handler implements ProtocolHandler via duck typing.
 
     Uses duck typing to verify the handler has the required properties and
-    methods for ProtocolMessageHandler compliance. Per ONEX conventions,
+    methods for ProtocolHandler compliance. Per ONEX conventions,
     protocol compliance is verified via structural typing rather than
     isinstance checks.
 
-    Protocol Requirements (ProtocolMessageHandler):
+    Protocol Requirements (ProtocolHandler):
         - handler_id (property): Unique identifier string
         - category (property): EnumMessageCategory value
         - message_types (property): set[str] of message type names
@@ -492,7 +493,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     context=ctx,
                 ) from e
 
-            # Validate handler implements ProtocolMessageHandler
+            # Validate handler implements ProtocolHandler
             is_valid, missing = _validate_handler_protocol(handler_instance)
             if not is_valid:
                 ctx = ModelInfraErrorContext.with_correlation(
@@ -501,7 +502,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     target_name=handler_class_name,
                 )
                 raise ProtocolConfigurationError(
-                    f"Handler '{handler_class_name}' does not implement ProtocolMessageHandler. "
+                    f"Handler '{handler_class_name}' does not implement ProtocolHandler. "
                     f"Missing required members: {', '.join(missing)}. "
                     f"Handlers must have: handler_id, category, message_types, node_kind properties "
                     f"and handle(envelope) method. "
@@ -510,7 +511,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 )
 
             # Register handler
-            registry.register_handler(handler_instance)
+            registry.register_handler(handler_instance)  # type: ignore[arg-type]
             logger.debug(
                 "Registered handler from contract: %s",
                 handler_class_name,

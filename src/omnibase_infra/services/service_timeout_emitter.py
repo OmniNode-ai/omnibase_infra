@@ -36,6 +36,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -568,8 +569,13 @@ class ServiceTimeoutEmitter:
             },
         )
 
+        # Wrap event in ModelEventEnvelope for protocol compliance
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            payload=event,
+            correlation_id=correlation_id,
+        )
         await self._event_bus.publish_envelope(
-            envelope=event,
+            envelope=envelope,  # type: ignore[arg-type]
             topic=topic,
         )
 
@@ -657,8 +663,13 @@ class ServiceTimeoutEmitter:
             },
         )
 
+        # Wrap event in ModelEventEnvelope for protocol compliance
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            payload=event,
+            correlation_id=correlation_id,
+        )
         await self._event_bus.publish_envelope(
-            envelope=event,
+            envelope=envelope,  # type: ignore[arg-type]
             topic=topic,
         )
 

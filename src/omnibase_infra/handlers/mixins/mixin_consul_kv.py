@@ -94,7 +94,7 @@ class MixinConsulKV:
         correlation_id: UUID,
     ) -> T:
         """Execute operation with retry logic - provided by host class."""
-        raise NotImplementedError("Must be provided by implementing class")
+        raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
 
     def _build_response(
         self,
@@ -103,6 +103,7 @@ class MixinConsulKV:
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Build standardized response - provided by host class."""
+        raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
 
     async def _kv_get(
         self,

@@ -246,10 +246,13 @@ class RuntimeHostProcess:
                     the container and pass it to RuntimeHostProcess:
 
                     ```python
-                    container = ModelONEXContainer()
-                    wire_infrastructure_services(container)
-                    registry = container.service_registry.resolve_service(RegistryProtocolBinding)
-                    process = RuntimeHostProcess(handler_registry=registry)
+                    async def create_runtime() -> RuntimeHostProcess:
+                        container = ModelONEXContainer()
+                        await wire_infrastructure_services(container)
+                        registry = await container.service_registry.resolve_service(
+                            RegistryProtocolBinding
+                        )
+                        return RuntimeHostProcess(handler_registry=registry)
                     ```
 
                     This follows ONEX container-based DI patterns for better testability
