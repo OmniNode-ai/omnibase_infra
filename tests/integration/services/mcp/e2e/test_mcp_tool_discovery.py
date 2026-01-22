@@ -8,6 +8,8 @@ using the MCP protocol's tools/list method.
 Related Ticket: OMN-1408
 """
 
+from __future__ import annotations
+
 import httpx
 import pytest
 

@@ -204,8 +204,6 @@ async def mcp_http_client(
     Yields:
         Configured httpx.AsyncClient.
     """
-    import httpx
-
     app: Starlette = mcp_app_dev_mode["app"]  # type: ignore[assignment]
 
     async with httpx.AsyncClient(
