@@ -23,6 +23,7 @@ Exports:
     EnumHandlerErrorType: Handler error types for validation and lifecycle
     EnumHandlerLoaderError: Handler loader error codes for plugin loading
     EnumResponseStatus: Handler response status (SUCCESS, ERROR)
+    EnumHandlerSourceMode: Handler source modes for loading strategy (BOOTSTRAP, CONTRACT, HYBRID)
     EnumHandlerSourceType: Handler validation error source types
     EnumHandlerType: Handler architectural roles (INFRA_HANDLER, NODE_HANDLER)
     EnumHandlerTypeCategory: Behavioral classification (COMPUTE, EFFECT)
@@ -61,6 +62,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 )
 from omnibase_infra.enums.enum_handler_error_type import EnumHandlerErrorType
 from omnibase_infra.enums.enum_handler_loader_error import EnumHandlerLoaderError
+from omnibase_infra.enums.enum_handler_source_mode import EnumHandlerSourceMode
 from omnibase_infra.enums.enum_handler_source_type import EnumHandlerSourceType
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
@@ -100,6 +102,7 @@ __all__: list[str] = [
     "EnumExecutionShapeViolation",
     "EnumHandlerErrorType",
     "EnumHandlerLoaderError",
+    "EnumHandlerSourceMode",
     "EnumHandlerSourceType",
     "EnumHandlerType",
     "EnumHandlerTypeCategory",
