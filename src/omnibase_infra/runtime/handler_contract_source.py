@@ -110,6 +110,207 @@ MAX_CONTRACT_SIZE = 10 * 1024 * 1024
 
 
 # =============================================================================
+# Module-Level Helper Functions
+# =============================================================================
+#
+# These functions are extracted from HandlerContractSource to reduce method count
+# while maintaining the same functionality. They are pure functions that operate
+# on their inputs without requiring instance state.
+# =============================================================================
+
+
+def _sanitize_path_for_logging(path: Path) -> str:
+    """Sanitize a file path for safe inclusion in logs and error messages.
+
+    In production environments, full paths may leak sensitive information
+    about directory structure. This function returns only the filename and
+    parent directory to provide context without exposing full paths.
+
+    Args:
+        path: The full path to sanitize.
+
+    Returns:
+        Sanitized path string showing only parent/filename.
+        For example: "/home/user/code/handlers/handler_contract.yaml"
+        becomes "handlers/handler_contract.yaml".
+    """
+    # Return parent directory name + filename for context
+    # This provides enough info for debugging without full path exposure
+    try:
+        return str(Path(path.parent.name) / path.name)
+    except (ValueError, AttributeError):
+        # Fallback to just filename if parent extraction fails
+        return path.name
+
+
+def _create_parse_error(
+    contract_path: Path,
+    error: yaml.YAMLError,
+) -> ModelHandlerValidationError:
+    """Create a validation error for YAML parse failures.
+
+    Args:
+        contract_path: Path to the failing contract file.
+        error: The YAML parsing error.
+
+    Returns:
+        ModelHandlerValidationError with parse error details.
+    """
+    handler_identity = ModelHandlerIdentifier.from_handler_id(
+        f"unknown@{contract_path.name}"
+    )
+
+    return ModelHandlerValidationError(
+        error_type=EnumHandlerErrorType.CONTRACT_PARSE_ERROR,
+        rule_id="CONTRACT-001",
+        handler_identity=handler_identity,
+        source_type=EnumHandlerSourceType.CONTRACT,
+        message=f"Failed to parse YAML in {_sanitize_path_for_logging(contract_path)}: {error}",
+        remediation_hint="Check YAML syntax and ensure proper indentation",
+        file_path=str(contract_path),
+    )
+
+
+def _create_validation_error(
+    contract_path: Path,
+    error: ValidationError,
+) -> ModelHandlerValidationError:
+    """Create a validation error for contract validation failures.
+
+    Args:
+        contract_path: Path to the failing contract file.
+        error: The Pydantic validation error.
+
+    Returns:
+        ModelHandlerValidationError with validation details.
+    """
+    handler_identity = ModelHandlerIdentifier.from_handler_id(
+        f"unknown@{contract_path.name}"
+    )
+
+    # Extract first error detail for remediation hint
+    error_details = error.errors()
+    if error_details:
+        first_error = error_details[0]
+        field_loc = " -> ".join(str(x) for x in first_error.get("loc", ()))
+        error_msg = str(first_error.get("msg", "validation failed"))
+    else:
+        field_loc = "unknown"
+        error_msg = "validation failed"
+
+    return ModelHandlerValidationError(
+        error_type=EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR,
+        rule_id="CONTRACT-002",
+        handler_identity=handler_identity,
+        source_type=EnumHandlerSourceType.CONTRACT,
+        message=f"Contract validation failed in {_sanitize_path_for_logging(contract_path)}: {error_msg} at {field_loc}",
+        remediation_hint=f"Check the '{field_loc}' field in the contract",
+        file_path=str(contract_path),
+    )
+
+
+def _create_size_limit_error(
+    contract_path: Path,
+    file_size: int,
+) -> ModelHandlerValidationError:
+    """Create a validation error for file size limit violations.
+
+    Args:
+        contract_path: Path to the oversized contract file.
+        file_size: The actual file size in bytes.
+
+    Returns:
+        ModelHandlerValidationError with size limit details.
+    """
+    handler_identity = ModelHandlerIdentifier.from_handler_id(
+        f"unknown@{contract_path.name}"
+    )
+
+    return ModelHandlerValidationError(
+        error_type=EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR,
+        rule_id="CONTRACT-003",
+        handler_identity=handler_identity,
+        source_type=EnumHandlerSourceType.CONTRACT,
+        message=(
+            f"Contract file {_sanitize_path_for_logging(contract_path)} exceeds size limit: "
+            f"{file_size} bytes (max: {MAX_CONTRACT_SIZE} bytes)"
+        ),
+        remediation_hint=(
+            f"Reduce contract file size to under {MAX_CONTRACT_SIZE // (1024 * 1024)}MB. "
+            "Consider splitting into multiple contracts if needed."
+        ),
+        file_path=str(contract_path),
+    )
+
+
+def _create_io_error(
+    contract_path: Path,
+    error: OSError,
+) -> ModelHandlerValidationError:
+    """Create a validation error for I/O failures.
+
+    Args:
+        contract_path: Path to the contract file that failed to read.
+        error: The I/O error encountered.
+
+    Returns:
+        ModelHandlerValidationError with I/O error details.
+    """
+    handler_identity = ModelHandlerIdentifier.from_handler_id(
+        f"unknown@{contract_path.name}"
+    )
+
+    # OSError.strerror may be None for some error types (e.g., custom subclasses),
+    # so use str(error) as a fallback to ensure we always have an error message
+    error_message = error.strerror or str(error)
+
+    return ModelHandlerValidationError(
+        error_type=EnumHandlerErrorType.CONTRACT_PARSE_ERROR,
+        rule_id="CONTRACT-004",
+        handler_identity=handler_identity,
+        source_type=EnumHandlerSourceType.CONTRACT,
+        message=f"Failed to read contract file: {error_message}",
+        remediation_hint="Check file permissions and ensure the file exists",
+        file_path=str(contract_path),
+    )
+
+
+def _create_version_parse_error(
+    contract_path: Path,
+    error_message: str,
+) -> ModelHandlerValidationError:
+    """Create a validation error for version string parse failures.
+
+    Args:
+        contract_path: Path to the contract file with invalid version.
+        error_message: The error message describing the version parse failure.
+
+    Returns:
+        ModelHandlerValidationError with version parse error details.
+    """
+    handler_identity = ModelHandlerIdentifier.from_handler_id(
+        f"unknown@{contract_path.name}"
+    )
+
+    return ModelHandlerValidationError(
+        error_type=EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR,
+        rule_id="CONTRACT-005",
+        handler_identity=handler_identity,
+        source_type=EnumHandlerSourceType.CONTRACT,
+        message=(
+            f"Invalid version string in contract "
+            f"{_sanitize_path_for_logging(contract_path)}: {error_message}"
+        ),
+        remediation_hint=(
+            "Ensure the 'version' field uses semantic versioning format "
+            "(e.g., '1.0.0', '2.1.3-beta.1'). "
+            "Version components must be non-negative integers."
+        ),
+        file_path=str(contract_path),
+    )
+
+
+# =============================================================================
 # HandlerContractSource Implementation
 # =============================================================================
 
@@ -197,29 +398,6 @@ class HandlerContractSource(ProtocolContractSource):
             "CONTRACT" as the source type.
         """
         return "CONTRACT"
-
-    def _sanitize_path_for_logging(self, path: Path) -> str:
-        """Sanitize a file path for safe inclusion in logs and error messages.
-
-        In production environments, full paths may leak sensitive information
-        about directory structure. This method returns only the filename and
-        parent directory to provide context without exposing full paths.
-
-        Args:
-            path: The full path to sanitize.
-
-        Returns:
-            Sanitized path string showing only parent/filename.
-            For example: "/home/user/code/handlers/handler_contract.yaml"
-            becomes "handlers/handler_contract.yaml".
-        """
-        # Return parent directory name + filename for context
-        # This provides enough info for debugging without full path exposure
-        try:
-            return str(Path(path.parent.name) / path.name)
-        except (ValueError, AttributeError):
-            # Fallback to just filename if parent extraction fails
-            return path.name
 
     async def discover_handlers(
         self,
@@ -340,7 +518,7 @@ class HandlerContractSource(ProtocolContractSource):
                         },
                     )
                 except yaml.YAMLError as e:
-                    error = self._create_parse_error(contract_file, e)
+                    error = _create_parse_error(contract_file, e)
                     if not self._graceful_mode:
                         raise ModelOnexError(
                             f"Failed to parse YAML contract at {contract_file}: {e}",
@@ -348,7 +526,7 @@ class HandlerContractSource(ProtocolContractSource):
                         ) from e
                     logger.warning(
                         "Failed to parse YAML contract in %s, continuing in graceful mode",
-                        self._sanitize_path_for_logging(contract_file),
+                        _sanitize_path_for_logging(contract_file),
                         extra={
                             "contract_file": str(contract_file),
                             "error_type": "yaml_parse_error",
@@ -358,7 +536,7 @@ class HandlerContractSource(ProtocolContractSource):
                     )
                     validation_errors.append(error)
                 except ValidationError as e:
-                    error = self._create_validation_error(contract_file, e)
+                    error = _create_validation_error(contract_file, e)
                     if not self._graceful_mode:
                         raise ModelOnexError(
                             f"Contract validation failed at {contract_file}: {e}",
@@ -366,7 +544,7 @@ class HandlerContractSource(ProtocolContractSource):
                         ) from e
                     logger.warning(
                         "Contract validation failed in %s, continuing in graceful mode",
-                        self._sanitize_path_for_logging(contract_file),
+                        _sanitize_path_for_logging(contract_file),
                         extra={
                             "contract_file": str(contract_file),
                             "error_type": "validation_error",
@@ -397,13 +575,13 @@ class HandlerContractSource(ProtocolContractSource):
                             file_size = contract_file.stat().st_size
                         except OSError:
                             file_size = 0  # File may have been deleted/changed
-                        error = self._create_size_limit_error(
+                        error = _create_size_limit_error(
                             contract_file,
                             file_size,
                         )
                         logger.warning(
                             "Contract file %s exceeds size limit, continuing in graceful mode",
-                            self._sanitize_path_for_logging(contract_file),
+                            _sanitize_path_for_logging(contract_file),
                             extra={
                                 "contract_file": str(contract_file),
                                 "error_type": "size_limit_error",
@@ -415,14 +593,14 @@ class HandlerContractSource(ProtocolContractSource):
                         validation_errors.append(error)
                     elif error_code == "HANDLER_SOURCE_007":
                         # Invalid version string - extract version from error message
-                        error = self._create_version_parse_error(
+                        error = _create_version_parse_error(
                             contract_file,
                             str(e),
                         )
                         logger.warning(
                             "Contract file %s has invalid version string, "
                             "continuing in graceful mode",
-                            self._sanitize_path_for_logging(contract_file),
+                            _sanitize_path_for_logging(contract_file),
                             extra={
                                 "contract_file": str(contract_file),
                                 "error_type": "version_parse_error",
@@ -444,10 +622,10 @@ class HandlerContractSource(ProtocolContractSource):
                             f"Failed to read contract file at {contract_file}: {e}",
                             error_code="HANDLER_SOURCE_006",
                         ) from e
-                    error = self._create_io_error(contract_file, e)
+                    error = _create_io_error(contract_file, e)
                     logger.warning(
                         "Failed to read contract file, continuing in graceful mode: %s",
-                        self._sanitize_path_for_logging(contract_file),
+                        _sanitize_path_for_logging(contract_file),
                         extra={
                             "contract_file": str(contract_file),
                             "error_type": "io_error",
@@ -573,173 +751,6 @@ class HandlerContractSource(ProtocolContractSource):
             description=contract.description,
             handler_class=handler_class,
             contract_path=str(contract_path),
-        )
-
-    def _create_parse_error(
-        self,
-        contract_path: Path,
-        error: yaml.YAMLError,
-    ) -> ModelHandlerValidationError:
-        """Create a validation error for YAML parse failures.
-
-        Args:
-            contract_path: Path to the failing contract file.
-            error: The YAML parsing error.
-
-        Returns:
-            ModelHandlerValidationError with parse error details.
-        """
-        handler_identity = ModelHandlerIdentifier.from_handler_id(
-            f"unknown@{contract_path.name}"
-        )
-
-        return ModelHandlerValidationError(
-            error_type=EnumHandlerErrorType.CONTRACT_PARSE_ERROR,
-            rule_id="CONTRACT-001",
-            handler_identity=handler_identity,
-            source_type=EnumHandlerSourceType.CONTRACT,
-            message=f"Failed to parse YAML in {self._sanitize_path_for_logging(contract_path)}: {error}",
-            remediation_hint="Check YAML syntax and ensure proper indentation",
-            file_path=str(contract_path),
-        )
-
-    def _create_validation_error(
-        self,
-        contract_path: Path,
-        error: ValidationError,
-    ) -> ModelHandlerValidationError:
-        """Create a validation error for contract validation failures.
-
-        Args:
-            contract_path: Path to the failing contract file.
-            error: The Pydantic validation error.
-
-        Returns:
-            ModelHandlerValidationError with validation details.
-        """
-        handler_identity = ModelHandlerIdentifier.from_handler_id(
-            f"unknown@{contract_path.name}"
-        )
-
-        # Extract first error detail for remediation hint
-        error_details = error.errors()
-        if error_details:
-            first_error = error_details[0]
-            field_loc = " -> ".join(str(x) for x in first_error.get("loc", ()))
-            error_msg = str(first_error.get("msg", "validation failed"))
-        else:
-            field_loc = "unknown"
-            error_msg = "validation failed"
-
-        return ModelHandlerValidationError(
-            error_type=EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR,
-            rule_id="CONTRACT-002",
-            handler_identity=handler_identity,
-            source_type=EnumHandlerSourceType.CONTRACT,
-            message=f"Contract validation failed in {self._sanitize_path_for_logging(contract_path)}: {error_msg} at {field_loc}",
-            remediation_hint=f"Check the '{field_loc}' field in the contract",
-            file_path=str(contract_path),
-        )
-
-    def _create_size_limit_error(
-        self,
-        contract_path: Path,
-        file_size: int,
-    ) -> ModelHandlerValidationError:
-        """Create a validation error for file size limit violations.
-
-        Args:
-            contract_path: Path to the oversized contract file.
-            file_size: The actual file size in bytes.
-
-        Returns:
-            ModelHandlerValidationError with size limit details.
-        """
-        handler_identity = ModelHandlerIdentifier.from_handler_id(
-            f"unknown@{contract_path.name}"
-        )
-
-        return ModelHandlerValidationError(
-            error_type=EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR,
-            rule_id="CONTRACT-003",
-            handler_identity=handler_identity,
-            source_type=EnumHandlerSourceType.CONTRACT,
-            message=(
-                f"Contract file {self._sanitize_path_for_logging(contract_path)} exceeds size limit: "
-                f"{file_size} bytes (max: {MAX_CONTRACT_SIZE} bytes)"
-            ),
-            remediation_hint=(
-                f"Reduce contract file size to under {MAX_CONTRACT_SIZE // (1024 * 1024)}MB. "
-                "Consider splitting into multiple contracts if needed."
-            ),
-            file_path=str(contract_path),
-        )
-
-    def _create_io_error(
-        self,
-        contract_path: Path,
-        error: OSError,
-    ) -> ModelHandlerValidationError:
-        """Create a validation error for I/O failures.
-
-        Args:
-            contract_path: Path to the contract file that failed to read.
-            error: The I/O error encountered.
-
-        Returns:
-            ModelHandlerValidationError with I/O error details.
-        """
-        handler_identity = ModelHandlerIdentifier.from_handler_id(
-            f"unknown@{contract_path.name}"
-        )
-
-        # OSError.strerror may be None for some error types (e.g., custom subclasses),
-        # so use str(error) as a fallback to ensure we always have an error message
-        error_message = error.strerror or str(error)
-
-        return ModelHandlerValidationError(
-            error_type=EnumHandlerErrorType.CONTRACT_PARSE_ERROR,
-            rule_id="CONTRACT-004",
-            handler_identity=handler_identity,
-            source_type=EnumHandlerSourceType.CONTRACT,
-            message=f"Failed to read contract file: {error_message}",
-            remediation_hint="Check file permissions and ensure the file exists",
-            file_path=str(contract_path),
-        )
-
-    def _create_version_parse_error(
-        self,
-        contract_path: Path,
-        error_message: str,
-    ) -> ModelHandlerValidationError:
-        """Create a validation error for version string parse failures.
-
-        Args:
-            contract_path: Path to the contract file with invalid version.
-            error_message: The error message describing the version parse failure.
-
-        Returns:
-            ModelHandlerValidationError with version parse error details.
-        """
-        handler_identity = ModelHandlerIdentifier.from_handler_id(
-            f"unknown@{contract_path.name}"
-        )
-
-        return ModelHandlerValidationError(
-            error_type=EnumHandlerErrorType.CONTRACT_VALIDATION_ERROR,
-            rule_id="CONTRACT-005",
-            handler_identity=handler_identity,
-            source_type=EnumHandlerSourceType.CONTRACT,
-            message=(
-                f"Invalid version string in contract "
-                f"{self._sanitize_path_for_logging(contract_path)}: {error_message}"
-            ),
-            remediation_hint=(
-                "Ensure the 'version' field uses semantic versioning format "
-                "(e.g., '1.0.0', '2.1.3-beta.1'). "
-                "Version components must be non-negative integers."
-            ),
-            file_path=str(contract_path),
         )
 
     def _log_discovery_results(
