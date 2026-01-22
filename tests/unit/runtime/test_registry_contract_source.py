@@ -48,7 +48,10 @@ from omnibase_infra.runtime.registry_contract_source import (
 VALID_HANDLER_CONTRACT_YAML = """
 handler_id: "effect.test.handler"
 name: "Test Effect Handler"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 description: "A test handler for unit tests"
 descriptor:
   handler_kind: "effect"
@@ -61,7 +64,10 @@ metadata:
 MINIMAL_HANDLER_CONTRACT_YAML = """
 handler_id: "{handler_id}"
 name: "{name}"
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 descriptor:
   handler_kind: "compute"
 input_model: "test.models.Input"

@@ -42,7 +42,10 @@ SAMPLE_CONTRACTS = {
     "effect.filesystem.handler": """
 handler_id: effect.filesystem.handler
 name: Filesystem Handler
-version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
 description: Filesystem operations handler for file I/O
 input_model: omnibase_infra.models.types.JsonDict
 output_model: omnibase_core.models.dispatch.ModelHandlerOutput
@@ -58,7 +61,10 @@ tags:
     "compute.auth.validator": """
 handler_id: compute.auth.validator
 name: Auth Token Validator
-version: "2.1.0"
+contract_version:
+  major: 2
+  minor: 1
+  patch: 0
 description: Validates authentication tokens and extracts claims
 input_model: omnibase_infra.models.auth.ModelAuthRequest
 output_model: omnibase_infra.models.auth.ModelAuthResponse
@@ -74,7 +80,10 @@ tags:
     "effect.http.client": """
 handler_id: effect.http.client
 name: HTTP Client Handler
-version: "1.2.0"
+contract_version:
+  major: 1
+  minor: 2
+  patch: 0
 description: HTTP/REST client for external API calls
 input_model: omnibase_infra.models.http.ModelHttpRequest
 output_model: omnibase_infra.models.http.ModelHttpResponse
