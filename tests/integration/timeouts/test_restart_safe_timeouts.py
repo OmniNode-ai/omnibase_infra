@@ -355,8 +355,10 @@ class TestRestartSafeTimeouts:
         # Verify the emitted event is for the unmarked entity
         events = mock_event_bus.get_events_for_topic("ack-timed-out")
         assert len(events) == 1
-        # Access node_id via getattr to satisfy type checker (event is typed as object)
-        assert getattr(events[0], "node_id", None) == proj_unmarked.entity_id
+        # Events are wrapped in ModelEventEnvelope; access entity_id from payload
+        envelope = events[0]
+        assert hasattr(envelope, "payload"), "Event should be ModelEventEnvelope"
+        assert getattr(envelope.payload, "entity_id", None) == proj_unmarked.entity_id
 
     async def test_marker_prevents_duplicate_on_replay(
         self,

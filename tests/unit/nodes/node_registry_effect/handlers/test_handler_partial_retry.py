@@ -24,6 +24,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumBackendType
 from omnibase_infra.nodes.effects.models import ModelBackendResult
 from omnibase_infra.nodes.node_registry_effect.handlers.handler_partial_retry import (
@@ -195,10 +196,14 @@ class TestHandlerPartialRetryPostgresSuccess:
         await handler.handle(request, correlation_id)
 
         # Assert
+        # Handler converts string version to ModelSemVer via _parse_semver
+        expected_semver = ModelSemVer(
+            major=2, minor=0, patch=0, prerelease=None, build=None
+        )
         mock_postgres.upsert.assert_called_once_with(
             node_id=node_id,
             node_type=node_type,
-            node_version=node_version,
+            node_version=expected_semver,
             endpoints=endpoints,
             metadata=metadata,
         )
