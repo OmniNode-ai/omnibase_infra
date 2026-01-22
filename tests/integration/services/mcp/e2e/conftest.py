@@ -18,6 +18,7 @@ import socket
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
+import httpx
 import pytest
 
 if TYPE_CHECKING:
@@ -191,7 +192,7 @@ async def mcp_app_dev_mode() -> AsyncGenerator[dict[str, object], None]:
 @pytest.fixture
 async def mcp_http_client(
     mcp_app_dev_mode: dict[str, object],
-) -> AsyncGenerator[object, None]:
+) -> AsyncGenerator[httpx.AsyncClient, None]:
     """HTTP client for testing MCP app via ASGI transport.
 
     Uses httpx.AsyncClient with ASGITransport to test the MCP app

@@ -8,8 +8,7 @@ using the MCP protocol's tools/list method.
 Related Ticket: OMN-1408
 """
 
-import json
-
+import httpx
 import pytest
 
 pytestmark = [
@@ -34,8 +33,6 @@ class TestMCPToolDiscovery:
         - Response contains the mock_compute tool
         - Tool has correct description from contract
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
 
@@ -75,8 +72,6 @@ class TestMCPToolDiscovery:
 
         Verifies the MCP endpoint responds to requests.
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
 
@@ -114,8 +109,6 @@ class TestMCPToolDiscoveryWithInfra:
         It verifies that real ONEX nodes registered in Consul are
         discoverable via MCP.
         """
-        import httpx
-
         app = mcp_app_full_infra["app"]
         path = str(mcp_app_full_infra["path"])
 

@@ -8,8 +8,7 @@ protocol using the tools/call method.
 Related Ticket: OMN-1408
 """
 
-import json
-
+import httpx
 import pytest
 
 pytestmark = [
@@ -33,8 +32,6 @@ class TestMCPInvokeNode:
         - tools/call request returns a valid response
         - Response contains the expected result structure
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
 
@@ -77,8 +74,6 @@ class TestMCPInvokeNode:
         that arguments are passed through correctly from MCP client
         to ONEX executor.
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
@@ -119,8 +114,6 @@ class TestMCPInvokeNode:
         - Have its own correlation ID
         - Be recorded separately in call history
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
@@ -178,8 +171,6 @@ class TestMCPInvokeWorkflow:
         This test requires full infrastructure (Consul + PostgreSQL)
         and invokes real ONEX workflows.
         """
-        import httpx
-
         app = mcp_app_full_infra["app"]
         path = str(mcp_app_full_infra["path"])
 

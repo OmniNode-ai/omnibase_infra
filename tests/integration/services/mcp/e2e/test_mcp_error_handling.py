@@ -12,6 +12,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 pytestmark = [
@@ -33,8 +34,6 @@ class TestMCPRoutingErrors:
 
         The MCP protocol should return an error for unknown tools.
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
 
@@ -76,8 +75,6 @@ class TestMCPBasicFunctionality:
 
         Verifies the MCP layer handles empty argument dicts correctly.
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
 
@@ -107,8 +104,6 @@ class TestMCPBasicFunctionality:
 
         Verifies the executor receives and records calls correctly.
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
@@ -149,8 +144,6 @@ class TestMCPTimeoutHandling:
         This test verifies async execution works correctly within
         the configured timeout period.
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
 
@@ -185,8 +178,6 @@ class TestMCPProtocolCompliance:
 
         Sending invalid JSON-RPC should return an error.
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
 
@@ -209,8 +200,6 @@ class TestMCPProtocolCompliance:
 
         The initialize method is required by MCP protocol.
         """
-        import httpx
-
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
 
