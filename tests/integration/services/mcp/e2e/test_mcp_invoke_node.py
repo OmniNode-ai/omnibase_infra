@@ -62,6 +62,9 @@ class TestMockMCPInvokeNode:
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
 
+        # Track initial call history size to verify delta
+        initial_history_size = len(call_history)
+
         # Send MCP JSON-RPC request to call tool
         response = await client.post(
             f"{path}/",
@@ -97,9 +100,14 @@ class TestMockMCPInvokeNode:
         assert len(content) >= 1, "MCP content array must not be empty"
 
         # Verify call was recorded in executor history (prevents silent failures)
-        assert len(call_history) >= 1, (
-            f"Expected at least 1 call recorded in history, got {len(call_history)}. "
-            "Tool call may have silently failed to reach executor."
+        # Check delta rather than absolute size to catch silent failures
+        assert len(call_history) > initial_history_size, (
+            f"Expected call history to increase from {initial_history_size}, "
+            f"but got {len(call_history)}. Tool call may have silently failed to reach executor."
+        )
+        assert len(call_history) == initial_history_size + 1, (
+            f"Expected exactly 1 new call in history, but got "
+            f"{len(call_history) - initial_history_size} new calls."
         )
         # Verify the recorded call matches what we sent
         last_call = call_history[-1]
@@ -121,6 +129,9 @@ class TestMockMCPInvokeNode:
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+
+        # Track initial call history size to verify delta
+        initial_history_size = len(call_history)
 
         # Send tool call request
         response = await client.post(
@@ -148,10 +159,16 @@ class TestMockMCPInvokeNode:
         assert "error" not in data, f"Unexpected error in response: {data.get('error')}"
 
         # Verify executor received the call (mandatory assertions)
-        assert len(call_history) == 1, (
-            f"Expected exactly 1 call, got {len(call_history)}"
+        # Check delta rather than absolute size to catch silent failures
+        assert len(call_history) > initial_history_size, (
+            f"Expected call history to increase from {initial_history_size}, "
+            f"but got {len(call_history)}. Tool call may have silently failed."
         )
-        call = call_history[0]
+        assert len(call_history) == initial_history_size + 1, (
+            f"Expected exactly 1 new call in history, but got "
+            f"{len(call_history) - initial_history_size} new calls."
+        )
+        call = call_history[-1]
         assert call["tool_name"] == "mock_compute"
         arguments = call["arguments"]
         assert isinstance(arguments, dict)
@@ -172,6 +189,9 @@ class TestMockMCPInvokeNode:
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+
+        # Track initial call history size to verify delta
+        initial_history_size = len(call_history)
 
         # Make multiple calls
         response1 = await client.post(
@@ -223,15 +243,23 @@ class TestMockMCPInvokeNode:
         )
 
         # Both calls must be recorded (mandatory assertions)
-        assert len(call_history) == 2, (
-            f"Expected exactly 2 calls, got {len(call_history)}"
+        # Check delta rather than absolute size to catch silent failures
+        assert len(call_history) > initial_history_size, (
+            f"Expected call history to increase from {initial_history_size}, "
+            f"but got {len(call_history)}. Calls may have silently failed."
         )
-        args_0 = call_history[0]["arguments"]
-        args_1 = call_history[1]["arguments"]
+        assert len(call_history) == initial_history_size + 2, (
+            f"Expected exactly 2 new calls in history, but got "
+            f"{len(call_history) - initial_history_size} new calls."
+        )
+        # Get the two new calls (last 2 entries)
+        new_calls = call_history[-2:]
+        args_0 = new_calls[0]["arguments"]
+        args_1 = new_calls[1]["arguments"]
         assert isinstance(args_0, dict) and isinstance(args_1, dict)
         assert args_0["input_value"] == "first"
         assert args_1["input_value"] == "second"
-        assert call_history[0]["correlation_id"] != call_history[1]["correlation_id"], (
+        assert new_calls[0]["correlation_id"] != new_calls[1]["correlation_id"], (
             "Each invocation must have unique correlation_id"
         )
 
@@ -250,6 +278,9 @@ class TestMockMCPInvokeNode:
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
         call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+
+        # Track initial call history size to verify delta
+        initial_history_size = len(call_history)
 
         async def make_call(value: str) -> httpx.Response:
             return await client.post(
@@ -286,11 +317,19 @@ class TestMockMCPInvokeNode:
                 f"Call {i + 1} unexpected error: {data.get('error')}"
             )
 
-        # All calls must be recorded
-        assert len(call_history) == 5, f"Expected 5 calls, got {len(call_history)}"
+        # All calls must be recorded (check delta to avoid silent failures)
+        assert len(call_history) > initial_history_size, (
+            f"Expected call history to increase from {initial_history_size}, "
+            f"but got {len(call_history)}. Concurrent calls may have silently failed."
+        )
+        assert len(call_history) == initial_history_size + 5, (
+            f"Expected exactly 5 new calls in history, but got "
+            f"{len(call_history) - initial_history_size} new calls."
+        )
 
-        # All correlation_ids must be unique
-        correlation_ids = [call["correlation_id"] for call in call_history]
+        # Get the 5 new calls and verify correlation_ids are unique
+        new_calls = call_history[-5:]
+        correlation_ids = [call["correlation_id"] for call in new_calls]
         assert len(set(correlation_ids)) == 5, (
             "Each concurrent call must have unique correlation_id"
         )

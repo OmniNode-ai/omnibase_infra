@@ -32,6 +32,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from .conftest import MCPDevModeFixture, MCPFullInfraFixture
+
 pytestmark = [
     pytest.mark.mcp_protocol,
     pytest.mark.asyncio,
@@ -47,18 +49,18 @@ class TestMockMCPToolDiscovery:
 
     async def test_list_tools_returns_discovered_nodes(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """MCP tools/list returns ONEX nodes from registry.
 
         Verifies:
-        - tools/list request returns a valid response
-        - Response contains the mock_compute tool
-        - Tool has correct description from contract
+        - tools/list request returns HTTP 200 success
+        - Response contains result with tools array (no error)
+        - Tools array includes mock_compute tool
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
+        client = mcp_http_client
+        path = mcp_app_dev_mode["path"]
 
         # Send MCP JSON-RPC request to list tools
         response = await client.post(
@@ -88,18 +90,18 @@ class TestMockMCPToolDiscovery:
 
     async def test_initialize_returns_mcp_protocol_fields(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """MCP initialize returns required protocol fields.
 
         Verifies:
-        - Initialize request succeeds with status 200
-        - Response contains protocolVersion, capabilities, serverInfo
+        - Initialize request succeeds with HTTP 200 status
+        - Response contains result with protocolVersion, capabilities, serverInfo
         - serverInfo contains name and version fields
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
+        client = mcp_http_client
+        path = mcp_app_dev_mode["path"]
 
         # Send a basic request
         response = await client.post(
@@ -157,20 +159,19 @@ class TestMCPToolDiscoveryWithInfra:
 
     async def test_tool_discovery_with_real_consul(
         self,
-        mcp_app_full_infra: object,
+        mcp_app_full_infra: MCPFullInfraFixture,
     ) -> None:
-        """When infrastructure available, real orchestrators are discovered.
+        """Discover tools from real Consul registry when infrastructure available.
 
         This test requires Consul and PostgreSQL to be running.
         It verifies that real ONEX nodes registered in Consul are
-        discoverable via MCP.
+        discoverable via MCP with HTTP 200 responses.
 
         Note: Infrastructure availability check is handled by mcp_app_full_infra
         fixture which depends on infra_availability and skips if unavailable.
         """
-        fixture: dict[str, object] = mcp_app_full_infra  # type: ignore[assignment]
-        app = fixture["app"]
-        path = str(fixture["path"])
+        app = mcp_app_full_infra["app"]
+        path = mcp_app_full_infra["path"]
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),  # type: ignore[arg-type]

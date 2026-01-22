@@ -150,10 +150,24 @@ class TestMockMCPBasicFunctionality:
         assert isinstance(result["content"], list), (
             f"MCP result content must be array, got: {type(result['content'])}"
         )
+        # Success response MUST have non-empty content (prevents false positive from empty array)
+        assert len(result["content"]) > 0, (
+            f"MCP tool call result content must be non-empty: {result}"
+        )
+        # Each content item MUST have a 'type' field per MCP spec
+        for i, item in enumerate(result["content"]):
+            assert isinstance(item, dict), (
+                f"Content item {i} must be dict, got: {type(item)}"
+            )
+            assert "type" in item, (
+                f"Content item {i} missing required 'type' field: {item}"
+            )
 
         # Verify call was recorded in history (prevents false positive if executor not called)
-        assert len(call_history) > initial_count, (
-            "Expected call to be recorded in history after successful execution"
+        # Use exact increment check to detect duplicate or missed recordings
+        assert len(call_history) == initial_count + 1, (
+            f"Expected exactly 1 new call in history (from {initial_count} to {initial_count + 1}), "
+            f"got {len(call_history)}"
         )
         latest_call = call_history[-1]
         assert latest_call["tool_name"] == "mock_compute", (
@@ -209,10 +223,23 @@ class TestMockMCPBasicFunctionality:
         assert isinstance(result["content"], list), (
             f"MCP result content must be array, got: {type(result['content'])}"
         )
+        # Success response MUST have non-empty content (prevents false positive from empty array)
+        assert len(result["content"]) > 0, (
+            f"MCP tool call result content must be non-empty: {result}"
+        )
+        # Each content item MUST have a 'type' field per MCP spec
+        for i, item in enumerate(result["content"]):
+            assert isinstance(item, dict), (
+                f"Content item {i} must be dict, got: {type(item)}"
+            )
+            assert "type" in item, (
+                f"Content item {i} missing required 'type' field: {item}"
+            )
 
-        # Call should be recorded in history
-        assert len(call_history) > initial_count, (
-            "Expected call to be recorded in history"
+        # Call should be recorded in history - use exact increment check
+        assert len(call_history) == initial_count + 1, (
+            f"Expected exactly 1 new call in history (from {initial_count} to {initial_count + 1}), "
+            f"got {len(call_history)}"
         )
         latest_call = call_history[-1]
         assert latest_call["tool_name"] == "mock_compute"
@@ -292,9 +319,23 @@ class TestMockMCPBasicFunctionality:
             assert isinstance(result["content"], list), (
                 f"MCP result content must be array, got: {type(result['content'])}"
             )
+            # Success response MUST have non-empty content (prevents false positive)
+            assert len(result["content"]) > 0, (
+                f"MCP tool call result content must be non-empty: {result}"
+            )
+            # Each content item MUST have a 'type' field per MCP spec
+            for i, item in enumerate(result["content"]):
+                assert isinstance(item, dict), (
+                    f"Content item {i} must be dict, got: {type(item)}"
+                )
+                assert "type" in item, (
+                    f"Content item {i} missing required 'type' field: {item}"
+                )
 
-            assert len(call_history) > initial_count, (
-                "Expected call to be recorded in history on successful execution"
+            # Use exact increment check for call history
+            assert len(call_history) == initial_count + 1, (
+                f"Expected exactly 1 new call in history (from {initial_count} to "
+                f"{initial_count + 1}), got {len(call_history)}"
             )
             latest_call = call_history[-1]
             assert latest_call["tool_name"] == "mock_compute", (
@@ -371,10 +412,24 @@ class TestMockMCPAsyncExecution:
         assert isinstance(result["content"], list), (
             f"MCP result content must be array, got: {type(result['content'])}"
         )
+        # Success response MUST have non-empty content (prevents false positive from empty array)
+        assert len(result["content"]) > 0, (
+            f"MCP tool call result content must be non-empty: {result}"
+        )
+        # Each content item MUST have a 'type' field per MCP spec
+        for i, item in enumerate(result["content"]):
+            assert isinstance(item, dict), (
+                f"Content item {i} must be dict, got: {type(item)}"
+            )
+            assert "type" in item, (
+                f"Content item {i} missing required 'type' field: {item}"
+            )
 
         # Verify call was recorded in history (ensures executor was actually invoked)
-        assert len(call_history) > initial_count, (
-            "Expected call to be recorded in history after successful execution"
+        # Use exact increment check to detect duplicate or missed recordings
+        assert len(call_history) == initial_count + 1, (
+            f"Expected exactly 1 new call in history (from {initial_count} to {initial_count + 1}), "
+            f"got {len(call_history)}"
         )
         latest_call = call_history[-1]
         assert latest_call["tool_name"] == "mock_compute", (
