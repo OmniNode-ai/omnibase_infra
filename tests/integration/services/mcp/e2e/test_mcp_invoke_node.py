@@ -56,9 +56,11 @@ class TestMockMCPInvokeNode:
         Verifies:
         - tools/call request returns a valid response
         - Response contains the expected result structure
+        - Call was recorded in executor history
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
+        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
 
         # Send MCP JSON-RPC request to call tool
         response = await client.post(
@@ -75,7 +77,7 @@ class TestMockMCPInvokeNode:
             headers={"Content-Type": "application/json"},
         )
 
-        # Tool call should succeed
+        # Tool call should succeed (HTTP level)
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
         # Verify successful result (not error) before validating structure
@@ -85,12 +87,25 @@ class TestMockMCPInvokeNode:
         )
         assert "error" not in data, f"Unexpected error in response: {data.get('error')}"
 
-        # Verify the result structure (mandatory)
+        # Verify the result structure (mandatory assertions)
         result = data["result"]
-        # MCP tool result contains content array
-        if "content" in result:
-            content = result["content"]
-            assert len(content) >= 1
+        # MCP tool result MUST contain content array
+        assert "content" in result, (
+            f"MCP result must contain 'content' array, got keys: {list(result.keys())}"
+        )
+        content = result["content"]
+        assert len(content) >= 1, "MCP content array must not be empty"
+
+        # Verify call was recorded in executor history (prevents silent failures)
+        assert len(call_history) >= 1, (
+            f"Expected at least 1 call recorded in history, got {len(call_history)}. "
+            "Tool call may have silently failed to reach executor."
+        )
+        # Verify the recorded call matches what we sent
+        last_call = call_history[-1]
+        assert last_call["tool_name"] == "mock_compute", (
+            f"Expected tool_name 'mock_compute', got '{last_call['tool_name']}'"
+        )
 
     async def test_executor_receives_correct_arguments(
         self,
@@ -279,13 +294,15 @@ class TestMCPInvokeWorkflow:
 
     async def test_invoke_registration_workflow(
         self,
-        infra_availability: dict[str, bool],
         mcp_app_full_infra: dict[str, object],
     ) -> None:
         """MCP invokes real workflow end-to-end.
 
         This test requires full infrastructure (Consul + PostgreSQL)
         and invokes real ONEX workflows through the registry.
+
+        Note: Infrastructure availability check is handled by mcp_app_full_infra
+        fixture which depends on infra_availability and skips if unavailable.
 
         Test flow:
         1. List available tools from Consul-discovered registry

@@ -55,8 +55,9 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from omnibase_core.models.errors import ModelOnexError
+
 if TYPE_CHECKING:
-    from omnibase_infra.handlers.mcp import TransportMCPStreamableHttp
     from omnibase_infra.services.mcp import MCPServerLifecycle
 
 
@@ -79,7 +80,6 @@ class MCPFullInfraFixture(TypedDict):
     app: Starlette
     path: str
     lifecycle: MCPServerLifecycle
-    transport: TransportMCPStreamableHttp
 
 
 pytestmark = [
@@ -113,7 +113,13 @@ def infra_availability() -> dict[str, bool]:
     consul_available = False
     if consul_host:
         try:
-            consul_port = int(os.getenv("CONSUL_PORT", "28500"))
+            consul_port_str = os.getenv("CONSUL_PORT", "28500")
+            try:
+                consul_port = int(consul_port_str)
+            except ValueError as e:
+                raise ModelOnexError(
+                    f"Invalid CONSUL_PORT value: {consul_port_str!r} - must be an integer"
+                ) from e
             with socket.socket() as s:
                 s.settimeout(2.0)
                 consul_available = s.connect_ex((consul_host, consul_port)) == 0
@@ -449,7 +455,6 @@ async def mcp_app_full_infra(
             - app: The Starlette ASGI application (mock JSON-RPC)
             - path: The MCP endpoint path
             - lifecycle: MCPServerLifecycle for cleanup
-            - transport: TransportMCPStreamableHttp for cleanup
     """
     if not infra_availability["full_infra"]:
         pytest.skip(
@@ -460,15 +465,21 @@ async def mcp_app_full_infra(
 
     from starlette.routing import Route
 
-    from omnibase_infra.handlers.mcp import TransportMCPStreamableHttp
-    from omnibase_infra.handlers.models.mcp import ModelMcpHandlerConfig
     from omnibase_infra.services.mcp import MCPServerLifecycle, ModelMCPServerConfig
 
     # Use lifecycle to discover real tools from Consul
+    consul_port_str = os.getenv("CONSUL_PORT", "28500")
+    try:
+        consul_port = int(consul_port_str)
+    except ValueError as e:
+        raise ModelOnexError(
+            f"Invalid CONSUL_PORT value: {consul_port_str!r} - must be an integer"
+        ) from e
+
     lifecycle_config = ModelMCPServerConfig(
         dev_mode=False,
         consul_host=os.getenv("CONSUL_HOST", "localhost"),
-        consul_port=int(os.getenv("CONSUL_PORT", "28500")),
+        consul_port=consul_port,
         http_port=8090,  # Not used for ASGI testing
         http_host="127.0.0.1",
         kafka_enabled=False,
@@ -512,7 +523,7 @@ async def mcp_app_full_infra(
                 - validation: Tool validation details (for integration test mode)
 
         Raises:
-            ValueError: If tool not found in registry.
+            ModelOnexError: If tool not found in registry.
         """
         import logging
         from uuid import uuid4
@@ -530,7 +541,7 @@ async def mcp_app_full_infra(
 
         tool = await lifecycle.registry.get_tool(tool_name)
         if tool is None:
-            raise ValueError(f"Tool not found in registry: {tool_name}")
+            raise ModelOnexError(f"Tool not found in registry: {tool_name}")
 
         # If tool has an endpoint, dispatch to ONEX orchestrator via HTTP
         if tool.endpoint and lifecycle.executor is not None:
@@ -600,24 +611,10 @@ async def mcp_app_full_infra(
         ]
     )
 
-    # Create transport for cleanup (even though we don't use its app)
-    transport_config = ModelMcpHandlerConfig(
-        host="127.0.0.1",
-        port=8090,
-        path="/mcp",
-        stateless=True,
-        json_response=True,
-        timeout_seconds=30.0,
-    )
-
-    transport = TransportMCPStreamableHttp(config=transport_config)
-
     yield MCPFullInfraFixture(
         app=app,
         path="/mcp",
         lifecycle=lifecycle,
-        transport=transport,
     )
 
-    await transport.stop()
     await lifecycle.shutdown()

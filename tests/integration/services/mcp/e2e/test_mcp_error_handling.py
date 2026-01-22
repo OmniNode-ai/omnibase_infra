@@ -105,6 +105,9 @@ class TestMockMCPBasicFunctionality:
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
+        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+
+        initial_count = len(call_history)
 
         response = await client.post(
             f"{path}/",
@@ -127,6 +130,15 @@ class TestMockMCPBasicFunctionality:
         data = response.json()
         assert "result" in data, (
             f"Expected success result, got error: {data.get('error')}"
+        )
+
+        # Verify call was recorded in history (prevents false positive if executor not called)
+        assert len(call_history) > initial_count, (
+            "Expected call to be recorded in history after successful execution"
+        )
+        latest_call = call_history[-1]
+        assert latest_call["tool_name"] == "mock_compute", (
+            f"Expected tool_name 'mock_compute', got '{latest_call['tool_name']}'"
         )
 
     async def test_tool_call_records_to_history(
@@ -191,6 +203,9 @@ class TestMockMCPBasicFunctionality:
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
+        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+
+        initial_count = len(call_history)
 
         # Call with partial arguments - some fields present, others missing
         # The tool may expect certain fields; we intentionally provide incomplete data
@@ -234,25 +249,45 @@ class TestMockMCPBasicFunctionality:
                 f"JSON-RPC error missing message/code: {error}"
             )
 
+        # If success, verify call was recorded in history
+        if has_result:
+            assert len(call_history) > initial_count, (
+                "Expected call to be recorded in history on successful execution"
+            )
+            latest_call = call_history[-1]
+            assert latest_call["tool_name"] == "mock_compute", (
+                f"Expected tool_name 'mock_compute', got '{latest_call['tool_name']}'"
+            )
+            # Verify the partial arguments were passed through
+            arguments = latest_call["arguments"]
+            assert isinstance(arguments, dict), f"Expected dict, got {type(arguments)}"
+            assert arguments.get("partial_field") == "partial_value", (
+                f"Expected partial_field='partial_value', got {arguments}"
+            )
 
-class TestMockMCPTimeoutHandling:
-    """Mock-based MCP protocol tests for timeout handling.
 
-    Uses mock JSON-RPC handlers (not real MCP SDK) to verify timeout behavior.
+class TestMockMCPAsyncExecution:
+    """Mock-based MCP protocol tests for async execution behavior.
+
+    Uses mock JSON-RPC handlers (not real MCP SDK) to verify async execution.
+    Note: This class tests normal async execution, not timeout error scenarios.
     """
 
-    async def test_normal_execution_completes_within_timeout(
+    async def test_normal_execution_completes_successfully(
         self,
         mcp_http_client: object,
         mcp_app_dev_mode: dict[str, object],
     ) -> None:
-        """Normal tool execution completes within timeout.
+        """Tool execution completes successfully via async handler.
 
-        This test verifies async execution works correctly within
-        the configured timeout period.
+        This test verifies async execution works correctly and returns
+        a valid response within the test timeout.
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
+        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+
+        initial_count = len(call_history)
 
         # Make a normal call - should complete quickly
         response = await client.post(
@@ -278,6 +313,21 @@ class TestMockMCPTimeoutHandling:
             f"Expected success result, got error: {data.get('error')}"
         )
 
+        # Verify call was recorded in history (ensures executor was actually invoked)
+        assert len(call_history) > initial_count, (
+            "Expected call to be recorded in history after successful execution"
+        )
+        latest_call = call_history[-1]
+        assert latest_call["tool_name"] == "mock_compute", (
+            f"Expected tool_name 'mock_compute', got '{latest_call['tool_name']}'"
+        )
+        # Verify arguments were passed through correctly
+        arguments = latest_call["arguments"]
+        assert isinstance(arguments, dict), f"Expected dict, got {type(arguments)}"
+        assert arguments.get("input_value") == "timeout_test", (
+            f"Expected input_value='timeout_test', got {arguments}"
+        )
+
 
 class TestMockMCPProtocolCompliance:
     """Mock-based MCP JSON-RPC protocol compliance tests.
@@ -293,6 +343,7 @@ class TestMockMCPProtocolCompliance:
         """MCP endpoint requires JSON-RPC format.
 
         Sending invalid JSON-RPC should return an error.
+        In dev-mode, the mock handler returns 200 with JSON-RPC error.
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
@@ -304,15 +355,28 @@ class TestMockMCPProtocolCompliance:
             headers={"Content-Type": "application/json"},
         )
 
-        # Invalid JSON-RPC should return error (400) or be handled gracefully (200 with error)
-        assert response.status_code in (200, 400), (
-            f"Expected 200 or 400, got {response.status_code}"
+        # Dev-mode MUST return 200 with JSON-RPC error (not HTTP error codes)
+        assert response.status_code == 200, (
+            f"Expected 200 with JSON-RPC error in dev-mode, got HTTP {response.status_code}"
         )
 
-        # If 200, the response should contain an error for invalid JSON-RPC
-        if response.status_code == 200:
-            data = response.json()
-            assert "error" in data, f"Expected error for invalid JSON-RPC, got: {data}"
+        # MANDATORY: Response MUST contain JSON-RPC error for invalid request
+        data = response.json()
+        assert "error" in data, (
+            f"Expected JSON-RPC error for missing jsonrpc field, got: {data}"
+        )
+
+        # Verify error has proper JSON-RPC structure (code and/or message)
+        error = data["error"]
+        assert "message" in error or "code" in error, (
+            f"JSON-RPC error missing message/code: {error}"
+        )
+
+        # Verify error code is -32600 (Invalid Request) per JSON-RPC 2.0 spec
+        if "code" in error:
+            assert error["code"] == -32600, (
+                f"Expected error code -32600 (Invalid Request), got: {error['code']}"
+            )
 
     async def test_initialize_method_supported(
         self,
@@ -400,6 +464,7 @@ class TestMockMCPProtocolCompliance:
 
         JSON-RPC 2.0 requires the jsonrpc field to be present.
         Testing across multiple MCP methods ensures consistent validation.
+        In dev-mode, the mock handler returns 200 with JSON-RPC error.
         """
         client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
         path = str(mcp_app_dev_mode["path"])
@@ -415,14 +480,27 @@ class TestMockMCPProtocolCompliance:
             headers={"Content-Type": "application/json"},
         )
 
-        # Should return error for invalid JSON-RPC (either 400 or 200 with error)
-        assert response.status_code in (200, 400), (
-            f"Expected 200 or 400 for missing jsonrpc, got {response.status_code}"
+        # Dev-mode MUST return 200 with JSON-RPC error (not HTTP error codes)
+        assert response.status_code == 200, (
+            f"Expected 200 with JSON-RPC error in dev-mode for {method}, "
+            f"got HTTP {response.status_code}"
         )
 
-        # If 200, the response MUST contain an error for invalid JSON-RPC
-        if response.status_code == 200:
-            data = response.json()
-            assert "error" in data, (
-                f"Expected error for missing jsonrpc field on {method}, got: {data}"
+        # MANDATORY: Response MUST contain JSON-RPC error for invalid request
+        data = response.json()
+        assert "error" in data, (
+            f"Expected JSON-RPC error for missing jsonrpc field on {method}, got: {data}"
+        )
+
+        # Verify error has proper JSON-RPC structure
+        error = data["error"]
+        assert "message" in error or "code" in error, (
+            f"JSON-RPC error missing message/code for {method}: {error}"
+        )
+
+        # Verify error code is -32600 (Invalid Request) per JSON-RPC 2.0 spec
+        if "code" in error:
+            assert error["code"] == -32600, (
+                f"Expected error code -32600 (Invalid Request) for {method}, "
+                f"got: {error['code']}"
             )

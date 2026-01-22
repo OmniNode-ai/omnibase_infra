@@ -119,10 +119,31 @@ class TestMockMCPToolDiscovery:
             f"Initialize must succeed in dev mode, got {response.status_code}"
         )
 
-        # Verify response structure
+        # Verify response structure - must have result, not error
         data = response.json()
         assert "error" not in data, f"Unexpected error in response: {data.get('error')}"
         assert "result" in data, f"Expected 'result' in response, got: {data}"
+
+        # Verify initialize response contains expected MCP protocol fields
+        result = data["result"]
+        assert "protocolVersion" in result, (
+            f"Initialize response must contain 'protocolVersion', got: {result}"
+        )
+        assert "capabilities" in result, (
+            f"Initialize response must contain 'capabilities', got: {result}"
+        )
+        assert "serverInfo" in result, (
+            f"Initialize response must contain 'serverInfo', got: {result}"
+        )
+
+        # Verify serverInfo has required fields
+        server_info = result["serverInfo"]
+        assert "name" in server_info, (
+            f"serverInfo must contain 'name', got: {server_info}"
+        )
+        assert "version" in server_info, (
+            f"serverInfo must contain 'version', got: {server_info}"
+        )
 
 
 class TestMCPToolDiscoveryWithInfra:
@@ -133,7 +154,6 @@ class TestMCPToolDiscoveryWithInfra:
 
     async def test_tool_discovery_with_real_consul(
         self,
-        infra_availability: dict[str, bool],
         mcp_app_full_infra: object,
     ) -> None:
         """When infrastructure available, real orchestrators are discovered.
@@ -141,6 +161,9 @@ class TestMCPToolDiscoveryWithInfra:
         This test requires Consul and PostgreSQL to be running.
         It verifies that real ONEX nodes registered in Consul are
         discoverable via MCP.
+
+        Note: Infrastructure availability check is handled by mcp_app_full_infra
+        fixture which depends on infra_availability and skips if unavailable.
         """
         fixture: dict[str, object] = mcp_app_full_infra  # type: ignore[assignment]
         app = fixture["app"]
@@ -161,12 +184,12 @@ class TestMCPToolDiscoveryWithInfra:
                 headers={"Content-Type": "application/json"},
             )
 
-            # Tool listing should succeed when infrastructure is available
+            # Tool listing must succeed when infrastructure is available
             assert response.status_code == 200, (
                 f"Expected 200, got {response.status_code}"
             )
 
-            # Verify response structure
+            # Verify response structure - must have result, not error
             data = response.json()
             assert "error" not in data, (
                 f"Unexpected error in response: {data.get('error')}"
@@ -174,3 +197,23 @@ class TestMCPToolDiscoveryWithInfra:
             assert "result" in data, f"Expected 'result' in response, got: {data}"
             result = data["result"]
             assert "tools" in result, f"Expected 'tools' in result, got: {result}"
+
+            # Verify tools is a list (may be empty if nothing registered in Consul)
+            tools = result["tools"]
+            assert isinstance(tools, list), (
+                f"Expected 'tools' to be a list, got: {type(tools).__name__}"
+            )
+
+            # Verify each discovered tool has required MCP tool fields
+            # (tools list may be empty if Consul has no registered services)
+            for tool in tools:
+                assert "name" in tool, f"Tool must have 'name', got: {tool}"
+                assert isinstance(tool["name"], str), (
+                    f"Tool 'name' must be a string, got: {type(tool['name']).__name__}"
+                )
+                assert "description" in tool, (
+                    f"Tool must have 'description', got: {tool}"
+                )
+                assert "inputSchema" in tool, (
+                    f"Tool must have 'inputSchema', got: {tool}"
+                )
