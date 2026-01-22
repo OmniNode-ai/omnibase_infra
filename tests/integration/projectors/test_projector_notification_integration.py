@@ -338,11 +338,11 @@ class TestProjectorNotificationIntegration:
         assert len(mock_event_bus.published_envelopes) == 1
         published_envelope, _ = mock_event_bus.published_envelopes[0]
 
-        # The envelope payload contains the notification data
+        # The envelope payload contains the notification data (Pydantic model)
         payload = published_envelope.payload
-        assert payload["aggregate_type"] == "registration"
+        assert payload.aggregate_type == "registration"
         # UUID fields may be UUID objects or strings depending on serialization
-        assert str(payload["aggregate_id"]) == str(entity_id)
+        assert str(payload.aggregate_id) == str(entity_id)
 
     async def test_notification_tracks_state_transition(
         self,
@@ -375,8 +375,8 @@ class TestProjectorNotificationIntegration:
         # Verify first notification (new entity, from_state is sentinel)
         assert len(mock_event_bus.published_envelopes) == 1
         payload1 = mock_event_bus.published_envelopes[0][0].payload
-        assert payload1["from_state"] == FROM_STATE_INITIAL  # New entity
-        assert payload1["to_state"] == "pending_registration"
+        assert payload1.from_state == FROM_STATE_INITIAL  # New entity
+        assert payload1.to_state == "pending_registration"
 
         # Second transition: pending_registration -> active
         mock_event_bus.published_envelopes.clear()
@@ -391,8 +391,8 @@ class TestProjectorNotificationIntegration:
         # Verify second notification (existing entity, has from_state)
         assert len(mock_event_bus.published_envelopes) == 1
         payload2 = mock_event_bus.published_envelopes[0][0].payload
-        assert payload2["from_state"] == "pending_registration"
-        assert payload2["to_state"] == "active"
+        assert payload2.from_state == "pending_registration"
+        assert payload2.to_state == "active"
 
     async def test_notification_has_correct_correlation_ids(
         self,
@@ -424,9 +424,9 @@ class TestProjectorNotificationIntegration:
         assert len(mock_event_bus.published_envelopes) == 1
         payload = mock_event_bus.published_envelopes[0][0].payload
         # UUID fields may be UUID objects or strings depending on serialization
-        assert str(payload["correlation_id"]) == str(correlation_id)
+        assert str(payload.correlation_id) == str(correlation_id)
         # causation_id should be the envelope_id of the triggering event
-        assert str(payload["causation_id"]) == str(envelope.envelope_id)
+        assert str(payload.causation_id) == str(envelope.envelope_id)
 
     async def test_no_notification_on_zero_rows_affected(
         self,
@@ -553,7 +553,7 @@ class TestProjectorNotificationIntegration:
         # Verify each notification corresponds to correct entity
         # UUID fields may be UUID objects or strings depending on serialization
         published_aggregate_ids = [
-            str(envelope.payload["aggregate_id"])
+            str(envelope.payload.aggregate_id)
             for envelope, _ in mock_event_bus.published_envelopes
         ]
         for entity_id in entity_ids:
@@ -660,7 +660,7 @@ class TestProjectorNotificationConfigIntegration:
 
         assert len(mock_event_bus.published_envelopes) == 1
         payload = mock_event_bus.published_envelopes[0][0].payload
-        assert payload["projection_version"] == 42
+        assert payload.projection_version == 42
 
 
 class TestProjectorNotificationConcurrency:
@@ -760,13 +760,13 @@ class TestProjectorNotificationConcurrency:
             payload = envelope.payload
             expected_from = FROM_STATE_INITIAL if i == 0 else states[i - 1]
             expected_to = states[i]
-            assert payload["from_state"] == expected_from, (
+            assert payload.from_state == expected_from, (
                 f"Expected from_state '{expected_from}' at step {i}, "
-                f"got '{payload['from_state']}'"
+                f"got '{payload.from_state}'"
             )
-            assert payload["to_state"] == expected_to, (
+            assert payload.to_state == expected_to, (
                 f"Expected to_state '{expected_to}' at step {i}, "
-                f"got '{payload['to_state']}'"
+                f"got '{payload.to_state}'"
             )
 
 
