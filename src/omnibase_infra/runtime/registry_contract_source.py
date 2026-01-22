@@ -309,7 +309,9 @@ class RegistryContractSource(ProtocolContractSource):
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
             name=contract.name,
-            version=contract.version,
+            # NOTE: version exists on omnibase_core.ModelHandlerContract but mypy doesn't see it
+            # (same pattern as handler_contract_source.py:533, which works in CI)
+            version=contract.version,  # type: ignore[attr-defined]
             handler_kind=handler_kind,
             input_model=contract.input_model,
             output_model=contract.output_model,
