@@ -155,6 +155,11 @@ class MCPServerFixture:
             self._server.should_exit = True  # type: ignore[attr-defined]
         if self._server_thread and self._server_thread.is_alive():
             self._server_thread.join(timeout=5.0)
+            if self._server_thread.is_alive():
+                logger.warning(
+                    "MCP server thread did not terminate within timeout",
+                    extra={"host": self.host, "port": self.port},
+                )
         logger.info("Real MCP server stopped")
 
     def _run_server(self) -> None:
@@ -735,6 +740,11 @@ class MCPConsulServerFixture:
             self._server.should_exit = True  # type: ignore[attr-defined]
         if self._server_thread and self._server_thread.is_alive():
             self._server_thread.join(timeout=5.0)
+            if self._server_thread.is_alive():
+                logger.warning(
+                    "MCP server thread did not terminate within timeout",
+                    extra={"host": self.host, "port": self.port},
+                )
         logger.info("Real MCP server with Consul discovery stopped")
 
     async def shutdown_lifecycle(self) -> None:

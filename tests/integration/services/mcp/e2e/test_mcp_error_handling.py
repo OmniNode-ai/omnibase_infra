@@ -34,6 +34,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from .conftest import MCPDevModeFixture
+
 pytestmark = [
     pytest.mark.mcp_protocol,
     pytest.mark.asyncio,
@@ -49,18 +51,17 @@ class TestMockMCPRoutingErrors:
 
     async def test_nonexistent_tool_returns_error(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Calling nonexistent tool returns error response.
 
         The MCP protocol should return an error for unknown tools.
         In dev-mode, this MUST return 200 with a JSON-RPC error response.
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
+        path = mcp_app_dev_mode["path"]
 
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -103,20 +104,19 @@ class TestMockMCPBasicFunctionality:
 
     async def test_tool_call_with_empty_arguments(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Tool call with empty arguments succeeds.
 
         Verifies the MCP layer handles empty argument dicts correctly.
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
-        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+        path = mcp_app_dev_mode["path"]
+        call_history = mcp_app_dev_mode["call_history"]
 
         initial_count = len(call_history)
 
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -176,20 +176,19 @@ class TestMockMCPBasicFunctionality:
 
     async def test_tool_call_records_to_history(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Tool calls are recorded in call history.
 
         Verifies the executor receives and records calls correctly.
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
-        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+        path = mcp_app_dev_mode["path"]
+        call_history = mcp_app_dev_mode["call_history"]
 
         initial_count = len(call_history)
 
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -249,8 +248,8 @@ class TestMockMCPBasicFunctionality:
 
     async def test_tool_call_with_missing_required_argument(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Tool call with missing required argument handles gracefully.
 
@@ -259,15 +258,14 @@ class TestMockMCPBasicFunctionality:
         This differs from empty arguments - here we provide some fields
         but potentially omit others that may be required.
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
-        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+        path = mcp_app_dev_mode["path"]
+        call_history = mcp_app_dev_mode["call_history"]
 
         initial_count = len(call_history)
 
         # Call with partial arguments - some fields present, others missing
         # The tool may expect certain fields; we intentionally provide incomplete data
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -359,8 +357,8 @@ class TestMockMCPAsyncExecution:
 
     async def test_async_execution_completes_successfully(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Async tool execution completes successfully and returns valid response.
 
@@ -371,14 +369,13 @@ class TestMockMCPAsyncExecution:
         4. Call history is updated (executor was invoked)
         5. Arguments are passed through correctly
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
-        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+        path = mcp_app_dev_mode["path"]
+        call_history = mcp_app_dev_mode["call_history"]
 
         initial_count = len(call_history)
 
         # Make a normal call - should complete quickly
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -451,19 +448,18 @@ class TestMockMCPProtocolCompliance:
 
     async def test_json_rpc_format_required(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """MCP endpoint requires JSON-RPC format.
 
         Sending invalid JSON-RPC should return an error.
         In dev-mode, the mock handler returns 200 with JSON-RPC error.
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
+        path = mcp_app_dev_mode["path"]
 
         # Send invalid request (missing jsonrpc field)
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={"method": "tools/list", "id": 1},
             headers={"Content-Type": "application/json"},
@@ -498,8 +494,8 @@ class TestMockMCPProtocolCompliance:
 
     async def test_initialize_method_supported(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """MCP initialize method is supported.
 
@@ -509,10 +505,9 @@ class TestMockMCPProtocolCompliance:
         2. Response contains result (not error)
         3. Result contains required MCP fields (protocolVersion, capabilities)
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
+        path = mcp_app_dev_mode["path"]
 
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -554,18 +549,17 @@ class TestMockMCPProtocolCompliance:
 
     async def test_malformed_json_returns_parse_error(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Malformed JSON body returns JSON-RPC parse error.
 
         The MCP protocol should return error code -32700 for invalid JSON.
         This is a standard JSON-RPC error code for parse errors.
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
+        path = mcp_app_dev_mode["path"]
 
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             content="not valid json{",
             headers={"Content-Type": "application/json"},
@@ -598,8 +592,8 @@ class TestMockMCPProtocolCompliance:
     @pytest.mark.parametrize("method", ["initialize", "tools/list", "tools/call"])
     async def test_missing_jsonrpc_field_returns_error(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
         method: str,
     ) -> None:
         """Missing jsonrpc field returns error for {method}.
@@ -608,15 +602,14 @@ class TestMockMCPProtocolCompliance:
         Testing across multiple MCP methods ensures consistent validation.
         In dev-mode, the mock handler returns 200 with JSON-RPC error.
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
+        path = mcp_app_dev_mode["path"]
 
         # Build request without jsonrpc field
         request_body: dict[str, object] = {"method": method, "id": 1}
         if method == "tools/call":
             request_body["params"] = {"name": "mock_compute", "arguments": {}}
 
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json=request_body,
             headers={"Content-Type": "application/json"},

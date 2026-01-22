@@ -33,6 +33,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from .conftest import MCPDevModeFixture
+
 pytestmark = [
     pytest.mark.mcp_protocol,
     pytest.mark.asyncio,
@@ -48,8 +50,8 @@ class TestMockMCPInvokeNode:
 
     async def test_call_tool_returns_structured_result(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """MCP tools/call returns deterministic structured result.
 
@@ -58,15 +60,14 @@ class TestMockMCPInvokeNode:
         - Response contains the expected result structure
         - Call was recorded in executor history
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
-        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+        path = mcp_app_dev_mode["path"]
+        call_history = mcp_app_dev_mode["call_history"]
 
         # Track initial call history size to verify delta
         initial_history_size = len(call_history)
 
         # Send MCP JSON-RPC request to call tool
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -117,8 +118,8 @@ class TestMockMCPInvokeNode:
 
     async def test_executor_receives_correct_arguments(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Verify MCP layer correctly routes arguments to executor.
 
@@ -126,15 +127,14 @@ class TestMockMCPInvokeNode:
         that arguments are passed through correctly from MCP client
         to ONEX executor.
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
-        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+        path = mcp_app_dev_mode["path"]
+        call_history = mcp_app_dev_mode["call_history"]
 
         # Track initial call history size to verify delta
         initial_history_size = len(call_history)
 
         # Send tool call request
-        response = await client.post(
+        response = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -177,8 +177,8 @@ class TestMockMCPInvokeNode:
 
     async def test_multiple_invocations_are_independent(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Multiple tool invocations are independent and tracked.
 
@@ -186,15 +186,14 @@ class TestMockMCPInvokeNode:
         - Have its own correlation ID
         - Be recorded separately in call history
         """
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
-        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+        path = mcp_app_dev_mode["path"]
+        call_history = mcp_app_dev_mode["call_history"]
 
         # Track initial call history size to verify delta
         initial_history_size = len(call_history)
 
         # Make multiple calls
-        response1 = await client.post(
+        response1 = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -208,7 +207,7 @@ class TestMockMCPInvokeNode:
             headers={"Content-Type": "application/json"},
         )
 
-        response2 = await client.post(
+        response2 = await mcp_http_client.post(
             f"{path}/",
             json={
                 "jsonrpc": "2.0",
@@ -265,8 +264,8 @@ class TestMockMCPInvokeNode:
 
     async def test_concurrent_invocations_are_independent(
         self,
-        mcp_http_client: object,
-        mcp_app_dev_mode: dict[str, object],
+        mcp_http_client: httpx.AsyncClient,
+        mcp_app_dev_mode: MCPDevModeFixture,
     ) -> None:
         """Concurrent tool invocations are independent and tracked.
 
@@ -275,15 +274,14 @@ class TestMockMCPInvokeNode:
         """
         import asyncio
 
-        client: httpx.AsyncClient = mcp_http_client  # type: ignore[assignment]
-        path = str(mcp_app_dev_mode["path"])
-        call_history: list[dict[str, object]] = mcp_app_dev_mode["call_history"]  # type: ignore[assignment]
+        path = mcp_app_dev_mode["path"]
+        call_history = mcp_app_dev_mode["call_history"]
 
         # Track initial call history size to verify delta
         initial_history_size = len(call_history)
 
         async def make_call(value: str) -> httpx.Response:
-            return await client.post(
+            return await mcp_http_client.post(
                 f"{path}/",
                 json={
                     "jsonrpc": "2.0",

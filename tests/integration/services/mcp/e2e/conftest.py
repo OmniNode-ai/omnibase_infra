@@ -43,7 +43,7 @@ Related Ticket: OMN-1408
 
 from __future__ import annotations
 
-import json as json_module
+import json as json_module  # Aliased to avoid shadowing in handler scopes
 import os
 import socket
 from collections.abc import AsyncGenerator, Awaitable, Callable
