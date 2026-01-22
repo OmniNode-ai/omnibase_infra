@@ -52,7 +52,7 @@ from omnibase_infra.protocols import (
 from omnibase_infra.runtime.models import ModelProjectorPluginLoaderConfig
 
 if TYPE_CHECKING:
-    from omnibase_core.models.events import ModelEventEnvelope
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_core.models.projectors import ModelProjectionResult
 
 logger = logging.getLogger(__name__)

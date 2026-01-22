@@ -65,7 +65,7 @@ from __future__ import annotations
 
 import threading
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
@@ -115,10 +115,11 @@ class RegistryError(RuntimeHostError):
         if protocol_type is not None:
             extra_context["protocol_type"] = protocol_type
 
+        # NOTE: Cast required for mypy - **dict[str, object] doesn't satisfy **context: Any
         super().__init__(
             message=message,
             context=context,
-            **extra_context,
+            **cast("dict[str, Any]", extra_context),
         )
 
 

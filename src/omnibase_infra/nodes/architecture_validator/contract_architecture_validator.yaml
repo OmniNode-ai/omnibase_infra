@@ -11,11 +11,6 @@
 name: "architecture_validator"
 contract_name: "architecture_validator"
 node_name: "architecture_validator"
-# Version (semantic versioning)
-version:
-  major: 1
-  minor: 0
-  patch: 0
 contract_version:
   major: 1
   minor: 0

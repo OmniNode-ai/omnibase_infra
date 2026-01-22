@@ -76,6 +76,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -1020,7 +1021,7 @@ class HandlerDb(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             - docs/architecture/HANDLER_PROTOCOL_DRIVEN_ARCHITECTURE.md
         """
         # Get circuit breaker state if initialized
-        cb_state: dict[str, object] | None = None
+        cb_state: dict[str, JsonType] | None = None
         if self._circuit_breaker_initialized:
             cb_state = self._get_circuit_breaker_state()
 

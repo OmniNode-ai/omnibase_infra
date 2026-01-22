@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from omnibase_core.models.events import ModelEventEnvelope
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_core.models.projectors import ModelProjectionResult
 
 

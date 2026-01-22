@@ -57,10 +57,11 @@ See Also:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from aiohttp import web
 
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     ModelInfraErrorContext,
@@ -859,7 +860,7 @@ class ServiceHealth:
             response = ModelHealthCheckResponse.success(
                 status=status,
                 version=self._version,
-                details=health_details,
+                details=cast("dict[str, JsonType]", health_details),
             )
 
             return web.Response(

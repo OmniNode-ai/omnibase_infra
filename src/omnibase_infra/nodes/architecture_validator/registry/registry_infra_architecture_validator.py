@@ -39,7 +39,7 @@ class RegistryInfraArchitectureValidator:
 
     This registry provides a static method to register the NodeArchitectureValidator
     with the ONEX dependency injection container. The validator is registered as
-    a factory, allowing lazy instantiation when first resolved.
+    an instance after being created with the container reference.
 
     Thread Safety:
         Registration is typically done at startup before the container is frozen.
@@ -53,17 +53,17 @@ class RegistryInfraArchitectureValidator:
         )
 
         container = ModelONEXContainer()
-        RegistryInfraArchitectureValidator.register(container)
+        await RegistryInfraArchitectureValidator.register(container)
         ```
     """
 
     @staticmethod
-    def register(container: ModelONEXContainer) -> None:
+    async def register(container: ModelONEXContainer) -> None:
         """Register architecture validator with container.
 
         Registers the NodeArchitectureValidator as a service in the ONEX
-        dependency injection container. The validator is registered with
-        a factory function that creates a new instance on demand.
+        dependency injection container. The validator is created immediately
+        and registered as a singleton instance.
 
         Args:
             container: The DI container to register with.
@@ -77,22 +77,29 @@ class RegistryInfraArchitectureValidator:
         Example:
             ```python
             container = ModelONEXContainer()
-            RegistryInfraArchitectureValidator.register(container)
+            await RegistryInfraArchitectureValidator.register(container)
 
             # Resolve when needed
-            validator = container.get_service(NodeArchitectureValidator)
+            validator = await container.service_registry.resolve_service(
+                NodeArchitectureValidator
+            )
             result = await validator.compute(request)
             ```
         """
+        from omnibase_core.enums import EnumInjectionScope
+
         # Check if service_registry is available
         if container.service_registry is None:
             # Container doesn't have full DI support - skip registration
             # This allows the code to work with minimal container configurations
             return
 
-        container.service_registry.register(
-            NodeArchitectureValidator,
-            lambda c: NodeArchitectureValidator(c),
+        # Create instance and register (factory registration not supported in v1.0)
+        validator_instance = NodeArchitectureValidator(container)
+        await container.service_registry.register_instance(
+            interface=NodeArchitectureValidator,
+            instance=validator_instance,
+            scope=EnumInjectionScope.GLOBAL,
         )
 
 

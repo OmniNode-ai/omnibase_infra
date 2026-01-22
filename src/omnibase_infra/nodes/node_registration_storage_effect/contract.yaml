@@ -15,11 +15,6 @@
 name: "node_registration_storage_effect"
 contract_name: "node_registration_storage_effect"
 node_name: "node_registration_storage_effect"
-# Version (semantic versioning)
-version:
-  major: 1
-  minor: 0
-  patch: 0
 contract_version:
   major: 1
   minor: 0

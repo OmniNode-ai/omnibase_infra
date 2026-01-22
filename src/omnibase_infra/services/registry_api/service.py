@@ -136,19 +136,19 @@ class ServiceRegistryDiscovery:
         """
         self._container = container
 
-        # Resolve projection_reader: direct param > container > None
+        # Resolve projection_reader: direct param > None
+        # NOTE: Container-based resolution removed in omnibase_core ^0.9.0.
+        # The new ServiceRegistry uses async interface-based resolution which
+        # doesn't fit the sync __init__ pattern. Use explicit dependency injection
+        # via the projection_reader parameter instead.
         self._projection_reader = projection_reader
-        if self._projection_reader is None and container is not None:
-            self._projection_reader = container.resolve(
-                "ProjectionReaderRegistration", None
-            )
 
-        # Resolve consul_handler: direct param > container > None
+        # Resolve consul_handler: direct param > None
+        # NOTE: Container-based resolution removed in omnibase_core ^0.9.0.
+        # The new ServiceRegistry uses async interface-based resolution which
+        # doesn't fit the sync __init__ pattern. Use explicit dependency injection
+        # via the consul_handler parameter instead.
         self._consul_handler = consul_handler
-        if self._consul_handler is None and container is not None:
-            self._consul_handler = container.resolve(
-                "HandlerServiceDiscoveryConsul", None
-            )
 
         self._widget_mapping_path = widget_mapping_path or DEFAULT_WIDGET_MAPPING_PATH
         self._widget_mapping_cache: ModelWidgetMapping | None = None
@@ -824,7 +824,9 @@ class ServiceRegistryDiscovery:
 
         # Determine overall status
         unhealthy_count = sum(
-            1 for c in components.values() if not c.get("healthy", False)
+            1
+            for c in components.values()
+            if isinstance(c, dict) and not c.get("healthy", False)
         )
         if unhealthy_count == 0:
             status = "healthy"

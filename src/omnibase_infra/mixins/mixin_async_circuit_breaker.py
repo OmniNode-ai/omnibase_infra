@@ -101,6 +101,7 @@ import logging
 import time
 from uuid import UUID, uuid4
 
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumCircuitState, EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraUnavailableError,
@@ -580,7 +581,7 @@ class MixinAsyncCircuitBreaker:
         self._circuit_breaker_failures = 0
         self._circuit_breaker_open_until = 0.0
 
-    def _get_circuit_breaker_state(self) -> dict[str, object]:
+    def _get_circuit_breaker_state(self) -> dict[str, JsonType]:
         """Return current circuit breaker state for introspection.
 
         This method encapsulates circuit breaker internals for safe access
@@ -638,7 +639,7 @@ class MixinAsyncCircuitBreaker:
             cb_state = "closed"
             seconds_until_half_open = None
 
-        result: dict[str, object] = {
+        result: dict[str, JsonType] = {
             "initialized": cb_initialized,
             "state": cb_state,
             "failures": cb_failures,

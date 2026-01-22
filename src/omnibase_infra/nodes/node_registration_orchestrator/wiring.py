@@ -44,6 +44,7 @@ import logging
 from typing import TYPE_CHECKING, TypedDict, cast
 from uuid import UUID
 
+from omnibase_core.enums import EnumInjectionScope
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     ContainerValidationError,
@@ -269,12 +270,14 @@ async def wire_registration_dispatchers(
         # because MessageDispatchEngine.register_dispatcher() takes a callable
 
         # 3a. Register DispatcherNodeIntrospected
+        # Note: node_kind is NOT passed to register_dispatcher because the dispatcher's
+        # handle() method doesn't accept ModelDispatchContext - it handles time injection
+        # internally. The node_kind property is informational only.
         engine.register_dispatcher(
             dispatcher_id=dispatcher_introspected.dispatcher_id,
             dispatcher=dispatcher_introspected.handle,
             category=dispatcher_introspected.category,
             message_types=dispatcher_introspected.message_types,
-            node_kind=dispatcher_introspected.node_kind,
         )
         dispatchers_registered.append(dispatcher_introspected.dispatcher_id)
 
@@ -284,7 +287,6 @@ async def wire_registration_dispatchers(
             dispatcher=dispatcher_runtime_tick.handle,
             category=dispatcher_runtime_tick.category,
             message_types=dispatcher_runtime_tick.message_types,
-            node_kind=dispatcher_runtime_tick.node_kind,
         )
         dispatchers_registered.append(dispatcher_runtime_tick.dispatcher_id)
 
@@ -294,7 +296,6 @@ async def wire_registration_dispatchers(
             dispatcher=dispatcher_acked.handle,
             category=dispatcher_acked.category,
             message_types=dispatcher_acked.message_types,
-            node_kind=dispatcher_acked.node_kind,
         )
         dispatchers_registered.append(dispatcher_acked.dispatcher_id)
 
@@ -409,7 +410,7 @@ async def wire_registration_handlers(
         ContainerWiringError: If service registration fails.
 
     Note:
-        Services are registered with scope="global" and may conflict if multiple
+        Services are registered with scope=EnumInjectionScope.GLOBAL and may conflict if multiple
         plugins register the same interface type. This is acceptable for the
         Registration domain as these handlers are singletons by design. If you
         need to register multiple implementations of the same interface, use
@@ -440,7 +441,7 @@ async def wire_registration_handlers(
         await container.service_registry.register_instance(
             interface=ProjectionReaderRegistration,
             instance=projection_reader,
-            scope="global",
+            scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "Registration projection reader",
                 "version": str(semver_default),
@@ -453,7 +454,7 @@ async def wire_registration_handlers(
             await container.service_registry.register_instance(
                 interface=ProjectorShell,
                 instance=projector,
-                scope="global",
+                scope=EnumInjectionScope.GLOBAL,
                 metadata={
                     "description": "Registration projector",
                     "version": str(semver_default),
@@ -470,7 +471,7 @@ async def wire_registration_handlers(
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
             instance=handler_introspected,
-            scope="global",
+            scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "Handler for NodeIntrospectionEvent",
                 "version": str(semver_default),
@@ -485,7 +486,7 @@ async def wire_registration_handlers(
         await container.service_registry.register_instance(
             interface=HandlerRuntimeTick,
             instance=handler_runtime_tick,
-            scope="global",
+            scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "Handler for RuntimeTick",
                 "version": str(semver_default),
@@ -501,7 +502,7 @@ async def wire_registration_handlers(
         await container.service_registry.register_instance(
             interface=HandlerNodeRegistrationAcked,
             instance=handler_acked,
-            scope="global",
+            scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "Handler for NodeRegistrationAcked",
                 "version": str(semver_default),

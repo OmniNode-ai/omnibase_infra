@@ -105,9 +105,15 @@ ONEX 4-Node Architecture Integration:
 
         # Step 2: Integrate with NodeComputeService (I/O wrapper)
         class ValidationNode(NodeComputeService):
-            def __init__(self, container: ONEXContainer):
+            def __init__(self, container: ONEXContainer, plugin: ProtocolPluginCompute):
                 super().__init__(container)
-                self.plugin = container.resolve(ProtocolPluginCompute)
+                # Plugin is injected via constructor (sync-friendly)
+                # Resolution from container happens at initialization time:
+                #   plugin = await container.service_registry.resolve_service(
+                #       ProtocolPluginCompute
+                #   )
+                #   node = ValidationNode(container, plugin)
+                self.plugin = plugin
 
             async def execute(self, input_model: ModelInput) -> ModelOutput:
                 # Node handles I/O and state management
@@ -119,6 +125,14 @@ ONEX 4-Node Architecture Integration:
 
                 # Node handles output persistence (if needed)
                 return ModelOutput(**result)
+
+        # Complete initialization example:
+        async def create_validation_node(container: ONEXContainer) -> ValidationNode:
+            '''Factory function for creating ValidationNode with resolved plugin.'''
+            plugin = await container.service_registry.resolve_service(
+                ProtocolPluginCompute
+            )
+            return ValidationNode(container, plugin)
         ```
 
     When to Use Plugin vs Direct Node Implementation:

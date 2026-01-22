@@ -17,6 +17,12 @@ Related:
     - NodeRegistrationStorageEffect: Effect node that uses these dependencies
     - ProtocolRegistrationPersistence: Protocol for storage backends
     - ModelONEXContainer: ONEX dependency injection container
+
+Note:
+    This registry uses a module-level dict for handler storage because the
+    ServiceRegistry in omnibase_core v1.0 doesn't support dict-style access
+    or string-keyed multi-handler routing. The handlers are still validated
+    against the protocol but stored separately.
 """
 
 from __future__ import annotations
@@ -30,6 +36,12 @@ if TYPE_CHECKING:
     )
 
 __all__ = ["RegistryInfraRegistrationStorage"]
+
+# Module-level storage for handlers and metadata
+# ServiceRegistry in v1.0 doesn't support dict-style access needed for
+# multi-handler routing (e.g., "postgresql", "mock" handler types)
+_HANDLER_STORAGE: dict[str, object] = {}
+_PROTOCOL_METADATA: dict[str, dict[str, object]] = {}
 
 
 class RegistryInfraRegistrationStorage:
@@ -72,14 +84,18 @@ class RegistryInfraRegistrationStorage:
     DEFAULT_HANDLER_TYPE = "postgresql"
 
     @staticmethod
-    def register(container: ModelONEXContainer) -> None:
+    def register(_container: ModelONEXContainer) -> None:
         """Register registration storage dependencies with the container.
 
         Registers the protocol key for later handler binding. This method
         sets up the infrastructure but does not bind a specific handler.
 
         Args:
-            container: ONEX dependency injection container.
+            _container: ONEX dependency injection container. Currently unused
+                because ServiceRegistry v1.0 doesn't support dict-style access
+                for multi-handler routing. The parameter is retained for API
+                consistency with other registry methods and future migration
+                when ServiceRegistry supports the required access patterns.
 
         Example:
             >>> from omnibase_core.models.container import ModelONEXContainer
@@ -88,20 +104,19 @@ class RegistryInfraRegistrationStorage:
         """
         # Register protocol metadata for discovery
         # Actual handler binding happens via register_handler()
-        if container.service_registry is not None:
-            container.service_registry[
-                RegistryInfraRegistrationStorage.PROTOCOL_KEY
-            ] = {
-                "protocol": "ProtocolRegistrationPersistence",
-                "module": "omnibase_infra.nodes.node_registration_storage_effect.protocols",
-                "description": "Protocol for registration storage backends",
-                "pluggable": True,
-                "implementations": ["postgresql", "mock"],
-            }
+        # Note: Uses module-level storage since ServiceRegistry v1.0 doesn't
+        # support dict-style access for multi-handler routing
+        _PROTOCOL_METADATA[RegistryInfraRegistrationStorage.PROTOCOL_KEY] = {
+            "protocol": "ProtocolRegistrationPersistence",
+            "module": "omnibase_infra.nodes.node_registration_storage_effect.protocols",
+            "description": "Protocol for registration storage backends",
+            "pluggable": True,
+            "implementations": ["postgresql", "mock"],
+        }
 
     @staticmethod
     def register_handler(
-        container: ModelONEXContainer,
+        _container: ModelONEXContainer,
         handler: ProtocolRegistrationPersistence,
     ) -> None:
         """Register a specific storage handler with the container.
@@ -110,7 +125,11 @@ class RegistryInfraRegistrationStorage:
         The handler must implement ProtocolRegistrationPersistence.
 
         Args:
-            container: ONEX dependency injection container.
+            _container: ONEX dependency injection container. Currently unused
+                because ServiceRegistry v1.0 doesn't support dict-style access
+                for multi-handler routing. The parameter is retained for API
+                consistency and future migration when ServiceRegistry supports
+                the required access patterns.
             handler: Handler implementation to register.
 
         Raises:
@@ -143,32 +162,35 @@ class RegistryInfraRegistrationStorage:
                 f"got {type(handler).__name__}"
             )
 
-        if container.service_registry is None:
-            return
-
+        # Note: Uses module-level storage since ServiceRegistry v1.0 doesn't
+        # support dict-style access for multi-handler routing
         handler_key = (
             f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.{handler.handler_type}"
         )
-        container.service_registry[handler_key] = handler
+        _HANDLER_STORAGE[handler_key] = handler
 
         # Also register as default if it matches the default type
         if (
             handler.handler_type
             == RegistryInfraRegistrationStorage.DEFAULT_HANDLER_TYPE
         ):
-            container.service_registry[
+            _HANDLER_STORAGE[
                 RegistryInfraRegistrationStorage.PROTOCOL_KEY + ".default"
             ] = handler
 
     @staticmethod
     def get_handler(
-        container: ModelONEXContainer,
+        _container: ModelONEXContainer,
         handler_type: str | None = None,
     ) -> ProtocolRegistrationPersistence | None:
         """Retrieve a registered storage handler from the container.
 
         Args:
-            container: ONEX dependency injection container.
+            _container: ONEX dependency injection container. Currently unused
+                because ServiceRegistry v1.0 doesn't support dict-style access
+                for multi-handler routing. The parameter is retained for API
+                consistency and future migration when ServiceRegistry supports
+                the required access patterns.
             handler_type: Specific handler type to retrieve. If None, returns default.
 
         Returns:
@@ -180,9 +202,8 @@ class RegistryInfraRegistrationStorage:
             ...     handler_type="postgresql",
             ... )
         """
-        if container.service_registry is None:
-            return None
-
+        # Note: Uses module-level storage since ServiceRegistry v1.0 doesn't
+        # support dict-style access for multi-handler routing
         if handler_type is not None:
             handler_key = (
                 f"{RegistryInfraRegistrationStorage.PROTOCOL_KEY}.{handler_type}"
@@ -190,5 +211,5 @@ class RegistryInfraRegistrationStorage:
         else:
             handler_key = RegistryInfraRegistrationStorage.PROTOCOL_KEY + ".default"
 
-        result = container.service_registry.get(handler_key)
+        result = _HANDLER_STORAGE.get(handler_key)
         return cast("ProtocolRegistrationPersistence | None", result)

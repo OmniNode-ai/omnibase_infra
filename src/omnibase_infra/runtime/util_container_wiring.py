@@ -54,6 +54,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from omnibase_core.enums import EnumInjectionScope
 from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -257,7 +258,7 @@ async def wire_infrastructure_services(
         await container.service_registry.register_instance(
             interface=RegistryPolicy,
             instance=policy_registry,
-            scope="global",
+            scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "ONEX policy plugin registry",
                 "version": str(SEMVER_DEFAULT),
@@ -274,7 +275,7 @@ async def wire_infrastructure_services(
         await container.service_registry.register_instance(
             interface=RegistryProtocolBinding,
             instance=handler_registry,
-            scope="global",
+            scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "ONEX protocol handler binding registry",
                 "version": str(SEMVER_DEFAULT),
@@ -291,7 +292,7 @@ async def wire_infrastructure_services(
         await container.service_registry.register_instance(
             interface=RegistryCompute,
             instance=compute_registry,
-            scope="global",
+            scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "ONEX compute plugin registry",
                 "version": str(SEMVER_DEFAULT),
@@ -530,7 +531,7 @@ async def get_or_create_policy_registry(
             await container.service_registry.register_instance(
                 interface=RegistryPolicy,
                 instance=policy_registry,
-                scope="global",
+                scope=EnumInjectionScope.GLOBAL,
                 metadata={
                     "description": "ONEX policy plugin registry (auto-registered)",
                     "version": str(SEMVER_DEFAULT),
@@ -804,7 +805,7 @@ async def get_or_create_compute_registry(
             await container.service_registry.register_instance(
                 interface=RegistryCompute,
                 instance=compute_registry,
-                scope="global",
+                scope=EnumInjectionScope.GLOBAL,
                 metadata={
                     "description": "ONEX compute plugin registry (auto-registered)",
                     "version": str(SEMVER_DEFAULT),

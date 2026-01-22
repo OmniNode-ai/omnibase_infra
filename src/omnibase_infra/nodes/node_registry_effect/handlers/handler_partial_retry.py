@@ -41,6 +41,7 @@ import time
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumBackendType
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -80,7 +81,7 @@ class ProtocolPartialRetryRequest(Protocol):
 
     node_id: UUID
     node_type: EnumNodeKind
-    node_version: str
+    node_version: ModelSemVer
     target_backend: EnumBackendType
     idempotency_key: str | None
     service_name: str | None
