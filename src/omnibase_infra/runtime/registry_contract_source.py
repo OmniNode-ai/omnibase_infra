@@ -291,6 +291,10 @@ class RegistryContractSource(ProtocolContractSource):
             ValueError: If contract is invalid.
         """
         if value is None:
+            logger.debug(
+                "Skipping contract with None value",
+                extra={"key": key, "handler_id": handler_id},
+            )
             return None
 
         # Check size limit
@@ -304,6 +308,10 @@ class RegistryContractSource(ProtocolContractSource):
         contract_data = yaml.safe_load(content)
 
         if not contract_data:
+            logger.debug(
+                "Skipping contract with empty YAML content",
+                extra={"key": key, "handler_id": handler_id},
+            )
             return None
 
         # Validate against ModelHandlerContract
@@ -324,6 +332,12 @@ class RegistryContractSource(ProtocolContractSource):
         # Extract handler_class from metadata (canonical location per contract schema)
         metadata = contract_data.get("metadata", {})
         handler_class = metadata.get("handler_class")
+
+        if handler_class is None:
+            logger.debug(
+                "handler_class missing from metadata, handler may not be loadable",
+                extra={"handler_id": handler_id, "key": key},
+            )
 
         # Access handler_kind directly from the validated Pydantic model.
         # Both descriptor and handler_kind are required fields in the model schema,

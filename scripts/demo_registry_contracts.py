@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S poetry run python
 """Demo script for Registry-Based Contract Discovery (OMN-1100).
 
 This script demonstrates contract materialization from Consul KV:
@@ -7,15 +7,20 @@ This script demonstrates contract materialization from Consul KV:
 3. Shows the materialized contracts
 
 Usage:
-    # Store and discover contracts (requires Consul running)
-    # Configure via CONSUL_HOST, CONSUL_PORT, CONSUL_TOKEN, CONSUL_SCHEME env vars
-    python scripts/demo_registry_contracts.py
+    # Direct execution (uses shebang with poetry run - preferred)
+    ./scripts/demo_registry_contracts.py
+
+    # Explicit poetry run (equivalent, works without executable bit)
+    poetry run python scripts/demo_registry_contracts.py
 
     # List existing contracts only
-    python scripts/demo_registry_contracts.py --list-only
+    ./scripts/demo_registry_contracts.py --list-only
 
     # Clean up (remove demo contracts)
-    python scripts/demo_registry_contracts.py --cleanup
+    ./scripts/demo_registry_contracts.py --cleanup
+
+Environment:
+    Configure via CONSUL_HOST, CONSUL_PORT, CONSUL_TOKEN, CONSUL_SCHEME env vars.
 """
 
 from __future__ import annotations
@@ -26,7 +31,8 @@ import os
 import sys
 from pathlib import Path
 
-# Development only - for production use: poetry run python scripts/demo_registry_contracts.py
+# Fallback path injection for edge cases where poetry environment isn't active.
+# Preferred: use shebang (#!/usr/bin/env -S poetry run python) or explicit poetry run.
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from omnibase_infra.runtime import (
