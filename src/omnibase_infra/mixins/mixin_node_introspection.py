@@ -248,6 +248,9 @@ PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
 PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
 PERF_THRESHOLD_CACHE_HIT_MS = 1.0
 
+# Module-level capability extractor instance (stateless, can be shared)
+_CAPABILITY_EXTRACTOR = ContractCapabilityExtractor()
+
 
 class PerformanceMetricsCacheDict(TypedDict, total=False):
     """TypedDict for JSON-serialized ModelIntrospectionPerformanceMetrics.
@@ -1348,8 +1351,9 @@ class MixinNodeIntrospection:
         # This is automatic and non-skippable when contract is provided
         contract_capabilities = None
         if self._introspection_contract is not None:
-            extractor = ContractCapabilityExtractor()
-            contract_capabilities = extractor.extract(self._introspection_contract)
+            contract_capabilities = _CAPABILITY_EXTRACTOR.extract(
+                self._introspection_contract
+            )
 
         # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
