@@ -37,6 +37,8 @@ from omnibase_infra.models.handlers import (
 )
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 from omnibase_infra.runtime.registry_contract_source import (
+    DEFAULT_CONSUL_HOST,
+    DEFAULT_CONSUL_PORT,
     DEFAULT_CONTRACT_PREFIX,
     MAX_CONTRACT_SIZE,
     RegistryContractSource,
@@ -893,6 +895,15 @@ class TestRegistryContractSourceExports:
     def test_default_contract_prefix_exported(self) -> None:
         """DEFAULT_CONTRACT_PREFIX should be exported."""
         assert DEFAULT_CONTRACT_PREFIX == "onex/contracts/handlers/"
+
+    def test_default_consul_host_exported(self) -> None:
+        """DEFAULT_CONSUL_HOST should be exported."""
+        assert DEFAULT_CONSUL_HOST == "localhost"
+
+    def test_default_consul_port_exported(self) -> None:
+        """DEFAULT_CONSUL_PORT should be exported as int."""
+        assert DEFAULT_CONSUL_PORT == 8500
+        assert isinstance(DEFAULT_CONSUL_PORT, int)
 
     def test_max_contract_size_exported(self) -> None:
         """MAX_CONTRACT_SIZE should be exported (10MB)."""

@@ -36,16 +36,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from omnibase_infra.runtime import (
+    DEFAULT_CONSUL_HOST,
+    DEFAULT_CONSUL_PORT,
     DEFAULT_CONTRACT_PREFIX,
     RegistryContractSource,
     delete_contract_from_consul,
     list_contracts_in_consul,
     store_contract_in_consul,
 )
-
-# Default connection settings (can be overridden via env vars)
-DEFAULT_CONSUL_HOST = "localhost"
-DEFAULT_CONSUL_PORT = "8500"
 
 # Sample contracts for demo
 # NOTE: handler_class is stored in metadata (not a core contract field)

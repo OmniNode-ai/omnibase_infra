@@ -214,6 +214,8 @@ from omnibase_infra.runtime.transition_notification_outbox import (
 
 # Registry contract source (OMN-1100)
 from omnibase_infra.runtime.registry_contract_source import (
+    DEFAULT_CONSUL_HOST,
+    DEFAULT_CONSUL_PORT,
     DEFAULT_CONTRACT_PREFIX,
     RegistryContractSource,
     delete_contract_from_consul,
@@ -353,6 +355,8 @@ __all__: list[str] = [
     "TransitionNotificationOutbox",
     "TransitionNotificationPublisher",
     # Registry contract source (OMN-1100)
+    "DEFAULT_CONSUL_HOST",
+    "DEFAULT_CONSUL_PORT",
     "DEFAULT_CONTRACT_PREFIX",
     "RegistryContractSource",
     "delete_contract_from_consul",

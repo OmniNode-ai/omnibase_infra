@@ -65,6 +65,10 @@ ModelContractDiscoveryResult.model_rebuild()
 # Default Consul KV prefix for contract storage
 DEFAULT_CONTRACT_PREFIX = "onex/contracts/handlers/"
 
+# Default Consul connection settings
+DEFAULT_CONSUL_HOST = "localhost"
+DEFAULT_CONSUL_PORT = 8500
+
 # Maximum contract size (same as filesystem source)
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024  # 10MB
 
@@ -95,8 +99,6 @@ class RegistryContractSource(ProtocolContractSource):
     .. versionadded:: 0.7.0
     """
 
-    _client: consul.Consul
-
     def __init__(
         self,
         host: str | None = None,
@@ -117,8 +119,10 @@ class RegistryContractSource(ProtocolContractSource):
             graceful_mode: If True, collect errors instead of raising.
         """
         # Configuration from environment variables (per CLAUDE.md)
-        self._host = host or os.environ.get("CONSUL_HOST", "localhost")
-        self._port = port or int(os.environ.get("CONSUL_PORT", "8500"))
+        self._host = host or os.environ.get("CONSUL_HOST", DEFAULT_CONSUL_HOST)
+        self._port = port or int(
+            os.environ.get("CONSUL_PORT", str(DEFAULT_CONSUL_PORT))
+        )
         self._token = token or os.environ.get("CONSUL_TOKEN")
         self._scheme = scheme or os.environ.get("CONSUL_SCHEME", "http")
         self._prefix = prefix
@@ -427,8 +431,8 @@ def _create_consul_client_from_env() -> consul.Consul:
         Configured Consul client instance.
     """
     return consul.Consul(
-        host=os.environ.get("CONSUL_HOST", "localhost"),
-        port=int(os.environ.get("CONSUL_PORT", "8500")),
+        host=os.environ.get("CONSUL_HOST", DEFAULT_CONSUL_HOST),
+        port=int(os.environ.get("CONSUL_PORT", str(DEFAULT_CONSUL_PORT))),
         token=os.environ.get("CONSUL_TOKEN"),
         scheme=os.environ.get("CONSUL_SCHEME", "http"),
     )
@@ -587,6 +591,8 @@ def delete_contract_from_consul(
 
 
 __all__ = [
+    "DEFAULT_CONSUL_HOST",
+    "DEFAULT_CONSUL_PORT",
     "DEFAULT_CONTRACT_PREFIX",
     "RegistryContractSource",
     "delete_contract_from_consul",
