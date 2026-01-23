@@ -107,23 +107,32 @@ class ContractCapabilityExtractor:
         )
 
     def _extract_contract_type(self, contract: ModelContractBase) -> str:
-        """Extract normalized contract type string."""
-        # Get from node_type field, normalize to lowercase without _GENERIC suffix
+        """Extract normalized contract type string.
+
+        Raises:
+            ValueError: If contract does not have node_type field.
+        """
         node_type = getattr(contract, "node_type", None)
         if node_type is None:
-            return "unknown"
+            raise ValueError("Contract must have node_type field")
 
-        # Handle both enum and string
+        # Handle both enum and string, normalize to lowercase without _GENERIC suffix
         type_str = node_type.value if hasattr(node_type, "value") else str(node_type)
         return type_str.lower().replace("_generic", "")
 
     def _extract_version(self, contract: ModelContractBase) -> ModelSemVer:
-        """Extract contract version."""
+        """Extract contract version.
+
+        Raises:
+            ValueError: If contract_version is missing or not a ModelSemVer instance.
+        """
         version = getattr(contract, "contract_version", None)
         if isinstance(version, ModelSemVer):
             return version
-        # Fallback to default version
-        return ModelSemVer(major=0, minor=0, patch=0)
+        raise ValueError(
+            f"Contract must have contract_version as ModelSemVer, "
+            f"got {type(version).__name__ if version is not None else 'None'}"
+        )
 
     def _extract_intent_types(self, contract: ModelContractBase) -> list[str]:
         """Extract intent types based on node type.

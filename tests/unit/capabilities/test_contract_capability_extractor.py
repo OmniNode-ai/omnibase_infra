@@ -15,7 +15,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_core.enums import EnumNodeType
 from omnibase_core.models.capabilities import ModelContractCapabilities
+from omnibase_core.models.contracts import ModelContractEffect, ModelIOOperationConfig
+from omnibase_core.models.contracts.subcontracts.model_event_type_subcontract import (
+    ModelEventTypeSubcontract,
+)
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.capabilities import ContractCapabilityExtractor
 
@@ -47,7 +52,7 @@ def minimal_compute_contract() -> MagicMock:
     """Create minimal COMPUTE_GENERIC contract mock."""
     contract = MagicMock()
     contract.node_type = MagicMock(value="COMPUTE_GENERIC")
-    contract.version = ModelSemVer(major=1, minor=0, patch=0)
+    contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
     contract.dependencies = []
     contract.protocol_interfaces = []
     contract.tags = []
@@ -59,7 +64,7 @@ def minimal_reducer_contract() -> MagicMock:
     """Create minimal REDUCER_GENERIC contract mock."""
     contract = MagicMock()
     contract.node_type = MagicMock(value="REDUCER_GENERIC")
-    contract.version = ModelSemVer(major=1, minor=0, patch=0)
+    contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
     contract.dependencies = []
     contract.protocol_interfaces = []
     contract.tags = []
@@ -71,7 +76,7 @@ def minimal_orchestrator_contract() -> MagicMock:
     """Create minimal ORCHESTRATOR_GENERIC contract mock."""
     contract = MagicMock()
     contract.node_type = MagicMock(value="ORCHESTRATOR_GENERIC")
-    contract.version = ModelSemVer(major=1, minor=0, patch=0)
+    contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
     contract.dependencies = []
     contract.protocol_interfaces = []
     contract.tags = []
@@ -166,7 +171,7 @@ class TestContractTypeExtraction:
         contract = MagicMock()
         # String without .value attribute
         contract.node_type = "EFFECT_GENERIC"
-        contract.version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
         contract.dependencies = []
         contract.protocol_interfaces = []
         contract.tags = []
@@ -183,7 +188,7 @@ class TestContractTypeExtraction:
         """Should normalize case to lowercase."""
         contract = MagicMock()
         contract.node_type = MagicMock(value="REDUCER_GENERIC")
-        contract.version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
         contract.dependencies = []
         contract.protocol_interfaces = []
         contract.tags = []
@@ -194,22 +199,20 @@ class TestContractTypeExtraction:
         assert result.contract_type == "reducer"
         assert result.contract_type.islower()
 
-    def test_missing_node_type_returns_unknown(
+    def test_missing_node_type_raises_value_error(
         self,
         extractor: ContractCapabilityExtractor,
     ) -> None:
-        """Missing node_type should default to 'unknown'."""
+        """Missing node_type should raise ValueError (fail-fast)."""
         contract = MagicMock(spec=[])
         # Add minimal required attributes without node_type
-        contract.version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
         contract.dependencies = []
         contract.protocol_interfaces = []
         contract.tags = []
 
-        result = extractor.extract(contract)
-
-        assert result is not None
-        assert result.contract_type == "unknown"
+        with pytest.raises(ValueError, match="Contract must have node_type field"):
+            extractor.extract(contract)
 
 
 # =============================================================================
@@ -237,11 +240,11 @@ class TestVersionExtraction:
         assert result.contract_version.minor == 3
         assert result.contract_version.patch == 4
 
-    def test_missing_version_defaults_to_0_0_0(
+    def test_missing_version_raises_value_error(
         self,
         extractor: ContractCapabilityExtractor,
     ) -> None:
-        """Missing version should default to 0.0.0."""
+        """Missing version should raise ValueError (fail-fast)."""
         contract = MagicMock(spec=[])
         contract.node_type = MagicMock(value="EFFECT_GENERIC")
         contract.dependencies = []
@@ -249,40 +252,30 @@ class TestVersionExtraction:
         contract.tags = []
         # No version attribute
 
-        result = extractor.extract(contract)
+        with pytest.raises(ValueError, match="Contract must have contract_version"):
+            extractor.extract(contract)
 
-        assert result is not None
-        assert result.contract_version.major == 0
-        assert result.contract_version.minor == 0
-        assert result.contract_version.patch == 0
-
-    def test_non_semver_version_defaults_to_0_0_0(
+    def test_non_semver_version_raises_value_error(
         self,
         extractor: ContractCapabilityExtractor,
         minimal_effect_contract: MagicMock,
     ) -> None:
-        """Non-ModelSemVer version should default to 0.0.0."""
+        """Non-ModelSemVer version should raise ValueError (fail-fast)."""
         minimal_effect_contract.contract_version = "1.2.3"  # String, not ModelSemVer
 
-        result = extractor.extract(minimal_effect_contract)
+        with pytest.raises(ValueError, match="Contract must have contract_version"):
+            extractor.extract(minimal_effect_contract)
 
-        assert result is not None
-        assert result.contract_version.major == 0
-        assert result.contract_version.minor == 0
-        assert result.contract_version.patch == 0
-
-    def test_version_none_defaults_to_0_0_0(
+    def test_version_none_raises_value_error(
         self,
         extractor: ContractCapabilityExtractor,
         minimal_effect_contract: MagicMock,
     ) -> None:
-        """None version should default to 0.0.0."""
+        """None version should raise ValueError (fail-fast)."""
         minimal_effect_contract.contract_version = None
 
-        result = extractor.extract(minimal_effect_contract)
-
-        assert result is not None
-        assert result.contract_version == ModelSemVer(major=0, minor=0, patch=0)
+        with pytest.raises(ValueError, match="Contract must have contract_version"):
+            extractor.extract(minimal_effect_contract)
 
     def test_version_prerelease_preserved(
         self,
@@ -634,7 +627,7 @@ class TestExplicitTagExtraction:
         """Missing tags field should not cause error."""
         contract = MagicMock(spec=[])
         contract.node_type = MagicMock(value="EFFECT_GENERIC")
-        contract.version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
         contract.dependencies = []
         contract.protocol_interfaces = []
         # No tags attribute
@@ -766,7 +759,7 @@ class TestDeterminism:
         def make_contract() -> MagicMock:
             contract = MagicMock()
             contract.node_type = MagicMock(value="EFFECT_GENERIC")
-            contract.version = ModelSemVer(major=1, minor=0, patch=0)
+            contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
             contract.tags = ["z.tag", "a.tag", "m.tag"]
             contract.dependencies = []
             contract.protocol_interfaces = ["ProtocolZ", "ProtocolA"]
@@ -789,7 +782,7 @@ class TestDeterminism:
         """capability_tags must be sorted."""
         contract = MagicMock()
         contract.node_type = MagicMock(value="EFFECT_GENERIC")
-        contract.version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
         contract.tags = ["zebra", "apple", "mango"]
         contract.protocol_interfaces = []
         contract.dependencies = []
@@ -806,7 +799,7 @@ class TestDeterminism:
         """protocols must be sorted."""
         contract = MagicMock()
         contract.node_type = MagicMock(value="EFFECT_GENERIC")
-        contract.version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
         contract.tags = []
         contract.protocol_interfaces = ["ZProtocol", "AProtocol", "MProtocol"]
         contract.dependencies = []
@@ -841,14 +834,14 @@ class TestDeterminism:
         """Multiple extractions should not affect each other."""
         contract1 = MagicMock()
         contract1.node_type = MagicMock(value="EFFECT_GENERIC")
-        contract1.version = ModelSemVer(major=1, minor=0, patch=0)
+        contract1.contract_version = ModelSemVer(major=1, minor=0, patch=0)
         contract1.tags = ["tag1"]
         contract1.protocol_interfaces = ["Proto1"]
         contract1.dependencies = []
 
         contract2 = MagicMock()
         contract2.node_type = MagicMock(value="REDUCER_GENERIC")
-        contract2.version = ModelSemVer(major=2, minor=0, patch=0)
+        contract2.contract_version = ModelSemVer(major=2, minor=0, patch=0)
         contract2.tags = ["tag2"]
         contract2.protocol_interfaces = ["Proto2"]
         contract2.dependencies = []
@@ -882,7 +875,7 @@ class TestEdgeCases:
         """Contract with all empty fields should still work."""
         contract = MagicMock()
         contract.node_type = MagicMock(value="COMPUTE_GENERIC")
-        contract.version = ModelSemVer(major=0, minor=0, patch=0)
+        contract.contract_version = ModelSemVer(major=0, minor=0, patch=0)
         contract.tags = []
         contract.protocol_interfaces = []
         contract.dependencies = []
@@ -965,7 +958,7 @@ class TestEdgeCases:
         """Should handle unknown node type values."""
         contract = MagicMock()
         contract.node_type = MagicMock(value="UNKNOWN_TYPE")
-        contract.version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
         contract.tags = []
         contract.protocol_interfaces = []
         contract.dependencies = []
@@ -1260,3 +1253,238 @@ class TestExtractorWithCustomRules:
 
         # extractor2 should NOT have redis tag (unrecognized pattern)
         assert "redis.caching" not in result2.capability_tags
+
+
+# =============================================================================
+# TestRealContractModels - Tests with actual contract models (not mocks)
+# =============================================================================
+
+
+class TestRealContractModels:
+    """Tests using real contract models (not mocks) to verify extraction paths.
+
+    These tests validate that the extraction logic works correctly with actual
+    Pydantic models from omnibase_core, not just MagicMock objects. This ensures
+    the extractor handles real model field access patterns correctly.
+    """
+
+    def test_effect_contract_event_type_extraction(
+        self,
+        extractor: ContractCapabilityExtractor,
+    ) -> None:
+        """Verify event_type.primary_events extraction works with real ModelContractEffect.
+
+        This test validates the extraction path that retrieves intent types from
+        the event_type.primary_events field of an EFFECT contract. The mock-based
+        test in TestIntentTypeExtraction verifies the logic works with mocks, but
+        this test ensures the actual ModelContractEffect model structure is compatible.
+        """
+        # Create real event_type subcontract with primary_events
+        event_type_config = ModelEventTypeSubcontract(
+            version=ModelSemVer(major=1, minor=0, patch=0),
+            primary_events=["NodeRegistered", "NodeUpdated", "NodeDeleted"],
+            event_categories=["node_lifecycle"],
+            event_routing="direct",
+        )
+
+        # Create real ModelContractEffect with event_type populated
+        contract = ModelContractEffect(
+            name="test-effect-with-events",
+            contract_version=ModelSemVer(major=1, minor=0, patch=0),
+            description="Test effect contract with event_type",
+            node_type=EnumNodeType.EFFECT_GENERIC,
+            input_model="object",
+            output_model="object",
+            event_type=event_type_config,
+            io_operations=[
+                ModelIOOperationConfig(
+                    name="test_operation",
+                    operation_type="read",
+                    target="database",
+                )
+            ],
+        )
+
+        # Extract capabilities
+        result = extractor.extract(contract)
+
+        # Verify extraction succeeded
+        assert result is not None, (
+            "Extraction should succeed for real ModelContractEffect"
+        )
+
+        # Verify intent_types were extracted from event_type.primary_events
+        assert "NodeRegistered" in result.intent_types, (
+            f"Expected 'NodeRegistered' in intent_types, got {result.intent_types}"
+        )
+        assert "NodeUpdated" in result.intent_types, (
+            f"Expected 'NodeUpdated' in intent_types, got {result.intent_types}"
+        )
+        assert "NodeDeleted" in result.intent_types, (
+            f"Expected 'NodeDeleted' in intent_types, got {result.intent_types}"
+        )
+
+        # Verify intent_types are sorted (determinism requirement)
+        assert result.intent_types == sorted(result.intent_types), (
+            "intent_types should be sorted for deterministic output"
+        )
+
+        # Verify contract_type is correctly extracted
+        assert result.contract_type == "effect", (
+            f"Expected contract_type 'effect', got '{result.contract_type}'"
+        )
+
+    def test_effect_contract_without_event_type(
+        self,
+        extractor: ContractCapabilityExtractor,
+    ) -> None:
+        """Verify extraction works when event_type is None (optional field).
+
+        ModelContractEffect.event_type is optional. This test ensures the
+        extractor handles the None case gracefully without errors.
+        """
+        # Create real ModelContractEffect without event_type
+        contract = ModelContractEffect(
+            name="test-effect-no-events",
+            contract_version=ModelSemVer(major=1, minor=0, patch=0),
+            description="Test effect contract without event_type",
+            node_type=EnumNodeType.EFFECT_GENERIC,
+            input_model="object",
+            output_model="object",
+            event_type=None,  # Explicitly None
+            io_operations=[
+                ModelIOOperationConfig(
+                    name="test_operation",
+                    operation_type="read",
+                    target="database",
+                )
+            ],
+        )
+
+        # Extract capabilities
+        result = extractor.extract(contract)
+
+        # Verify extraction succeeded
+        assert result is not None, "Extraction should succeed when event_type is None"
+
+        # Verify intent_types is empty (no events to extract)
+        assert result.intent_types == [], (
+            f"Expected empty intent_types when event_type is None, got {result.intent_types}"
+        )
+
+        # Verify contract_type is still correctly extracted
+        assert result.contract_type == "effect"
+
+    def test_effect_contract_with_single_primary_event(
+        self,
+        extractor: ContractCapabilityExtractor,
+    ) -> None:
+        """Verify extraction handles single-element primary_events list.
+
+        The primary_events field requires at least one event. This test
+        ensures the extractor correctly handles the minimum valid case.
+        """
+        # Create event_type with single primary_event (minimum valid)
+        event_type_config = ModelEventTypeSubcontract(
+            version=ModelSemVer(major=1, minor=0, patch=0),
+            primary_events=["SingleEvent"],  # Minimum required
+            event_categories=["single_category"],
+            event_routing="direct",
+        )
+
+        contract = ModelContractEffect(
+            name="test-effect-single-event",
+            contract_version=ModelSemVer(major=1, minor=0, patch=0),
+            description="Test effect contract with single primary_event",
+            node_type=EnumNodeType.EFFECT_GENERIC,
+            input_model="object",
+            output_model="object",
+            event_type=event_type_config,
+            io_operations=[
+                ModelIOOperationConfig(
+                    name="test_operation",
+                    operation_type="read",
+                    target="database",
+                )
+            ],
+        )
+
+        # Extract capabilities
+        result = extractor.extract(contract)
+
+        # Verify extraction succeeded
+        assert result is not None
+
+        # Verify intent_types contains the single event
+        assert result.intent_types == ["SingleEvent"], (
+            f"Expected ['SingleEvent'], got {result.intent_types}"
+        )
+
+    def test_effect_contract_full_extraction(
+        self,
+        extractor: ContractCapabilityExtractor,
+    ) -> None:
+        """Verify full capability extraction from a complete ModelContractEffect.
+
+        This test validates that all extraction paths work together:
+        - contract_type from node_type
+        - contract_version from contract_version
+        - intent_types from event_type.primary_events
+        - protocols from protocol_interfaces
+        - capability_tags from explicit tags and inference
+        """
+        event_type_config = ModelEventTypeSubcontract(
+            version=ModelSemVer(major=1, minor=0, patch=0),
+            primary_events=["DatabaseConnected", "DatabaseDisconnected"],
+            event_categories=["database_lifecycle"],
+            event_routing="direct",
+        )
+
+        contract = ModelContractEffect(
+            name="test-complete-effect",
+            contract_version=ModelSemVer(major=2, minor=3, patch=4),
+            description="Complete test effect contract",
+            node_type=EnumNodeType.EFFECT_GENERIC,
+            input_model="object",
+            output_model="object",
+            event_type=event_type_config,
+            tags=["custom.capability", "database.integration"],
+            protocol_interfaces=["ProtocolDatabaseAdapter"],
+            io_operations=[
+                ModelIOOperationConfig(
+                    name="query_operation",
+                    operation_type="read",
+                    target="postgres",
+                )
+            ],
+        )
+
+        result = extractor.extract(contract)
+
+        # Verify all extraction paths
+        assert result is not None
+
+        # contract_type
+        assert result.contract_type == "effect"
+
+        # contract_version
+        assert result.contract_version.major == 2
+        assert result.contract_version.minor == 3
+        assert result.contract_version.patch == 4
+
+        # intent_types from event_type.primary_events
+        assert "DatabaseConnected" in result.intent_types
+        assert "DatabaseDisconnected" in result.intent_types
+
+        # protocols from protocol_interfaces
+        assert "ProtocolDatabaseAdapter" in result.protocols
+
+        # capability_tags include explicit tags
+        assert "custom.capability" in result.capability_tags
+        assert "database.integration" in result.capability_tags
+
+        # capability_tags include inferred tags
+        assert "node.effect" in result.capability_tags  # from node_type
+        assert (
+            "database.adapter" in result.capability_tags
+        )  # from ProtocolDatabaseAdapter

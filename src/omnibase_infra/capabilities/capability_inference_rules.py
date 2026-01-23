@@ -113,6 +113,13 @@ class CapabilityInferenceRules:
     def infer_from_protocols(self, protocols: list[str]) -> list[str]:
         """Infer capability tags from protocol names.
 
+        Matching behavior:
+        - Exact match: "ProtocolReducer" matches DEFAULT_PROTOCOL_TAGS["ProtocolReducer"]
+        - Suffix match: "MyCustomProtocolReducer" also matches because it ends with "ProtocolReducer"
+        - No match: "ProtocolReducerExtended" does NOT match (doesn't end with known protocol)
+
+        This allows custom-prefixed protocol implementations to inherit base capability tags.
+
         Args:
             protocols: List of protocol class names
 

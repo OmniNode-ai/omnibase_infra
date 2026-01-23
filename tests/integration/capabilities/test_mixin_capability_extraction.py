@@ -23,6 +23,9 @@ import pytest
 
 from omnibase_core.enums import EnumNodeKind, EnumNodeType
 from omnibase_core.models.contracts import (
+    ModelAlgorithmConfig,
+    ModelAlgorithmFactorConfig,
+    ModelContractCompute,
     ModelContractEffect,
     ModelContractOrchestrator,
     ModelContractReducer,
@@ -400,13 +403,25 @@ class TestCapabilityInferenceIntegration:
 
     async def test_node_type_triggers_inference(self) -> None:
         """Node type should trigger base capability tag inference."""
-        contract = ModelContractReducer(
+        contract = ModelContractCompute(
             name="compute-test",
             contract_version=ModelSemVer(major=1, minor=0, patch=0),
             description="Test compute contract",
             node_type=EnumNodeType.COMPUTE_GENERIC,
             input_model="object",
             output_model="object",
+            algorithm=ModelAlgorithmConfig(
+                algorithm_type="test",
+                factors={
+                    "default": ModelAlgorithmFactorConfig(
+                        weight=1.0,
+                        calculation_method="identity",
+                    )
+                },
+            ),
+            performance=ModelPerformanceRequirements(
+                single_operation_max_ms=1000,
+            ),
         )
 
         config = ModelIntrospectionConfig(
