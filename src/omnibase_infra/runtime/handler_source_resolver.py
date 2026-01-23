@@ -10,13 +10,15 @@ Part of OMN-1095: Handler Source Mode Hybrid Resolution.
 Resolution Modes:
     - BOOTSTRAP: Only use hardcoded bootstrap handlers.
     - CONTRACT: Only use YAML contract-discovered handlers.
-    - HYBRID: Per-handler resolution with contract precedence.
+    - HYBRID: Per-handler resolution with configurable precedence.
 
 In HYBRID mode, the resolver performs per-handler identity resolution:
     1. Discovers handlers from both bootstrap and contract sources
     2. Builds a handler map keyed by handler_id
-    3. Contract handlers override bootstrap handlers with same handler_id
-    4. Bootstrap handlers serve as fallback for handlers not in contracts
+    3. Resolves conflicts based on allow_bootstrap_override:
+       - False (default): Contract handlers override bootstrap handlers
+       - True: Bootstrap handlers override contract handlers
+    4. Non-conflicting handlers are included from both sources
 
 See Also:
     - EnumHandlerSourceMode: Defines the resolution modes
@@ -45,9 +47,24 @@ from omnibase_infra.models.handlers import (
     ModelHandlerDescriptor,
 )
 
-# Rebuild to resolve forward reference to ModelHandlerValidationError
-# This is required because ModelContractDiscoveryResult uses TYPE_CHECKING
-# to defer the import of ModelHandlerValidationError for circular import avoidance.
+# =============================================================================
+# Forward Reference Resolution for ModelContractDiscoveryResult
+# =============================================================================
+#
+# ModelContractDiscoveryResult has a field typed as list[ModelHandlerValidationError].
+# To avoid circular imports, ModelContractDiscoveryResult uses TYPE_CHECKING to defer
+# the import of ModelHandlerValidationError. This requires calling model_rebuild()
+# after both classes are imported to resolve the forward reference.
+#
+# This module-level call ensures the model is rebuilt before any code in this module
+# creates or validates ModelContractDiscoveryResult instances. Multiple model_rebuild()
+# calls are idempotent, so this is safe even if handler_contract_source.py or
+# handler_bootstrap_source.py has already called it.
+#
+# See Also:
+#   - handler_contract_source.py: Module-level pattern with detailed rationale
+#   - handler_bootstrap_source.py: Deferred pattern with thread-safe initialization
+# =============================================================================
 ModelContractDiscoveryResult.model_rebuild()
 
 logger = logging.getLogger(__name__)
@@ -61,12 +78,17 @@ class HandlerSourceResolver:
 
     - BOOTSTRAP: Use only bootstrap handlers, ignore contracts.
     - CONTRACT: Use only contract handlers, ignore bootstrap.
-    - HYBRID: Per-handler resolution where contract handlers take precedence
-      over bootstrap handlers with the same handler_id, and bootstrap handlers
-      serve as fallback for handlers not defined in contracts.
+    - HYBRID: Per-handler resolution with configurable precedence:
+        - allow_bootstrap_override=False (default): Contract handlers take
+          precedence over bootstrap handlers with the same handler_id.
+        - allow_bootstrap_override=True: Bootstrap handlers take precedence
+          over contract handlers with the same handler_id.
+      In both cases, handlers without conflicts are included from both sources.
 
     Attributes:
         mode: The configured resolution mode.
+        allow_bootstrap_override: If True, bootstrap handlers take precedence
+            in HYBRID mode. Default is False (contract precedence).
 
     Example:
         >>> resolver = HandlerSourceResolver(
@@ -86,6 +108,8 @@ class HandlerSourceResolver:
         bootstrap_source: ProtocolContractSource,
         contract_source: ProtocolContractSource,
         mode: EnumHandlerSourceMode,
+        *,
+        allow_bootstrap_override: bool = False,
     ) -> None:
         """Initialize the handler source resolver.
 
@@ -96,10 +120,15 @@ class HandlerSourceResolver:
                 implement ProtocolContractSource with discover_handlers() method.
             mode: Resolution mode determining which sources are used and how
                 handlers are merged.
+            allow_bootstrap_override: If True, bootstrap handlers override
+                contract handlers with the same handler_id in HYBRID mode.
+                Default is False (contract handlers take precedence).
+                Has no effect in BOOTSTRAP or CONTRACT modes.
         """
         self._bootstrap_source = bootstrap_source
         self._contract_source = contract_source
         self._mode = mode
+        self._allow_bootstrap_override = allow_bootstrap_override
 
     @property
     def mode(self) -> EnumHandlerSourceMode:
@@ -109,6 +138,16 @@ class HandlerSourceResolver:
             EnumHandlerSourceMode: The mode used for handler resolution.
         """
         return self._mode
+
+    @property
+    def allow_bootstrap_override(self) -> bool:
+        """Get the bootstrap override configuration.
+
+        Returns:
+            bool: True if bootstrap handlers take precedence in HYBRID mode,
+                False if contract handlers take precedence (default).
+        """
+        return self._allow_bootstrap_override
 
     async def resolve_handlers(self) -> ModelContractDiscoveryResult:
         """Resolve handlers based on the configured mode.
@@ -169,40 +208,103 @@ class HandlerSourceResolver:
         return result
 
     async def _resolve_hybrid(self) -> ModelContractDiscoveryResult:
-        """Resolve handlers using both sources with contract precedence.
+        """Resolve handlers using both sources with configurable precedence.
 
         In HYBRID mode:
         1. Discover handlers from both bootstrap and contract sources
         2. Build a handler map keyed by handler_id
-        3. Contract handlers override bootstrap handlers with same handler_id
-        4. Bootstrap handlers serve as fallback when no matching contract handler
+        3. Resolve conflicts based on allow_bootstrap_override:
+           - False (default): Contract handlers override bootstrap handlers
+           - True: Bootstrap handlers override contract handlers
+        4. Non-conflicting handlers are included from both sources
 
         Returns:
-            ModelContractDiscoveryResult: Merged handlers with contract precedence
-            and combined validation errors from both sources.
+            ModelContractDiscoveryResult: Merged handlers with configured
+            precedence and combined validation errors from both sources.
         """
         # Get handlers from both sources
         bootstrap_result = await self._bootstrap_source.discover_handlers()
         contract_result = await self._contract_source.discover_handlers()
 
-        # Build handler map - contract handlers first (they take precedence)
+        # Build lookup maps for both sources
+        bootstrap_by_id: dict[str, ModelHandlerDescriptor] = {
+            d.handler_id: d for d in bootstrap_result.descriptors
+        }
+        contract_by_id: dict[str, ModelHandlerDescriptor] = {
+            d.handler_id: d for d in contract_result.descriptors
+        }
+
+        # Determine which source takes precedence
+        if self._allow_bootstrap_override:
+            # Bootstrap wins conflicts: add bootstrap first, then contract fallbacks
+            primary_source = bootstrap_result.descriptors
+            primary_by_id = bootstrap_by_id
+            secondary_source = contract_result.descriptors
+            secondary_by_id = contract_by_id
+            primary_name = "bootstrap"
+            secondary_name = "contract"
+        else:
+            # Contract wins conflicts (default): add contract first, then bootstrap fallbacks
+            primary_source = contract_result.descriptors
+            primary_by_id = contract_by_id
+            secondary_source = bootstrap_result.descriptors
+            secondary_by_id = bootstrap_by_id
+            primary_name = "contract"
+            secondary_name = "bootstrap"
+
+        # Build handler map - primary source handlers first (they take precedence)
         handlers_by_id: dict[str, ModelHandlerDescriptor] = {}
 
-        # Add contract handlers (they win conflicts)
-        for descriptor in contract_result.descriptors:
+        # Add primary handlers (they win conflicts)
+        for descriptor in primary_source:
             handlers_by_id[descriptor.handler_id] = descriptor
 
-        # Add bootstrap handlers only if not already present (fallback)
+            # Log primary-only handlers (no secondary equivalent)
+            if descriptor.handler_id not in secondary_by_id:
+                logger.debug(
+                    f"Adding {primary_name}-only handler (no {secondary_name} equivalent)",
+                    extra={
+                        "handler_id": descriptor.handler_id,
+                        "handler_name": descriptor.name,
+                        "source": primary_name,
+                    },
+                )
+
+        # Add secondary handlers only if not already present (fallback)
         fallback_count = 0
         override_count = 0
-        for descriptor in bootstrap_result.descriptors:
+        for descriptor in secondary_source:
             if descriptor.handler_id in handlers_by_id:
-                # Contract handler wins - this is an override
+                # Primary handler wins - this is an override
                 override_count += 1
+                primary_handler = handlers_by_id[descriptor.handler_id]
+                logger.debug(
+                    f"{primary_name.capitalize()} handler overrides {secondary_name} handler",
+                    extra={
+                        "handler_id": descriptor.handler_id,
+                        "primary_name": primary_handler.name,
+                        "secondary_name": descriptor.name,
+                        "primary_source": primary_name,
+                        "secondary_source": secondary_name,
+                        "contract_path": (
+                            primary_handler.contract_path
+                            if primary_name == "contract"
+                            else descriptor.contract_path
+                        ),
+                    },
+                )
             else:
-                # No contract handler with this ID - use bootstrap as fallback
+                # No primary handler with this ID - use secondary as fallback
                 handlers_by_id[descriptor.handler_id] = descriptor
                 fallback_count += 1
+                logger.debug(
+                    f"Using {secondary_name} handler as fallback (no {primary_name} match)",
+                    extra={
+                        "handler_id": descriptor.handler_id,
+                        "handler_name": descriptor.name,
+                        "source": secondary_name,
+                    },
+                )
 
         # NOTE: Validation errors from bootstrap and contract sources are intentionally
         # combined WITHOUT deduplication. During migration, the same error appearing from
@@ -218,6 +320,8 @@ class HandlerSourceResolver:
             "Handler resolution completed (HYBRID mode)",
             extra={
                 "mode": self._mode.value,
+                "allow_bootstrap_override": self._allow_bootstrap_override,
+                "precedence": primary_name,
                 "contract_handler_count": len(contract_result.descriptors),
                 "bootstrap_handler_count": len(bootstrap_result.descriptors),
                 "fallback_handler_count": fallback_count,

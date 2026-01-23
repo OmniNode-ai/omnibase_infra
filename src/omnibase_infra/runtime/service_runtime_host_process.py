@@ -53,7 +53,11 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
-from omnibase_infra.enums import EnumHandlerSourceMode, EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerSourceMode,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ModelInfraErrorContext,
@@ -91,6 +95,7 @@ if TYPE_CHECKING:
 from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
+    LiteralHandlerKind,
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
 )
@@ -103,6 +108,18 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 wire_handlers = wire_default_handlers
 
 logger = logging.getLogger(__name__)
+
+# Mapping from EnumHandlerTypeCategory to LiteralHandlerKind for descriptor creation.
+# COMPUTE and EFFECT map directly to their string values.
+# NONDETERMINISTIC_COMPUTE maps to "compute" because it is architecturally pure
+# (no I/O) even though it may produce different results between runs.
+# "effect" is used as the fallback for any unknown types as the safer option
+# (effect handlers have stricter policy envelopes for I/O operations).
+_HANDLER_TYPE_TO_KIND: dict[EnumHandlerTypeCategory, LiteralHandlerKind] = {
+    EnumHandlerTypeCategory.COMPUTE: "compute",
+    EnumHandlerTypeCategory.EFFECT: "effect",
+    EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE: "compute",
+}
 
 # Default configuration values
 DEFAULT_INPUT_TOPIC = "requests"
@@ -200,8 +217,9 @@ class PluginLoaderContractSource(ProtocolContractSource):
             fails to load, discovery continues with remaining paths and the
             error is logged but not raised.
         """
-        # Ensure model is rebuilt for validation_errors field
-        ModelContractDiscoveryResult.model_rebuild()
+        # NOTE: ModelContractDiscoveryResult.model_rebuild() is called at module-level
+        # in handler_source_resolver.py and handler_contract_source.py to resolve
+        # forward references. No need to call it here - see those modules for rationale.
 
         descriptors: list[ModelHandlerDescriptor] = []
         validation_errors: list[ModelHandlerValidationError] = []
@@ -223,13 +241,22 @@ class PluginLoaderContractSource(ProtocolContractSource):
 
                 # Convert ModelLoadedHandler to ModelHandlerDescriptor
                 for loaded in loaded_handlers:
+                    # Map EnumHandlerTypeCategory to LiteralHandlerKind.
+                    # handler_type is required on ModelLoadedHandler, so this always
+                    # provides a valid value. The mapping handles COMPUTE, EFFECT,
+                    # and NONDETERMINISTIC_COMPUTE. Falls back to "effect" for any
+                    # unknown types as the safer option (stricter policy envelope).
+                    handler_kind = _HANDLER_TYPE_TO_KIND.get(
+                        loaded.handler_type, "effect"
+                    )
+
                     descriptor = ModelHandlerDescriptor(
                         # Use protocol_type as handler_id for compatibility
                         # with HandlerSourceResolver's per-identity resolution
                         handler_id=loaded.protocol_type,
                         name=loaded.handler_name,
                         version=ModelSemVer(major=1, minor=0, patch=0),
-                        handler_kind="effect",  # Default for infra handlers
+                        handler_kind=handler_kind,
                         input_model="omnibase_infra.models.types.JsonDict",
                         output_model="omnibase_core.models.dispatch.ModelHandlerOutput",
                         description=f"Handler: {loaded.handler_name}",
