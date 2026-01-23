@@ -43,6 +43,10 @@ from omnibase_infra.runtime import (
     store_contract_in_consul,
 )
 
+# Default connection settings (can be overridden via env vars)
+DEFAULT_CONSUL_HOST = "localhost"
+DEFAULT_CONSUL_PORT = "8500"
+
 # Sample contracts for demo
 # NOTE: handler_class is stored in metadata (not a core contract field)
 SAMPLE_CONTRACTS = {
@@ -108,8 +112,8 @@ tags:
 
 def store_demo_contracts() -> int:
     """Store sample contracts in Consul KV (uses env vars for connection)."""
-    host = os.environ.get("CONSUL_HOST", "localhost")
-    port = os.environ.get("CONSUL_PORT", "8500")
+    host = os.environ.get("CONSUL_HOST", DEFAULT_CONSUL_HOST)
+    port = os.environ.get("CONSUL_PORT", DEFAULT_CONSUL_PORT)
     print(f"\n[STORE] Storing {len(SAMPLE_CONTRACTS)} contracts in Consul...")
     print(f"        Target: {host}:{port}")
     print(f"        Prefix: {DEFAULT_CONTRACT_PREFIX}")
@@ -131,8 +135,8 @@ def store_demo_contracts() -> int:
 
 async def discover_contracts() -> None:
     """Discover and display contracts from Consul KV (uses env vars for connection)."""
-    host = os.environ.get("CONSUL_HOST", "localhost")
-    port = os.environ.get("CONSUL_PORT", "8500")
+    host = os.environ.get("CONSUL_HOST", DEFAULT_CONSUL_HOST)
+    port = os.environ.get("CONSUL_PORT", DEFAULT_CONSUL_PORT)
     print("\n[DISCOVER] Discovering contracts from Consul...")
     print(f"           Source: consul://{host}:{port}")
     print()
@@ -169,8 +173,8 @@ async def discover_contracts() -> None:
 
 def list_existing_contracts() -> None:
     """List existing contracts in Consul KV (uses env vars for connection)."""
-    host = os.environ.get("CONSUL_HOST", "localhost")
-    port = os.environ.get("CONSUL_PORT", "8500")
+    host = os.environ.get("CONSUL_HOST", DEFAULT_CONSUL_HOST)
+    port = os.environ.get("CONSUL_PORT", DEFAULT_CONSUL_PORT)
     print("\n[LIST] Existing contracts in Consul...")
     print(f"       Source: consul://{host}:{port}")
     print()
@@ -239,6 +243,7 @@ def main() -> None:
     print(" Demo complete!")
     print(" Run with --cleanup to remove demo contracts")
     print("=" * 70)
+    sys.exit(0)
 
 
 if __name__ == "__main__":
