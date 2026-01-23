@@ -94,6 +94,15 @@ class CapabilityInferenceRules:
     def infer_from_intent_types(self, intent_types: list[str]) -> list[str]:
         """Infer capability tags from intent type patterns.
 
+        Pattern matching uses first-match-wins semantics: each intent is matched
+        against patterns in iteration order, and only the FIRST matching pattern
+        is used (early exit via break). This is intentional because intents should
+        belong to a single capability category.
+
+        Example:
+            - "postgres.upsert" matches "postgres." -> "postgres.storage"
+            - "postgres.kafka.hybrid" matches "postgres." only (NOT both postgres and kafka)
+
         Args:
             intent_types: List of intent type strings (e.g., ["postgres.upsert", "consul.register"])
 
@@ -114,11 +123,32 @@ class CapabilityInferenceRules:
         """Infer capability tags from protocol names.
 
         Matching behavior:
-        - Exact match: "ProtocolReducer" matches DEFAULT_PROTOCOL_TAGS["ProtocolReducer"]
-        - Suffix match: "MyCustomProtocolReducer" also matches because it ends with "ProtocolReducer"
-        - No match: "ProtocolReducerExtended" does NOT match (doesn't end with known protocol)
+            - Exact match: "ProtocolReducer" matches DEFAULT_PROTOCOL_TAGS["ProtocolReducer"]
+            - Suffix match: "MyCustomProtocolReducer" also matches because it ends with "ProtocolReducer"
+            - No match: "ProtocolReducerExtended" does NOT match (doesn't end with known protocol)
 
         This allows custom-prefixed protocol implementations to inherit base capability tags.
+
+        Warning:
+            Suffix matching can cause unexpected over-matching if your protocol name
+            accidentally ends with a known protocol name. The matching is strict:
+            the protocol name must END with the exact known protocol string.
+
+        Examples:
+            Protocols that MATCH (suffix ends with known protocol)::
+
+                "ProtocolReducer" -> matches "ProtocolReducer" (exact match)
+                "MyCustomProtocolReducer" -> matches "ProtocolReducer" (suffix match)
+                "InfraProtocolDatabaseAdapter" -> matches "ProtocolDatabaseAdapter"
+                "V2ProtocolEventBus" -> matches "ProtocolEventBus"
+
+            Protocols that DO NOT MATCH (suffix has additional characters)::
+
+                "ProtocolReducerV2" -> NO match (ends with "V2", not "ProtocolReducer")
+                "ProtocolReducerExtended" -> NO match (ends with "Extended")
+                "ProtocolReducerExtendedVersion" -> NO match (ends with "Version")
+                "MyReducer" -> NO match (must end with full "ProtocolReducer")
+                "ProtocolReducerImpl" -> NO match (ends with "Impl")
 
         Args:
             protocols: List of protocol class names

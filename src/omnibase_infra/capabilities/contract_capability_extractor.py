@@ -15,6 +15,7 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.capabilities.capability_inference_rules import (
     CapabilityInferenceRules,
 )
+from omnibase_infra.capabilities.intent_type_extractor import IntentTypeExtractor
 
 if TYPE_CHECKING:
     from omnibase_core.models.contracts import (
@@ -57,6 +58,7 @@ class ContractCapabilityExtractor:
                 a default instance with standard rule mappings.
         """
         self._rules = rules if rules is not None else CapabilityInferenceRules()
+        self._intent_extractor = IntentTypeExtractor()
 
     def extract(self, contract: ModelContractBase) -> ModelContractCapabilities | None:
         """Extract capabilities from a contract model.
@@ -95,8 +97,9 @@ class ContractCapabilityExtractor:
             node_type=contract_type,
         )
 
-        # Union explicit + inferred (deterministic)
-        all_tags = sorted(set(explicit_tags) | set(inferred_tags))
+        # Union explicit + inferred (deterministic), filtering out invalid tags
+        combined_tags = set(explicit_tags) | set(inferred_tags)
+        all_tags = sorted(tag for tag in combined_tags if self._validate_tag(tag))
 
         return ModelContractCapabilities(
             contract_type=contract_type,
@@ -137,52 +140,16 @@ class ContractCapabilityExtractor:
     def _extract_intent_types(self, contract: ModelContractBase) -> list[str]:
         """Extract intent types based on node type.
 
-        Different contract types expose intent types in different locations:
-        - Effect: event_type.primary_events
-        - Orchestrator: consumed_events[].event_pattern
-        - Reducer: aggregation, state_machine related intents
+        Delegates to IntentTypeExtractor which handles extraction from
+        multiple sources based on node type.
+
+        Args:
+            contract: The contract model to extract intent types from.
+
+        Returns:
+            Combined list of intent types from all applicable sources.
         """
-        intent_types: list[str] = []
-
-        # For effect nodes: check event_type.primary_events
-        if hasattr(contract, "event_type"):
-            event_type = contract.event_type
-            if event_type is not None and hasattr(event_type, "primary_events"):
-                primary_events = event_type.primary_events
-                if primary_events:
-                    intent_types.extend(primary_events)
-
-        # For orchestrators: check consumed_events
-        if hasattr(contract, "consumed_events"):
-            consumed_events = contract.consumed_events
-            if consumed_events:
-                for event in consumed_events:
-                    # ModelEventSubscription has event_pattern field
-                    if hasattr(event, "event_pattern") and event.event_pattern:
-                        intent_types.append(event.event_pattern)
-
-        # For orchestrators: check published_events
-        if hasattr(contract, "published_events"):
-            published_events = contract.published_events
-            if published_events:
-                for event in published_events:
-                    # ModelEventDescriptor has event_name field
-                    if hasattr(event, "event_name") and event.event_name:
-                        intent_types.append(event.event_name)
-
-        # For reducers: check aggregation and state_machine for patterns
-        if hasattr(contract, "aggregation"):
-            aggregation = contract.aggregation
-            if aggregation is not None:
-                # Check for aggregation patterns
-                if hasattr(aggregation, "aggregation_functions"):
-                    agg_funcs = aggregation.aggregation_functions
-                    if agg_funcs:
-                        for func in agg_funcs:
-                            if hasattr(func, "output_field") and func.output_field:
-                                intent_types.append(f"aggregate.{func.output_field}")
-
-        return intent_types
+        return self._intent_extractor.extract_all(contract)
 
     def _extract_protocols(self, contract: ModelContractBase) -> list[str]:
         """Extract protocol names from dependencies and interfaces."""
@@ -219,6 +186,26 @@ class ContractCapabilityExtractor:
 
         return protocols
 
+    def _validate_tag(self, tag: str | None) -> bool:
+        """Validate a tag string.
+
+        Args:
+            tag: Tag string to validate.
+
+        Returns:
+            True if the tag is valid, False otherwise.
+            Invalid tags include: None, empty strings, whitespace-only strings.
+        """
+        if tag is None:
+            return False
+        if not isinstance(tag, str):
+            return False
+        if tag == "":
+            return False
+        if tag.strip() == "":
+            return False
+        return True
+
     def _extract_explicit_tags(self, contract: ModelContractBase) -> list[str]:
         """Extract explicitly declared capability tags from contract."""
         tags: list[str] = []
@@ -228,7 +215,7 @@ class ContractCapabilityExtractor:
             contract_tags = contract.tags
             if contract_tags:
                 for tag in contract_tags:
-                    if tag is not None:  # Skip None values
+                    if self._validate_tag(tag):
                         tags.append(tag)
 
         return tags

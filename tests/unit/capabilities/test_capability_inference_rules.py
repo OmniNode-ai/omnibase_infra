@@ -138,6 +138,21 @@ class TestInferFromIntentTypes:
         result = rules.infer_from_intent_types(["postgresext.upsert"])
         assert result == []  # No dot after postgres
 
+    def test_first_match_wins(self) -> None:
+        """Only the first matching pattern is used (early exit behavior).
+
+        Intent types should belong to a single capability category. When an intent
+        contains multiple pattern prefixes (e.g., "postgres.kafka.hybrid"), only the
+        first matching pattern is applied.
+        """
+        rules = CapabilityInferenceRules()
+        # "postgres.kafka.hybrid" starts with "postgres." so matches postgres only
+        # Even though "kafka." appears in the intent, it's not at the start
+        result = rules.infer_from_intent_types(["postgres.kafka.hybrid"])
+        assert result == ["postgres.storage"]
+        # Verify kafka.messaging is NOT included (first match wins)
+        assert "kafka.messaging" not in result
+
 
 class TestInferFromProtocols:
     """Tests for protocol name matching."""
@@ -261,6 +276,40 @@ class TestInferFromProtocols:
         # ProtocolReducerExtended does not end with ProtocolReducer
         result = rules.infer_from_protocols(["ProtocolReducerExtended"])
         assert result == []
+
+    def test_protocol_with_version_suffix_no_match(self) -> None:
+        """Protocol with version suffix should NOT match known protocol.
+
+        This verifies that "ProtocolReducerV2" does NOT match "ProtocolReducer"
+        because the string ends with "V2", not "ProtocolReducer".
+        """
+        rules = CapabilityInferenceRules()
+        # ProtocolReducerV2 ends with "V2", not "ProtocolReducer"
+        result = rules.infer_from_protocols(["ProtocolReducerV2"])
+        assert result == []
+        # Also test other version patterns
+        result = rules.infer_from_protocols(["ProtocolDatabaseAdapterV3"])
+        assert result == []
+        result = rules.infer_from_protocols(["ProtocolEventBus2"])
+        assert result == []
+
+    def test_multiple_suffix_words_no_match(self) -> None:
+        """Protocol with multiple suffix words should NOT match known protocol.
+
+        This verifies that "ProtocolReducerExtendedVersion" does NOT match
+        "ProtocolReducer" because the string ends with "Version", not "ProtocolReducer".
+        """
+        rules = CapabilityInferenceRules()
+        # Multiple suffix words after known protocol name
+        result = rules.infer_from_protocols(["ProtocolReducerExtendedVersion"])
+        assert result == []
+        result = rules.infer_from_protocols(["ProtocolDatabaseAdapterEnhancedImpl"])
+        assert result == []
+        result = rules.infer_from_protocols(["ProtocolEventBusAsyncWrapper"])
+        assert result == []
+        # Verify that proper suffix still works for contrast
+        result = rules.infer_from_protocols(["CustomProtocolReducer"])
+        assert result == ["state.reducer"]
 
 
 class TestInferFromNodeType:

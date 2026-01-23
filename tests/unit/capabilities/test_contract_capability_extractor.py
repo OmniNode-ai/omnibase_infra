@@ -585,6 +585,132 @@ class TestIntentTypeExtraction:
 
 
 # =============================================================================
+# TestTagValidation - Tag format validation
+# =============================================================================
+
+
+class TestTagValidation:
+    """Tests for tag format validation."""
+
+    def test_empty_string_tags_filtered_out(
+        self,
+        extractor: ContractCapabilityExtractor,
+        minimal_effect_contract: MagicMock,
+    ) -> None:
+        """Empty string tags should be filtered out."""
+        minimal_effect_contract.tags = ["valid.tag", "", "another.valid"]
+
+        result = extractor.extract(minimal_effect_contract)
+
+        assert result is not None
+        assert "valid.tag" in result.capability_tags
+        assert "another.valid" in result.capability_tags
+        assert "" not in result.capability_tags
+
+    def test_whitespace_only_tags_filtered_out(
+        self,
+        extractor: ContractCapabilityExtractor,
+        minimal_effect_contract: MagicMock,
+    ) -> None:
+        """Whitespace-only tags should be filtered out."""
+        minimal_effect_contract.tags = ["valid.tag", "   ", "\t", "\n", "  \t\n  "]
+
+        result = extractor.extract(minimal_effect_contract)
+
+        assert result is not None
+        assert "valid.tag" in result.capability_tags
+        # Whitespace-only tags should not appear
+        assert "   " not in result.capability_tags
+        assert "\t" not in result.capability_tags
+        assert "\n" not in result.capability_tags
+        assert "  \t\n  " not in result.capability_tags
+
+    def test_none_tags_filtered_out(
+        self,
+        extractor: ContractCapabilityExtractor,
+        minimal_effect_contract: MagicMock,
+    ) -> None:
+        """None tags should be filtered out."""
+        minimal_effect_contract.tags = ["valid.tag", None, "another.valid"]  # type: ignore[list-item]
+
+        result = extractor.extract(minimal_effect_contract)
+
+        assert result is not None
+        assert "valid.tag" in result.capability_tags
+        assert "another.valid" in result.capability_tags
+
+    def test_valid_tags_pass_through(
+        self,
+        extractor: ContractCapabilityExtractor,
+        minimal_effect_contract: MagicMock,
+    ) -> None:
+        """Valid tags should pass through validation."""
+        minimal_effect_contract.tags = [
+            "simple",
+            "with.dots",
+            "with-dashes",
+            "with_underscores",
+            "MixedCase",
+            "123numeric",
+        ]
+
+        result = extractor.extract(minimal_effect_contract)
+
+        assert result is not None
+        assert "simple" in result.capability_tags
+        assert "with.dots" in result.capability_tags
+        assert "with-dashes" in result.capability_tags
+        assert "with_underscores" in result.capability_tags
+        assert "MixedCase" in result.capability_tags
+        assert "123numeric" in result.capability_tags
+
+    def test_mixed_valid_and_invalid_tags(
+        self,
+        extractor: ContractCapabilityExtractor,
+        minimal_effect_contract: MagicMock,
+    ) -> None:
+        """Should filter invalid tags while keeping valid ones."""
+        minimal_effect_contract.tags = [
+            "valid.first",
+            "",
+            "valid.second",
+            "   ",
+            None,  # type: ignore[list-item]
+            "valid.third",
+            "\t\n",
+        ]
+
+        result = extractor.extract(minimal_effect_contract)
+
+        assert result is not None
+        # Valid tags present
+        assert "valid.first" in result.capability_tags
+        assert "valid.second" in result.capability_tags
+        assert "valid.third" in result.capability_tags
+        # Invalid tags absent
+        assert "" not in result.capability_tags
+        assert "   " not in result.capability_tags
+        assert "\t\n" not in result.capability_tags
+
+    def test_all_invalid_tags_results_in_only_inferred_tags(
+        self,
+        extractor: ContractCapabilityExtractor,
+        minimal_effect_contract: MagicMock,
+    ) -> None:
+        """If all explicit tags are invalid, result should have only inferred tags."""
+        minimal_effect_contract.tags = ["", "   ", None]  # type: ignore[list-item]
+
+        result = extractor.extract(minimal_effect_contract)
+
+        assert result is not None
+        # Should have inferred tag from node type
+        assert "node.effect" in result.capability_tags
+        # Invalid tags should not be present
+        assert "" not in result.capability_tags
+        assert "   " not in result.capability_tags
+
+
+# =============================================================================
 # TestExplicitTagExtraction - Tag extraction from contract
 # =============================================================================
 
