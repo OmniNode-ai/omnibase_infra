@@ -121,6 +121,10 @@ _HANDLER_TYPE_TO_KIND: dict[EnumHandlerTypeCategory, LiteralHandlerKind] = {
     EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE: "compute",
 }
 
+# Default handler kind for unknown handler types. "effect" is the safe default
+# because effect handlers have stricter policy envelopes for I/O operations.
+_DEFAULT_HANDLER_KIND: LiteralHandlerKind = "effect"
+
 # Default configuration values
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
@@ -247,7 +251,7 @@ class PluginLoaderContractSource(ProtocolContractSource):
                     # and NONDETERMINISTIC_COMPUTE. Falls back to "effect" for any
                     # unknown types as the safer option (stricter policy envelope).
                     handler_kind = _HANDLER_TYPE_TO_KIND.get(
-                        loaded.handler_type, "effect"
+                        loaded.handler_type, _DEFAULT_HANDLER_KIND
                     )
 
                     descriptor = ModelHandlerDescriptor(
@@ -1151,6 +1155,8 @@ class RuntimeHostProcess:
         """
         from datetime import datetime
 
+        from pydantic import ValidationError
+
         from omnibase_infra.models.handlers import ModelHandlerSourceConfig
 
         config = self._config or {}
@@ -1183,10 +1189,33 @@ class RuntimeHostProcess:
                         extra={"invalid_value": expires_at_str},
                     )
 
-            return ModelHandlerSourceConfig(
-                handler_source_mode=mode,
-                bootstrap_expires_at=expires_at,
-            )
+            # Construct config with validation - catch naive datetime errors
+            try:
+                return ModelHandlerSourceConfig(
+                    handler_source_mode=mode,
+                    bootstrap_expires_at=expires_at,
+                )
+            except ValidationError as e:
+                # Check if error is due to naive datetime (no timezone info)
+                error_messages = [err.get("msg", "") for err in e.errors()]
+                if any("timezone-aware" in msg for msg in error_messages):
+                    logger.warning(
+                        "bootstrap_expires_at must be timezone-aware (UTC recommended). "
+                        "Naive datetime provided - falling back to no expiry. "
+                        "Use ISO format with timezone: '2026-02-01T00:00:00+00:00' "
+                        "or '2026-02-01T00:00:00Z'",
+                        extra={
+                            "invalid_value": expires_at_str,
+                            "parsed_datetime": str(expires_at) if expires_at else None,
+                        },
+                    )
+                    # Fall back to config without expiry
+                    return ModelHandlerSourceConfig(
+                        handler_source_mode=mode,
+                        bootstrap_expires_at=None,
+                    )
+                # Re-raise other validation errors
+                raise
 
         # Default: HYBRID mode with no expiry
         return ModelHandlerSourceConfig(
@@ -1257,6 +1286,20 @@ class RuntimeHostProcess:
                     ),
                 )
             # BOOTSTRAP or HYBRID mode without contract_paths - use bootstrap as fallback
+            #
+            # HYBRID MODE NOTE: When HYBRID mode is configured but no contract_paths
+            # are provided, we reuse bootstrap_source for both the bootstrap_source
+            # and contract_source parameters of HandlerSourceResolver. This means
+            # discover_handlers() will be called twice on the same instance:
+            #   1. Once as the "contract source" (returns bootstrap handlers)
+            #   2. Once as the "bootstrap source" (returns same bootstrap handlers)
+            #
+            # This is intentional: HYBRID semantics require consulting both sources,
+            # and with no contracts available, bootstrap provides all handlers.
+            # The HandlerSourceResolver's HYBRID merge logic (contract wins per-identity,
+            # bootstrap as fallback) produces the correct result since both sources
+            # return identical handlers. The outcome is functionally equivalent to
+            # BOOTSTRAP mode but maintains HYBRID logging/metrics for observability.
             contract_source = bootstrap_source
 
         # Create resolver with the effective mode (handles expiry enforcement)

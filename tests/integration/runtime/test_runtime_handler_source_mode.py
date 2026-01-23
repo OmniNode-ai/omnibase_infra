@@ -35,9 +35,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums.enum_handler_source_mode import EnumHandlerSourceMode
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.models.handlers import (
+    ModelContractDiscoveryResult,
+    ModelHandlerDescriptor,
+)
 from omnibase_infra.runtime.handler_bootstrap_source import (
     SOURCE_TYPE_BOOTSTRAP,
     HandlerBootstrapSource,
@@ -491,6 +496,311 @@ class TestHybridModeContractFirstBootstrapFallback:
 
         finally:
             await process.stop()
+
+
+# =============================================================================
+# Test Class: HYBRID Mode with Bootstrap Override
+# =============================================================================
+
+
+class TestHybridModeBootstrapOverride:
+    """Tests for HYBRID mode with allow_bootstrap_override=True.
+
+    When allow_bootstrap_override=True in HYBRID mode:
+    1. Bootstrap handlers take precedence over contract handlers with same handler_id
+    2. Contract-only handlers (no bootstrap equivalent) are still included
+    3. Bootstrap-only handlers (no contract equivalent) are still included
+    """
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_override_takes_precedence_over_contract(self) -> None:
+        """Verify bootstrap handlers override contract handlers when allow_bootstrap_override=True.
+
+        Given:
+            - HandlerSourceResolver configured with HYBRID mode
+            - allow_bootstrap_override=True
+            - Contract source returns handler with same handler_id as bootstrap handler
+
+        When:
+            - resolve_handlers() is called
+
+        Then:
+            - Bootstrap handler is used (not contract handler)
+            - Handler descriptor source_type indicates bootstrap origin
+        """
+        bootstrap_source = HandlerBootstrapSource()
+
+        # Create mock contract source returning handler with SAME handler_id as bootstrap
+        # Bootstrap source uses "bootstrap.http" as handler_id for HTTP handler
+        mock_contract_source = MagicMock()
+        mock_contract_source.source_type = "CONTRACT"
+
+        # Create a contract handler that conflicts with bootstrap.http
+        contract_http_descriptor = ModelHandlerDescriptor(
+            handler_id="bootstrap.http",  # Same ID as bootstrap HTTP handler
+            name="Contract HTTP Handler (should be overridden)",
+            version="2.0.0",
+            handler_kind="effect",
+            input_model="test.models.Input",
+            output_model="test.models.Output",
+            handler_class="test.handlers.ContractHttpHandler",
+            contract_path="/fake/path/http/handler_contract.yaml",
+        )
+
+        # Mock discover_handlers to return async result
+        async def mock_discover_contract() -> ModelContractDiscoveryResult:
+            return ModelContractDiscoveryResult(
+                descriptors=[contract_http_descriptor],
+                validation_errors=[],
+            )
+
+        mock_contract_source.discover_handlers = mock_discover_contract
+
+        resolver = HandlerSourceResolver(
+            bootstrap_source=bootstrap_source,
+            contract_source=mock_contract_source,
+            mode=EnumHandlerSourceMode.HYBRID,
+            allow_bootstrap_override=True,  # Bootstrap takes precedence
+        )
+
+        result = await resolver.resolve_handlers()
+
+        # Find the handler with bootstrap.http ID
+        http_handlers = [
+            d for d in result.descriptors if d.handler_id == "bootstrap.http"
+        ]
+        assert len(http_handlers) == 1, "Should have exactly one http handler"
+
+        http_handler = http_handlers[0]
+        # Bootstrap handler should win - verify by checking it's NOT the contract version
+        assert http_handler.name != "Contract HTTP Handler (should be overridden)", (
+            "Bootstrap handler should take precedence, not contract handler"
+        )
+        # Bootstrap HTTP handler has version 1.0.0, contract has 2.0.0
+        assert http_handler.version != ModelSemVer.parse("2.0.0"), (
+            "Bootstrap handler version should be used, not contract version 2.0.0"
+        )
+        # Verify contract_path is NOT the fake path we set for the contract handler
+        assert http_handler.contract_path != "/fake/path/http/handler_contract.yaml", (
+            "Bootstrap handler contract_path should be used, not fake contract path"
+        )
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_override_includes_contract_only_handlers(self) -> None:
+        """Verify contract-only handlers are included even with allow_bootstrap_override=True.
+
+        Given:
+            - HandlerSourceResolver configured with HYBRID mode
+            - allow_bootstrap_override=True
+            - Contract source returns handler with unique handler_id (no bootstrap equivalent)
+
+        When:
+            - resolve_handlers() is called
+
+        Then:
+            - Contract-only handler is included in results
+        """
+        bootstrap_source = HandlerBootstrapSource()
+
+        # Create mock contract source with handler that has NO bootstrap equivalent
+        mock_contract_source = MagicMock()
+        mock_contract_source.source_type = "CONTRACT"
+
+        # Create a contract-only handler with unique ID
+        contract_only_descriptor = ModelHandlerDescriptor(
+            handler_id="contract.custom.handler",  # No bootstrap equivalent
+            name="Contract-Only Custom Handler",
+            version="1.0.0",
+            handler_kind="compute",
+            input_model="test.models.CustomInput",
+            output_model="test.models.CustomOutput",
+            handler_class="test.handlers.CustomHandler",
+            contract_path="/fake/path/custom/handler_contract.yaml",
+        )
+
+        async def mock_discover_contract() -> ModelContractDiscoveryResult:
+            return ModelContractDiscoveryResult(
+                descriptors=[contract_only_descriptor],
+                validation_errors=[],
+            )
+
+        mock_contract_source.discover_handlers = mock_discover_contract
+
+        resolver = HandlerSourceResolver(
+            bootstrap_source=bootstrap_source,
+            contract_source=mock_contract_source,
+            mode=EnumHandlerSourceMode.HYBRID,
+            allow_bootstrap_override=True,
+        )
+
+        result = await resolver.resolve_handlers()
+
+        # Verify contract-only handler is included
+        handler_ids = {d.handler_id for d in result.descriptors}
+        assert "contract.custom.handler" in handler_ids, (
+            "Contract-only handler should be included even with allow_bootstrap_override=True"
+        )
+
+        # Verify the handler details are correct
+        custom_handler = next(
+            d for d in result.descriptors if d.handler_id == "contract.custom.handler"
+        )
+        assert custom_handler.name == "Contract-Only Custom Handler"
+        assert custom_handler.contract_path == "/fake/path/custom/handler_contract.yaml"
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_override_includes_bootstrap_only_handlers(self) -> None:
+        """Verify bootstrap-only handlers are included with allow_bootstrap_override=True.
+
+        Given:
+            - HandlerSourceResolver configured with HYBRID mode
+            - allow_bootstrap_override=True
+            - Contract source returns empty (no handlers)
+
+        When:
+            - resolve_handlers() is called
+
+        Then:
+            - All bootstrap handlers are included in results
+        """
+        bootstrap_source = HandlerBootstrapSource()
+
+        # Create mock contract source with no handlers
+        mock_contract_source = MagicMock()
+        mock_contract_source.source_type = "CONTRACT"
+
+        async def mock_discover_contract() -> ModelContractDiscoveryResult:
+            return ModelContractDiscoveryResult(
+                descriptors=[],
+                validation_errors=[],
+            )
+
+        mock_contract_source.discover_handlers = mock_discover_contract
+
+        resolver = HandlerSourceResolver(
+            bootstrap_source=bootstrap_source,
+            contract_source=mock_contract_source,
+            mode=EnumHandlerSourceMode.HYBRID,
+            allow_bootstrap_override=True,
+        )
+
+        result = await resolver.resolve_handlers()
+
+        # All bootstrap handlers should be included
+        handler_ids = {d.handler_id for d in result.descriptors}
+        expected_bootstrap_ids = {
+            "bootstrap.consul",
+            "bootstrap.db",
+            "bootstrap.http",
+            "bootstrap.mcp",
+            "bootstrap.vault",
+        }
+        assert expected_bootstrap_ids.issubset(handler_ids), (
+            "All bootstrap handlers should be included when contract source is empty"
+        )
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_override_logs_override_count(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify resolver logs override count when bootstrap takes precedence.
+
+        Given:
+            - HandlerSourceResolver configured with HYBRID mode
+            - allow_bootstrap_override=True
+            - Contract source returns handler with same handler_id as bootstrap
+
+        When:
+            - resolve_handlers() is called
+
+        Then:
+            - Logs include override_count > 0
+            - Logs indicate bootstrap as precedence source
+        """
+        bootstrap_source = HandlerBootstrapSource()
+
+        mock_contract_source = MagicMock()
+        mock_contract_source.source_type = "CONTRACT"
+
+        # Create conflicting handler
+        contract_http_descriptor = ModelHandlerDescriptor(
+            handler_id="bootstrap.http",
+            name="Contract HTTP Handler",
+            version="2.0.0",
+            handler_kind="effect",
+            input_model="test.models.Input",
+            output_model="test.models.Output",
+            handler_class="test.handlers.ContractHttpHandler",
+            contract_path="/fake/path/http/handler_contract.yaml",
+        )
+
+        async def mock_discover_contract() -> ModelContractDiscoveryResult:
+            return ModelContractDiscoveryResult(
+                descriptors=[contract_http_descriptor],
+                validation_errors=[],
+            )
+
+        mock_contract_source.discover_handlers = mock_discover_contract
+
+        resolver = HandlerSourceResolver(
+            bootstrap_source=bootstrap_source,
+            contract_source=mock_contract_source,
+            mode=EnumHandlerSourceMode.HYBRID,
+            allow_bootstrap_override=True,
+        )
+
+        with caplog.at_level(logging.INFO):
+            await resolver.resolve_handlers()
+
+            # Find log with override information
+            override_logs = [
+                r
+                for r in caplog.records
+                if hasattr(r, "__dict__") and r.__dict__.get("override_count", 0) > 0
+            ]
+
+            assert len(override_logs) >= 1, (
+                "Expected log with override_count > 0 when bootstrap overrides contract"
+            )
+
+            # Verify precedence is logged as bootstrap
+            precedence_logs = [
+                r
+                for r in caplog.records
+                if hasattr(r, "__dict__")
+                and r.__dict__.get("precedence") == "bootstrap"
+            ]
+
+            assert len(precedence_logs) >= 1, (
+                "Expected log with precedence='bootstrap' when allow_bootstrap_override=True"
+            )
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_override_property_exposed(self) -> None:
+        """Verify HandlerSourceResolver exposes allow_bootstrap_override property.
+
+        Given:
+            - HandlerSourceResolver configured with allow_bootstrap_override=True
+
+        When:
+            - allow_bootstrap_override property is accessed
+
+        Then:
+            - Returns True
+        """
+        bootstrap_source = HandlerBootstrapSource()
+        mock_contract_source = MagicMock()
+        mock_contract_source.source_type = "CONTRACT"
+
+        resolver = HandlerSourceResolver(
+            bootstrap_source=bootstrap_source,
+            contract_source=mock_contract_source,
+            mode=EnumHandlerSourceMode.HYBRID,
+            allow_bootstrap_override=True,
+        )
+
+        assert resolver.allow_bootstrap_override is True
 
 
 # =============================================================================
@@ -1056,6 +1366,7 @@ __all__ = [
     "TestBootstrapModeLoadsOnlyBootstrapHandlers",
     "TestContractModeLoadsOnlyContractHandlers",
     "TestHybridModeContractFirstBootstrapFallback",
+    "TestHybridModeBootstrapOverride",
     "TestExpiredBootstrapForcesContractMode",
     "TestHandlerResolutionLogging",
     "TestDefaultConfigUsesHybridMode",
