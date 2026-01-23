@@ -30,6 +30,8 @@ import asyncio
 import os
 import sys
 
+import consul
+
 from omnibase_infra.runtime import (
     DEFAULT_CONSUL_HOST,
     DEFAULT_CONSUL_PORT,
@@ -214,29 +216,39 @@ def main() -> None:
     print(" OMN-1100: Registry-Based Contract Discovery Demo")
     print("=" * 70)
 
-    if args.cleanup:
-        cleanup_demo_contracts()
-        return
+    try:
+        if args.cleanup:
+            cleanup_demo_contracts()
+            return
 
-    if args.list_only:
-        list_existing_contracts()
-        return
+        if args.list_only:
+            list_existing_contracts()
+            return
 
-    # Full demo: store, list, and discover
-    stored = store_demo_contracts()
+        # Full demo: store, list, and discover
+        stored = store_demo_contracts()
 
-    if stored > 0:
-        list_existing_contracts()
-        asyncio.run(discover_contracts())
-    else:
-        print("\n[ERROR] No contracts were stored. Check Consul connection.")
+        if stored > 0:
+            list_existing_contracts()
+            asyncio.run(discover_contracts())
+        else:
+            print("\n[ERROR] No contracts were stored. Check Consul connection.")
+            sys.exit(1)
+
+        print("\n" + "=" * 70)
+        print(" Demo complete!")
+        print(" Run with --cleanup to remove demo contracts")
+        print("=" * 70)
+        sys.exit(0)
+
+    except consul.ConsulException as e:
+        print(f"\n[ERROR] Cannot connect to Consul: {e}")
+        print("        Check CONSUL_HOST and CONSUL_PORT environment variables")
+        print(
+            f"        Current: CONSUL_HOST={os.environ.get('CONSUL_HOST', 'localhost')}"
+        )
+        print(f"                 CONSUL_PORT={os.environ.get('CONSUL_PORT', '8500')}")
         sys.exit(1)
-
-    print("\n" + "=" * 70)
-    print(" Demo complete!")
-    print(" Run with --cleanup to remove demo contracts")
-    print("=" * 70)
-    sys.exit(0)
 
 
 if __name__ == "__main__":

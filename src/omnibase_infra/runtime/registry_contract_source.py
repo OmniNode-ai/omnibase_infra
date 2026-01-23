@@ -66,6 +66,8 @@ ModelContractDiscoveryResult.model_rebuild()
 DEFAULT_CONTRACT_PREFIX = "onex/contracts/handlers/"
 
 # Default Consul connection settings
+# NOTE: Standard Consul port is 8500. Production deployments typically
+# override via CONSUL_PORT env var (e.g., 28500 per CLAUDE.md infrastructure).
 DEFAULT_CONSUL_HOST = "localhost"
 DEFAULT_CONSUL_PORT = 8500
 
@@ -120,8 +122,10 @@ class RegistryContractSource(ProtocolContractSource):
         """
         # Configuration from environment variables (per CLAUDE.md)
         self._host = host or os.environ.get("CONSUL_HOST", DEFAULT_CONSUL_HOST)
-        self._port = port or int(
-            os.environ.get("CONSUL_PORT", str(DEFAULT_CONSUL_PORT))
+        self._port = (
+            port
+            if port is not None
+            else int(os.environ.get("CONSUL_PORT", str(DEFAULT_CONSUL_PORT)))
         )
         self._token = token or os.environ.get("CONSUL_TOKEN")
         self._scheme = scheme or os.environ.get("CONSUL_SCHEME", "http")
