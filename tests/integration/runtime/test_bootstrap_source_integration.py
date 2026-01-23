@@ -284,8 +284,8 @@ class TestBootstrapSourceRuntimeIntegration:
                 # In HYBRID mode (default), discover_handlers() is called twice:
                 # once for bootstrap_source and once for contract_source
                 # (which is the same instance when no contract_paths provided)
-                assert mock_source.discover_handlers.call_count >= 1, (
-                    "discover_handlers should be called at least once"
+                assert mock_source.discover_handlers.call_count == 2, (
+                    "discover_handlers should be called twice in HYBRID mode"
                 )
 
             finally:

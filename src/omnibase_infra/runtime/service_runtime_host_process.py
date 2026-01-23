@@ -80,17 +80,23 @@ if TYPE_CHECKING:
     from omnibase_infra.idempotency.protocol_idempotency_store import (
         ProtocolIdempotencyStore,
     )
-    from omnibase_infra.models.handlers import (
-        ModelHandlerDescriptor,
-        ModelHandlerSourceConfig,
-    )
+    from omnibase_infra.models.handlers import ModelHandlerSourceConfig
     from omnibase_infra.nodes.architecture_validator import ProtocolArchitectureRule
     from omnibase_infra.protocols import ProtocolContainerAware
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
 
+# Imports for PluginLoaderContractSource adapter class
+from omnibase_core.models.primitives import ModelSemVer
+from omnibase_infra.models.errors import ModelHandlerValidationError
+from omnibase_infra.models.handlers import (
+    ModelContractDiscoveryResult,
+    ModelHandlerDescriptor,
+)
 from omnibase_infra.models.types import JsonDict
+from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
@@ -127,6 +133,123 @@ DEFAULT_DRAIN_TIMEOUT_SECONDS: float = parse_env_float(
     transport_type=EnumInfraTransportType.RUNTIME,
     service_name="runtime_host_process",
 )
+
+
+class PluginLoaderContractSource(ProtocolContractSource):
+    """Adapter that uses HandlerPluginLoader for contract discovery.
+
+    This adapter implements ProtocolContractSource using HandlerPluginLoader,
+    which uses the simpler contract schema (handler_name, handler_class,
+    handler_type, capability_tags) rather than the full ONEX contract schema.
+
+    This class wraps the HandlerPluginLoader to conform to the ProtocolContractSource
+    interface expected by HandlerSourceResolver, enabling plugin-based handler
+    discovery within the unified handler source resolution framework.
+
+    Attributes:
+        _contract_paths: List of filesystem paths to scan for handler contracts.
+        _plugin_loader: The underlying HandlerPluginLoader instance.
+
+    Example:
+        ```python
+        from pathlib import Path
+        source = PluginLoaderContractSource(
+            contract_paths=[Path("/etc/onex/handlers")]
+        )
+        result = await source.discover_handlers()
+        for descriptor in result.descriptors:
+            print(f"Found handler: {descriptor.name}")
+        ```
+
+    .. versionadded:: 0.7.0
+        Extracted from _resolve_handler_descriptors() method for better
+        testability and code organization.
+    """
+
+    def __init__(self, contract_paths: list[Path]) -> None:
+        """Initialize the contract source with paths to scan.
+
+        Args:
+            contract_paths: List of filesystem paths containing handler contracts.
+        """
+        self._contract_paths = contract_paths
+        self._plugin_loader = HandlerPluginLoader()
+
+    @property
+    def source_type(self) -> str:
+        """Return the source type identifier.
+
+        Returns:
+            str: Always "CONTRACT" for this filesystem-based source.
+        """
+        return "CONTRACT"
+
+    async def discover_handlers(self) -> ModelContractDiscoveryResult:
+        """Discover handlers using HandlerPluginLoader.
+
+        Scans all configured contract paths and loads handler contracts using
+        the HandlerPluginLoader. Each discovered handler is converted to a
+        ModelHandlerDescriptor for use by the handler resolution framework.
+
+        Returns:
+            ModelContractDiscoveryResult: Container with discovered descriptors
+                and any validation errors encountered during discovery.
+
+        Note:
+            This method uses graceful degradation - if a single contract path
+            fails to load, discovery continues with remaining paths and the
+            error is logged but not raised.
+        """
+        # Ensure model is rebuilt for validation_errors field
+        ModelContractDiscoveryResult.model_rebuild()
+
+        descriptors: list[ModelHandlerDescriptor] = []
+        validation_errors: list[ModelHandlerValidationError] = []
+
+        for path in self._contract_paths:
+            path_obj = Path(path) if isinstance(path, str) else path
+            if not path_obj.exists():
+                logger.warning(
+                    "Contract path does not exist, skipping: %s",
+                    path_obj,
+                )
+                continue
+
+            try:
+                # Use plugin loader to discover handlers with simpler schema
+                loaded_handlers = self._plugin_loader.load_from_directory(
+                    directory=path_obj,
+                )
+
+                # Convert ModelLoadedHandler to ModelHandlerDescriptor
+                for loaded in loaded_handlers:
+                    descriptor = ModelHandlerDescriptor(
+                        # Use protocol_type as handler_id for compatibility
+                        # with HandlerSourceResolver's per-identity resolution
+                        handler_id=loaded.protocol_type,
+                        name=loaded.handler_name,
+                        version=ModelSemVer(major=1, minor=0, patch=0),
+                        handler_kind="effect",  # Default for infra handlers
+                        input_model="omnibase_infra.models.types.JsonDict",
+                        output_model="omnibase_core.models.dispatch.ModelHandlerOutput",
+                        description=f"Handler: {loaded.handler_name}",
+                        handler_class=loaded.handler_class,
+                        contract_path=str(loaded.contract_path),
+                    )
+                    descriptors.append(descriptor)
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to load handlers from path %s: %s",
+                    path_obj,
+                    e,
+                )
+                # Continue with other paths (graceful degradation)
+
+        return ModelContractDiscoveryResult(
+            descriptors=descriptors,
+            validation_errors=validation_errors,
+        )
 
 
 class RuntimeHostProcess:
@@ -1007,7 +1130,9 @@ class RuntimeHostProcess:
         handler_source_config = config.get("handler_source", {})
 
         if isinstance(handler_source_config, dict):
-            mode_str = handler_source_config.get("mode", "hybrid")
+            mode_str = handler_source_config.get(
+                "mode", EnumHandlerSourceMode.HYBRID.value
+            )
             expires_at_str = handler_source_config.get("bootstrap_expires_at")
 
             # Parse mode
@@ -1062,97 +1187,10 @@ class RuntimeHostProcess:
         .. versionadded:: 0.7.0
             Part of OMN-1095 handler source mode integration.
         """
-        from pathlib import Path
-
-        from omnibase_core.models.primitives import ModelSemVer
-        from omnibase_infra.models.handlers import (
-            ModelContractDiscoveryResult,
-            ModelHandlerDescriptor,
-        )
         from omnibase_infra.runtime.handler_bootstrap_source import (
             HandlerBootstrapSource,
         )
-        from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
         from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
-        from omnibase_infra.runtime.protocol_contract_source import (
-            ProtocolContractSource,
-        )
-
-        # Local adapter class that wraps HandlerPluginLoader to implement
-        # ProtocolContractSource. This uses the simpler contract schema
-        # (handler_name, handler_class, handler_type) from
-        # omnibase_infra.models.runtime.model_handler_contract.ModelHandlerContract
-        # which is compatible with existing test contracts.
-        class PluginLoaderContractSource(ProtocolContractSource):
-            """Adapter that uses HandlerPluginLoader for contract discovery.
-
-            This adapter implements ProtocolContractSource using HandlerPluginLoader,
-            which uses the simpler contract schema (handler_name, handler_class,
-            handler_type, capability_tags) rather than the full ONEX contract schema.
-            """
-
-            def __init__(self, contract_paths: list[Path]) -> None:
-                self._contract_paths = contract_paths
-                self._plugin_loader = HandlerPluginLoader()
-
-            @property
-            def source_type(self) -> str:
-                return "CONTRACT"
-
-            async def discover_handlers(self) -> ModelContractDiscoveryResult:
-                """Discover handlers using HandlerPluginLoader."""
-                from omnibase_infra.models.errors import ModelHandlerValidationError
-
-                # Ensure model is rebuilt for validation_errors field
-                ModelContractDiscoveryResult.model_rebuild()
-
-                descriptors: list[ModelHandlerDescriptor] = []
-                validation_errors: list[ModelHandlerValidationError] = []
-
-                for path in self._contract_paths:
-                    path_obj = Path(path) if isinstance(path, str) else path
-                    if not path_obj.exists():
-                        logger.warning(
-                            "Contract path does not exist, skipping: %s",
-                            path_obj,
-                        )
-                        continue
-
-                    try:
-                        # Use plugin loader to discover handlers with simpler schema
-                        loaded_handlers = self._plugin_loader.load_from_directory(
-                            directory=path_obj,
-                        )
-
-                        # Convert ModelLoadedHandler to ModelHandlerDescriptor
-                        for loaded in loaded_handlers:
-                            descriptor = ModelHandlerDescriptor(
-                                # Use protocol_type as handler_id for compatibility
-                                # with HandlerSourceResolver's per-identity resolution
-                                handler_id=loaded.protocol_type,
-                                name=loaded.handler_name,
-                                version=ModelSemVer(major=1, minor=0, patch=0),
-                                handler_kind="effect",  # Default for infra handlers
-                                input_model="omnibase_infra.models.types.JsonDict",
-                                output_model="omnibase_core.models.dispatch.ModelHandlerOutput",
-                                description=f"Handler: {loaded.handler_name}",
-                                handler_class=loaded.handler_class,
-                                contract_path=str(loaded.contract_path),
-                            )
-                            descriptors.append(descriptor)
-
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to load handlers from path %s: %s",
-                            path_obj,
-                            e,
-                        )
-                        # Continue with other paths (graceful degradation)
-
-                return ModelContractDiscoveryResult(
-                    descriptors=descriptors,
-                    validation_errors=validation_errors,
-                )
 
         source_config = self._load_handler_source_config()
 
@@ -1276,11 +1314,8 @@ class RuntimeHostProcess:
                 # Extract protocol type from handler_id
                 # Bootstrap handler IDs are prefixed (e.g., "bootstrap.consul" -> "consul")
                 # Contract handlers use their handler_name directly as protocol_type
-                protocol_type = descriptor.handler_id
-                if protocol_type.startswith("bootstrap."):
-                    # Strip the "bootstrap." prefix for bootstrap handlers
-                    protocol_type = protocol_type.split(".", 1)[-1]
-                # For contract handlers, preserve the full handler_name as protocol_type
+                # removeprefix() is a no-op if prefix doesn't exist, so contract handlers keep their name as-is
+                protocol_type = descriptor.handler_id.removeprefix("bootstrap.")
 
                 # Import the handler class from fully qualified path
                 handler_class_path = descriptor.handler_class
@@ -1338,9 +1373,17 @@ class RuntimeHostProcess:
                     },
                 )
 
+            except (ImportError, AttributeError):
+                logger.exception(
+                    "Failed to import handler",
+                    extra={
+                        "handler_id": descriptor.handler_id,
+                    },
+                )
+                error_count += 1
             except Exception:
                 logger.exception(
-                    "Failed to register handler from descriptor",
+                    "Unexpected error registering handler",
                     extra={
                         "handler_id": descriptor.handler_id,
                     },
