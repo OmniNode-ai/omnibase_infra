@@ -209,6 +209,7 @@ from uuid import UUID, uuid4
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.capabilities import ContractCapabilityExtractor
 from omnibase_infra.enums import EnumInfraTransportType, EnumIntrospectionReason
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.discovery import (
@@ -228,6 +229,7 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_core.models.contracts import ModelContractBase
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
     from omnibase_core.protocols.event_bus.protocol_event_message import (
         ProtocolEventMessage,
@@ -458,6 +460,7 @@ class MixinNodeIntrospection:
     _introspection_event_bus: ProtocolEventBus | None
     _introspection_version: str
     _introspection_start_time: float | None
+    _introspection_contract: ModelContractBase | None
 
     # Capability discovery configuration
     _introspection_operation_keywords: frozenset[str]
@@ -649,6 +652,9 @@ class MixinNodeIntrospection:
         self._introspection_topic = config.introspection_topic
         self._heartbeat_topic = config.heartbeat_topic
         self._request_introspection_topic = config.request_introspection_topic
+
+        # Contract for capability extraction (may be None for legacy nodes)
+        self._introspection_contract = config.contract
 
         # State
         self._introspection_cache = None
@@ -1338,6 +1344,13 @@ class MixinNodeIntrospection:
             # Fallback to 1.0.0 if version parsing fails
             node_version = ModelSemVer(major=1, minor=0, patch=0)
 
+        # Extract contract capabilities if contract is available
+        # This is automatic and non-skippable when contract is provided
+        contract_capabilities = None
+        if self._introspection_contract is not None:
+            extractor = ContractCapabilityExtractor()
+            contract_capabilities = extractor.extract(self._introspection_contract)
+
         # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
             node_id=node_id_uuid,
@@ -1345,6 +1358,7 @@ class MixinNodeIntrospection:
             node_version=node_version,
             declared_capabilities=ModelNodeCapabilities(),
             discovered_capabilities=discovered_capabilities,
+            contract_capabilities=contract_capabilities,
             endpoints=endpoints,
             current_state=current_state,
             reason=EnumIntrospectionReason.HEARTBEAT,  # cache_refresh maps to heartbeat
