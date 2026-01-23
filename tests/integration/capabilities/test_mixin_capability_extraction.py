@@ -73,7 +73,7 @@ def create_effect_contract(
     """
     return ModelContractEffect(
         name=name,
-        version=version or ModelSemVer(major=1, minor=0, patch=0),
+        contract_version=version or ModelSemVer(major=1, minor=0, patch=0),
         description="Test effect contract",
         node_type=EnumNodeType.EFFECT_GENERIC,
         input_model="object",
@@ -109,7 +109,7 @@ def create_reducer_contract(
     """
     return ModelContractReducer(
         name=name,
-        version=version or ModelSemVer(major=1, minor=0, patch=0),
+        contract_version=version or ModelSemVer(major=1, minor=0, patch=0),
         description="Test reducer contract",
         node_type=EnumNodeType.REDUCER_GENERIC,
         input_model="object",
@@ -140,7 +140,7 @@ def create_orchestrator_contract(
     """
     return ModelContractOrchestrator(
         name=name,
-        version=version or ModelSemVer(major=1, minor=0, patch=0),
+        contract_version=version or ModelSemVer(major=1, minor=0, patch=0),
         description="Test orchestrator contract",
         node_type=EnumNodeType.ORCHESTRATOR_GENERIC,
         input_model="object",
@@ -402,7 +402,7 @@ class TestCapabilityInferenceIntegration:
         """Node type should trigger base capability tag inference."""
         contract = ModelContractReducer(
             name="compute-test",
-            version=ModelSemVer(major=1, minor=0, patch=0),
+            contract_version=ModelSemVer(major=1, minor=0, patch=0),
             description="Test compute contract",
             node_type=EnumNodeType.COMPUTE_GENERIC,
             input_model="object",

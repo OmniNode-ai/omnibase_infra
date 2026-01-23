@@ -100,7 +100,7 @@ class ContractCapabilityExtractor:
 
     def _extract_version(self, contract: ModelContractBase) -> ModelSemVer:
         """Extract contract version."""
-        version = getattr(contract, "version", None)
+        version = getattr(contract, "contract_version", None)
         if isinstance(version, ModelSemVer):
             return version
         # Fallback to default version

@@ -35,7 +35,7 @@ def minimal_effect_contract() -> MagicMock:
     """Create minimal EFFECT_GENERIC contract mock."""
     contract = MagicMock()
     contract.node_type = MagicMock(value="EFFECT_GENERIC")
-    contract.version = ModelSemVer(major=1, minor=0, patch=0)
+    contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
     contract.dependencies = []
     contract.protocol_interfaces = []
     contract.tags = []
@@ -227,7 +227,7 @@ class TestVersionExtraction:
     ) -> None:
         """Should extract ModelSemVer from contract."""
         expected_version = ModelSemVer(major=2, minor=3, patch=4)
-        minimal_effect_contract.version = expected_version
+        minimal_effect_contract.contract_version = expected_version
 
         result = extractor.extract(minimal_effect_contract)
 
@@ -262,7 +262,7 @@ class TestVersionExtraction:
         minimal_effect_contract: MagicMock,
     ) -> None:
         """Non-ModelSemVer version should default to 0.0.0."""
-        minimal_effect_contract.version = "1.2.3"  # String, not ModelSemVer
+        minimal_effect_contract.contract_version = "1.2.3"  # String, not ModelSemVer
 
         result = extractor.extract(minimal_effect_contract)
 
@@ -277,7 +277,7 @@ class TestVersionExtraction:
         minimal_effect_contract: MagicMock,
     ) -> None:
         """None version should default to 0.0.0."""
-        minimal_effect_contract.version = None
+        minimal_effect_contract.contract_version = None
 
         result = extractor.extract(minimal_effect_contract)
 
@@ -294,7 +294,7 @@ class TestVersionExtraction:
         version_with_prerelease = ModelSemVer(
             major=1, minor=0, patch=0, prerelease=("alpha", 1)
         )
-        minimal_effect_contract.version = version_with_prerelease
+        minimal_effect_contract.contract_version = version_with_prerelease
 
         result = extractor.extract(minimal_effect_contract)
 
