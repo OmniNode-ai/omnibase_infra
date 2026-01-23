@@ -345,7 +345,7 @@ class TestRegistryContractSourceErrorHandling:
         assert len(result.validation_errors) == 1
 
         error = result.validation_errors[0]
-        assert error.error_type == EnumHandlerErrorType.CONTRACT_PARSE_ERROR
+        assert error.error_type == EnumHandlerErrorType.DISCOVERY_ERROR
         assert error.rule_id == "REGISTRY-002"
         assert "Connection refused" in error.message
         assert error.correlation_id is not None

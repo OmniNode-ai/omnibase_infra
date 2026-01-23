@@ -95,6 +95,8 @@ class RegistryContractSource(ProtocolContractSource):
     .. versionadded:: 0.7.0
     """
 
+    _client: consul.Consul
+
     def __init__(
         self,
         host: str | None = None,
@@ -307,9 +309,12 @@ class RegistryContractSource(ProtocolContractSource):
         # Validate against ModelHandlerContract
         contract = ModelHandlerContract.model_validate(contract_data)
 
-        # Validate handler_id consistency between key and contract content
-        # NOTE: This is ALWAYS an error regardless of graceful_mode.
-        # Graceful mode only applies to connection/parse errors, not data integrity issues.
+        # Validate handler_id consistency between key and contract content.
+        # NOTE: handler_id mismatch is NEVER silently ignored - it's always treated
+        # as an error in both modes. The difference is how the error is surfaced:
+        # - Strict mode: Raises ProtocolConfigurationError immediately
+        # - Graceful mode: Collects in validation_errors (ValueError caught upstream)
+        # This ensures data integrity issues are always reported, not swallowed.
         if contract.handler_id != handler_id:
             raise ValueError(
                 f"handler_id mismatch: key='{handler_id}' vs "
@@ -385,7 +390,7 @@ class RegistryContractSource(ProtocolContractSource):
         handler_identity = ModelHandlerIdentifier.from_handler_id("registry-source")
 
         return ModelHandlerValidationError(
-            error_type=EnumHandlerErrorType.CONTRACT_PARSE_ERROR,
+            error_type=EnumHandlerErrorType.DISCOVERY_ERROR,
             rule_id="REGISTRY-002",
             handler_identity=handler_identity,
             source_type=EnumHandlerSourceType.CONTRACT,
