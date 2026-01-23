@@ -36,6 +36,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from omnibase_infra.enums.enum_handler_source_mode import EnumHandlerSourceMode
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.handler_bootstrap_source import (
     SOURCE_TYPE_BOOTSTRAP,
@@ -337,11 +338,10 @@ class TestContractModeLoadsOnlyContractHandlers:
                 await process.stop()
 
     @pytest.mark.asyncio
-    async def test_contract_mode_graceful_with_no_contracts(
+    async def test_contract_mode_raises_error_without_contract_paths(
         self,
-        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Verify CONTRACT mode gracefully handles no contract paths.
+        """Verify CONTRACT mode raises error when no contract_paths provided.
 
         Given:
             - RuntimeHostProcess configured with CONTRACT mode
@@ -351,8 +351,8 @@ class TestContractModeLoadsOnlyContractHandlers:
             - RuntimeHostProcess.start() is called
 
         Then:
-            - Runtime should start (graceful degradation)
-            - Warning or info logged about no contracts
+            - ProtocolConfigurationError is raised (fail-fast behavior)
+            - Error message indicates CONTRACT mode requires contract_paths
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
@@ -365,18 +365,14 @@ class TestContractModeLoadsOnlyContractHandlers:
             event_bus=event_bus,
             input_topic="test.input",
             config=config,
-            # No contract_paths - graceful degradation
+            # No contract_paths - should raise error in CONTRACT mode
         )
 
-        with caplog.at_level(logging.INFO):
-            try:
-                await process.start()
+        # CONTRACT mode without contract_paths should raise ProtocolConfigurationError
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await process.start()
 
-                # Process should still start (graceful degradation)
-                assert process.is_running
-
-            finally:
-                await process.stop()
+        assert "CONTRACT mode requires contract_paths" in str(exc_info.value)
 
 
 # =============================================================================
@@ -520,13 +516,20 @@ class TestExpiredBootstrapForcesContractMode:
         Given:
             - RuntimeHostProcess configured with HYBRID mode
             - bootstrap_expires_at set to a past datetime
+            - NO contract_paths provided
 
         When:
             - RuntimeHostProcess.start() is called
 
         Then:
-            - effective_mode becomes CONTRACT
-            - Bootstrap handlers are NOT loaded as fallback
+            - effective_mode becomes CONTRACT (due to expiry)
+            - ProtocolConfigurationError raised (CONTRACT requires contract_paths)
+
+        Note:
+            This test verifies the interaction between bootstrap expiry and
+            strict CONTRACT mode enforcement. When bootstrap expires, the
+            effective mode becomes CONTRACT, which requires contract_paths.
+            Without paths, this correctly raises an error.
         """
         # Set expiry in the past (yesterday)
         past_expiry = datetime.now(UTC) - timedelta(days=1)
@@ -543,36 +546,16 @@ class TestExpiredBootstrapForcesContractMode:
             event_bus=event_bus,
             input_topic="test.input",
             config=config,
+            # No contract_paths - this will trigger error when effective_mode is CONTRACT
         )
 
-        with caplog.at_level(logging.INFO):
-            try:
-                await process.start()
+        # When bootstrap expires, effective_mode becomes CONTRACT
+        # CONTRACT mode requires contract_paths, so this should raise an error
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await process.start()
 
-                # Look for logs indicating effective mode is CONTRACT
-                # The _resolve_handler_descriptors method logs effective_mode
-                mode_logs = [
-                    r
-                    for r in caplog.records
-                    if hasattr(r, "__dict__")
-                    and r.__dict__.get("effective_mode") == "contract"
-                ]
-
-                # Also check is_bootstrap_expired in logs
-                expired_logs = [
-                    r
-                    for r in caplog.records
-                    if hasattr(r, "__dict__")
-                    and r.__dict__.get("is_bootstrap_expired") is True
-                ]
-
-                # Verify expiry was detected
-                assert len(expired_logs) >= 1 or any(
-                    "expired" in r.message.lower() for r in caplog.records
-                ), "Should log that bootstrap is expired"
-
-            finally:
-                await process.stop()
+        # Verify error message indicates CONTRACT mode requirement
+        assert "CONTRACT mode requires contract_paths" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_non_expired_bootstrap_uses_configured_mode(

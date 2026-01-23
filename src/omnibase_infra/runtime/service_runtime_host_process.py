@@ -1218,21 +1218,19 @@ class RuntimeHostProcess:
                 contract_paths=[Path(p) for p in self._contract_paths],
             )
         else:
-            # No contract paths - reuse bootstrap_source as placeholder for contract source
-            # The resolver will handle this based on the mode
-            # IMPORTANT: Reuse bootstrap_source instance, don't create a new one
+            # No contract paths provided
             if source_config.effective_mode == EnumHandlerSourceMode.CONTRACT:
-                logger.warning(
-                    "CONTRACT mode enabled but no contract_paths provided; "
-                    "bootstrap handlers will be loaded as 'contract source' fallback. "
-                    "This may produce unexpected results. Consider providing "
-                    "contract_paths or switching to HYBRID mode.",
-                    extra={
-                        "mode": source_config.handler_source_mode.value,
-                        "effective_mode": source_config.effective_mode.value,
-                    },
+                # CONTRACT mode REQUIRES contract_paths - fail fast
+                raise ProtocolConfigurationError(
+                    "CONTRACT mode requires contract_paths to be provided. "
+                    "Either provide contract_paths or use HYBRID/BOOTSTRAP mode.",
+                    context=ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="resolve_handler_descriptors",
+                    ),
                 )
-            contract_source = bootstrap_source  # Reuse, don't create new instance
+            # BOOTSTRAP or HYBRID mode without contract_paths - use bootstrap as fallback
+            contract_source = bootstrap_source
 
         # Create resolver with the effective mode (handles expiry enforcement)
         resolver = HandlerSourceResolver(
