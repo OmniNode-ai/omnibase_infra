@@ -33,11 +33,30 @@ class ContractCapabilityExtractor:
 
     This extractor is stateless and produces deterministic output
     for the same contract input.
+
+    Args:
+        rules: Optional custom CapabilityInferenceRules instance. If not provided,
+            uses a default instance with standard rule mappings.
+
+    Example:
+        # Use default rules
+        extractor = ContractCapabilityExtractor()
+
+        # Use custom rules
+        custom_rules = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching"}
+        )
+        extractor = ContractCapabilityExtractor(rules=custom_rules)
     """
 
-    def __init__(self) -> None:
-        """Initialize with inference rules engine."""
-        self._rules = CapabilityInferenceRules()
+    def __init__(self, rules: CapabilityInferenceRules | None = None) -> None:
+        """Initialize with optional custom inference rules.
+
+        Args:
+            rules: Custom CapabilityInferenceRules instance. If None, creates
+                a default instance with standard rule mappings.
+        """
+        self._rules = rules if rules is not None else CapabilityInferenceRules()
 
     def extract(self, contract: ModelContractBase) -> ModelContractCapabilities | None:
         """Extract capabilities from a contract model.

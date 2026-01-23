@@ -635,3 +635,225 @@ class TestStatelessness:
         # Verify result1 is unchanged
         assert "postgres.storage" in result1
         assert "state.reducer" in result1
+
+
+class TestDependencyInjection:
+    """Tests for dependency injection of custom rule mappings."""
+
+    def test_default_rules_when_no_args(self) -> None:
+        """Constructor with no args should use default rules."""
+        rules = CapabilityInferenceRules()
+        # Verify default intent patterns work
+        result = rules.infer_from_intent_types(["postgres.upsert"])
+        assert result == ["postgres.storage"]
+
+    def test_custom_intent_patterns_extend_defaults(self) -> None:
+        """Custom intent patterns should extend default patterns."""
+        rules = CapabilityInferenceRules(intent_patterns={"redis.": "redis.caching"})
+        # New custom pattern should work
+        result = rules.infer_from_intent_types(["redis.get"])
+        assert result == ["redis.caching"]
+        # Default patterns should still work
+        result = rules.infer_from_intent_types(["postgres.upsert"])
+        assert result == ["postgres.storage"]
+
+    def test_custom_intent_patterns_override_defaults(self) -> None:
+        """Custom intent patterns should override default patterns when key matches."""
+        rules = CapabilityInferenceRules(
+            intent_patterns={"postgres.": "custom.database"}
+        )
+        result = rules.infer_from_intent_types(["postgres.upsert"])
+        assert result == ["custom.database"]
+        # Other defaults should still work
+        result = rules.infer_from_intent_types(["consul.register"])
+        assert result == ["consul.registration"]
+
+    def test_custom_protocol_tags_extend_defaults(self) -> None:
+        """Custom protocol tags should extend default tags."""
+        rules = CapabilityInferenceRules(
+            protocol_tags={"ProtocolCustom": "custom.protocol"}
+        )
+        # New custom protocol should work
+        result = rules.infer_from_protocols(["ProtocolCustom"])
+        assert result == ["custom.protocol"]
+        # Default protocols should still work
+        result = rules.infer_from_protocols(["ProtocolReducer"])
+        assert result == ["state.reducer"]
+
+    def test_custom_protocol_tags_override_defaults(self) -> None:
+        """Custom protocol tags should override defaults when key matches."""
+        rules = CapabilityInferenceRules(
+            protocol_tags={"ProtocolReducer": "custom.reducer"}
+        )
+        result = rules.infer_from_protocols(["ProtocolReducer"])
+        assert result == ["custom.reducer"]
+        # Other defaults should still work
+        result = rules.infer_from_protocols(["ProtocolEventBus"])
+        assert result == ["event.bus"]
+
+    def test_custom_node_type_tags_extend_defaults(self) -> None:
+        """Custom node type tags should extend default tags."""
+        rules = CapabilityInferenceRules(node_type_tags={"gateway": "node.gateway"})
+        # New custom node type should work
+        result = rules.infer_from_node_type("gateway")
+        assert result == ["node.gateway"]
+        # Default node types should still work
+        result = rules.infer_from_node_type("effect")
+        assert result == ["node.effect"]
+
+    def test_custom_node_type_tags_override_defaults(self) -> None:
+        """Custom node type tags should override defaults when key matches."""
+        rules = CapabilityInferenceRules(node_type_tags={"effect": "custom.effect"})
+        result = rules.infer_from_node_type("effect")
+        assert result == ["custom.effect"]
+        # Other defaults should still work
+        result = rules.infer_from_node_type("reducer")
+        assert result == ["node.reducer"]
+
+    def test_multiple_custom_rules_combined(self) -> None:
+        """Multiple custom rules can be combined."""
+        rules = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching"},
+            protocol_tags={"ProtocolCustom": "custom.protocol"},
+            node_type_tags={"gateway": "node.gateway"},
+        )
+        # All custom rules should work
+        result = rules.infer_all(
+            intent_types=["redis.get"],
+            protocols=["ProtocolCustom"],
+            node_type="gateway",
+        )
+        assert "redis.caching" in result
+        assert "custom.protocol" in result
+        assert "node.gateway" in result
+
+    def test_empty_custom_rules_use_defaults(self) -> None:
+        """Empty custom rules should use defaults."""
+        rules = CapabilityInferenceRules(
+            intent_patterns={},
+            protocol_tags={},
+            node_type_tags={},
+        )
+        result = rules.infer_from_intent_types(["postgres.upsert"])
+        assert result == ["postgres.storage"]
+
+    def test_none_custom_rules_use_defaults(self) -> None:
+        """None values for custom rules should use defaults."""
+        rules = CapabilityInferenceRules(
+            intent_patterns=None,
+            protocol_tags=None,
+            node_type_tags=None,
+        )
+        result = rules.infer_from_intent_types(["postgres.upsert"])
+        assert result == ["postgres.storage"]
+
+    def test_custom_rules_isolated_between_instances(self) -> None:
+        """Custom rules should be isolated between instances."""
+        rules1 = CapabilityInferenceRules(intent_patterns={"redis.": "redis.caching"})
+        rules2 = CapabilityInferenceRules()
+
+        # rules1 should have custom pattern
+        result1 = rules1.infer_from_intent_types(["redis.get"])
+        assert result1 == ["redis.caching"]
+
+        # rules2 should NOT have custom pattern
+        result2 = rules2.infer_from_intent_types(["redis.get"])
+        assert result2 == []
+
+    def test_default_constants_unchanged(self) -> None:
+        """Creating instances with custom rules should not modify DEFAULT_* constants."""
+        original_intent = dict(CapabilityInferenceRules.DEFAULT_INTENT_PATTERNS)
+        original_protocol = dict(CapabilityInferenceRules.DEFAULT_PROTOCOL_TAGS)
+        original_node = dict(CapabilityInferenceRules.DEFAULT_NODE_TYPE_TAGS)
+
+        # Create instance with custom rules
+        _ = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching"},
+            protocol_tags={"ProtocolCustom": "custom.protocol"},
+            node_type_tags={"gateway": "node.gateway"},
+        )
+
+        # Verify DEFAULT_* constants are unchanged
+        assert original_intent == CapabilityInferenceRules.DEFAULT_INTENT_PATTERNS
+        assert original_protocol == CapabilityInferenceRules.DEFAULT_PROTOCOL_TAGS
+        assert original_node == CapabilityInferenceRules.DEFAULT_NODE_TYPE_TAGS
+
+    def test_infer_all_with_custom_rules(self) -> None:
+        """infer_all should work correctly with custom rules."""
+        rules = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching", "postgres.": "custom.db"},
+            protocol_tags={"ProtocolReducer": "custom.reducer"},
+            node_type_tags={"effect": "custom.effect"},
+        )
+        result = rules.infer_all(
+            intent_types=["redis.get", "postgres.upsert"],
+            protocols=["ProtocolReducer"],
+            node_type="effect",
+        )
+        assert "redis.caching" in result
+        assert "custom.db" in result
+        assert "custom.reducer" in result
+        assert "custom.effect" in result
+        # Should be sorted
+        assert result == sorted(result)
+
+
+class TestDefaultConstants:
+    """Tests for DEFAULT_* class constants."""
+
+    def test_default_intent_patterns_exist(self) -> None:
+        """DEFAULT_INTENT_PATTERNS should exist and have expected keys."""
+        assert hasattr(CapabilityInferenceRules, "DEFAULT_INTENT_PATTERNS")
+        patterns = CapabilityInferenceRules.DEFAULT_INTENT_PATTERNS
+        assert "postgres." in patterns
+        assert "consul." in patterns
+        assert "kafka." in patterns
+        assert "vault." in patterns
+        assert "valkey." in patterns
+        assert "http." in patterns
+
+    def test_default_protocol_tags_exist(self) -> None:
+        """DEFAULT_PROTOCOL_TAGS should exist and have expected keys."""
+        assert hasattr(CapabilityInferenceRules, "DEFAULT_PROTOCOL_TAGS")
+        tags = CapabilityInferenceRules.DEFAULT_PROTOCOL_TAGS
+        assert "ProtocolReducer" in tags
+        assert "ProtocolDatabaseAdapter" in tags
+        assert "ProtocolEventBus" in tags
+        assert "ProtocolCacheAdapter" in tags
+        assert "ProtocolServiceDiscovery" in tags
+
+    def test_default_node_type_tags_exist(self) -> None:
+        """DEFAULT_NODE_TYPE_TAGS should exist and have expected keys."""
+        assert hasattr(CapabilityInferenceRules, "DEFAULT_NODE_TYPE_TAGS")
+        tags = CapabilityInferenceRules.DEFAULT_NODE_TYPE_TAGS
+        assert "effect" in tags
+        assert "compute" in tags
+        assert "reducer" in tags
+        assert "orchestrator" in tags
+
+    def test_default_intent_patterns_values(self) -> None:
+        """DEFAULT_INTENT_PATTERNS should have expected values."""
+        patterns = CapabilityInferenceRules.DEFAULT_INTENT_PATTERNS
+        assert patterns["postgres."] == "postgres.storage"
+        assert patterns["consul."] == "consul.registration"
+        assert patterns["kafka."] == "kafka.messaging"
+        assert patterns["vault."] == "vault.secrets"
+        assert patterns["valkey."] == "valkey.caching"
+        assert patterns["http."] == "http.transport"
+
+    def test_default_protocol_tags_values(self) -> None:
+        """DEFAULT_PROTOCOL_TAGS should have expected values."""
+        tags = CapabilityInferenceRules.DEFAULT_PROTOCOL_TAGS
+        assert tags["ProtocolReducer"] == "state.reducer"
+        assert tags["ProtocolDatabaseAdapter"] == "database.adapter"
+        assert tags["ProtocolEventBus"] == "event.bus"
+        assert tags["ProtocolCacheAdapter"] == "cache.adapter"
+        assert tags["ProtocolServiceDiscovery"] == "service.discovery"
+
+    def test_default_node_type_tags_values(self) -> None:
+        """DEFAULT_NODE_TYPE_TAGS should have expected values."""
+        tags = CapabilityInferenceRules.DEFAULT_NODE_TYPE_TAGS
+        assert tags["effect"] == "node.effect"
+        assert tags["compute"] == "node.compute"
+        assert tags["reducer"] == "node.reducer"
+        assert tags["orchestrator"] == "node.orchestrator"

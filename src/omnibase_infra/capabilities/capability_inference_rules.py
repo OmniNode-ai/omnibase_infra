@@ -1,21 +1,42 @@
 """Capability inference rules for deriving tags from contract structure.
 
-This module provides stateless, deterministic pattern matching to infer
-capability tags from contract fields like intent_types and protocols.
+This module provides deterministic pattern matching to infer capability tags
+from contract fields like intent_types and protocols. Rules are injectable
+via constructor for extensibility while providing sensible defaults.
 """
 
 from __future__ import annotations
 
 
 class CapabilityInferenceRules:
-    """Code-driven capability inference rules.
+    """Code-driven capability inference rules with injectable patterns.
 
-    Stateless pure functions for deterministic pattern matching.
-    Rules infer capability_tags from contract structure.
+    Deterministic pattern matching for inferring capability_tags from
+    contract structure. All rule mappings are injectable via constructor
+    while providing sensible defaults.
+
+    Args:
+        intent_patterns: Custom/additional intent patterns (merged with defaults).
+        protocol_tags: Custom/additional protocol tags (merged with defaults).
+        node_type_tags: Custom/additional node type tags (merged with defaults).
+
+    Example:
+        # Use defaults
+        rules = CapabilityInferenceRules()
+
+        # Override specific pattern
+        rules = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching"}
+        )
+
+        # Override existing pattern
+        rules = CapabilityInferenceRules(
+            intent_patterns={"postgres.": "custom.database"}
+        )
     """
 
-    # Intent pattern -> capability tag mappings
-    INTENT_PATTERNS: dict[str, str] = {
+    # Default intent pattern -> capability tag mappings
+    DEFAULT_INTENT_PATTERNS: dict[str, str] = {
         "postgres.": "postgres.storage",
         "consul.": "consul.registration",
         "kafka.": "kafka.messaging",
@@ -24,8 +45,8 @@ class CapabilityInferenceRules:
         "http.": "http.transport",
     }
 
-    # Protocol -> capability tag mappings
-    PROTOCOL_TAGS: dict[str, str] = {
+    # Default protocol -> capability tag mappings
+    DEFAULT_PROTOCOL_TAGS: dict[str, str] = {
         "ProtocolReducer": "state.reducer",
         "ProtocolDatabaseAdapter": "database.adapter",
         "ProtocolEventBus": "event.bus",
@@ -33,13 +54,42 @@ class CapabilityInferenceRules:
         "ProtocolServiceDiscovery": "service.discovery",
     }
 
-    # Node type -> base capability tag
-    NODE_TYPE_TAGS: dict[str, str] = {
+    # Default node type -> base capability tag
+    DEFAULT_NODE_TYPE_TAGS: dict[str, str] = {
         "effect": "node.effect",
         "compute": "node.compute",
         "reducer": "node.reducer",
         "orchestrator": "node.orchestrator",
     }
+
+    def __init__(
+        self,
+        intent_patterns: dict[str, str] | None = None,
+        protocol_tags: dict[str, str] | None = None,
+        node_type_tags: dict[str, str] | None = None,
+    ) -> None:
+        """Initialize with optional custom rules.
+
+        Custom rules are merged with defaults. If a custom rule has the same
+        key as a default rule, the custom rule takes precedence (override).
+
+        Args:
+            intent_patterns: Custom/additional intent patterns (merged with defaults).
+            protocol_tags: Custom/additional protocol tags (merged with defaults).
+            node_type_tags: Custom/additional node type tags (merged with defaults).
+        """
+        self._intent_patterns = {
+            **self.DEFAULT_INTENT_PATTERNS,
+            **(intent_patterns or {}),
+        }
+        self._protocol_tags = {
+            **self.DEFAULT_PROTOCOL_TAGS,
+            **(protocol_tags or {}),
+        }
+        self._node_type_tags = {
+            **self.DEFAULT_NODE_TYPE_TAGS,
+            **(node_type_tags or {}),
+        }
 
     def infer_from_intent_types(self, intent_types: list[str]) -> list[str]:
         """Infer capability tags from intent type patterns.
@@ -54,7 +104,7 @@ class CapabilityInferenceRules:
         for intent in intent_types:
             if intent is None:  # Skip None values
                 continue
-            for pattern, tag in self.INTENT_PATTERNS.items():
+            for pattern, tag in self._intent_patterns.items():
                 if intent.startswith(pattern):
                     tags.add(tag)
                     break
@@ -74,10 +124,10 @@ class CapabilityInferenceRules:
             if protocol is None:  # Skip None values
                 continue
             # Check exact match
-            if protocol in self.PROTOCOL_TAGS:
-                tags.add(self.PROTOCOL_TAGS[protocol])
+            if protocol in self._protocol_tags:
+                tags.add(self._protocol_tags[protocol])
             # Also check if protocol name ends with known suffix
-            for known_protocol, tag in self.PROTOCOL_TAGS.items():
+            for known_protocol, tag in self._protocol_tags.items():
                 if protocol.endswith(known_protocol):
                     tags.add(tag)
         return sorted(tags)
@@ -92,8 +142,8 @@ class CapabilityInferenceRules:
             List with single node type capability tag, or empty if unknown
         """
         normalized = node_type.lower().replace("_generic", "")
-        if normalized in self.NODE_TYPE_TAGS:
-            return [self.NODE_TYPE_TAGS[normalized]]
+        if normalized in self._node_type_tags:
+            return [self._node_type_tags[normalized]]
         return []
 
     def infer_all(

@@ -1057,3 +1057,206 @@ class TestExtractorInstantiation:
 
         assert extractor1 is not extractor2
         assert extractor1._rules is not extractor2._rules
+
+
+# =============================================================================
+# TestExtractorWithCustomRules - Dependency injection tests
+# =============================================================================
+
+
+class TestExtractorWithCustomRules:
+    """Tests for extractor with custom inference rules."""
+
+    def test_extractor_accepts_custom_rules(self) -> None:
+        """Extractor should accept custom CapabilityInferenceRules instance."""
+        from omnibase_infra.capabilities import CapabilityInferenceRules
+
+        custom_rules = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching"}
+        )
+        extractor = ContractCapabilityExtractor(rules=custom_rules)
+
+        assert extractor._rules is custom_rules
+
+    def test_extractor_uses_custom_rules_for_inference(self) -> None:
+        """Extractor should use custom rules for tag inference."""
+        from omnibase_infra.capabilities import CapabilityInferenceRules
+
+        custom_rules = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching"}
+        )
+        extractor = ContractCapabilityExtractor(rules=custom_rules)
+
+        # Create contract with redis intent
+        contract = MagicMock()
+        contract.node_type = MagicMock(value="EFFECT_GENERIC")
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.dependencies = []
+        contract.protocol_interfaces = []
+        contract.tags = []
+
+        # Add consumed_events with redis pattern
+        event = MagicMock()
+        event.event_pattern = "redis.get"
+        contract.consumed_events = [event]
+
+        result = extractor.extract(contract)
+
+        assert result is not None
+        assert "redis.caching" in result.capability_tags
+
+    def test_extractor_custom_rules_override_defaults(self) -> None:
+        """Extractor should use overridden rules from custom instance."""
+        from omnibase_infra.capabilities import CapabilityInferenceRules
+
+        # Override postgres to custom tag
+        custom_rules = CapabilityInferenceRules(
+            intent_patterns={"postgres.": "custom.database"}
+        )
+        extractor = ContractCapabilityExtractor(rules=custom_rules)
+
+        # Create contract with postgres intent
+        contract = MagicMock()
+        contract.node_type = MagicMock(value="EFFECT_GENERIC")
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.dependencies = []
+        contract.protocol_interfaces = []
+        contract.tags = []
+
+        event = MagicMock()
+        event.event_pattern = "postgres.upsert"
+        contract.consumed_events = [event]
+
+        result = extractor.extract(contract)
+
+        assert result is not None
+        assert "custom.database" in result.capability_tags
+        assert "postgres.storage" not in result.capability_tags
+
+    def test_extractor_none_rules_uses_defaults(self) -> None:
+        """Extractor with rules=None should use default rules."""
+        extractor = ContractCapabilityExtractor(rules=None)
+
+        # Create contract with postgres intent
+        contract = MagicMock()
+        contract.node_type = MagicMock(value="EFFECT_GENERIC")
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.dependencies = []
+        contract.protocol_interfaces = []
+        contract.tags = []
+
+        event = MagicMock()
+        event.event_pattern = "postgres.upsert"
+        contract.consumed_events = [event]
+
+        result = extractor.extract(contract)
+
+        assert result is not None
+        # Should use default mapping
+        assert "postgres.storage" in result.capability_tags
+
+    def test_extractor_custom_protocol_inference(self) -> None:
+        """Extractor should use custom protocol rules."""
+        from omnibase_infra.capabilities import CapabilityInferenceRules
+
+        custom_rules = CapabilityInferenceRules(
+            protocol_tags={"ProtocolCustom": "custom.protocol"}
+        )
+        extractor = ContractCapabilityExtractor(rules=custom_rules)
+
+        contract = MagicMock()
+        contract.node_type = MagicMock(value="EFFECT_GENERIC")
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.dependencies = []
+        contract.protocol_interfaces = ["ProtocolCustom"]
+        contract.tags = []
+
+        result = extractor.extract(contract)
+
+        assert result is not None
+        assert "custom.protocol" in result.capability_tags
+
+    def test_extractor_custom_node_type_inference(self) -> None:
+        """Extractor should use custom node type rules."""
+        from omnibase_infra.capabilities import CapabilityInferenceRules
+
+        custom_rules = CapabilityInferenceRules(
+            node_type_tags={"effect": "custom.effect"}
+        )
+        extractor = ContractCapabilityExtractor(rules=custom_rules)
+
+        contract = MagicMock()
+        contract.node_type = MagicMock(value="EFFECT_GENERIC")
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.dependencies = []
+        contract.protocol_interfaces = []
+        contract.tags = []
+
+        result = extractor.extract(contract)
+
+        assert result is not None
+        assert "custom.effect" in result.capability_tags
+        assert "node.effect" not in result.capability_tags
+
+    def test_extractor_custom_rules_combined(self) -> None:
+        """Extractor should work with multiple custom rule types combined."""
+        from omnibase_infra.capabilities import CapabilityInferenceRules
+
+        custom_rules = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching"},
+            protocol_tags={"ProtocolCustom": "custom.protocol"},
+            node_type_tags={"gateway": "node.gateway"},
+        )
+        extractor = ContractCapabilityExtractor(rules=custom_rules)
+
+        contract = MagicMock()
+        contract.node_type = "gateway"  # Custom node type
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.dependencies = []
+        contract.protocol_interfaces = ["ProtocolCustom"]
+        contract.tags = []
+
+        event = MagicMock()
+        event.event_pattern = "redis.get"
+        contract.consumed_events = [event]
+
+        result = extractor.extract(contract)
+
+        assert result is not None
+        assert "redis.caching" in result.capability_tags
+        assert "custom.protocol" in result.capability_tags
+        assert "node.gateway" in result.capability_tags
+
+    def test_extractor_isolates_rules_between_instances(self) -> None:
+        """Different extractor instances with different rules should be isolated."""
+        from omnibase_infra.capabilities import CapabilityInferenceRules
+
+        custom_rules = CapabilityInferenceRules(
+            intent_patterns={"redis.": "redis.caching"}
+        )
+        extractor1 = ContractCapabilityExtractor(rules=custom_rules)
+        extractor2 = ContractCapabilityExtractor()  # Default rules
+
+        # Create contract with redis intent
+        contract = MagicMock()
+        contract.node_type = MagicMock(value="EFFECT_GENERIC")
+        contract.contract_version = ModelSemVer(major=1, minor=0, patch=0)
+        contract.dependencies = []
+        contract.protocol_interfaces = []
+        contract.tags = []
+
+        event = MagicMock()
+        event.event_pattern = "redis.get"
+        contract.consumed_events = [event]
+
+        result1 = extractor1.extract(contract)
+        result2 = extractor2.extract(contract)
+
+        assert result1 is not None
+        assert result2 is not None
+
+        # extractor1 should have custom redis tag
+        assert "redis.caching" in result1.capability_tags
+
+        # extractor2 should NOT have redis tag (unrecognized pattern)
+        assert "redis.caching" not in result2.capability_tags
