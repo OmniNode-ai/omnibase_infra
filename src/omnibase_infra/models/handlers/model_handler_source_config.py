@@ -58,7 +58,7 @@ class ModelHandlerSourceConfig(BaseModel):
             - BOOTSTRAP: Load from hardcoded _KNOWN_HANDLERS dict (MVP)
             - CONTRACT: Load from handler_contract.yaml files (production)
             - HYBRID: Contract-first with bootstrap fallback per-handler identity
-            Defaults to CONTRACT as recommended for production.
+            Defaults to HYBRID as recommended for gradual migration.
 
         allow_bootstrap_override: If True, bootstrap handlers can override
             contract handlers in HYBRID mode. Default is False, meaning
@@ -98,8 +98,9 @@ class ModelHandlerSourceConfig(BaseModel):
     )
 
     handler_source_mode: EnumHandlerSourceMode = Field(
-        default=EnumHandlerSourceMode.CONTRACT,
-        description="Handler loading source mode: BOOTSTRAP, CONTRACT, or HYBRID",
+        default=EnumHandlerSourceMode.HYBRID,
+        description="Handler loading source mode: BOOTSTRAP, CONTRACT, or HYBRID. "
+        "Defaults to HYBRID (contract-first with bootstrap fallback).",
     )
 
     allow_bootstrap_override: bool = Field(

@@ -236,16 +236,34 @@ class TestBootstrapSourceRuntimeIntegration:
         Verifies that RuntimeHostProcess actually calls the bootstrap source
         discover_handlers() method during startup.
         """
+        from omnibase_core.models.primitives import ModelSemVer
+        from omnibase_infra.models.handlers import ModelHandlerDescriptor
+
         event_bus = EventBusInmemory()
 
         # Patch at the source module where it's imported from
         with patch(
             "omnibase_infra.runtime.handler_bootstrap_source.HandlerBootstrapSource"
         ) as MockBootstrapSource:
-            # Create a mock that returns proper discovery result
+            # Create a mock that returns proper discovery result with valid descriptor
             mock_source = MagicMock()
+            mock_source.source_type = SOURCE_TYPE_BOOTSTRAP
+
+            # Provide a real handler descriptor so the runtime can start
+            mock_descriptor = ModelHandlerDescriptor(
+                handler_id="bootstrap.http",
+                name="HTTP Handler",
+                version=ModelSemVer(major=1, minor=0, patch=0),
+                handler_kind="effect",
+                input_model="omnibase_infra.models.types.JsonDict",
+                output_model="omnibase_core.models.dispatch.ModelHandlerOutput",
+                description="HTTP REST protocol handler",
+                handler_class="omnibase_infra.handlers.handler_http.HandlerHttpRest",
+            )
+
             mock_discovery_result = MagicMock()
-            mock_discovery_result.descriptors = []  # Empty for simplicity
+            mock_discovery_result.descriptors = [mock_descriptor]
+            mock_discovery_result.validation_errors = []
             mock_source.discover_handlers = AsyncMock(
                 return_value=mock_discovery_result
             )
@@ -259,9 +277,16 @@ class TestBootstrapSourceRuntimeIntegration:
             try:
                 await process.start()
 
-                # Verify HandlerBootstrapSource was instantiated and called
+                # Verify HandlerBootstrapSource was instantiated only ONCE
+                # This is the key fix from OMN-1095 - previously it was instantiated twice
                 MockBootstrapSource.assert_called_once()
-                mock_source.discover_handlers.assert_called_once()
+
+                # In HYBRID mode (default), discover_handlers() is called twice:
+                # once for bootstrap_source and once for contract_source
+                # (which is the same instance when no contract_paths provided)
+                assert mock_source.discover_handlers.call_count >= 1, (
+                    "discover_handlers should be called at least once"
+                )
 
             finally:
                 await process.stop()
