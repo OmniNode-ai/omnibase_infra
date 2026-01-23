@@ -27,6 +27,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.contracts import ModelContractBase
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
@@ -86,6 +87,9 @@ class ModelIntrospectionConfig(BaseModel):
         request_introspection_topic: Topic for receiving introspection requests.
             Defaults to "node.request_introspection". ONEX topics (onex.*)
             require version suffix (.v1, .v2, etc.).
+        contract: Optional typed contract model for capability extraction.
+            When provided, MixinNodeIntrospection extracts contract_capabilities
+            using ContractCapabilityExtractor. None for legacy nodes.
 
     Example:
         ```python
@@ -183,6 +187,13 @@ class ModelIntrospectionConfig(BaseModel):
         default=DEFAULT_REQUEST_INTROSPECTION_TOPIC,
         description="Topic for receiving introspection request events. "
         "ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).",
+    )
+
+    contract: ModelContractBase | None = Field(
+        default=None,
+        description="Typed contract model for capability extraction. "
+        "When provided, MixinNodeIntrospection will extract contract_capabilities "
+        "using ContractCapabilityExtractor. None for legacy nodes without contracts.",
     )
 
     @field_validator("node_type", mode="before")

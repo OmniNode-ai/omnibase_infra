@@ -14,6 +14,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.capabilities import ModelContractCapabilities
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.discovery.model_discovered_capabilities import (
@@ -49,6 +50,8 @@ class ModelNodeIntrospectionEvent(BaseModel):
         node_version: Semantic version of the node.
         declared_capabilities: Contract-declared capabilities (feature flags).
         discovered_capabilities: Runtime-discovered capabilities (reflection).
+        contract_capabilities: Contract-derived capabilities (design-time truth).
+            Populated from the node's contract when available, None otherwise.
         endpoints: Dictionary of exposed endpoints (name -> URL).
         current_state: Current FSM state if the node has state management.
         reason: Why this introspection event was emitted.
@@ -97,6 +100,12 @@ class ModelNodeIntrospectionEvent(BaseModel):
     discovered_capabilities: ModelDiscoveredCapabilities = Field(
         default_factory=ModelDiscoveredCapabilities,
         description="Capabilities discovered via runtime reflection",
+    )
+    contract_capabilities: ModelContractCapabilities | None = Field(
+        default=None,
+        description="Contract-derived capabilities (design-time truth, deterministic). "
+        "Populated by ContractCapabilityExtractor from the node's contract. "
+        "None when contract is not available or extraction fails.",
     )
 
     # Endpoints and state
