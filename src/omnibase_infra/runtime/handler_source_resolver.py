@@ -204,7 +204,11 @@ class HandlerSourceResolver:
                 handlers_by_id[descriptor.handler_id] = descriptor
                 fallback_count += 1
 
-        # Merge validation errors from both sources
+        # NOTE: Validation errors from bootstrap and contract sources are intentionally
+        # combined WITHOUT deduplication. During migration, the same error appearing from
+        # BOTH sources helps distinguish handler-level issues (error in both) from
+        # source-specific configuration problems (error in only one). This preserves
+        # diagnostic signal that would be lost if we deduplicated.
         all_errors: list[ModelHandlerValidationError] = list(
             bootstrap_result.validation_errors
         ) + list(contract_result.validation_errors)

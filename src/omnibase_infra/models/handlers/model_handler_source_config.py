@@ -26,9 +26,9 @@ See Also:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timezone
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_handler_source_mode import EnumHandlerSourceMode
 
@@ -71,7 +71,7 @@ class ModelHandlerSourceConfig(BaseModel):
             after a migration deadline. Set to None to disable expiry checking.
 
     Example:
-        >>> from datetime import datetime, timedelta
+        >>> from datetime import datetime, timezone
         >>> from omnibase_infra.models.handlers import ModelHandlerSourceConfig
         >>> from omnibase_infra.enums import EnumHandlerSourceMode
         >>>
@@ -80,10 +80,10 @@ class ModelHandlerSourceConfig(BaseModel):
         ...     handler_source_mode=EnumHandlerSourceMode.CONTRACT,
         ... )
         >>>
-        >>> # Migration configuration with safety expiry
+        >>> # Migration configuration with safety expiry (must be timezone-aware)
         >>> config = ModelHandlerSourceConfig(
         ...     handler_source_mode=EnumHandlerSourceMode.HYBRID,
-        ...     bootstrap_expires_at=datetime(2025, 3, 1, 0, 0, 0),
+        ...     bootstrap_expires_at=datetime(2025, 3, 1, 0, 0, 0, tzinfo=timezone.utc),
         ... )
         >>>
         >>> # Check if bootstrap is expired
@@ -114,9 +114,33 @@ class ModelHandlerSourceConfig(BaseModel):
         default=None,
         description=(
             "If set and expired, refuse BOOTSTRAP mode and force CONTRACT. "
-            "Production safety mechanism for migration deadlines."
+            "Production safety mechanism for migration deadlines. "
+            "Must be timezone-aware (UTC recommended); naive datetimes are rejected."
         ),
     )
+
+    @field_validator("bootstrap_expires_at")
+    @classmethod
+    def _validate_expires_at_timezone(cls, value: datetime | None) -> datetime | None:
+        """Validate and normalize bootstrap_expires_at to UTC.
+
+        Args:
+            value: The datetime value to validate.
+
+        Returns:
+            None if value is None, otherwise the datetime normalized to UTC.
+
+        Raises:
+            ValueError: If the datetime is naive (no timezone info).
+        """
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError(
+                "bootstrap_expires_at must be timezone-aware (UTC recommended). "
+                "Use datetime.now(timezone.utc) or datetime(..., tzinfo=timezone.utc)."
+            )
+        return value.astimezone(UTC)
 
     @property
     def is_bootstrap_expired(self) -> bool:
@@ -127,12 +151,12 @@ class ModelHandlerSourceConfig(BaseModel):
             False otherwise.
 
         Note:
-            Uses datetime.now() for comparison. For timezone-aware expiry,
-            ensure bootstrap_expires_at is set with appropriate timezone.
+            Uses UTC-aware comparison. The bootstrap_expires_at field is
+            validated and normalized to UTC at construction time.
         """
         if self.bootstrap_expires_at is None:
             return False
-        return datetime.now() > self.bootstrap_expires_at
+        return datetime.now(UTC) > self.bootstrap_expires_at
 
     @property
     def effective_mode(self) -> EnumHandlerSourceMode:
