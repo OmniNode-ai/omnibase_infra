@@ -52,6 +52,8 @@ class CapabilityInferenceRules:
         """
         tags: set[str] = set()
         for intent in intent_types:
+            if intent is None:  # Skip None values
+                continue
             for pattern, tag in self.INTENT_PATTERNS.items():
                 if intent.startswith(pattern):
                     tags.add(tag)
@@ -69,6 +71,8 @@ class CapabilityInferenceRules:
         """
         tags: set[str] = set()
         for protocol in protocols:
+            if protocol is None:  # Skip None values
+                continue
             # Check exact match
             if protocol in self.PROTOCOL_TAGS:
                 tags.add(self.PROTOCOL_TAGS[protocol])

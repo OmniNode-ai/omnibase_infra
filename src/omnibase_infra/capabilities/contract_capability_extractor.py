@@ -46,47 +46,46 @@ class ContractCapabilityExtractor:
             contract: Typed contract model (Effect, Compute, Reducer, or Orchestrator)
 
         Returns:
-            ModelContractCapabilities with extracted data, or None if extraction fails
+            ModelContractCapabilities with extracted data, or None if contract is None
+
+        Raises:
+            Any exceptions from extraction propagate (fail-fast behavior).
         """
         if contract is None:
             return None
 
-        try:
-            # Extract contract type from node_type
-            contract_type = self._extract_contract_type(contract)
+        # Extract contract type from node_type
+        contract_type = self._extract_contract_type(contract)
 
-            # Extract version
-            contract_version = self._extract_version(contract)
+        # Extract version
+        contract_version = self._extract_version(contract)
 
-            # Extract intent types (varies by node type)
-            intent_types = self._extract_intent_types(contract)
+        # Extract intent types (varies by node type)
+        intent_types = self._extract_intent_types(contract)
 
-            # Extract protocols from dependencies
-            protocols = self._extract_protocols(contract)
+        # Extract protocols from dependencies
+        protocols = self._extract_protocols(contract)
 
-            # Extract explicit capability tags from contract
-            explicit_tags = self._extract_explicit_tags(contract)
+        # Extract explicit capability tags from contract
+        explicit_tags = self._extract_explicit_tags(contract)
 
-            # Infer additional tags using rules
-            inferred_tags = self._rules.infer_all(
-                intent_types=intent_types,
-                protocols=protocols,
-                node_type=contract_type,
-            )
+        # Infer additional tags using rules
+        inferred_tags = self._rules.infer_all(
+            intent_types=intent_types,
+            protocols=protocols,
+            node_type=contract_type,
+        )
 
-            # Union explicit + inferred (deterministic)
-            all_tags = sorted(set(explicit_tags) | set(inferred_tags))
+        # Union explicit + inferred (deterministic)
+        all_tags = sorted(set(explicit_tags) | set(inferred_tags))
 
-            return ModelContractCapabilities(
-                contract_type=contract_type,
-                contract_version=contract_version,
-                intent_types=sorted(set(intent_types)),
-                protocols=sorted(set(protocols)),
-                capability_tags=all_tags,
-            )
-        except Exception:
-            # Never raise - return None for graceful degradation
-            return None
+        return ModelContractCapabilities(
+            contract_type=contract_type,
+            contract_version=contract_version,
+            intent_types=sorted(set(intent_types)),
+            protocols=sorted(set(protocols)),
+            capability_tags=all_tags,
+        )
 
     def _extract_contract_type(self, contract: ModelContractBase) -> str:
         """Extract normalized contract type string."""
@@ -165,7 +164,9 @@ class ContractCapabilityExtractor:
         if hasattr(contract, "protocol_interfaces"):
             protocol_interfaces = contract.protocol_interfaces
             if protocol_interfaces:
-                protocols.extend(protocol_interfaces)
+                for proto in protocol_interfaces:
+                    if proto is not None:  # Skip None values
+                        protocols.append(proto)
 
         # From dependencies where type is protocol
         if hasattr(contract, "dependencies"):
@@ -198,6 +199,8 @@ class ContractCapabilityExtractor:
         if hasattr(contract, "tags"):
             contract_tags = contract.tags
             if contract_tags:
-                tags.extend(contract_tags)
+                for tag in contract_tags:
+                    if tag is not None:  # Skip None values
+                        tags.append(tag)
 
         return tags

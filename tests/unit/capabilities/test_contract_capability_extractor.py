@@ -105,56 +105,6 @@ class TestExtractBasics:
         result = extractor.extract(None)  # type: ignore[arg-type]
         assert result is None
 
-    def test_extract_never_raises_on_attribute_error(
-        self,
-        extractor: ContractCapabilityExtractor,
-    ) -> None:
-        """extract() should never raise, returns None on AttributeError."""
-        contract = MagicMock()
-        # Configure node_type to raise AttributeError
-        type(contract).node_type = property(
-            fget=MagicMock(side_effect=AttributeError("boom"))
-        )
-
-        # Should not raise
-        result = extractor.extract(contract)
-        # Should return None (graceful degradation)
-        assert result is None
-
-    def test_extract_never_raises_on_type_error(
-        self,
-        extractor: ContractCapabilityExtractor,
-    ) -> None:
-        """extract() should never raise, returns None on TypeError."""
-        contract = MagicMock()
-        contract.node_type = MagicMock(value="EFFECT_GENERIC")
-        # Configure version to raise TypeError when accessed
-        type(contract).version = property(
-            fget=MagicMock(side_effect=TypeError("invalid type"))
-        )
-
-        result = extractor.extract(contract)
-        assert result is None
-
-    def test_extract_never_raises_on_value_error(
-        self,
-        extractor: ContractCapabilityExtractor,
-    ) -> None:
-        """extract() should never raise, returns None on ValueError."""
-        contract = MagicMock()
-        contract.node_type = MagicMock(value="EFFECT_GENERIC")
-        contract.version = ModelSemVer(major=1, minor=0, patch=0)
-        # Configure dependencies to raise ValueError during iteration
-        contract.dependencies = MagicMock()
-        contract.dependencies.__iter__ = MagicMock(
-            side_effect=ValueError("iteration error")
-        )
-        contract.protocol_interfaces = []
-        contract.tags = []
-
-        result = extractor.extract(contract)
-        assert result is None
-
 
 # =============================================================================
 # TestContractTypeExtraction - Node type parsing
