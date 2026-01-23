@@ -42,6 +42,9 @@ from omnibase_infra.runtime.registry_contract_source import (
     DEFAULT_CONTRACT_PREFIX,
     MAX_CONTRACT_SIZE,
     RegistryContractSource,
+    adelete_contract_from_consul,
+    alist_contracts_in_consul,
+    astore_contract_in_consul,
 )
 
 # =============================================================================
@@ -885,6 +888,102 @@ class TestRegistryContractSourceUtilities:
 
 
 # =============================================================================
+# Async Utility Function Tests
+# =============================================================================
+
+
+class TestRegistryContractSourceAsyncUtilities:
+    """Tests for async utility functions in the module."""
+
+    @pytest.mark.asyncio
+    async def test_astore_contract_in_consul(self) -> None:
+        """astore_contract_in_consul should wrap sync function in to_thread."""
+        mock_client = MagicMock()
+        mock_client.kv.put.return_value = True
+
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env",
+            return_value=mock_client,
+        ):
+            result = await astore_contract_in_consul(
+                contract_yaml=VALID_HANDLER_CONTRACT_YAML,
+                handler_id="effect.test.handler",
+            )
+
+        assert result is True
+        mock_client.kv.put.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_alist_contracts_in_consul_empty(self) -> None:
+        """alist_contracts_in_consul should return empty list when no contracts."""
+        mock_client = MagicMock()
+        mock_client.kv.get.return_value = (0, None)
+
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env",
+            return_value=mock_client,
+        ):
+            result = await alist_contracts_in_consul()
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_alist_contracts_in_consul_with_contracts(self) -> None:
+        """alist_contracts_in_consul should return handler IDs."""
+        mock_client = MagicMock()
+        mock_client.kv.get.return_value = (
+            1,
+            [
+                f"{DEFAULT_CONTRACT_PREFIX}handler.one",
+                f"{DEFAULT_CONTRACT_PREFIX}handler.two",
+            ],
+        )
+
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env",
+            return_value=mock_client,
+        ):
+            result = await alist_contracts_in_consul()
+
+        assert result == ["handler.one", "handler.two"]
+
+    @pytest.mark.asyncio
+    async def test_adelete_contract_from_consul_success(self) -> None:
+        """adelete_contract_from_consul should delete contract from Consul KV."""
+        mock_client = MagicMock()
+        mock_client.kv.delete.return_value = True
+
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env",
+            return_value=mock_client,
+        ):
+            result = await adelete_contract_from_consul(
+                handler_id="effect.test.handler"
+            )
+
+        assert result is True
+        mock_client.kv.delete.assert_called_once_with(
+            f"{DEFAULT_CONTRACT_PREFIX}effect.test.handler"
+        )
+
+    @pytest.mark.asyncio
+    async def test_adelete_contract_from_consul_failure(self) -> None:
+        """adelete_contract_from_consul should return False on failure."""
+        mock_client = MagicMock()
+        mock_client.kv.delete.return_value = False
+
+        with patch(
+            "omnibase_infra.runtime.registry_contract_source._create_consul_client_from_env",
+            return_value=mock_client,
+        ):
+            result = await adelete_contract_from_consul(
+                handler_id="nonexistent.handler"
+            )
+
+        assert result is False
+
+
+# =============================================================================
 # Default Exports Tests
 # =============================================================================
 
@@ -908,3 +1007,27 @@ class TestRegistryContractSourceExports:
     def test_max_contract_size_exported(self) -> None:
         """MAX_CONTRACT_SIZE should be exported (10MB)."""
         assert MAX_CONTRACT_SIZE == 10 * 1024 * 1024
+
+    def test_astore_contract_in_consul_exported(self) -> None:
+        """astore_contract_in_consul should be exported."""
+        import asyncio
+
+        from omnibase_infra.runtime import astore_contract_in_consul
+
+        assert asyncio.iscoroutinefunction(astore_contract_in_consul)
+
+    def test_alist_contracts_in_consul_exported(self) -> None:
+        """alist_contracts_in_consul should be exported."""
+        import asyncio
+
+        from omnibase_infra.runtime import alist_contracts_in_consul
+
+        assert asyncio.iscoroutinefunction(alist_contracts_in_consul)
+
+    def test_adelete_contract_from_consul_exported(self) -> None:
+        """adelete_contract_from_consul should be exported."""
+        import asyncio
+
+        from omnibase_infra.runtime import adelete_contract_from_consul
+
+        assert asyncio.iscoroutinefunction(adelete_contract_from_consul)

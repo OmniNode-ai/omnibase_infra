@@ -590,11 +590,92 @@ def delete_contract_from_consul(
     return success
 
 
+async def astore_contract_in_consul(
+    contract_yaml: str,
+    handler_id: str,
+    prefix: str = DEFAULT_CONTRACT_PREFIX,
+    client: consul.Consul | None = None,
+) -> bool:
+    """Async variant of store_contract_in_consul.
+
+    Wraps the synchronous function in asyncio.to_thread() for non-blocking
+    execution in async contexts.
+
+    Args:
+        contract_yaml: The full YAML contract content.
+        handler_id: Handler ID (used as key suffix).
+        prefix: KV prefix (default: onex/contracts/handlers/).
+        client: Optional Consul client.
+
+    Returns:
+        True if successful.
+    """
+    return await to_thread(
+        store_contract_in_consul,
+        contract_yaml,
+        handler_id,
+        prefix,
+        client,
+    )
+
+
+async def alist_contracts_in_consul(
+    prefix: str = DEFAULT_CONTRACT_PREFIX,
+    client: consul.Consul | None = None,
+) -> list[str]:
+    """Async variant of list_contracts_in_consul.
+
+    Wraps the synchronous function in asyncio.to_thread() for non-blocking
+    execution in async contexts.
+
+    Args:
+        prefix: KV prefix (default: onex/contracts/handlers/).
+        client: Optional Consul client.
+
+    Returns:
+        List of handler IDs found.
+    """
+    return await to_thread(
+        list_contracts_in_consul,
+        prefix,
+        client,
+    )
+
+
+async def adelete_contract_from_consul(
+    handler_id: str,
+    prefix: str = DEFAULT_CONTRACT_PREFIX,
+    client: consul.Consul | None = None,
+) -> bool:
+    """Async variant of delete_contract_from_consul.
+
+    Wraps the synchronous function in asyncio.to_thread() for non-blocking
+    execution in async contexts.
+
+    Args:
+        handler_id: Handler ID (used as key suffix).
+        prefix: KV prefix (default: onex/contracts/handlers/).
+        client: Optional Consul client.
+
+    Returns:
+        True if successful.
+    """
+    return await to_thread(
+        delete_contract_from_consul,
+        handler_id,
+        prefix,
+        client,
+    )
+
+
 __all__ = [
     "DEFAULT_CONSUL_HOST",
     "DEFAULT_CONSUL_PORT",
     "DEFAULT_CONTRACT_PREFIX",
     "RegistryContractSource",
+    "adelete_contract_from_consul",
+    "alist_contracts_in_consul",
+    "astore_contract_in_consul",
     "delete_contract_from_consul",
     "list_contracts_in_consul",
     "store_contract_in_consul",

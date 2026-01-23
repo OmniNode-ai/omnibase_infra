@@ -29,11 +29,6 @@ import argparse
 import asyncio
 import os
 import sys
-from pathlib import Path
-
-# Fallback path injection for edge cases where poetry environment isn't active.
-# Preferred: use shebang (#!/usr/bin/env -S poetry run python) or explicit poetry run.
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from omnibase_infra.runtime import (
     DEFAULT_CONSUL_HOST,
