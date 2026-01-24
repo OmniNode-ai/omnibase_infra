@@ -1216,25 +1216,13 @@ class RuntimeHostProcess:
                         extra={"invalid_value": expires_at_str},
                     )
 
-            # Parse allow_bootstrap_override - accept bool or truthy strings
-            if isinstance(allow_override_raw, bool):
-                allow_bootstrap_override = allow_override_raw
-            elif isinstance(allow_override_raw, str):
-                allow_bootstrap_override = allow_override_raw.strip().lower() in {
-                    "1",
-                    "true",
-                    "yes",
-                    "on",
-                }
-            else:
-                allow_bootstrap_override = bool(allow_override_raw)
-
             # Construct config with validation - catch naive datetime errors
+            # Note: allow_bootstrap_override coercion handled by Pydantic field validator
             try:
                 return ModelHandlerSourceConfig(
                     handler_source_mode=mode,
                     bootstrap_expires_at=expires_at,
-                    allow_bootstrap_override=allow_bootstrap_override,
+                    allow_bootstrap_override=allow_override_raw,
                 )
             except ValidationError as e:
                 # Check if error is due to naive datetime (no timezone info)
@@ -1254,7 +1242,7 @@ class RuntimeHostProcess:
                     return ModelHandlerSourceConfig(
                         handler_source_mode=mode,
                         bootstrap_expires_at=None,
-                        allow_bootstrap_override=allow_bootstrap_override,
+                        allow_bootstrap_override=allow_override_raw,
                     )
                 # Re-raise other validation errors
                 raise
