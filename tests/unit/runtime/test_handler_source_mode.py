@@ -81,10 +81,10 @@ def bootstrap_consul_descriptor(sample_version: ModelSemVer) -> ModelHandlerDesc
     """Create a bootstrap handler descriptor for Consul.
 
     This represents a handler loaded from HandlerBootstrapSource.
-    The handler_id follows the bootstrap naming convention: "bootstrap.consul"
+    The handler_id follows the bootstrap naming convention: "proto.consul"
     """
     return ModelHandlerDescriptor(
-        handler_id="bootstrap.consul",
+        handler_id="proto.consul",
         name="Consul Handler (Bootstrap)",
         version=sample_version,
         handler_kind="effect",
@@ -101,10 +101,10 @@ def bootstrap_vault_descriptor(sample_version: ModelSemVer) -> ModelHandlerDescr
     """Create a bootstrap handler descriptor for Vault.
 
     This represents a handler loaded from HandlerBootstrapSource.
-    The handler_id follows the bootstrap naming convention: "bootstrap.vault"
+    The handler_id follows the bootstrap naming convention: "proto.vault"
     """
     return ModelHandlerDescriptor(
-        handler_id="bootstrap.vault",
+        handler_id="proto.vault",
         name="Vault Handler (Bootstrap)",
         version=sample_version,
         handler_kind="effect",
@@ -125,7 +125,7 @@ def contract_consul_descriptor(sample_version: ModelSemVer) -> ModelHandlerDescr
     WIN over the bootstrap handler because contract takes precedence.
     """
     return ModelHandlerDescriptor(
-        handler_id="bootstrap.consul",  # Same identity as bootstrap
+        handler_id="proto.consul",  # Same identity as bootstrap
         name="Consul Handler (Contract)",  # Different name to verify which wins
         version=sample_version,
         handler_kind="effect",
@@ -165,8 +165,8 @@ def mock_bootstrap_source(
     """Create a mock HandlerBootstrapSource.
 
     Returns a mock that provides:
-    - bootstrap.consul handler
-    - bootstrap.vault handler
+    - proto.consul handler
+    - proto.vault handler
     """
     mock_source = MagicMock()
     mock_source.source_type = "BOOTSTRAP"
@@ -187,7 +187,7 @@ def mock_contract_source(
     """Create a mock HandlerContractSource.
 
     Returns a mock that provides:
-    - bootstrap.consul handler (same identity as bootstrap, should override)
+    - proto.consul handler (same identity as bootstrap, should override)
     - contract.custom handler (unique to contract)
     """
     mock_source = MagicMock()
@@ -243,14 +243,14 @@ class TestHybridModeContractWins:
         """When HYBRID mode, contract handler should override bootstrap handler with same handler_id.
 
         Given:
-            - Bootstrap source provides handler with handler_id="bootstrap.consul"
-            - Contract source provides handler with handler_id="bootstrap.consul" (same identity)
+            - Bootstrap source provides handler with handler_id="proto.consul"
+            - Contract source provides handler with handler_id="proto.consul" (same identity)
 
         When:
             - Resolve handlers in HYBRID mode
 
         Then:
-            - Only ONE handler with handler_id="bootstrap.consul" should be registered
+            - Only ONE handler with handler_id="proto.consul" should be registered
             - That handler should be the CONTRACT version (name="Consul Handler (Contract)")
             - The bootstrap version should be discarded
         """
@@ -266,12 +266,12 @@ class TestHybridModeContractWins:
 
         # Get handler by ID
         consul_handlers = [
-            h for h in result.descriptors if h.handler_id == "bootstrap.consul"
+            h for h in result.descriptors if h.handler_id == "proto.consul"
         ]
 
         # Should have exactly one Consul handler (not two)
         assert len(consul_handlers) == 1, (
-            f"Expected exactly 1 handler with id 'bootstrap.consul', "
+            f"Expected exactly 1 handler with id 'proto.consul', "
             f"got {len(consul_handlers)}. "
             "Contract should override bootstrap when same identity."
         )
@@ -292,8 +292,8 @@ class TestHybridModeContractWins:
         """Hybrid mode should include handlers that only exist in contracts.
 
         Given:
-            - Bootstrap source provides: bootstrap.consul, bootstrap.vault
-            - Contract source provides: bootstrap.consul (override), contract.custom (unique)
+            - Bootstrap source provides: proto.consul, proto.vault
+            - Contract source provides: proto.consul (override), contract.custom (unique)
 
         When:
             - Resolve handlers in HYBRID mode
@@ -328,16 +328,16 @@ class TestHybridModeContractWins:
         """Hybrid mode should return merged unique handlers.
 
         Given:
-            - Bootstrap: bootstrap.consul, bootstrap.vault (2 handlers)
-            - Contract: bootstrap.consul (override), contract.custom (1 unique)
+            - Bootstrap: proto.consul, proto.vault (2 handlers)
+            - Contract: proto.consul (override), contract.custom (1 unique)
 
         When:
             - Resolve handlers in HYBRID mode
 
         Then:
             - Total should be 3 unique handlers:
-              - bootstrap.consul (from contract, overrides bootstrap)
-              - bootstrap.vault (from bootstrap, no contract override)
+              - proto.consul (from contract, overrides bootstrap)
+              - proto.vault (from bootstrap, no contract override)
               - contract.custom (from contract, unique)
         """
         from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
@@ -352,7 +352,7 @@ class TestHybridModeContractWins:
 
         assert len(result.descriptors) == 3, (
             f"Expected 3 unique handlers in HYBRID mode, got {len(result.descriptors)}. "
-            "Handlers: bootstrap.consul (contract), bootstrap.vault (bootstrap), "
+            "Handlers: proto.consul (contract), proto.vault (bootstrap), "
             "contract.custom (contract)"
         )
 
@@ -379,14 +379,14 @@ class TestHybridModeFallback:
         """When HYBRID mode, bootstrap handler should be used if no contract handler with same identity.
 
         Given:
-            - Bootstrap source provides handler with handler_id="bootstrap.vault"
-            - Contract source does NOT provide handler with handler_id="bootstrap.vault"
+            - Bootstrap source provides handler with handler_id="proto.vault"
+            - Contract source does NOT provide handler with handler_id="proto.vault"
 
         When:
             - Resolve handlers in HYBRID mode
 
         Then:
-            - bootstrap.vault handler should be registered (from bootstrap as fallback)
+            - proto.vault handler should be registered (from bootstrap as fallback)
         """
         from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
 
@@ -399,11 +399,11 @@ class TestHybridModeFallback:
         result = await resolver.resolve_handlers()
 
         vault_handlers = [
-            h for h in result.descriptors if h.handler_id == "bootstrap.vault"
+            h for h in result.descriptors if h.handler_id == "proto.vault"
         ]
 
         assert len(vault_handlers) == 1, (
-            "Expected bootstrap.vault to be included as fallback"
+            "Expected proto.vault to be included as fallback"
         )
 
         vault_handler = vault_handlers[0]
@@ -421,7 +421,7 @@ class TestHybridModeFallback:
         """When contracts are empty, HYBRID mode should use all bootstrap handlers.
 
         Given:
-            - Bootstrap source provides: bootstrap.consul, bootstrap.vault
+            - Bootstrap source provides: proto.consul, proto.vault
             - Contract source provides: (empty)
 
         When:
@@ -445,7 +445,7 @@ class TestHybridModeFallback:
         )
 
         handler_ids = {h.handler_id for h in result.descriptors}
-        assert handler_ids == {"bootstrap.consul", "bootstrap.vault"}, (
+        assert handler_ids == {"proto.consul", "proto.vault"}, (
             f"Expected bootstrap handler IDs, got {handler_ids}"
         )
 
@@ -505,7 +505,7 @@ class TestBootstrapOnlyMode:
         )
 
         handler_ids = {h.handler_id for h in result.descriptors}
-        assert handler_ids == {"bootstrap.consul", "bootstrap.vault"}, (
+        assert handler_ids == {"proto.consul", "proto.vault"}, (
             f"Expected only bootstrap handler IDs, got {handler_ids}"
         )
 
@@ -592,7 +592,7 @@ class TestContractOnlyMode:
         )
 
         handler_ids = {h.handler_id for h in result.descriptors}
-        assert handler_ids == {"bootstrap.consul", "contract.custom"}, (
+        assert handler_ids == {"proto.consul", "contract.custom"}, (
             f"Expected only contract handler IDs, got {handler_ids}"
         )
 
@@ -619,7 +619,7 @@ class TestContractOnlyMode:
 
         # Find the consul handler - should be from contract
         consul_handlers = [
-            h for h in result.descriptors if h.handler_id == "bootstrap.consul"
+            h for h in result.descriptors if h.handler_id == "proto.consul"
         ]
         assert len(consul_handlers) == 1
 
@@ -723,7 +723,7 @@ class TestHybridModeStructuredLogging:
 
         Given:
             - Bootstrap: consul, vault
-            - Contract: consul (overrides bootstrap.consul)
+            - Contract: consul (overrides proto.consul)
 
         When:
             - Resolve handlers in HYBRID mode
@@ -754,7 +754,7 @@ class TestHybridModeStructuredLogging:
 
         assert found_override, (
             "Expected structured logging field 'override_count' for handlers "
-            "that were overridden by contract. bootstrap.consul should be overridden."
+            "that were overridden by contract. proto.consul should be overridden."
         )
 
 

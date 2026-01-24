@@ -86,11 +86,11 @@ class TestHandlerBootstrapSourceDiscovery:
 
         handler_ids = {d.handler_id for d in result.descriptors}
         expected_ids = {
-            "bootstrap.consul",
-            "bootstrap.db",
-            "bootstrap.http",
-            "bootstrap.mcp",
-            "bootstrap.vault",
+            "proto.consul",
+            "proto.db",
+            "proto.http",
+            "proto.mcp",
+            "proto.vault",
         }
 
         assert handler_ids == expected_ids
@@ -235,6 +235,26 @@ class TestBootstrapSourceRuntimeIntegration:
 
         Verifies that RuntimeHostProcess actually calls the bootstrap source
         discover_handlers() method during startup.
+
+        HYBRID Mode Double-Discovery Design Decision:
+            When HYBRID mode is configured but no contract_paths are provided,
+            the runtime reuses bootstrap_source as both the bootstrap_source
+            AND contract_source parameters to HandlerSourceResolver. This means
+            discover_handlers() is called twice on the same instance.
+
+            This is INTENTIONAL for two reasons:
+
+            1. **Observability Symmetry**: HYBRID mode logs contract_handler_count,
+               bootstrap_handler_count, fallback_handler_count, and override_count.
+               Calling both sources ensures consistent metrics even when sources
+               are identical.
+
+            2. **Semantic Correctness**: HYBRID semantics require consulting both
+               sources. The resolver's merge logic produces correct results even
+               when both sources return identical handlers.
+
+            If you're tempted to "optimize" this to a single call, DON'T - it would
+            break observability expectations and change HYBRID mode semantics.
         """
         from omnibase_core.models.primitives import ModelSemVer
         from omnibase_infra.models.handlers import ModelHandlerDescriptor
@@ -251,7 +271,7 @@ class TestBootstrapSourceRuntimeIntegration:
 
             # Provide a real handler descriptor so the runtime can start
             mock_descriptor = ModelHandlerDescriptor(
-                handler_id="bootstrap.http",
+                handler_id="proto.http",
                 name="HTTP Handler",
                 version=ModelSemVer(major=1, minor=0, patch=0),
                 handler_kind="effect",
@@ -284,6 +304,9 @@ class TestBootstrapSourceRuntimeIntegration:
                 # In HYBRID mode (default), discover_handlers() is called twice:
                 # once for bootstrap_source and once for contract_source
                 # (which is the same instance when no contract_paths provided)
+                #
+                # IMPORTANT: Double-discovery is intentional for observability symmetry.
+                # See docstring above. Do not "optimize" this to call_count == 1.
                 assert mock_source.discover_handlers.call_count == 2, (
                     "discover_handlers should be called twice in HYBRID mode"
                 )

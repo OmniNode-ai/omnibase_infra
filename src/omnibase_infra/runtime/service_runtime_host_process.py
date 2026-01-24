@@ -99,6 +99,10 @@ from omnibase_infra.models.handlers import (
     ModelHandlerDescriptor,
 )
 from omnibase_infra.models.types import JsonDict
+from omnibase_infra.runtime.handler_identity import (
+    HANDLER_IDENTITY_PREFIX,
+    handler_identity,
+)
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
@@ -263,18 +267,19 @@ class PluginLoaderContractSource(ProtocolContractSource):
                     )
 
                     descriptor = ModelHandlerDescriptor(
-                        # NOTE: Uses "bootstrap." prefix intentionally for handler ID matching.
+                        # NOTE: Uses handler_identity() for consistent ID generation.
                         # In HYBRID mode, HandlerSourceResolver compares handler_id values to
                         # determine which handler wins when both sources provide the same handler.
                         # Contract handlers need matching IDs to override their bootstrap equivalents.
                         #
-                        # WARNING: The "bootstrap." prefix is NOT an indicator of source origin.
-                        # It is a namespace convention for identity matching. Contract-discovered
-                        # handlers use this prefix specifically so they can be compared against
-                        # bootstrap-discovered handlers with the same protocol_type.
+                        # The "proto." prefix is a **protocol identity namespace**, NOT a source
+                        # indicator. Both bootstrap and contract sources use this prefix via the
+                        # shared handler_identity() helper. This enables per-handler identity
+                        # matching regardless of which source discovered the handler.
                         #
                         # See: HandlerSourceResolver._resolve_hybrid() for resolution logic.
-                        handler_id=f"bootstrap.{loaded.protocol_type}",
+                        # See: handler_identity.py for the shared helper function.
+                        handler_id=handler_identity(loaded.protocol_type),
                         name=loaded.handler_name,
                         version=loaded.handler_version,
                         handler_kind=handler_kind,
@@ -1337,6 +1342,11 @@ class RuntimeHostProcess:
             # bootstrap as fallback) produces the correct result since both sources
             # return identical handlers. The outcome is functionally equivalent to
             # BOOTSTRAP mode but maintains HYBRID logging/metrics for observability.
+            #
+            # DO NOT "optimize" this to skip the second call - it would break
+            # metrics expectations (contract_handler_count would not be logged)
+            # and change HYBRID mode semantics. See test_bootstrap_source_integration.py
+            # test_bootstrap_source_called_during_start() for the verification test.
             logger.debug(
                 "HYBRID mode: No contract_paths provided, using bootstrap source "
                 "as fallback for contract source",
@@ -1426,10 +1436,12 @@ class RuntimeHostProcess:
         for descriptor in descriptors:
             try:
                 # Extract protocol type from handler_id
-                # Bootstrap handler IDs are prefixed (e.g., "bootstrap.consul" -> "consul")
-                # Contract handlers use their handler_name directly as protocol_type
-                # removeprefix() is a no-op if prefix doesn't exist, so contract handlers keep their name as-is
-                protocol_type = descriptor.handler_id.removeprefix("bootstrap.")
+                # Handler IDs use "proto." prefix for identity matching (e.g., "proto.consul" -> "consul")
+                # Contract handlers also use this prefix for HYBRID mode resolution
+                # removeprefix() is a no-op if prefix doesn't exist, so handlers without prefix keep their name as-is
+                protocol_type = descriptor.handler_id.removeprefix(
+                    f"{HANDLER_IDENTITY_PREFIX}."
+                )
 
                 # Import the handler class from fully qualified path
                 handler_class_path = descriptor.handler_class

@@ -95,7 +95,7 @@ def load_handler_contract_config(
     Example:
         >>> contract = load_handler_contract_config(
         ...     "contracts/handlers/consul/handler_contract.yaml",
-        ...     "bootstrap.consul",
+        ...     "proto.consul",
         ... )
         >>> contract["name"]
         'handler-consul'

@@ -531,13 +531,13 @@ class TestHybridModeBootstrapOverride:
         bootstrap_source = HandlerBootstrapSource()
 
         # Create mock contract source returning handler with SAME handler_id as bootstrap
-        # Bootstrap source uses "bootstrap.http" as handler_id for HTTP handler
+        # Bootstrap source uses "proto.http" as handler_id for HTTP handler
         mock_contract_source = MagicMock()
         mock_contract_source.source_type = "CONTRACT"
 
-        # Create a contract handler that conflicts with bootstrap.http
+        # Create a contract handler that conflicts with proto.http
         contract_http_descriptor = ModelHandlerDescriptor(
-            handler_id="bootstrap.http",  # Same ID as bootstrap HTTP handler
+            handler_id="proto.http",  # Same ID as bootstrap HTTP handler
             name="Contract HTTP Handler (should be overridden)",
             version="2.0.0",
             handler_kind="effect",
@@ -565,10 +565,8 @@ class TestHybridModeBootstrapOverride:
 
         result = await resolver.resolve_handlers()
 
-        # Find the handler with bootstrap.http ID
-        http_handlers = [
-            d for d in result.descriptors if d.handler_id == "bootstrap.http"
-        ]
+        # Find the handler with proto.http ID
+        http_handlers = [d for d in result.descriptors if d.handler_id == "proto.http"]
         assert len(http_handlers) == 1, "Should have exactly one http handler"
 
         http_handler = http_handlers[0]
@@ -689,11 +687,11 @@ class TestHybridModeBootstrapOverride:
         # All bootstrap handlers should be included
         handler_ids = {d.handler_id for d in result.descriptors}
         expected_bootstrap_ids = {
-            "bootstrap.consul",
-            "bootstrap.db",
-            "bootstrap.http",
-            "bootstrap.mcp",
-            "bootstrap.vault",
+            "proto.consul",
+            "proto.db",
+            "proto.http",
+            "proto.mcp",
+            "proto.vault",
         }
         assert expected_bootstrap_ids.issubset(handler_ids), (
             "All bootstrap handlers should be included when contract source is empty"
@@ -725,7 +723,7 @@ class TestHybridModeBootstrapOverride:
 
         # Create conflicting handler
         contract_http_descriptor = ModelHandlerDescriptor(
-            handler_id="bootstrap.http",
+            handler_id="proto.http",
             name="Contract HTTP Handler",
             version="2.0.0",
             handler_kind="effect",
@@ -1338,11 +1336,11 @@ class TestHandlerSourceResolverIntegration:
         # Verify handler IDs
         handler_ids = {d.handler_id for d in result.descriptors}
         expected_ids = {
-            "bootstrap.consul",
-            "bootstrap.db",
-            "bootstrap.http",
-            "bootstrap.mcp",
-            "bootstrap.vault",
+            "proto.consul",
+            "proto.db",
+            "proto.http",
+            "proto.mcp",
+            "proto.vault",
         }
         assert handler_ids == expected_ids
 

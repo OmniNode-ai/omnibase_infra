@@ -160,6 +160,12 @@ from omnibase_infra.runtime.handler_bootstrap_source import (
     SOURCE_TYPE_BOOTSTRAP,
 )
 
+# Handler identity helper (OMN-1095)
+from omnibase_infra.runtime.handler_identity import (
+    HANDLER_IDENTITY_PREFIX,
+    handler_identity,
+)
+
 # Handler source resolver (OMN-1095)
 from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
 
@@ -337,6 +343,9 @@ __all__: list[str] = [
     # Handler bootstrap source (OMN-1087)
     "HandlerBootstrapSource",
     "SOURCE_TYPE_BOOTSTRAP",
+    # Handler identity helper (OMN-1095)
+    "HANDLER_IDENTITY_PREFIX",
+    "handler_identity",
     # Handler source resolver (OMN-1095)
     "HandlerSourceResolver",
     # Handler contract config loader

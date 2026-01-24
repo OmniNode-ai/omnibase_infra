@@ -79,6 +79,7 @@ from omnibase_infra.runtime.handler_contract_config_loader import (
     extract_handler_config,
     load_handler_contract_config,
 )
+from omnibase_infra.runtime.handler_identity import handler_identity
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
 
@@ -95,7 +96,7 @@ class BootstrapEffectDefinition(TypedDict):
     must always specify their implementation class.
 
     Attributes:
-        handler_id: Unique identifier with "bootstrap." prefix.
+        handler_id: Unique identifier with "proto." prefix (protocol identity namespace).
         name: Human-readable display name.
         description: Handler purpose description.
         handler_kind: ONEX handler archetype (all are "effect" for I/O handlers).
@@ -229,7 +230,7 @@ _HANDLER_TYPE_VAULT = "vault"
 # Bootstrap handler definitions.
 #
 # Each entry contains the metadata needed to create a ModelHandlerDescriptor:
-#   handler_id: Unique identifier with "bootstrap." prefix
+#   handler_id: Unique identifier with "proto." prefix (protocol identity namespace)
 #   name: Human-readable display name
 #   description: Handler purpose description
 #   handler_kind: ONEX handler archetype (all are "effect" for I/O handlers)
@@ -252,7 +253,7 @@ _HANDLER_TYPE_VAULT = "vault"
 # providing compile-time type safety for the hardcoded values.
 _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
     {
-        "handler_id": f"bootstrap.{_HANDLER_TYPE_CONSUL}",
+        "handler_id": handler_identity(_HANDLER_TYPE_CONSUL),
         "name": "Consul Handler",
         "description": "HashiCorp Consul service discovery handler",
         "handler_kind": "effect",
@@ -262,7 +263,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "contract_path": "contracts/handlers/consul/handler_contract.yaml",
     },
     {
-        "handler_id": f"bootstrap.{_HANDLER_TYPE_DATABASE}",
+        "handler_id": handler_identity(_HANDLER_TYPE_DATABASE),
         "name": "Database Handler",
         "description": "PostgreSQL database handler",
         "handler_kind": "effect",
@@ -272,7 +273,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "contract_path": "contracts/handlers/db/handler_contract.yaml",
     },
     {
-        "handler_id": f"bootstrap.{_HANDLER_TYPE_HTTP}",
+        "handler_id": handler_identity(_HANDLER_TYPE_HTTP),
         "name": "HTTP Handler",
         "description": "HTTP REST protocol handler",
         "handler_kind": "effect",
@@ -282,7 +283,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "contract_path": "contracts/handlers/http/handler_contract.yaml",
     },
     {
-        "handler_id": f"bootstrap.{_HANDLER_TYPE_VAULT}",
+        "handler_id": handler_identity(_HANDLER_TYPE_VAULT),
         "name": "Vault Handler",
         "description": "HashiCorp Vault secret management handler",
         "handler_kind": "effect",
@@ -292,7 +293,7 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "contract_path": "contracts/handlers/vault/handler_contract.yaml",
     },
     {
-        "handler_id": f"bootstrap.{_HANDLER_TYPE_MCP}",
+        "handler_id": handler_identity(_HANDLER_TYPE_MCP),
         "name": "MCP Handler",
         "description": "Model Context Protocol handler for AI agent integration",
         "handler_kind": "effect",
@@ -331,13 +332,14 @@ class HandlerBootstrapSource(
         >>> source = HandlerBootstrapSource()
         >>> result = await source.discover_handlers()
         >>> print(f"Found {len(result.descriptors)} bootstrap handlers")
-        Found 4 bootstrap handlers
+        Found 5 bootstrap handlers
         >>> for desc in result.descriptors:
         ...     print(f"  - {desc.handler_id}: {desc.description}")
-        - bootstrap.consul: HashiCorp Consul service discovery handler
-        - bootstrap.db: PostgreSQL database handler
-        - bootstrap.http: HTTP REST protocol handler
-        - bootstrap.vault: HashiCorp Vault secret management handler
+        - proto.consul: HashiCorp Consul service discovery handler
+        - proto.db: PostgreSQL database handler
+        - proto.http: HTTP REST protocol handler
+        - proto.mcp: Model Context Protocol handler for AI agent integration
+        - proto.vault: HashiCorp Vault secret management handler
 
     Performance Characteristics:
         - No filesystem or network I/O required

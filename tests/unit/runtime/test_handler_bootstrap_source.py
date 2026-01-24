@@ -43,14 +43,14 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 # Constants for Test Validation
 # =============================================================================
 
-# Expected bootstrap handler IDs
+# Expected bootstrap handler IDs (using "proto." prefix for protocol identity namespace)
 EXPECTED_HANDLER_IDS = frozenset(
     {
-        "bootstrap.consul",
-        "bootstrap.db",
-        "bootstrap.http",
-        "bootstrap.mcp",
-        "bootstrap.vault",
+        "proto.consul",
+        "proto.db",
+        "proto.http",
+        "proto.mcp",
+        "proto.vault",
     }
 )
 
@@ -219,15 +219,15 @@ class TestHandlerBootstrapSourceDiscovery:
         )
 
     @pytest.mark.asyncio
-    async def test_all_handlers_have_bootstrap_prefix(self) -> None:
-        """All handler IDs should start with 'bootstrap.' prefix."""
+    async def test_all_handlers_have_proto_prefix(self) -> None:
+        """All handler IDs should start with 'proto.' prefix (protocol identity namespace)."""
         source = HandlerBootstrapSource()
 
         result = await source.discover_handlers()
 
         for descriptor in result.descriptors:
-            assert descriptor.handler_id.startswith("bootstrap."), (
-                f"Handler ID '{descriptor.handler_id}' does not have 'bootstrap.' prefix"
+            assert descriptor.handler_id.startswith("proto."), (
+                f"Handler ID '{descriptor.handler_id}' does not have 'proto.' prefix"
             )
 
     @pytest.mark.asyncio
@@ -284,11 +284,11 @@ class TestHandlerBootstrapSourceDiscovery:
         result = await source.discover_handlers()
 
         expected_paths = {
-            "bootstrap.consul": "contracts/handlers/consul/handler_contract.yaml",
-            "bootstrap.db": "contracts/handlers/db/handler_contract.yaml",
-            "bootstrap.http": "contracts/handlers/http/handler_contract.yaml",
-            "bootstrap.vault": "contracts/handlers/vault/handler_contract.yaml",
-            "bootstrap.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
+            "proto.consul": "contracts/handlers/consul/handler_contract.yaml",
+            "proto.db": "contracts/handlers/db/handler_contract.yaml",
+            "proto.http": "contracts/handlers/http/handler_contract.yaml",
+            "proto.vault": "contracts/handlers/vault/handler_contract.yaml",
+            "proto.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
         }
 
         for descriptor in result.descriptors:
@@ -474,7 +474,7 @@ class TestHandlerBootstrapSourceDescriptors:
         result = await source.discover_handlers()
 
         consul_descriptors = [
-            d for d in result.descriptors if d.handler_id == "bootstrap.consul"
+            d for d in result.descriptors if d.handler_id == "proto.consul"
         ]
 
         assert len(consul_descriptors) == 1, "Should have exactly one Consul handler"
@@ -491,9 +491,7 @@ class TestHandlerBootstrapSourceDescriptors:
 
         result = await source.discover_handlers()
 
-        db_descriptors = [
-            d for d in result.descriptors if d.handler_id == "bootstrap.db"
-        ]
+        db_descriptors = [d for d in result.descriptors if d.handler_id == "proto.db"]
 
         assert len(db_descriptors) == 1, "Should have exactly one Database handler"
 
@@ -513,7 +511,7 @@ class TestHandlerBootstrapSourceDescriptors:
         result = await source.discover_handlers()
 
         http_descriptors = [
-            d for d in result.descriptors if d.handler_id == "bootstrap.http"
+            d for d in result.descriptors if d.handler_id == "proto.http"
         ]
 
         assert len(http_descriptors) == 1, "Should have exactly one HTTP handler"
@@ -531,7 +529,7 @@ class TestHandlerBootstrapSourceDescriptors:
         result = await source.discover_handlers()
 
         vault_descriptors = [
-            d for d in result.descriptors if d.handler_id == "bootstrap.vault"
+            d for d in result.descriptors if d.handler_id == "proto.vault"
         ]
 
         assert len(vault_descriptors) == 1, "Should have exactly one Vault handler"
@@ -548,9 +546,7 @@ class TestHandlerBootstrapSourceDescriptors:
 
         result = await source.discover_handlers()
 
-        mcp_descriptors = [
-            d for d in result.descriptors if d.handler_id == "bootstrap.mcp"
-        ]
+        mcp_descriptors = [d for d in result.descriptors if d.handler_id == "proto.mcp"]
 
         assert len(mcp_descriptors) == 1, "Should have exactly one MCP handler"
 
