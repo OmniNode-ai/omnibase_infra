@@ -106,9 +106,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumKafkaAcks
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         circuit_breaker_threshold: Number of consecutive failures before circuit opens
         circuit_breaker_reset_timeout: Seconds before circuit breaker resets to half-open
         consumer_sleep_interval: Sleep interval in seconds for consumer loop polling
-        acks: Producer acknowledgment policy ("all", "1", "0")
+        acks: Producer acknowledgment policy (EnumKafkaAcks.ALL, LEADER, NONE, ALL_REPLICAS)
         enable_idempotence: Enable producer idempotence for exactly-once semantics
         auto_offset_reset: Consumer offset reset policy ("earliest", "latest")
         enable_auto_commit: Enable auto-commit for consumer offsets
@@ -216,10 +216,9 @@ class ModelKafkaEventBusConfig(BaseModel):
     )
 
     # Kafka producer settings
-    acks: str = Field(
-        default="all",
-        description="Producer acknowledgment policy ('all', '1', '0')",
-        pattern=r"^(all|0|1)$",
+    acks: EnumKafkaAcks = Field(
+        default=EnumKafkaAcks.ALL,
+        description="Producer acknowledgment policy (ALL, LEADER, NONE, ALL_REPLICAS)",
     )
     enable_idempotence: bool = Field(
         default=True,
@@ -247,6 +246,32 @@ class ModelKafkaEventBusConfig(BaseModel):
             "(e.g., 'dev.dlq.intents.v1', 'prod.dlq.events.v1')"
         ),
     )
+
+    # NOTE: mypy reports "prop-decorator" error because it doesn't understand that
+    # Pydantic's @computed_field transforms the @property into a computed field.
+    # This is a known mypy/Pydantic v2 interaction - the code works correctly at runtime.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def acks_aiokafka(self) -> int | str:
+        """Get acks value in aiokafka-compatible format.
+
+        aiokafka's AIOKafkaProducer expects:
+        - The string "all" for all-replica acknowledgment
+        - Integer values (0, 1, -1) for numeric ack levels
+
+        Returns:
+            The acks value converted to the format expected by aiokafka:
+            - "all" (str) for EnumKafkaAcks.ALL
+            - 0 (int) for EnumKafkaAcks.NONE
+            - 1 (int) for EnumKafkaAcks.LEADER
+            - -1 (int) for EnumKafkaAcks.ALL_REPLICAS
+
+        Example:
+            >>> config = ModelKafkaEventBusConfig(acks=EnumKafkaAcks.LEADER)
+            >>> config.acks_aiokafka
+            1
+        """
+        return self.acks.to_aiokafka()
 
     @field_validator("bootstrap_servers", mode="before")
     @classmethod
@@ -503,10 +528,33 @@ class ModelKafkaEventBusConfig(BaseModel):
             "enable_auto_commit",
         }
 
+        # Enum fields with their valid values mapping
+        # Maps field_name -> (enum_class, value_to_enum_mapping)
+        acks_mapping = {
+            "all": EnumKafkaAcks.ALL,
+            "0": EnumKafkaAcks.NONE,
+            "1": EnumKafkaAcks.LEADER,
+            "-1": EnumKafkaAcks.ALL_REPLICAS,
+        }
+
         for env_var, field_name in env_mappings.items():
             env_value = os.environ.get(env_var)
             if env_value is not None:
-                if field_name in int_fields:
+                if field_name == "acks":
+                    # Special handling for acks enum - fail-fast on invalid values
+                    if env_value in acks_mapping:
+                        overrides[field_name] = acks_mapping[env_value]
+                    else:
+                        valid_values = ", ".join(acks_mapping.keys())
+                        raise ProtocolConfigurationError(
+                            f"Invalid value for environment variable {env_var}='{env_value}'. "
+                            f"Valid values are: {valid_values}",
+                            context=ModelInfraErrorContext.with_correlation(
+                                transport_type=EnumInfraTransportType.KAFKA,
+                                operation="apply_environment_overrides",
+                            ),
+                        )
+                elif field_name in int_fields:
                     try:
                         overrides[field_name] = int(env_value)
                     except ValueError:
@@ -557,7 +605,8 @@ class ModelKafkaEventBusConfig(BaseModel):
                     overrides[field_name] = env_value
 
         if overrides:
-            current_data = self.model_dump()
+            # Exclude computed field to avoid validation error
+            current_data = self.model_dump(exclude={"acks_aiokafka"})
             current_data.update(overrides)
             return ModelKafkaEventBusConfig(**current_data)
 
@@ -583,7 +632,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             circuit_breaker_threshold=5,
             circuit_breaker_reset_timeout=30.0,
             consumer_sleep_interval=0.1,
-            acks="all",
+            acks=EnumKafkaAcks.ALL,
             enable_idempotence=True,
             auto_offset_reset="latest",
             enable_auto_commit=True,

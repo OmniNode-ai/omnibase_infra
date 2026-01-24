@@ -28,6 +28,7 @@ Exports:
     EnumHandlerTypeCategory: Behavioral classification (COMPUTE, EFFECT)
     EnumInfraTransportType: Infrastructure transport type enumeration
     EnumIntrospectionReason: Introspection event reasons (STARTUP, SHUTDOWN, etc.)
+    EnumKafkaAcks: Kafka producer acknowledgment policy (ALL, NONE, LEADER, ALL_REPLICAS)
     EnumMessageCategory: Message categories (EVENT, COMMAND, INTENT)
     EnumNodeArchetype: 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
     EnumNodeOutputType: Node output types for execution shape validation
@@ -66,6 +67,7 @@ from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
+from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -105,6 +107,7 @@ __all__: list[str] = [
     "EnumHandlerTypeCategory",
     "EnumInfraTransportType",
     "EnumIntrospectionReason",
+    "EnumKafkaAcks",
     "EnumMessageCategory",
     "EnumNodeArchetype",
     "EnumNodeOutputType",
