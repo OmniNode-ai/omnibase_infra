@@ -127,29 +127,35 @@ class ModelHandlerSourceConfig(BaseModel):
     @field_validator("allow_bootstrap_override", mode="before")
     @classmethod
     def _coerce_allow_bootstrap_override(cls, value: object) -> bool:
-        """Coerce string values to boolean for config file compatibility.
+        """Coerce string and numeric values to boolean for config file compatibility.
 
         Environment variables and YAML/JSON config files often represent booleans
         as strings. This validator handles common truthy string representations
         before Pydantic's strict type validation.
 
         Args:
-            value: The raw value to coerce (may be str, bool, None, or other).
+            value: The raw value to coerce (may be str, bool, int, float, None, or other).
 
         Returns:
             True if value is a truthy string ("true", "yes", "1", "on") or
             a truthy boolean, False otherwise.
 
-        Note:
-            String comparison is case-insensitive. Non-string, non-bool values
-            are coerced via standard bool() conversion, with None defaulting
-            to False.
+        Type Handling:
+            - bool: Passed through unchanged.
+            - str: Case-insensitive check for "true", "yes", "1", "on".
+            - int/float: 0 and 0.0 are False, all other numbers are True.
+            - None: Returns False.
+            - Unknown types: Default to False for safety.
         """
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
             return value.lower() in ("true", "yes", "1", "on")
-        return bool(value) if value is not None else False
+        if isinstance(value, (int, float)):
+            # Explicit: 0/0.0 = False, any other number = True
+            return bool(value)
+        # Unknown types default to False for safety
+        return False
 
     @field_validator("bootstrap_expires_at")
     @classmethod

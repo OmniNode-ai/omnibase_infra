@@ -58,8 +58,10 @@ from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSour
 
 logger = logging.getLogger(__name__)
 
-# Rebuild ModelContractDiscoveryResult to resolve forward reference
-# to ModelHandlerValidationError (same pattern as handler_contract_source.py)
+# Forward Reference Resolution:
+# ModelContractDiscoveryResult uses a forward reference to ModelHandlerValidationError.
+# Since we import ModelHandlerValidationError above, we can call model_rebuild() here
+# to resolve the forward reference. This call is idempotent - multiple calls are harmless.
 ModelContractDiscoveryResult.model_rebuild()
 
 # Default Consul KV prefix for contract storage

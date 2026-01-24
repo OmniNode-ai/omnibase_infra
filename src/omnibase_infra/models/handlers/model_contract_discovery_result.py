@@ -72,9 +72,11 @@ class ModelContractDiscoveryResult(BaseModel):
     )
 
 
-# Rebuild model to resolve forward reference after all imports are available.
-# model_rebuild() is called in omnibase_infra.runtime.handler_contract_source
-# after ModelHandlerValidationError is imported. See the comment block preceding
-# model_rebuild() in handler_contract_source.py (lines 52-71) for detailed explanation.
+# Forward Reference Resolution:
+# This model uses TYPE_CHECKING to defer import of ModelHandlerValidationError.
+# model_rebuild() is called in runtime modules that import ModelHandlerValidationError
+# (e.g., handler_contract_source.py, handler_bootstrap_source.py, registry_contract_source.py).
+# Each module calls model_rebuild() at module level after importing both the model
+# and the forward-referenced type. This is safe because model_rebuild() is idempotent.
 
 __all__ = ["ModelContractDiscoveryResult"]

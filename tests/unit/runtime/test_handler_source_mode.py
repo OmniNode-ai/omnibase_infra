@@ -46,18 +46,17 @@ import pytest
 from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums.enum_handler_source_mode import EnumHandlerSourceMode
 
-# Import ModelHandlerValidationError BEFORE ModelContractDiscoveryResult
-# to ensure forward reference is available for model_rebuild()
+# Import models for test fixtures
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
 )
 
-# Rebuild to resolve forward reference to ModelHandlerValidationError
-# This is required because ModelContractDiscoveryResult uses TYPE_CHECKING
-# to defer the import of ModelHandlerValidationError for circular import avoidance.
-# See: handler_contract_source.py for the same pattern.
+# Forward Reference Resolution:
+# ModelContractDiscoveryResult uses a forward reference to ModelHandlerValidationError.
+# Since we import ModelHandlerValidationError above, we can call model_rebuild() here
+# to resolve the forward reference. This call is idempotent - multiple calls are harmless.
 ModelContractDiscoveryResult.model_rebuild()
 
 if TYPE_CHECKING:

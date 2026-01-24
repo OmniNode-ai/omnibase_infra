@@ -47,24 +47,10 @@ from omnibase_infra.models.handlers import (
     ModelHandlerDescriptor,
 )
 
-# =============================================================================
-# Forward Reference Resolution for ModelContractDiscoveryResult
-# =============================================================================
-#
-# ModelContractDiscoveryResult has a field typed as list[ModelHandlerValidationError].
-# To avoid circular imports, ModelContractDiscoveryResult uses TYPE_CHECKING to defer
-# the import of ModelHandlerValidationError. This requires calling model_rebuild()
-# after both classes are imported to resolve the forward reference.
-#
-# This module-level call ensures the model is rebuilt before any code in this module
-# creates or validates ModelContractDiscoveryResult instances. Multiple model_rebuild()
-# calls are idempotent, so this is safe even if handler_contract_source.py or
-# handler_bootstrap_source.py has already called it.
-#
-# See Also:
-#   - handler_contract_source.py: Module-level pattern with detailed rationale
-#   - handler_bootstrap_source.py: Deferred pattern with thread-safe initialization
-# =============================================================================
+# Forward Reference Resolution:
+# ModelContractDiscoveryResult uses a forward reference to ModelHandlerValidationError.
+# Since we import ModelHandlerValidationError above, we can call model_rebuild() here
+# to resolve the forward reference. This call is idempotent - multiple calls are harmless.
 ModelContractDiscoveryResult.model_rebuild()
 
 logger = logging.getLogger(__name__)

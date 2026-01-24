@@ -950,14 +950,12 @@ class TestModelContractDiscoveryResultForwardReference:
         evaluation, but Pydantic's validation works correctly after model_rebuild().
         This test verifies Pydantic's type resolution via model_fields.
 
-        This test imports through handler_contract_source to ensure model_rebuild()
-        has been called.
+        This test imports ModelContractDiscoveryResult - the forward reference is
+        resolved centrally in omnibase_infra.models.handlers.__init__.
         """
-        # Import through handler_contract_source which calls model_rebuild()
+        # Import models - model_rebuild() is called centrally in models.handlers.__init__
         from omnibase_infra.models.errors import ModelHandlerValidationError
-        from omnibase_infra.runtime.handler_contract_source import (
-            ModelContractDiscoveryResult,
-        )
+        from omnibase_infra.models.handlers import ModelContractDiscoveryResult
 
         # Verify the model's field info contains the resolved type
         # Pydantic stores resolved types in model_fields after model_rebuild()
@@ -1006,7 +1004,7 @@ class TestModelContractDiscoveryResultForwardReference:
         This verifies the forward reference is properly resolved for Pydantic
         validation at instance creation time.
         """
-        # Import through handler_contract_source to ensure model_rebuild() is called
+        # Import models - model_rebuild() is called centrally in models.handlers.__init__
         from omnibase_infra.runtime.handler_contract_source import (
             ModelContractDiscoveryResult,
         )
