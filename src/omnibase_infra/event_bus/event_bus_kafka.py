@@ -491,7 +491,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 # Apply producer configuration from config model
                 self._producer = AIOKafkaProducer(
                     bootstrap_servers=self._bootstrap_servers,
-                    acks=self._config.acks,
+                    acks=self._config.acks_aiokafka,
                     enable_idempotence=self._config.enable_idempotence,
                 )
 
