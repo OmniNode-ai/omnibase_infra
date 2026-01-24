@@ -327,6 +327,7 @@ class HandlerSourceResolver:
                 "fallback_handler_count": fallback_count,
                 "override_count": override_count,
                 "resolved_handler_count": len(handlers_by_id),
+                "validation_error_count": len(all_errors),
             },
         )
 
