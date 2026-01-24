@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""TDD RED Tests for Handler Source Mode Hybrid Resolution.
+"""Unit Tests for Handler Source Mode Hybrid Resolution.
 
-This module contains the RED phase TDD tests for OMN-1095: Handler Source Mode
-hybrid resolution functionality. These tests define the expected behavior for
-the HandlerSourceResolver class, which does NOT exist yet.
+This module contains unit tests for OMN-1095: Handler Source Mode hybrid
+resolution functionality. These tests verify the behavior of the
+HandlerSourceResolver class.
 
 The HandlerSourceResolver is responsible for:
 1. Resolving handlers from multiple sources (Bootstrap, Contract) based on mode
@@ -19,18 +19,13 @@ Test Categories:
     - Contract Only Mode: Ignores bootstrap handlers
     - Structured Logging: Proper handler count logging
 
-TDD Approach:
-    These tests are written FIRST (RED phase) before the implementation exists.
-    All tests should FAIL initially because HandlerSourceResolver is not implemented.
-    The tests define the expected interface that the implementation must satisfy.
-
 Related:
     - OMN-1095: Handler Source Mode Hybrid Resolution
     - HandlerBootstrapSource: Provides hardcoded bootstrap handlers
     - HandlerContractSource: Provides contract-discovered handlers
     - EnumHandlerSourceMode: Defines BOOTSTRAP, CONTRACT, HYBRID modes
 
-Expected Implementation Path:
+Implementation:
     src/omnibase_infra/runtime/handler_source_resolver.py
 
 See Also:

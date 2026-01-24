@@ -1167,6 +1167,9 @@ class RuntimeHostProcess:
                 "mode", EnumHandlerSourceMode.HYBRID.value
             )
             expires_at_str = handler_source_config.get("bootstrap_expires_at")
+            allow_override_raw = handler_source_config.get(
+                "allow_bootstrap_override", False
+            )
 
             # Parse mode
             try:
@@ -1189,11 +1192,25 @@ class RuntimeHostProcess:
                         extra={"invalid_value": expires_at_str},
                     )
 
+            # Parse allow_bootstrap_override - accept bool or truthy strings
+            if isinstance(allow_override_raw, bool):
+                allow_bootstrap_override = allow_override_raw
+            elif isinstance(allow_override_raw, str):
+                allow_bootstrap_override = allow_override_raw.strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }
+            else:
+                allow_bootstrap_override = bool(allow_override_raw)
+
             # Construct config with validation - catch naive datetime errors
             try:
                 return ModelHandlerSourceConfig(
                     handler_source_mode=mode,
                     bootstrap_expires_at=expires_at,
+                    allow_bootstrap_override=allow_bootstrap_override,
                 )
             except ValidationError as e:
                 # Check if error is due to naive datetime (no timezone info)
@@ -1213,6 +1230,7 @@ class RuntimeHostProcess:
                     return ModelHandlerSourceConfig(
                         handler_source_mode=mode,
                         bootstrap_expires_at=None,
+                        allow_bootstrap_override=allow_bootstrap_override,
                     )
                 # Re-raise other validation errors
                 raise
@@ -1307,6 +1325,7 @@ class RuntimeHostProcess:
             bootstrap_source=bootstrap_source,
             contract_source=contract_source,
             mode=source_config.effective_mode,
+            allow_bootstrap_override=source_config.allow_bootstrap_override,
         )
 
         # Resolve handlers
