@@ -9,7 +9,7 @@ including the acks_aiokafka computed field and environment variable parsing.
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -184,3 +184,221 @@ class TestAcksIntegrationWithEventBus:
                 f"Expected {expected_type.__name__} for {acks_enum.name}, "
                 f"got {type(result).__name__}"
             )
+
+
+class TestAcksAiokafkaProducerCompatibility:
+    """Tests verifying acks values are compatible with AIOKafkaProducer constructor.
+
+    These tests mock the AIOKafkaProducer class and verify that EventBusKafka
+    passes the correctly-typed acks value when creating the producer. This ensures
+    aiokafka receives:
+    - str "all" for EnumKafkaAcks.ALL
+    - int 0 for EnumKafkaAcks.NONE
+    - int 1 for EnumKafkaAcks.LEADER
+    - int -1 for EnumKafkaAcks.ALL_REPLICAS
+    """
+
+    @pytest.mark.asyncio
+    @patch("omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer")
+    async def test_producer_receives_string_all_for_acks_all(
+        self, mock_producer_class: MagicMock
+    ) -> None:
+        """AIOKafkaProducer should receive string 'all' for EnumKafkaAcks.ALL."""
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+
+        # Setup mock producer with async start method
+        mock_producer = MagicMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_producer_class.return_value = mock_producer
+
+        # Create config with ALL acks
+        config = ModelKafkaEventBusConfig(acks=EnumKafkaAcks.ALL)
+        bus = EventBusKafka(config=config)
+
+        try:
+            await bus.start()
+
+            # Verify AIOKafkaProducer was called with acks="all" (string)
+            mock_producer_class.assert_called_once()
+            call_kwargs = mock_producer_class.call_args.kwargs
+            assert "acks" in call_kwargs, (
+                "acks parameter not passed to AIOKafkaProducer"
+            )
+            assert call_kwargs["acks"] == "all", (
+                f"Expected acks='all', got acks={call_kwargs['acks']!r}"
+            )
+            assert isinstance(call_kwargs["acks"], str), (
+                f"Expected str type for acks, got {type(call_kwargs['acks']).__name__}"
+            )
+        finally:
+            await bus.close()
+
+    @pytest.mark.asyncio
+    @patch("omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer")
+    async def test_producer_receives_int_zero_for_acks_none(
+        self, mock_producer_class: MagicMock
+    ) -> None:
+        """AIOKafkaProducer should receive integer 0 for EnumKafkaAcks.NONE."""
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+
+        # Setup mock producer with async start method
+        mock_producer = MagicMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_producer_class.return_value = mock_producer
+
+        # Create config with NONE acks
+        config = ModelKafkaEventBusConfig(acks=EnumKafkaAcks.NONE)
+        bus = EventBusKafka(config=config)
+
+        try:
+            await bus.start()
+
+            # Verify AIOKafkaProducer was called with acks=0 (integer)
+            mock_producer_class.assert_called_once()
+            call_kwargs = mock_producer_class.call_args.kwargs
+            assert "acks" in call_kwargs, (
+                "acks parameter not passed to AIOKafkaProducer"
+            )
+            assert call_kwargs["acks"] == 0, (
+                f"Expected acks=0, got acks={call_kwargs['acks']!r}"
+            )
+            assert isinstance(call_kwargs["acks"], int), (
+                f"Expected int type for acks, got {type(call_kwargs['acks']).__name__}"
+            )
+            # Verify it's not a boolean (bool is a subclass of int in Python)
+            assert not isinstance(call_kwargs["acks"], bool), (
+                "acks should be int, not bool"
+            )
+        finally:
+            await bus.close()
+
+    @pytest.mark.asyncio
+    @patch("omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer")
+    async def test_producer_receives_int_one_for_acks_leader(
+        self, mock_producer_class: MagicMock
+    ) -> None:
+        """AIOKafkaProducer should receive integer 1 for EnumKafkaAcks.LEADER."""
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+
+        # Setup mock producer with async start method
+        mock_producer = MagicMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_producer_class.return_value = mock_producer
+
+        # Create config with LEADER acks
+        config = ModelKafkaEventBusConfig(acks=EnumKafkaAcks.LEADER)
+        bus = EventBusKafka(config=config)
+
+        try:
+            await bus.start()
+
+            # Verify AIOKafkaProducer was called with acks=1 (integer)
+            mock_producer_class.assert_called_once()
+            call_kwargs = mock_producer_class.call_args.kwargs
+            assert "acks" in call_kwargs, (
+                "acks parameter not passed to AIOKafkaProducer"
+            )
+            assert call_kwargs["acks"] == 1, (
+                f"Expected acks=1, got acks={call_kwargs['acks']!r}"
+            )
+            assert isinstance(call_kwargs["acks"], int), (
+                f"Expected int type for acks, got {type(call_kwargs['acks']).__name__}"
+            )
+            assert not isinstance(call_kwargs["acks"], bool), (
+                "acks should be int, not bool"
+            )
+        finally:
+            await bus.close()
+
+    @pytest.mark.asyncio
+    @patch("omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer")
+    async def test_producer_receives_int_negative_one_for_acks_all_replicas(
+        self, mock_producer_class: MagicMock
+    ) -> None:
+        """AIOKafkaProducer should receive integer -1 for EnumKafkaAcks.ALL_REPLICAS."""
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+
+        # Setup mock producer with async start method
+        mock_producer = MagicMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_producer_class.return_value = mock_producer
+
+        # Create config with ALL_REPLICAS acks
+        config = ModelKafkaEventBusConfig(acks=EnumKafkaAcks.ALL_REPLICAS)
+        bus = EventBusKafka(config=config)
+
+        try:
+            await bus.start()
+
+            # Verify AIOKafkaProducer was called with acks=-1 (integer)
+            mock_producer_class.assert_called_once()
+            call_kwargs = mock_producer_class.call_args.kwargs
+            assert "acks" in call_kwargs, (
+                "acks parameter not passed to AIOKafkaProducer"
+            )
+            assert call_kwargs["acks"] == -1, (
+                f"Expected acks=-1, got acks={call_kwargs['acks']!r}"
+            )
+            assert isinstance(call_kwargs["acks"], int), (
+                f"Expected int type for acks, got {type(call_kwargs['acks']).__name__}"
+            )
+            assert not isinstance(call_kwargs["acks"], bool), (
+                "acks should be int, not bool"
+            )
+        finally:
+            await bus.close()
+
+    @pytest.mark.asyncio
+    @patch("omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer")
+    async def test_producer_receives_correct_acks_for_all_variants_parametrized(
+        self, mock_producer_class: MagicMock
+    ) -> None:
+        """Verify all acks variants pass correct value AND type to AIOKafkaProducer."""
+        from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+
+        # Test matrix: (enum_variant, expected_value, expected_type)
+        test_cases = [
+            (EnumKafkaAcks.ALL, "all", str),
+            (EnumKafkaAcks.NONE, 0, int),
+            (EnumKafkaAcks.LEADER, 1, int),
+            (EnumKafkaAcks.ALL_REPLICAS, -1, int),
+        ]
+
+        for acks_enum, expected_value, expected_type in test_cases:
+            # Reset mock for each iteration
+            mock_producer_class.reset_mock()
+
+            # Setup mock producer with async start method
+            mock_producer = MagicMock()
+            mock_producer.start = AsyncMock()
+            mock_producer.stop = AsyncMock()
+            mock_producer_class.return_value = mock_producer
+
+            # Create config and bus with specific acks
+            config = ModelKafkaEventBusConfig(acks=acks_enum)
+            bus = EventBusKafka(config=config)
+
+            try:
+                await bus.start()
+
+                # Verify AIOKafkaProducer was called with correct acks
+                mock_producer_class.assert_called_once()
+                call_kwargs = mock_producer_class.call_args.kwargs
+
+                assert "acks" in call_kwargs, (
+                    f"acks parameter not passed to AIOKafkaProducer for {acks_enum.name}"
+                )
+                assert call_kwargs["acks"] == expected_value, (
+                    f"For {acks_enum.name}: expected acks={expected_value!r}, "
+                    f"got acks={call_kwargs['acks']!r}"
+                )
+                assert isinstance(call_kwargs["acks"], expected_type), (
+                    f"For {acks_enum.name}: expected {expected_type.__name__} type, "
+                    f"got {type(call_kwargs['acks']).__name__}"
+                )
+            finally:
+                await bus.close()

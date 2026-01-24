@@ -247,7 +247,10 @@ class ModelKafkaEventBusConfig(BaseModel):
         ),
     )
 
-    @computed_field  # type: ignore[prop-decorator]  # Pydantic v2 computed_field requires @property
+    # NOTE: mypy reports "prop-decorator" error because it doesn't understand that
+    # Pydantic's @computed_field transforms the @property into a computed field.
+    # This is a known mypy/Pydantic v2 interaction - the code works correctly at runtime.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def acks_aiokafka(self) -> int | str:
         """Get acks value in aiokafka-compatible format.
@@ -542,9 +545,10 @@ class ModelKafkaEventBusConfig(BaseModel):
                     if env_value in acks_mapping:
                         overrides[field_name] = acks_mapping[env_value]
                     else:
+                        valid_values = ", ".join(acks_mapping.keys())
                         raise ProtocolConfigurationError(
                             f"Invalid value for environment variable {env_var}='{env_value}'. "
-                            f"Valid values are: all, 0, 1, -1",
+                            f"Valid values are: {valid_values}",
                             context=ModelInfraErrorContext.with_correlation(
                                 transport_type=EnumInfraTransportType.KAFKA,
                                 operation="apply_environment_overrides",
