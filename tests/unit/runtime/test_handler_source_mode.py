@@ -254,7 +254,6 @@ class TestHybridModeContractWins:
             - That handler should be the CONTRACT version (name="Consul Handler (Contract)")
             - The bootstrap version should be discarded
         """
-        # Import will fail until implementation exists (TDD RED phase)
         from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
 
         resolver = HandlerSourceResolver(

@@ -659,6 +659,11 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             },
         )
 
+        # contract.handler_version is guaranteed non-None by model_validator
+        assert contract.handler_version is not None, (
+            "handler_version should be set by model_validator"
+        )
+
         return ModelLoadedHandler(
             handler_name=handler_name,
             protocol_type=protocol_type,
@@ -667,6 +672,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             contract_path=resolved_contract_path,
             capability_tags=capability_tags,
             loaded_at=datetime.now(UTC),
+            handler_version=contract.handler_version,
         )
 
     def load_from_directory(

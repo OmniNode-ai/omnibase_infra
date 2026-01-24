@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 logger = logging.getLogger(__name__)
 
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.runtime.model_contract_security_config import (
@@ -131,6 +132,10 @@ class ModelHandlerContract(BaseModel):
         default=None,
         description="Optional security configuration for the handler",
     )
+    handler_version: ModelSemVer | None = Field(
+        default=None,
+        description="Handler version in semantic versioning format. If not provided, defaults to 1.0.0",
+    )
 
     @field_validator("handler_type", mode="before")
     @classmethod
@@ -207,18 +212,22 @@ class ModelHandlerContract(BaseModel):
         return []
 
     @model_validator(mode="after")
-    def set_default_protocol_type(self) -> ModelHandlerContract:
-        """Set protocol_type from handler_name if not explicitly provided.
+    def set_defaults(self) -> ModelHandlerContract:
+        """Set default values for protocol_type and handler_version.
 
-        If protocol_type is None, derives it from handler_name by stripping
-        the 'handler-' prefix. If handler_name doesn't have that prefix,
-        uses the full handler_name as protocol_type.
+        Protocol Type:
+            If protocol_type is None, derives it from handler_name by stripping
+            the 'handler-' prefix. If handler_name doesn't have that prefix,
+            uses the full handler_name as protocol_type.
 
-        Guards against empty derived protocol_type which would produce
-        invalid registry keys.
+            Guards against empty derived protocol_type which would produce
+            invalid registry keys.
+
+        Handler Version:
+            If handler_version is None, sets it to the default version 1.0.0.
 
         Returns:
-            Self with protocol_type populated.
+            Self with protocol_type and handler_version populated.
 
         Raises:
             ValueError: If derived protocol_type would be empty (e.g., handler_name
@@ -232,6 +241,8 @@ class ModelHandlerContract(BaseModel):
             ... )
             >>> contract.protocol_type
             'db'
+            >>> contract.handler_version
+            ModelSemVer(major=1, minor=0, patch=0)
 
             >>> contract = ModelHandlerContract(
             ...     handler_name="custom-handler",
@@ -241,6 +252,10 @@ class ModelHandlerContract(BaseModel):
             >>> contract.protocol_type
             'custom-handler'
         """
+        # Set default handler_version if not provided
+        if self.handler_version is None:
+            self.handler_version = ModelSemVer(major=1, minor=0, patch=0)
+
         if self.protocol_type is None:
             prefix = "handler-"
             if self.handler_name.startswith(prefix):
@@ -263,7 +278,7 @@ class ModelHandlerContract(BaseModel):
                 f"Provide a non-empty protocol_type or handler_name."
             )
 
-        # Log successful protocol_type derivation for debugging
+        # Log successful contract validation for debugging
         logger.debug(
             "Handler contract validated successfully",
             extra={
@@ -271,6 +286,7 @@ class ModelHandlerContract(BaseModel):
                 "handler_class": self.handler_class,
                 "protocol_type": self.protocol_type,
                 "handler_type": self.handler_type.value,
+                "handler_version": str(self.handler_version),
             },
         )
 

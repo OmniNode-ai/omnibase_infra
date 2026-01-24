@@ -92,7 +92,6 @@ if TYPE_CHECKING:
     )
 
 # Imports for PluginLoaderContractSource adapter class
-from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
@@ -187,14 +186,23 @@ class PluginLoaderContractSource(ProtocolContractSource):
         testability and code organization.
     """
 
-    def __init__(self, contract_paths: list[Path]) -> None:
+    def __init__(
+        self,
+        contract_paths: list[Path],
+        allowed_namespaces: tuple[str, ...] | None = None,
+    ) -> None:
         """Initialize the contract source with paths to scan.
 
         Args:
             contract_paths: List of filesystem paths containing handler contracts.
+            allowed_namespaces: Optional tuple of allowed module namespaces for
+                handler class imports. If None, all namespaces are allowed.
         """
         self._contract_paths = contract_paths
-        self._plugin_loader = HandlerPluginLoader()
+        self._allowed_namespaces = allowed_namespaces
+        self._plugin_loader = HandlerPluginLoader(
+            allowed_namespaces=list(allowed_namespaces) if allowed_namespaces else None
+        )
 
     @property
     def source_type(self) -> str:
@@ -255,11 +263,13 @@ class PluginLoaderContractSource(ProtocolContractSource):
                     )
 
                     descriptor = ModelHandlerDescriptor(
-                        # Use protocol_type as handler_id for compatibility
-                        # with HandlerSourceResolver's per-identity resolution
-                        handler_id=loaded.protocol_type,
+                        # Use "bootstrap." prefix to match bootstrap handler ID format.
+                        # This enables contract handlers to override bootstrap handlers
+                        # with the same identity in HYBRID mode, where the resolver
+                        # compares handler_id values for per-identity resolution.
+                        handler_id=f"bootstrap.{loaded.protocol_type}",
                         name=loaded.handler_name,
-                        version=ModelSemVer(major=1, minor=0, patch=0),
+                        version=loaded.handler_version,
                         handler_kind=handler_kind,
                         input_model="omnibase_infra.models.types.JsonDict",
                         output_model="omnibase_core.models.dispatch.ModelHandlerOutput",
@@ -1291,7 +1301,7 @@ class RuntimeHostProcess:
             # Use PluginLoaderContractSource which uses the simpler contract schema
             # compatible with test contracts (handler_name, handler_class, handler_type)
             contract_source: ProtocolContractSource = PluginLoaderContractSource(
-                contract_paths=[Path(p) for p in self._contract_paths],
+                contract_paths=self._contract_paths,
             )
         else:
             # No contract paths provided
