@@ -263,10 +263,17 @@ class PluginLoaderContractSource(ProtocolContractSource):
                     )
 
                     descriptor = ModelHandlerDescriptor(
-                        # Use "bootstrap." prefix to match bootstrap handler ID format.
-                        # This enables contract handlers to override bootstrap handlers
-                        # with the same identity in HYBRID mode, where the resolver
-                        # compares handler_id values for per-identity resolution.
+                        # NOTE: Uses "bootstrap." prefix intentionally for handler ID matching.
+                        # In HYBRID mode, HandlerSourceResolver compares handler_id values to
+                        # determine which handler wins when both sources provide the same handler.
+                        # Contract handlers need matching IDs to override their bootstrap equivalents.
+                        #
+                        # WARNING: The "bootstrap." prefix is NOT an indicator of source origin.
+                        # It is a namespace convention for identity matching. Contract-discovered
+                        # handlers use this prefix specifically so they can be compared against
+                        # bootstrap-discovered handlers with the same protocol_type.
+                        #
+                        # See: HandlerSourceResolver._resolve_hybrid() for resolution logic.
                         handler_id=f"bootstrap.{loaded.protocol_type}",
                         name=loaded.handler_name,
                         version=loaded.handler_version,
