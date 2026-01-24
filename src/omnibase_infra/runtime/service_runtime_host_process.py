@@ -1153,6 +1153,8 @@ class RuntimeHostProcess:
         .. versionadded:: 0.7.0
             Part of OMN-1095 handler source mode integration.
         """
+        # Deferred imports: avoid circular dependencies at module load time
+        # and reduce import overhead when this method is not called.
         from datetime import datetime
 
         from pydantic import ValidationError
@@ -1318,6 +1320,14 @@ class RuntimeHostProcess:
             # bootstrap as fallback) produces the correct result since both sources
             # return identical handlers. The outcome is functionally equivalent to
             # BOOTSTRAP mode but maintains HYBRID logging/metrics for observability.
+            logger.debug(
+                "HYBRID mode: No contract_paths provided, using bootstrap source "
+                "as fallback for contract source",
+                extra={
+                    "mode": source_config.effective_mode.value,
+                    "behavior": "bootstrap_source_reused",
+                },
+            )
             contract_source = bootstrap_source
 
         # Create resolver with the effective mode (handles expiry enforcement)
@@ -1465,6 +1475,7 @@ class RuntimeHostProcess:
                     "Failed to import handler",
                     extra={
                         "handler_id": descriptor.handler_id,
+                        "handler_class": descriptor.handler_class,
                     },
                 )
                 error_count += 1
@@ -1473,6 +1484,7 @@ class RuntimeHostProcess:
                     "Unexpected error registering handler",
                     extra={
                         "handler_id": descriptor.handler_id,
+                        "handler_class": descriptor.handler_class,
                     },
                 )
                 error_count += 1

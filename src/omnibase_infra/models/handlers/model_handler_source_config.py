@@ -64,6 +64,8 @@ class ModelHandlerSourceConfig(BaseModel):
             contract handlers in HYBRID mode. Default is False, meaning
             contract handlers take precedence (inverse of naive HYBRID).
             Has no effect in BOOTSTRAP or CONTRACT modes.
+            When parsing from environment or config, string values "true",
+            "yes", "1", "on" (case-insensitive) are accepted as truthy.
 
         bootstrap_expires_at: If set and expired, refuse BOOTSTRAP mode and
             force CONTRACT. This is a production safety mechanism to ensure
@@ -107,7 +109,9 @@ class ModelHandlerSourceConfig(BaseModel):
         default=False,
         description=(
             "If True, bootstrap handlers can override contract handlers in HYBRID mode. "
-            "Default is False (contract handlers take precedence)."
+            "Default is False (contract handlers take precedence). "
+            "When parsing from config, string values 'true', 'yes', '1', 'on' "
+            "(case-insensitive) are accepted as truthy."
         ),
     )
 
