@@ -9,6 +9,7 @@ expected by aiokafka's AIOKafkaProducer.
 import pytest
 
 from omnibase_infra.enums import EnumKafkaAcks
+from omnibase_infra.enums.enum_kafka_acks import _AIOKAFKA_MAP
 
 
 class TestEnumKafkaAcksValues:
@@ -127,4 +128,11 @@ class TestAllMembersHaveToAiokafka:
             assert isinstance(result, expected_type), (
                 f"{member.name}.to_aiokafka() should return {expected_type.__name__}, "
                 f"got {type(result).__name__}"
+            )
+
+    def test_aiokafka_map_covers_all_members(self) -> None:
+        """_AIOKAFKA_MAP should have entry for every enum member."""
+        for member in EnumKafkaAcks:
+            assert member.value in _AIOKAFKA_MAP, (
+                f"Missing _AIOKAFKA_MAP entry for {member.name}"
             )

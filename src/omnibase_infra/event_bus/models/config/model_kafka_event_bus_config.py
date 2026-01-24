@@ -247,7 +247,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         ),
     )
 
-    @computed_field  # type: ignore[prop-decorator]
+    @computed_field  # type: ignore[prop-decorator]  # Pydantic v2 computed_field requires @property
     @property
     def acks_aiokafka(self) -> int | str:
         """Get acks value in aiokafka-compatible format.
@@ -538,17 +538,18 @@ class ModelKafkaEventBusConfig(BaseModel):
             env_value = os.environ.get(env_var)
             if env_value is not None:
                 if field_name == "acks":
-                    # Special handling for acks enum
+                    # Special handling for acks enum - fail-fast on invalid values
                     if env_value in acks_mapping:
                         overrides[field_name] = acks_mapping[env_value]
                     else:
-                        logger.warning(
-                            "Invalid value for environment variable %s='%s'. "
-                            "Valid values are: all, 0, 1, -1. Using default.",
-                            env_var,
-                            env_value,
+                        raise ProtocolConfigurationError(
+                            f"Invalid value for environment variable {env_var}='{env_value}'. "
+                            f"Valid values are: all, 0, 1, -1",
+                            context=ModelInfraErrorContext.with_correlation(
+                                transport_type=EnumInfraTransportType.KAFKA,
+                                operation="apply_environment_overrides",
+                            ),
                         )
-                        continue
                 elif field_name in int_fields:
                     try:
                         overrides[field_name] = int(env_value)

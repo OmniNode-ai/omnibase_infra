@@ -22,6 +22,16 @@ from __future__ import annotations
 
 from enum import Enum
 
+# Explicit mapping for aiokafka type conversion.
+# Defined at module level because str-based enums don't support ClassVar attributes
+# (attribute lookup on str enum members uses string indexing, not class attribute lookup).
+_AIOKAFKA_MAP: dict[str, int | str] = {
+    "all": "all",
+    "0": 0,
+    "1": 1,
+    "-1": -1,
+}
+
 
 class EnumKafkaAcks(str, Enum):
     """Kafka producer acknowledgment policy.
@@ -39,6 +49,11 @@ class EnumKafkaAcks(str, Enum):
         NONE: Fire and forget, no acknowledgment (string "0" -> int 0)
         LEADER: Wait for leader acknowledgment only (string "1" -> int 1)
         ALL_REPLICAS: Explicit numeric form of ALL (string "-1" -> int -1)
+
+    Note:
+        ALL ("all") and ALL_REPLICAS (-1) are semantically equivalent in Kafka.
+        ALL_REPLICAS is provided for explicit numeric configuration compatibility
+        when migrating from systems that use the numeric form.
 
     Example:
         >>> acks = EnumKafkaAcks.ALL
@@ -78,10 +93,7 @@ class EnumKafkaAcks(str, Enum):
             >>> EnumKafkaAcks.ALL_REPLICAS.to_aiokafka()
             -1
         """
-        if self == EnumKafkaAcks.ALL:
-            return "all"
-        # All other values are numeric strings that should be integers
-        return int(self.value)
+        return _AIOKAFKA_MAP[self.value]
 
 
 __all__: list[str] = ["EnumKafkaAcks"]

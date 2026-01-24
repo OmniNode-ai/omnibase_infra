@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from omnibase_infra.enums import EnumKafkaAcks
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 
@@ -126,19 +127,21 @@ class TestAcksEnvironmentOverride:
             assert config.acks == EnumKafkaAcks.ALL_REPLICAS
             assert config.acks_aiokafka == -1
 
-    def test_invalid_env_uses_default(self) -> None:
-        """Invalid environment variable should use default and log warning."""
+    def test_invalid_env_raises_error(self) -> None:
+        """Invalid environment variable should raise ProtocolConfigurationError."""
         with patch.dict(os.environ, {"KAFKA_ACKS": "invalid"}, clear=False):
-            config = ModelKafkaEventBusConfig.default()
-            # Should use default (ALL) when invalid
-            assert config.acks == EnumKafkaAcks.ALL
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                ModelKafkaEventBusConfig.default()
+            assert "KAFKA_ACKS='invalid'" in str(exc_info.value)
+            assert "Valid values are: all, 0, 1, -1" in str(exc_info.value)
 
-    def test_numeric_invalid_env_uses_default(self) -> None:
-        """Invalid numeric environment variable should use default."""
+    def test_numeric_invalid_env_raises_error(self) -> None:
+        """Invalid numeric environment variable should raise ProtocolConfigurationError."""
         with patch.dict(os.environ, {"KAFKA_ACKS": "2"}, clear=False):
-            config = ModelKafkaEventBusConfig.default()
-            # Should use default (ALL) when invalid
-            assert config.acks == EnumKafkaAcks.ALL
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                ModelKafkaEventBusConfig.default()
+            assert "KAFKA_ACKS='2'" in str(exc_info.value)
+            assert "Valid values are: all, 0, 1, -1" in str(exc_info.value)
 
 
 class TestAcksModelDump:
