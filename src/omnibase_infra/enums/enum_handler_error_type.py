@@ -43,6 +43,13 @@ class EnumHandlerErrorType(str, Enum):
             The parsed contract contains invalid field values or violates
             schema constraints defined in the ONEX contract specification.
 
+    Discovery Errors:
+        DISCOVERY_ERROR: Handler discovery failed due to infrastructure issues.
+            The handler could not be discovered due to connection failures,
+            timeouts, or other infrastructure problems (e.g., Consul unavailable,
+            network errors). This is distinct from parse/validation errors which
+            occur AFTER the contract is successfully retrieved.
+
     Validation Errors:
         DESCRIPTOR_VALIDATION_ERROR: Handler descriptor validation failed.
             The handler descriptor (metadata, annotations, signature) does not
@@ -79,6 +86,9 @@ class EnumHandlerErrorType(str, Enum):
     # Contract errors
     CONTRACT_PARSE_ERROR = "contract_parse_error"
     CONTRACT_VALIDATION_ERROR = "contract_validation_error"
+
+    # Discovery errors
+    DISCOVERY_ERROR = "discovery_error"
 
     # Validation errors
     DESCRIPTOR_VALIDATION_ERROR = "descriptor_validation_error"
