@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### OMN-1524: Infrastructure Primitives for Atomic Operations
+- `write_atomic_bytes()` / `write_atomic_bytes_async()` for crash-safe file writes with temp file + rename pattern
+- `transaction_context()` async context manager with configurable isolation levels, read-only/deferrable options, and per-transaction timeouts
+- `retry_on_optimistic_conflict()` decorator/helper with exponential backoff, jitter, and attempt tracking
+- Comprehensive test coverage (103 unit tests) for all new utilities
+
 #### OMN-1515: Intent Handler Routing (Demo)
 - `HANDLER_TYPE_GRAPH` and `HANDLER_TYPE_INTENT` constants for handler registration
 - `HandlerIntent` class wrapping graph operations for intent storage
