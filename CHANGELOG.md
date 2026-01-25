@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Dependencies
-- **omnibase-core**: Updated from ^0.9.1 to ^0.9.3 (core release with latest updates)
+- **omnibase-core**: Updated from ^0.9.1 to ^0.9.4 (core release with latest updates)
 
 ## [0.2.0] - 2026-01-17
 
