@@ -1512,6 +1512,285 @@ class TestHandlerGraphExecuteDispatcher:
 
             await handler.shutdown()
 
+    @pytest.mark.asyncio
+    async def test_execute_create_node_invalid_labels_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test create_node raises error when labels is not a list."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.create_node",
+                "payload": {
+                    "labels": "not-a-list",  # Invalid type
+                    "properties": {"name": "Alice"},
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "labels" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_create_node_invalid_properties_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test create_node raises error when properties is not a dict."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.create_node",
+                "payload": {
+                    "labels": ["Person"],
+                    "properties": "not-a-dict",  # Invalid type
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "properties" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_query_batch_invalid_query_item_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute_query_batch raises error when query item is not a dict."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.execute_query_batch",
+                "payload": {
+                    "queries": ["not-a-dict"],  # Invalid item type
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "index" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_query_batch_missing_query_string_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute_query_batch raises error when query item missing query field."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.execute_query_batch",
+                "payload": {
+                    "queries": [{"parameters": {}}],  # Missing "query" field
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "query" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_query_batch_invalid_parameters_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute_query_batch raises error when parameters is not a dict."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.execute_query_batch",
+                "payload": {
+                    "queries": [
+                        {
+                            "query": "MATCH (n) RETURN n",
+                            "parameters": "not-a-dict",  # Invalid type
+                        }
+                    ],
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "parameters" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_traverse_invalid_relationship_types_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test traverse raises error when relationship_types is not a list."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.traverse",
+                "payload": {
+                    "start_node_id": 123,
+                    "relationship_types": "not-a-list",  # Invalid type
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "relationship_types" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_traverse_invalid_direction_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test traverse raises error when direction is not a string."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.traverse",
+                "payload": {
+                    "start_node_id": 123,
+                    "direction": 123,  # Invalid type (not a string)
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "direction" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_traverse_invalid_direction_value_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test traverse raises error when direction has invalid value."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.traverse",
+                "payload": {
+                    "start_node_id": 123,
+                    "direction": "sideways",  # Invalid value
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            error_msg = str(exc_info.value).lower()
+            assert "direction" in error_msg
+            # Error should mention valid values
+            assert (
+                "outgoing" in error_msg
+                or "incoming" in error_msg
+                or "both" in error_msg
+            )
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_traverse_invalid_max_depth_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test traverse raises error when max_depth is not int/float."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.traverse",
+                "payload": {
+                    "start_node_id": 123,
+                    "max_depth": "deep",  # Invalid type (not int/float)
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "max_depth" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_traverse_invalid_filters_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test traverse raises error when filters is not a dict."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.traverse",
+                "payload": {
+                    "start_node_id": 123,
+                    "filters": "not-a-dict",  # Invalid type
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "filters" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
 
 class TestHandlerGraphLogWarnings:
     """Test suite for log warning assertions."""
