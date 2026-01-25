@@ -1453,7 +1453,7 @@ class HandlerGraph(
         to_node_id = payload.get("to_node_id")
         relationship_type = payload.get("relationship_type")
 
-        if not from_node_id or not to_node_id or not relationship_type:
+        if from_node_id is None or to_node_id is None or relationship_type is None:
             raise RuntimeHostError(
                 "Missing required fields: from_node_id, to_node_id, relationship_type",
                 context=self._error_context(
@@ -1498,7 +1498,7 @@ class HandlerGraph(
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
         """Execute graph.delete_node operation."""
         node_id = payload.get("node_id")
-        if not node_id:
+        if node_id is None:
             raise RuntimeHostError(
                 "Missing required field: node_id",
                 context=self._error_context("graph.delete_node", correlation_id),
@@ -1529,7 +1529,7 @@ class HandlerGraph(
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
         """Execute graph.delete_relationship operation."""
         relationship_id = payload.get("relationship_id")
-        if not relationship_id:
+        if relationship_id is None:
             raise RuntimeHostError(
                 "Missing required field: relationship_id",
                 context=self._error_context(
@@ -1560,7 +1560,7 @@ class HandlerGraph(
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
         """Execute graph.traverse operation."""
         start_node_id = payload.get("start_node_id")
-        if not start_node_id:
+        if start_node_id is None:
             raise RuntimeHostError(
                 "Missing required field: start_node_id",
                 context=self._error_context("graph.traverse", correlation_id),

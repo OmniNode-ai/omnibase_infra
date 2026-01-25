@@ -1709,6 +1709,33 @@ class TestHandlerGraphExecuteDispatcher:
             await handler.shutdown()
 
     @pytest.mark.asyncio
+    async def test_execute_query_invalid_parameters_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute_query raises error when parameters is not a dict."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.execute_query",
+                "payload": {
+                    "query": "MATCH (n) RETURN n",
+                    "parameters": "not-a-dict",  # Invalid type
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "parameters" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
     async def test_execute_missing_payload_raises_error(
         self, handler: HandlerGraph, mock_driver: MagicMock
     ) -> None:
