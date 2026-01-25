@@ -1221,54 +1221,30 @@ class HandlerGraph(
         input_envelope_id = self._extract_envelope_id(envelope)
 
         if not self._initialized or self._driver is None:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="execute",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "HandlerGraph not initialized. Call initialize() first.",
-                context=ctx,
+                context=self._error_context("execute", correlation_id),
             )
 
         operation = envelope.get("operation")
         if not isinstance(operation, str):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="execute",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "Missing or invalid 'operation' in envelope",
-                context=ctx,
+                context=self._error_context("execute", correlation_id),
             )
 
         if operation not in SUPPORTED_OPERATIONS:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation=operation,
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 f"Operation '{operation}' not supported. "
                 f"Available: {', '.join(sorted(SUPPORTED_OPERATIONS))}",
-                context=ctx,
+                context=self._error_context(operation, correlation_id),
             )
 
         payload = envelope.get("payload")
         if not isinstance(payload, dict):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation=operation,
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "Missing or invalid 'payload' in envelope",
-                context=ctx,
+                context=self._error_context(operation, correlation_id),
             )
 
         # Route to appropriate handler based on operation
@@ -1310,30 +1286,18 @@ class HandlerGraph(
         """Execute graph.execute_query operation."""
         query = payload.get("query")
         if not isinstance(query, str):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.execute_query",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "Missing or invalid 'query' in payload",
-                context=ctx,
+                context=self._error_context("graph.execute_query", correlation_id),
             )
 
         parameters = payload.get("parameters")
         params_dict: Mapping[str, JsonType] | None = None
         if parameters is not None:
             if not isinstance(parameters, dict):
-                ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.GRAPH,
-                    operation="graph.execute_query",
-                    target_name="graph_handler",
-                    correlation_id=correlation_id,
-                )
                 raise RuntimeHostError(
                     "Invalid 'parameters' in payload - must be a dict",
-                    context=ctx,
+                    context=self._error_context("graph.execute_query", correlation_id),
                 )
             params_dict = parameters  # type: ignore[assignment]
 
@@ -1374,54 +1338,38 @@ class HandlerGraph(
         """Execute graph.execute_query_batch operation."""
         queries_raw = payload.get("queries")
         if not isinstance(queries_raw, list):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.execute_query_batch",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "Missing or invalid 'queries' in payload - must be a list",
-                context=ctx,
+                context=self._error_context(
+                    "graph.execute_query_batch", correlation_id
+                ),
             )
 
         # Convert to list of tuples with fail-fast validation
         queries: list[tuple[str, Mapping[str, JsonType] | None]] = []
         for idx, q in enumerate(queries_raw):
             if not isinstance(q, dict):
-                ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.GRAPH,
-                    operation="graph.execute_query_batch",
-                    target_name="graph_handler",
-                    correlation_id=correlation_id,
-                )
                 raise RuntimeHostError(
                     f"Query at index {idx} must be a dict, got {type(q).__name__}",
-                    context=ctx,
+                    context=self._error_context(
+                        "graph.execute_query_batch", correlation_id
+                    ),
                 )
             query_str = q.get("query")
             if not isinstance(query_str, str):
-                ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.GRAPH,
-                    operation="graph.execute_query_batch",
-                    target_name="graph_handler",
-                    correlation_id=correlation_id,
-                )
                 raise RuntimeHostError(
                     f"Query at index {idx} missing or invalid 'query' field",
-                    context=ctx,
+                    context=self._error_context(
+                        "graph.execute_query_batch", correlation_id
+                    ),
                 )
             params = q.get("parameters")
             if params is not None and not isinstance(params, dict):
-                ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.GRAPH,
-                    operation="graph.execute_query_batch",
-                    target_name="graph_handler",
-                    correlation_id=correlation_id,
-                )
                 raise RuntimeHostError(
                     f"Query at index {idx} has invalid 'parameters' - must be dict or null",
-                    context=ctx,
+                    context=self._error_context(
+                        "graph.execute_query_batch", correlation_id
+                    ),
                 )
             queries.append(
                 (query_str, params if isinstance(params, dict) else None)  # type: ignore[arg-type]
@@ -1457,15 +1405,9 @@ class HandlerGraph(
         labels_raw = payload.get("labels")
         if labels_raw is not None:
             if not isinstance(labels_raw, list):
-                ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.GRAPH,
-                    operation="graph.create_node",
-                    target_name="graph_handler",
-                    correlation_id=correlation_id,
-                )
                 raise RuntimeHostError(
                     "Invalid 'labels' in payload - must be a list of strings",
-                    context=ctx,
+                    context=self._error_context("graph.create_node", correlation_id),
                 )
             labels_list: list[str] = [str(lbl) for lbl in labels_raw]
         else:
@@ -1474,15 +1416,9 @@ class HandlerGraph(
         properties_raw = payload.get("properties")
         if properties_raw is not None:
             if not isinstance(properties_raw, dict):
-                ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.GRAPH,
-                    operation="graph.create_node",
-                    target_name="graph_handler",
-                    correlation_id=correlation_id,
-                )
                 raise RuntimeHostError(
                     "Invalid 'properties' in payload - must be a dict",
-                    context=ctx,
+                    context=self._error_context("graph.create_node", correlation_id),
                 )
             props_dict: Mapping[str, JsonType] = properties_raw  # type: ignore[assignment]
         else:
@@ -1518,15 +1454,11 @@ class HandlerGraph(
         relationship_type = payload.get("relationship_type")
 
         if not from_node_id or not to_node_id or not relationship_type:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.create_relationship",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "Missing required fields: from_node_id, to_node_id, relationship_type",
-                context=ctx,
+                context=self._error_context(
+                    "graph.create_relationship", correlation_id
+                ),
             )
 
         properties = payload.get("properties")
@@ -1567,15 +1499,9 @@ class HandlerGraph(
         """Execute graph.delete_node operation."""
         node_id = payload.get("node_id")
         if not node_id:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.delete_node",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "Missing required field: node_id",
-                context=ctx,
+                context=self._error_context("graph.delete_node", correlation_id),
             )
 
         detach = bool(payload.get("detach", False))
@@ -1604,15 +1530,11 @@ class HandlerGraph(
         """Execute graph.delete_relationship operation."""
         relationship_id = payload.get("relationship_id")
         if not relationship_id:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.delete_relationship",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "Missing required field: relationship_id",
-                context=ctx,
+                context=self._error_context(
+                    "graph.delete_relationship", correlation_id
+                ),
             )
 
         result = await self.delete_relationship(str(relationship_id))
@@ -1639,15 +1561,9 @@ class HandlerGraph(
         """Execute graph.traverse operation."""
         start_node_id = payload.get("start_node_id")
         if not start_node_id:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.traverse",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 "Missing required field: start_node_id",
-                context=ctx,
+                context=self._error_context("graph.traverse", correlation_id),
             )
 
         # relationship_types - optional, but if provided must be list
@@ -1655,16 +1571,10 @@ class HandlerGraph(
         rel_types: list[str] | None = None
         if relationship_types is not None:
             if not isinstance(relationship_types, list):
-                ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.GRAPH,
-                    operation="graph.traverse",
-                    target_name="graph_handler",
-                    correlation_id=correlation_id,
-                )
                 raise RuntimeHostError(
                     f"Invalid 'relationship_types' - must be list, "
                     f"got {type(relationship_types).__name__}",
-                    context=ctx,
+                    context=self._error_context("graph.traverse", correlation_id),
                 )
             rel_types = [str(rt) for rt in relationship_types]
 
@@ -1673,28 +1583,16 @@ class HandlerGraph(
         if direction_raw is None:
             direction = "outgoing"
         elif not isinstance(direction_raw, str):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.traverse",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 f"Invalid 'direction' - must be string, "
                 f"got {type(direction_raw).__name__}",
-                context=ctx,
+                context=self._error_context("graph.traverse", correlation_id),
             )
         elif direction_raw not in ("outgoing", "incoming", "both"):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.traverse",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 f"Invalid 'direction' value '{direction_raw}' - "
                 f"must be 'outgoing', 'incoming', or 'both'",
-                context=ctx,
+                context=self._error_context("graph.traverse", correlation_id),
             )
         else:
             direction = direction_raw
@@ -1704,16 +1602,10 @@ class HandlerGraph(
         if max_depth_raw is None:
             max_depth = 1
         elif not isinstance(max_depth_raw, int | float):
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="graph.traverse",
-                target_name="graph_handler",
-                correlation_id=correlation_id,
-            )
             raise RuntimeHostError(
                 f"Invalid 'max_depth' - must be int or float, "
                 f"got {type(max_depth_raw).__name__}",
-                context=ctx,
+                context=self._error_context("graph.traverse", correlation_id),
             )
         else:
             max_depth = int(max_depth_raw)
@@ -1723,16 +1615,10 @@ class HandlerGraph(
         filters_raw = payload.get("filters")
         if filters_raw is not None:
             if not isinstance(filters_raw, dict):
-                ctx = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.GRAPH,
-                    operation="graph.traverse",
-                    target_name="graph_handler",
-                    correlation_id=correlation_id,
-                )
                 raise RuntimeHostError(
                     f"Invalid 'filters' - must be dict, "
                     f"got {type(filters_raw).__name__}",
-                    context=ctx,
+                    context=self._error_context("graph.traverse", correlation_id),
                 )
             filters = ModelGraphTraversalFilters(
                 node_labels=filters_raw.get("node_labels"),  # type: ignore[arg-type]
@@ -1775,6 +1661,25 @@ class HandlerGraph(
 
         return self._build_graph_response(
             query_payload, correlation_id, input_envelope_id
+        )
+
+    def _error_context(
+        self, operation: str, correlation_id: UUID
+    ) -> ModelInfraErrorContext:
+        """Create standardized error context for graph operations.
+
+        Args:
+            operation: The operation name (e.g., "graph.execute_query").
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            ModelInfraErrorContext configured for graph handler.
+        """
+        return ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.GRAPH,
+            operation=operation,
+            target_name="graph_handler",
+            correlation_id=correlation_id,
         )
 
     def _build_graph_response(

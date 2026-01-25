@@ -1340,6 +1340,251 @@ class TestHandlerGraphExecuteDispatcher:
 
             await handler.shutdown()
 
+    def _setup_mock_session_for_query_batch(
+        self,
+        mock_driver: MagicMock,
+    ) -> AsyncMock:
+        """Set up mock session for batch query execution with transaction."""
+        mock_session = AsyncMock()
+        mock_tx = AsyncMock()
+
+        mock_result = AsyncMock()
+        mock_result.data = AsyncMock(return_value=[{"count": 1}])
+
+        mock_summary = MagicMock()
+        mock_summary.query_type = "w"
+        mock_summary.counters = MagicMock()
+        mock_summary.counters.contains_updates = True
+        mock_summary.counters.nodes_created = 1
+        mock_summary.counters.nodes_deleted = 0
+        mock_summary.counters.relationships_created = 0
+        mock_summary.counters.relationships_deleted = 0
+        mock_summary.counters.properties_set = 2
+        mock_summary.counters.labels_added = 1
+        mock_summary.counters.labels_removed = 0
+        mock_result.consume = AsyncMock(return_value=mock_summary)
+
+        mock_tx.run = AsyncMock(return_value=mock_result)
+        mock_tx.commit = AsyncMock()
+        mock_tx.rollback = AsyncMock()
+
+        mock_session.begin_transaction = AsyncMock(return_value=mock_tx)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_driver.session.return_value = mock_session_cm
+
+        return mock_session
+
+    def _setup_mock_session_for_create_relationship(
+        self,
+        mock_driver: MagicMock,
+    ) -> AsyncMock:
+        """Set up mock session for relationship creation."""
+        mock_session = AsyncMock()
+        mock_result = AsyncMock()
+
+        mock_rel = MagicMock()
+        mock_rel.type = "KNOWS"
+        mock_rel.items = MagicMock(return_value=[("since", 2020)])
+
+        mock_record = MagicMock()
+        mock_record.__getitem__ = lambda self, key: {
+            "r": mock_rel,
+            "eid": "5:abc:456",
+            "rid": 456,
+            "start_eid": "4:abc:123",
+            "end_eid": "4:abc:124",
+        }[key]
+
+        mock_result.single = AsyncMock(return_value=mock_record)
+        mock_result.consume = AsyncMock()
+
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_driver.session.return_value = mock_session_cm
+
+        return mock_session
+
+    def _setup_mock_session_for_delete_node(
+        self,
+        mock_driver: MagicMock,
+    ) -> AsyncMock:
+        """Set up mock session for node deletion."""
+        mock_session = AsyncMock()
+        mock_result = AsyncMock()
+
+        mock_record = MagicMock()
+        mock_record.__getitem__ = lambda self, key: {"deleted": 1}[key]
+
+        mock_result.single = AsyncMock(return_value=mock_record)
+        mock_result.consume = AsyncMock()
+
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_driver.session.return_value = mock_session_cm
+
+        return mock_session
+
+    def _setup_mock_session_for_delete_relationship(
+        self,
+        mock_driver: MagicMock,
+    ) -> AsyncMock:
+        """Set up mock session for relationship deletion."""
+        mock_session = AsyncMock()
+        mock_result = AsyncMock()
+
+        mock_record = MagicMock()
+        mock_record.__getitem__ = lambda self, key: {"deleted": 1}[key]
+
+        mock_result.single = AsyncMock(return_value=mock_record)
+        mock_result.consume = AsyncMock()
+
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_driver.session.return_value = mock_session_cm
+
+        return mock_session
+
+    @pytest.mark.asyncio
+    async def test_execute_routes_to_execute_query_batch(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() routes graph.execute_query_batch to execute_query_batch()."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            self._setup_mock_session_for_query_batch(mock_driver)
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.execute_query_batch",
+                "payload": {
+                    "queries": [
+                        {
+                            "query": "CREATE (n:Person {name: $name})",
+                            "parameters": {"name": "Alice"},
+                        },
+                        {
+                            "query": "CREATE (n:Person {name: $name})",
+                            "parameters": {"name": "Bob"},
+                        },
+                    ],
+                    "transaction": True,
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result is not None
+            assert result.result.status == "success"
+            assert result.handler_id == "graph-handler"
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_routes_to_create_relationship(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() routes graph.create_relationship to create_relationship()."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            self._setup_mock_session_for_create_relationship(mock_driver)
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.create_relationship",
+                "payload": {
+                    "from_node_id": 123,
+                    "to_node_id": 124,
+                    "relationship_type": "KNOWS",
+                    "properties": {"since": 2020},
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result is not None
+            assert result.result.status == "success"
+            assert result.handler_id == "graph-handler"
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_routes_to_delete_node(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() routes graph.delete_node to delete_node()."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            self._setup_mock_session_for_delete_node(mock_driver)
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.delete_node",
+                "payload": {
+                    "node_id": 123,
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result is not None
+            assert result.result.status == "success"
+            assert result.handler_id == "graph-handler"
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_routes_to_delete_relationship(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() routes graph.delete_relationship to delete_relationship()."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            self._setup_mock_session_for_delete_relationship(mock_driver)
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.delete_relationship",
+                "payload": {
+                    "relationship_id": 456,
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result is not None
+            assert result.result.status == "success"
+            assert result.handler_id == "graph-handler"
+
+            await handler.shutdown()
+
     @pytest.mark.asyncio
     async def test_execute_unknown_operation_raises_error(
         self, handler: HandlerGraph, mock_driver: MagicMock
