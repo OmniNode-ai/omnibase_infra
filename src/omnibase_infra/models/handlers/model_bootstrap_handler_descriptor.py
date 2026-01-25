@@ -44,7 +44,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
     All other fields maintain the same constraints as the parent class.
 
     Attributes:
-        handler_id: Unique identifier for the handler (e.g., "bootstrap.consul").
+        handler_id: Unique identifier for the handler (e.g., "proto.consul").
         name: Human-readable name for the handler.
         version: Semantic version (ModelSemVer). Accepts string, dict, or ModelSemVer.
         handler_kind: Handler kind (compute, effect, reducer, orchestrator).
@@ -58,7 +58,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
         Create a bootstrap handler descriptor:
 
         >>> descriptor = ModelBootstrapHandlerDescriptor(
-        ...     handler_id="bootstrap.consul",
+        ...     handler_id="proto.consul",
         ...     name="Consul Handler",
         ...     version="1.0.0",
         ...     handler_kind="effect",
@@ -74,7 +74,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
         >>> from pydantic import ValidationError
         >>> try:
         ...     ModelBootstrapHandlerDescriptor(
-        ...         handler_id="bootstrap.consul",
+        ...         handler_id="proto.consul",
         ...         name="Consul Handler",
         ...         version="1.0.0",
         ...         handler_kind="effect",
@@ -144,7 +144,7 @@ class ModelBootstrapHandlerDescriptor(ModelHandlerDescriptor):
 
         Example:
             >>> bootstrap_desc = ModelBootstrapHandlerDescriptor(
-            ...     handler_id="bootstrap.consul",
+            ...     handler_id="proto.consul",
             ...     name="Consul Handler",
             ...     version="1.0.0",
             ...     handler_kind="effect",

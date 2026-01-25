@@ -275,7 +275,7 @@ class TestBootstrapHandlerDescriptorToBase:
     def test_to_base_descriptor_copies_all_fields(self) -> None:
         """to_base_descriptor() should copy all field values correctly."""
         bootstrap_desc = ModelBootstrapHandlerDescriptor(
-            handler_id="bootstrap.consul",
+            handler_id="proto.consul",
             name="Consul Handler",
             version="2.1.3",
             handler_kind="effect",

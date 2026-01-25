@@ -659,6 +659,20 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             },
         )
 
+        # contract.handler_version is guaranteed non-None by model_validator
+        if contract.handler_version is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_contract",
+            )
+            raise ProtocolConfigurationError(
+                "handler_version should be set by model_validator",
+                context=context,
+                loader_error=EnumHandlerLoaderError.MISSING_REQUIRED_FIELDS.value,
+                contract_path=str(contract_path),
+            )
+
         return ModelLoadedHandler(
             handler_name=handler_name,
             protocol_type=protocol_type,
@@ -667,6 +681,7 @@ class HandlerPluginLoader(ProtocolHandlerPluginLoader):
             contract_path=resolved_contract_path,
             capability_tags=capability_tags,
             loaded_at=datetime.now(UTC),
+            handler_version=contract.handler_version,
         )
 
     def load_from_directory(

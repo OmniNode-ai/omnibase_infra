@@ -24,6 +24,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
 
 
@@ -53,10 +54,13 @@ class ModelLoadedHandler(BaseModel):
             Examples: ['auth', 'validation', 'http-client'].
         loaded_at: Timestamp when the handler was successfully loaded.
             Used for diagnostics and cache invalidation.
+        handler_version: Semantic version of the handler from the contract.
+            Used for version tracking and compatibility checks.
 
     Example:
         >>> from datetime import datetime, UTC
         >>> from pathlib import Path
+        >>> from omnibase_core.models.primitives import ModelSemVer
         >>> from omnibase_infra.enums import EnumHandlerTypeCategory
         >>> handler = ModelLoadedHandler(
         ...     handler_name="auth.validate_token",
@@ -65,6 +69,7 @@ class ModelLoadedHandler(BaseModel):
         ...     contract_path=Path("/app/handlers/auth/handler_contract.yaml"),
         ...     capability_tags=["auth", "validation", "jwt"],
         ...     loaded_at=datetime.now(UTC),
+        ...     handler_version=ModelSemVer(major=1, minor=0, patch=0),
         ... )
         >>> handler.handler_name
         'auth.validate_token'
@@ -114,6 +119,10 @@ class ModelLoadedHandler(BaseModel):
     loaded_at: datetime = Field(
         ...,
         description="Timestamp when the handler was successfully loaded",
+    )
+    handler_version: ModelSemVer = Field(
+        ...,
+        description="Handler semantic version from contract",
     )
 
 
