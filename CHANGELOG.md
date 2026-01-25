@@ -5,6 +5,27 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-01-25
+
+### Added
+
+#### OMN-1524: Infrastructure Primitives for Atomic Operations
+- `write_atomic_bytes()` / `write_atomic_bytes_async()` for crash-safe file writes with temp file + rename pattern
+- `transaction_context()` async context manager with configurable isolation levels, read-only/deferrable options, and per-transaction timeouts
+- `retry_on_optimistic_conflict()` decorator/helper with exponential backoff, jitter, and attempt tracking
+- Comprehensive test coverage (103 unit tests) for all new utilities
+
+#### OMN-1515: Intent Handler Routing (Demo)
+- `HANDLER_TYPE_GRAPH` and `HANDLER_TYPE_INTENT` constants for handler registration
+- `HandlerIntent` class wrapping graph operations for intent storage
+- Operations: `intent.store`, `intent.query_session`, `intent.query_distribution`
+- Auto-routing registration for `HandlerGraph` and `HandlerIntent` in `util_wiring.py`
+
+### Changed
+
+#### Dependencies
+- **omnibase-core**: Updated from ^0.9.1 to ^0.9.4 (core release with latest updates)
+
 ## [0.2.0] - 2026-01-17
 
 ### Breaking Changes

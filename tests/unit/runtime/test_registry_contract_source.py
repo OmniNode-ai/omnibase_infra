@@ -60,7 +60,7 @@ contract_version:
   patch: 0
 description: "A test handler for unit tests"
 descriptor:
-  handler_kind: "effect"
+  node_archetype: "effect"
 input_model: "omnibase_infra.models.types.JsonDict"
 output_model: "omnibase_core.models.dispatch.ModelHandlerOutput"
 metadata:
@@ -75,7 +75,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """

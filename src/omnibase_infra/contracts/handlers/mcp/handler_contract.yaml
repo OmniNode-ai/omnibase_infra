@@ -9,7 +9,7 @@ description: >
   Effect handler for Model Context Protocol (MCP) integration. Exposes ONEX nodes as MCP tools for AI agent integration via streamable HTTP transport.
 
 descriptor:
-  handler_kind: effect
+  node_archetype: effect
   purity: side_effecting
   # Idempotent: true for list_tools/describe, false for call_tool (depends on target)
   # Overall handler is marked non-idempotent since tool execution may have side effects.
