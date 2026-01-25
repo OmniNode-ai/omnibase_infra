@@ -218,14 +218,8 @@ class HandlerIntent(MixinEnvelopeExtraction):
         Returns:
             dict with created node details.
         """
-        if self._graph_handler is None:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="intent.store",
-                target_name="intent_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError("Graph handler not initialized", context=ctx)
+        # Note: _graph_handler is guaranteed non-None by execute() validation
+        assert self._graph_handler is not None  # Type narrowing for mypy
 
         # Extract intent properties - use JsonType for graph compatibility
         properties: dict[str, JsonType] = {
@@ -270,14 +264,8 @@ class HandlerIntent(MixinEnvelopeExtraction):
         Returns:
             dict with matching intent nodes.
         """
-        if self._graph_handler is None:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="intent.query_session",
-                target_name="intent_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError("Graph handler not initialized", context=ctx)
+        # Note: _graph_handler is guaranteed non-None by execute() validation
+        assert self._graph_handler is not None  # Type narrowing for mypy
 
         session_id = payload.get("session_id")
         if not session_id:
@@ -333,14 +321,8 @@ class HandlerIntent(MixinEnvelopeExtraction):
         Returns:
             dict with intent statistics including counts by intent_type.
         """
-        if self._graph_handler is None:
-            ctx = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.GRAPH,
-                operation="intent.query_distribution",
-                target_name="intent_handler",
-                correlation_id=correlation_id,
-            )
-            raise RuntimeHostError("Graph handler not initialized", context=ctx)
+        # Note: _graph_handler is guaranteed non-None by execute() validation
+        assert self._graph_handler is not None  # Type narrowing for mypy
 
         # Query total count
         count_query = "MATCH (i:Intent) RETURN count(i) as total"
