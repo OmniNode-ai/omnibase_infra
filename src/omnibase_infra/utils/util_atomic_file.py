@@ -45,7 +45,7 @@ Example:
     13
 
 .. versionadded:: 0.10.0
-    Created as part of OMN-XXXX atomic write utilities.
+    Created as part of OMN-1524 atomic write utilities.
 """
 
 from __future__ import annotations
