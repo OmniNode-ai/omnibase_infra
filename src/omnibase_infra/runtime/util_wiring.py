@@ -121,14 +121,18 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.handlers.handler_db import HandlerDb
+from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
+from omnibase_infra.handlers.handler_intent import HandlerIntent
 from omnibase_infra.handlers.handler_mcp import HandlerMCP
 from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_CONSUL,
     HANDLER_TYPE_DATABASE,
+    HANDLER_TYPE_GRAPH,
     HANDLER_TYPE_HTTP,
+    HANDLER_TYPE_INTENT,
     HANDLER_TYPE_MCP,
     HANDLER_TYPE_VAULT,
     RegistryEventBusBinding,
@@ -170,7 +174,9 @@ _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolContainerAware], str]] = {
     # NOTE: Handlers implement ProtocolHandler structurally but concrete types differ from protocol.
     HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
+    HANDLER_TYPE_GRAPH: (HandlerGraph, "Graph database (Memgraph/Neo4j) handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_HTTP: (HandlerHttpRest, "HTTP REST protocol handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
+    HANDLER_TYPE_INTENT: (HandlerIntent, "Intent storage and query handler for demo"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_MCP: (HandlerMCP, "Model Context Protocol handler for AI agents"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
 }
@@ -197,7 +203,9 @@ def wire_default_handlers() -> dict[str, list[str]]:
     Registered Handlers:
         - CONSUL: HandlerConsul for HashiCorp Consul service discovery
         - DB: HandlerDb for PostgreSQL database operations
+        - GRAPH: HandlerGraph for graph database (Memgraph/Neo4j) operations
         - HTTP: HandlerHttpRest for HTTP/REST protocol operations
+        - INTENT: HandlerIntent for intent storage and query (demo)
         - MCP: HandlerMCP for Model Context Protocol AI agent integration
         - VAULT: HandlerVault for HashiCorp Vault secret management
 

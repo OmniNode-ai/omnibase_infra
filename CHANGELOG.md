@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.3] - 2026-01-25
 
+### Added
+
+#### OMN-1515: Intent Handler Routing (Demo)
+- `HANDLER_TYPE_GRAPH` and `HANDLER_TYPE_INTENT` constants for handler registration
+- `HandlerIntent` class wrapping graph operations for intent storage
+- Operations: `intent.store`, `intent.query_session`, `intent.query_distribution`
+- Auto-routing registration for `HandlerGraph` and `HandlerIntent` in `util_wiring.py`
+
 ### Changed
 
 #### Dependencies

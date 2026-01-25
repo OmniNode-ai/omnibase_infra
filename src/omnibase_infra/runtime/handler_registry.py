@@ -115,6 +115,12 @@ HANDLER_TYPE_MCP: str = "mcp"
 The MCP handler exposes ONEX nodes as tools for AI agents via streamable HTTP.
 Supports tools/list and tools/call operations per the MCP specification."""
 
+HANDLER_TYPE_GRAPH: str = "graph"
+"""Graph database (Memgraph/Neo4j) protocol handler type."""
+
+HANDLER_TYPE_INTENT: str = "intent"
+"""Intent storage and query handler type for demo wiring."""
+
 
 # =============================================================================
 # Event Bus Kind Constants
@@ -300,8 +306,10 @@ __all__: list[str] = [
     "HANDLER_TYPE_CONSUL",
     "HANDLER_TYPE_DATABASE",
     "HANDLER_TYPE_GRPC",
+    "HANDLER_TYPE_GRAPH",
     # Handler type constants
     "HANDLER_TYPE_HTTP",
+    "HANDLER_TYPE_INTENT",
     "HANDLER_TYPE_KAFKA",
     "HANDLER_TYPE_MCP",
     "HANDLER_TYPE_VALKEY",
