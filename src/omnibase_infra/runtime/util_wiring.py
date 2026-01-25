@@ -176,6 +176,7 @@ _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolContainerAware], str]] = {
     HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_GRAPH: (HandlerGraph, "Graph database (Memgraph/Neo4j) handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_HTTP: (HandlerHttpRest, "HTTP REST protocol handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
+    # DEMO: Temporary registration - remove when contract-driven (OMN-1515)
     HANDLER_TYPE_INTENT: (HandlerIntent, "Intent storage and query handler for demo"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_MCP: (HandlerMCP, "Model Context Protocol handler for AI agents"),  # type: ignore[dict-item]  # NOTE: structural subtyping
     HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping

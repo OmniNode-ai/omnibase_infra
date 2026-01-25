@@ -118,7 +118,7 @@ Supports tools/list and tools/call operations per the MCP specification."""
 HANDLER_TYPE_GRAPH: str = "graph"
 """Graph database (Memgraph/Neo4j) protocol handler type."""
 
-HANDLER_TYPE_INTENT: str = "intent"
+HANDLER_TYPE_INTENT: str = "intent"  # DEMO (OMN-1515)
 """Intent storage and query handler type for demo wiring."""
 
 

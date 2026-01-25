@@ -36,7 +36,10 @@ from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
 from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
-from omnibase_infra.handlers.handler_intent import HANDLER_ID_INTENT, HandlerIntent
+from omnibase_infra.handlers.handler_intent import (  # DEMO: Temporary intent handler wiring (OMN-1515)
+    HANDLER_ID_INTENT,
+    HandlerIntent,
+)
 from omnibase_infra.handlers.handler_manifest_persistence import (
     HandlerManifestPersistence,
 )

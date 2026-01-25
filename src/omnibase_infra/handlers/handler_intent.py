@@ -16,6 +16,8 @@ Note:
     Production implementation should use contract-driven handler routing.
 """
 
+# TODO(OMN-1515): Remove demo wiring after intent routing is contract-driven
+
 from __future__ import annotations
 
 import logging
@@ -43,7 +45,7 @@ _SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class HandlerIntent(MixinEnvelopeExtraction):
+class HandlerIntent(MixinEnvelopeExtraction):  # DEMO ONLY
     """Intent handler wrapping HandlerGraph for intent-specific operations.
 
     This handler provides a simplified interface for storing and querying
