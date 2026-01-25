@@ -92,8 +92,9 @@ def write_atomic_bytes(
         Number of bytes written to the file.
 
     Raises:
-        OSError: If the file cannot be written (permissions, disk full, etc.).
-            The temporary file is cleaned up before raising.
+        InfraConnectionError: If the file cannot be written (permissions, disk full,
+            etc.). The underlying OSError is chained via ``from e``. The temporary
+            file is cleaned up before raising.
 
     Example:
         >>> from pathlib import Path
@@ -174,7 +175,23 @@ def write_atomic_bytes(
             except OSError:
                 pass  # Best effort cleanup
 
-        raise
+        # Wrap OSError in InfraConnectionError per ONEX error handling guidelines
+        # Deferred import to avoid circular dependency (utils -> errors -> utils)
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation="write_atomic_bytes",
+            target_name=str(path),
+        )
+        raise InfraConnectionError(
+            f"Atomic write failed for '{path}'",
+            context=context,
+            error_type=type(e).__name__,
+            errno=getattr(e, "errno", None),
+        ) from e
 
 
 async def write_atomic_bytes_async(
@@ -205,7 +222,8 @@ async def write_atomic_bytes_async(
         Number of bytes written to the file.
 
     Raises:
-        OSError: If the file cannot be written (permissions, disk full, etc.).
+        InfraConnectionError: If the file cannot be written (permissions, disk full,
+            etc.). The underlying OSError is chained via ``from e``.
 
     Example:
         >>> import asyncio

@@ -31,6 +31,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.utils.util_atomic_file import (
     write_atomic_bytes,
     write_atomic_bytes_async,
@@ -235,8 +236,12 @@ class TestWriteAtomicBytesCleanup:
             mock_file.write.side_effect = OSError("Disk full")
             mock_fdopen.return_value = mock_file
 
-            with pytest.raises(OSError, match="Disk full"):
+            with pytest.raises(InfraConnectionError) as exc_info:
                 write_atomic_bytes(target, b"test data")
+
+            # Verify OSError is chained
+            assert isinstance(exc_info.value.__cause__, OSError)
+            assert "Disk full" in str(exc_info.value.__cause__)
 
         # Verify no temp files left behind
         temp_files = list(tmp_path.glob("*.tmp"))
@@ -249,8 +254,12 @@ class TestWriteAtomicBytesCleanup:
         with patch("os.replace") as mock_replace:
             mock_replace.side_effect = OSError("Permission denied")
 
-            with pytest.raises(OSError, match="Permission denied"):
+            with pytest.raises(InfraConnectionError) as exc_info:
                 write_atomic_bytes(target, b"test data")
+
+            # Verify OSError is chained
+            assert isinstance(exc_info.value.__cause__, OSError)
+            assert "Permission denied" in str(exc_info.value.__cause__)
 
         # Verify no temp files left behind
         temp_files = list(tmp_path.glob("*.tmp"))
@@ -265,25 +274,29 @@ class TestWriteAtomicBytesCleanup:
         with patch("os.replace") as mock_replace:
             mock_replace.side_effect = OSError("Permission denied")
 
-            with pytest.raises(OSError):
+            with pytest.raises(InfraConnectionError):
                 write_atomic_bytes(target, b"new content")
 
         # Original content should be preserved
         assert target.read_bytes() == original_content
 
-    def test_raises_oserror_on_failure(self, tmp_path: Path) -> None:
-        """Test OSError is raised (not wrapped) on failure."""
+    def test_raises_infra_connection_error_with_chained_oserror(
+        self, tmp_path: Path
+    ) -> None:
+        """Test InfraConnectionError is raised with chained OSError on failure."""
         target = tmp_path / "test.txt"
 
         with patch("os.replace") as mock_replace:
             mock_replace.side_effect = OSError("Test error")
 
-            with pytest.raises(OSError) as exc_info:
+            with pytest.raises(InfraConnectionError) as exc_info:
                 write_atomic_bytes(target, b"test")
 
-            # Should be plain OSError, not wrapped
-            assert type(exc_info.value) is OSError
-            assert "Test error" in str(exc_info.value)
+            # Should be InfraConnectionError wrapping OSError
+            assert isinstance(exc_info.value, InfraConnectionError)
+            assert exc_info.value.__cause__ is not None
+            assert isinstance(exc_info.value.__cause__, OSError)
+            assert "Test error" in str(exc_info.value.__cause__)
 
 
 @pytest.mark.unit
@@ -307,7 +320,7 @@ class TestWriteAtomicBytesLogging:
         ):
             mock_replace.side_effect = OSError("Test error")
 
-            with pytest.raises(OSError):
+            with pytest.raises(InfraConnectionError):
                 write_atomic_bytes(target, b"test", correlation_id=corr_id)
 
             mock_logger.exception.assert_called_once()
@@ -325,7 +338,7 @@ class TestWriteAtomicBytesLogging:
         ):
             mock_replace.side_effect = OSError("Test error")
 
-            with pytest.raises(OSError):
+            with pytest.raises(InfraConnectionError):
                 write_atomic_bytes(target, b"test", correlation_id=corr_id)
 
             call_kwargs = mock_logger.exception.call_args[1]
@@ -343,7 +356,7 @@ class TestWriteAtomicBytesLogging:
         ):
             mock_replace.side_effect = OSError("Test error")
 
-            with pytest.raises(OSError):
+            with pytest.raises(InfraConnectionError):
                 write_atomic_bytes(target, b"test", correlation_id=corr_id)
 
             call_kwargs = mock_logger.exception.call_args[1]
@@ -360,7 +373,7 @@ class TestWriteAtomicBytesLogging:
         ):
             mock_replace.side_effect = OSError("Test error")
 
-            with pytest.raises(OSError):
+            with pytest.raises(InfraConnectionError):
                 write_atomic_bytes(
                     target,
                     b"test",
@@ -383,7 +396,7 @@ class TestWriteAtomicBytesLogging:
         ):
             mock_replace.side_effect = OSError("Test error")
 
-            with pytest.raises(OSError):
+            with pytest.raises(InfraConnectionError):
                 write_atomic_bytes(target, b"test", correlation_id=None)
 
             mock_logger.exception.assert_not_called()
@@ -471,15 +484,15 @@ class TestWriteAtomicBytesAsync:
             )
 
     def test_async_wrapper_propagates_exceptions(self, tmp_path: Path) -> None:
-        """Test async wrapper propagates OSError from sync function."""
+        """Test async wrapper propagates InfraConnectionError from sync function."""
         target = tmp_path / "test.txt"
 
         with patch(
             "omnibase_infra.utils.util_atomic_file.write_atomic_bytes"
         ) as mock_sync:
-            mock_sync.side_effect = OSError("Async error")
+            mock_sync.side_effect = InfraConnectionError("Async error")
 
-            with pytest.raises(OSError, match="Async error"):
+            with pytest.raises(InfraConnectionError, match="Async error"):
                 asyncio.run(write_atomic_bytes_async(target, b"test"))
 
     def test_async_wrapper_uses_to_thread(self, tmp_path: Path) -> None:
