@@ -9,7 +9,7 @@ description: >
   Effect handler for filesystem operations including read, write, list, delete, and directory management.
 
 descriptor:
-  handler_kind: effect
+  node_archetype: effect
   purity: side_effecting
   # Idempotent: false because write operations may append (non-idempotent).
   # Individual operations (write w/ overwrite, mkdir w/ exist_ok) can be

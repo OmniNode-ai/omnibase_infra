@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from typing import cast
 
 import yaml
 from pydantic import ValidationError
@@ -41,6 +42,7 @@ from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumHandlerErrorType, EnumHandlerSourceType
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
+    LiteralHandlerKind,
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
     ModelHandlerIdentifier,
@@ -690,7 +692,9 @@ class HandlerContractSource(ProtocolContractSource):
             handler_id=contract.handler_id,
             name=contract.name,
             version=contract.contract_version,
-            handler_kind=contract.descriptor.handler_kind,
+            handler_kind=cast(
+                "LiteralHandlerKind", contract.descriptor.node_archetype.value
+            ),
             input_model=contract.input_model,
             output_model=contract.output_model,
             description=contract.description,

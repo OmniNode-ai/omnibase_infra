@@ -18,6 +18,7 @@ Available Handlers:
 - HandlerFileSystem: Filesystem handler with path whitelisting and size limits
 - HandlerManifestPersistence: Execution manifest persistence with filesystem storage
 - HandlerGraph: Graph database handler (Memgraph/Neo4j via Bolt protocol)
+- HandlerIntent: Intent storage and query handler wrapping HandlerGraph (demo wiring)
 - HandlerQdrant: Qdrant vector database handler (MVP: create, upsert, search, delete)
 
 Response Models:
@@ -35,6 +36,10 @@ from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
 from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
+from omnibase_infra.handlers.handler_intent import (  # DEMO: Temporary intent handler wiring (OMN-1515)
+    HANDLER_ID_INTENT,
+    HandlerIntent,
+)
 from omnibase_infra.handlers.handler_manifest_persistence import (
     HandlerManifestPersistence,
 )
@@ -56,15 +61,17 @@ from omnibase_infra.handlers.models.model_qdrant_handler_response import (
 )
 
 __all__: list[str] = [
+    "HANDLER_ID_INTENT",
     "HandlerConsul",
     "HandlerDb",
     "HandlerFileSystem",
     "HandlerGraph",
+    "HandlerHttpRest",
+    "HandlerIntent",
     "HandlerManifestPersistence",
     "HandlerMCP",
     "HandlerQdrant",
     "HandlerVault",
-    "HandlerHttpRest",
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",
     "ModelDbDescribeResponse",
