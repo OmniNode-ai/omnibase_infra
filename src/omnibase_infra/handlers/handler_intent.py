@@ -55,6 +55,11 @@ class HandlerIntent(MixinEnvelopeExtraction):  # DEMO ONLY
     Note:
         This is temporary demo wiring. The handler assumes HandlerGraph
         is already initialized and passed via config during initialize().
+
+    Idempotency:
+        - intent.store: NOT idempotent (creates new node each call)
+        - intent.query_session: Idempotent (read-only query)
+        - intent.query_distribution: Idempotent (read-only aggregation)
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:
@@ -283,6 +288,7 @@ class HandlerIntent(MixinEnvelopeExtraction):  # DEMO ONLY
             )
 
         # Query intents by session_id
+        # SECURITY: Using parameterized query ($session_id) to prevent Cypher injection
         query = """
         MATCH (i:Intent {session_id: $session_id})
         RETURN i, elementId(i) as eid, id(i) as nid
