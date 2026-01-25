@@ -67,7 +67,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -658,7 +658,7 @@ contract_version:
   patch: 0
 description: "A valid test handler"
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "omnibase_infra.models.test.ModelTestInput"
 output_model: "omnibase_infra.models.test.ModelTestOutput"
 """
@@ -689,7 +689,7 @@ name: "Test Handler Invalid Version"
 contract_version: "not-a-semver"
 description: "Handler with invalid version"
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "omnibase_infra.models.test.ModelTestInput"
 output_model: "omnibase_infra.models.test.ModelTestOutput"
 """
@@ -1127,7 +1127,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -1197,7 +1197,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -1312,7 +1312,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "effect"
+  node_archetype: "effect"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -1361,7 +1361,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "effect"
+  node_archetype: "effect"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -1409,7 +1409,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -1447,7 +1447,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "{input_model}"
 output_model: "{output_model}"
 """
@@ -1868,7 +1868,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -1955,7 +1955,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -2031,7 +2031,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """
@@ -2306,7 +2306,7 @@ handler_id: "test.handler.invalid_version"
 name: "Invalid Version Handler"
 contract_version: "not-a-version"
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """)
@@ -2343,7 +2343,7 @@ handler_id: "test.handler.invalid_version"
 name: "Invalid Version Handler"
 contract_version: "abc.def.ghi"
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """)
@@ -2380,7 +2380,7 @@ handler_id: "test.handler.empty_version"
 name: "Empty Version Handler"
 contract_version: ""
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """)
@@ -2420,7 +2420,7 @@ contract_version:
   minor: 0
   patch: 0
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """)
@@ -2434,7 +2434,7 @@ handler_id: "test.handler.invalid"
 name: "Invalid Handler"
 contract_version: "not.valid.version"
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """)
@@ -2473,7 +2473,7 @@ contract_version:
   patch: 0
   prerelease: ["beta", 1]
 descriptor:
-  handler_kind: "compute"
+  node_archetype: "compute"
 input_model: "test.models.Input"
 output_model: "test.models.Output"
 """)

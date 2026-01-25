@@ -4836,16 +4836,14 @@ class TestPropertyBasedStateInvariants:
         Note: This test creates states directly to test invariants. In practice,
         states are created through with_* transitions which enforce these rules.
         """
-        # Skip invalid state combinations that can't occur through normal transitions
+        from hypothesis import assume
+
+        # Filter out invalid state combinations that can't occur through normal transitions
         # (we test invariants that SHOULD hold, not that invalid states can be created)
         if consul_confirmed and postgres_confirmed:
             # Both confirmed: status must be 'complete' or 'failed'
-            if status in ("pending", "partial"):
-                # This combination would violate the invariant
-                # We skip this as it's not a valid state reachable through transitions
-                pytest.skip(
-                    "Invalid state: both confirmed but status is pending/partial"
-                )
+            # 'idle', 'pending', 'partial' are invalid since they indicate incomplete states
+            assume(status not in ("idle", "pending", "partial"))
 
         # For valid state combinations, verify the invariant holds
         if consul_confirmed and postgres_confirmed:
