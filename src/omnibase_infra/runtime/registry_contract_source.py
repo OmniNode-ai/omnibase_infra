@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import os
 from asyncio import to_thread
+from typing import cast
 from uuid import uuid4
 
 import consul
@@ -50,6 +51,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
+    LiteralHandlerKind,
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
     ModelHandlerIdentifier,
@@ -349,10 +351,13 @@ class RegistryContractSource(ProtocolContractSource):
                 extra={"handler_id": handler_id, "key": key},
             )
 
-        # Access handler_kind directly from the validated Pydantic model.
-        # Both descriptor and handler_kind are required fields in the model schema,
-        # so they are guaranteed to exist after model_validate() succeeds.
-        handler_kind = contract.descriptor.handler_kind
+        # Access node_archetype from the validated Pydantic model and cast to LiteralHandlerKind.
+        # ModelHandlerBehavior.node_archetype is an EnumNodeArchetype enum.
+        # Its .value property returns the handler_kind string ("compute", "effect", etc.).
+        # The cast is type-safe: EnumNodeArchetype values exactly match LiteralHandlerKind.
+        handler_kind = cast(
+            "LiteralHandlerKind", contract.descriptor.node_archetype.value
+        )
 
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
