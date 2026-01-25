@@ -208,7 +208,7 @@ async def transaction_context(
                 # Uses LOCAL to scope timeout to this transaction only
                 if timeout is not None:
                     timeout_ms = int(timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
+                    await conn.execute("SET LOCAL statement_timeout = $1", timeout_ms)
 
                 yield conn
 

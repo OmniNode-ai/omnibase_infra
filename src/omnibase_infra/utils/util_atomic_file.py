@@ -27,6 +27,11 @@ Windows Notes:
     - Path.rename() on Windows will fail if the target exists; use os.replace()
     - This module uses os.replace() for cross-platform atomic rename
 
+Durability Note:
+    This module provides atomicity (all-or-nothing) but not durability guarantees.
+    For systems requiring crash-recovery durability, consider adding fsync() after
+    write and before rename. This comes at a performance cost.
+
 Example:
     >>> from pathlib import Path
     >>> from omnibase_infra.utils import write_atomic_bytes

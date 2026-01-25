@@ -269,8 +269,9 @@ async def retry_on_optimistic_conflict(
         backoff *= backoff_multiplier
 
     # All retries exhausted - raise conflict error
-    # last_result is guaranteed to be set since we had at least one attempt
-    assert last_result is not None
+    # Defensive check - last_result is guaranteed to be set after at least one attempt
+    if last_result is None:
+        raise AssertionError("Unreachable: last_result must be set after retries")
     raise OptimisticConflictError(attempts=max_retries + 1, last_result=last_result)
 
 
