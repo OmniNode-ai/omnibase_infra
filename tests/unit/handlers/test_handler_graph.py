@@ -1088,6 +1088,431 @@ class TestHandlerGraphLifecycle:
             await handler.shutdown()
 
 
+class TestHandlerGraphSupportedOperations:
+    """Test SUPPORTED_OPERATIONS constant."""
+
+    def test_supported_operations_is_frozenset(self) -> None:
+        """Test that SUPPORTED_OPERATIONS is an immutable frozenset."""
+        from omnibase_infra.handlers.handler_graph import SUPPORTED_OPERATIONS
+
+        assert isinstance(SUPPORTED_OPERATIONS, frozenset)
+
+    def test_supported_operations_contains_expected_operations(self) -> None:
+        """Test SUPPORTED_OPERATIONS contains all expected graph operations."""
+        from omnibase_infra.handlers.handler_graph import SUPPORTED_OPERATIONS
+
+        # Core operations that MUST be supported
+        expected_operations = {
+            "graph.execute_query",
+            "graph.execute_query_batch",
+            "graph.create_node",
+            "graph.create_relationship",
+            "graph.delete_node",
+            "graph.delete_relationship",
+            "graph.traverse",
+        }
+
+        for operation in expected_operations:
+            assert operation in SUPPORTED_OPERATIONS, (
+                f"Expected operation '{operation}' not found in SUPPORTED_OPERATIONS"
+            )
+
+    def test_supported_operations_matches_exact_set(self) -> None:
+        """Test SUPPORTED_OPERATIONS matches the exact expected set of operations."""
+        from omnibase_infra.handlers.handler_graph import SUPPORTED_OPERATIONS
+
+        expected = frozenset(
+            {
+                "graph.execute_query",
+                "graph.execute_query_batch",
+                "graph.create_node",
+                "graph.create_relationship",
+                "graph.delete_node",
+                "graph.delete_relationship",
+                "graph.traverse",
+            }
+        )
+
+        assert expected == SUPPORTED_OPERATIONS
+
+    def test_supported_operations_all_prefixed_with_graph(self) -> None:
+        """Test all operations are prefixed with 'graph.' for consistency."""
+        from omnibase_infra.handlers.handler_graph import SUPPORTED_OPERATIONS
+
+        for operation in SUPPORTED_OPERATIONS:
+            assert operation.startswith("graph."), (
+                f"Operation '{operation}' should be prefixed with 'graph.'"
+            )
+
+
+class TestHandlerGraphExecuteDispatcher:
+    """Test HandlerGraph execute() method routing."""
+
+    def _setup_mock_session_for_query(
+        self,
+        mock_driver: MagicMock,
+        records_data: list[dict[str, object]] | None = None,
+    ) -> AsyncMock:
+        """Set up mock session for query execution."""
+        if records_data is None:
+            records_data = [{"name": "Alice"}]
+
+        mock_session = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.data = AsyncMock(return_value=records_data)
+
+        mock_summary = MagicMock()
+        mock_summary.query_type = "r"
+        mock_summary.counters = MagicMock()
+        mock_summary.counters.contains_updates = False
+        mock_summary.counters.nodes_created = 0
+        mock_summary.counters.nodes_deleted = 0
+        mock_summary.counters.relationships_created = 0
+        mock_summary.counters.relationships_deleted = 0
+        mock_summary.counters.properties_set = 0
+        mock_summary.counters.labels_added = 0
+        mock_summary.counters.labels_removed = 0
+        mock_result.consume = AsyncMock(return_value=mock_summary)
+
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_driver.session.return_value = mock_session_cm
+
+        return mock_session
+
+    def _setup_mock_session_for_create_node(
+        self,
+        mock_driver: MagicMock,
+    ) -> AsyncMock:
+        """Set up mock session for node creation."""
+        mock_session = AsyncMock()
+        mock_result = AsyncMock()
+
+        mock_node = MagicMock()
+        mock_node.labels = frozenset(["Person"])
+        mock_node.items = MagicMock(return_value=[("name", "Alice")])
+
+        mock_record = MagicMock()
+        mock_record.__getitem__ = lambda self, key: {
+            "n": mock_node,
+            "eid": "4:abc:123",
+            "nid": 123,
+        }[key]
+
+        mock_result.single = AsyncMock(return_value=mock_record)
+        mock_result.consume = AsyncMock()
+
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_driver.session.return_value = mock_session_cm
+
+        return mock_session
+
+    @pytest.mark.asyncio
+    async def test_execute_routes_to_execute_query(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() routes graph.execute_query to execute_query()."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            self._setup_mock_session_for_query(mock_driver)
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.execute_query",
+                "payload": {
+                    "query": "MATCH (n) RETURN n",
+                    "parameters": {},
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result is not None
+            assert result.result.status == "success"
+            assert result.handler_id == "graph-handler"
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_routes_to_create_node(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() routes graph.create_node to create_node()."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            self._setup_mock_session_for_create_node(mock_driver)
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.create_node",
+                "payload": {
+                    "labels": ["Person"],
+                    "properties": {"name": "Alice"},
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result is not None
+            assert result.result.status == "success"
+            assert result.handler_id == "graph-handler"
+
+            await handler.shutdown()
+
+    def _setup_mock_session_for_traverse(
+        self,
+        mock_driver: MagicMock,
+    ) -> AsyncMock:
+        """Set up mock session for graph traversal."""
+        mock_session = AsyncMock()
+        mock_result = AsyncMock()
+
+        # Create mock node
+        mock_node = MagicMock()
+        mock_node.labels = frozenset(["Person"])
+        mock_node.items = MagicMock(return_value=[("name", "Bob")])
+
+        records_data = [
+            {
+                "n": mock_node,
+                "eid": "4:abc:124",
+                "nid": 124,
+                "rels": [],
+                "path_ids": ["4:abc:123", "4:abc:124"],
+            }
+        ]
+        mock_result.data = AsyncMock(return_value=records_data)
+        mock_result.consume = AsyncMock()
+
+        mock_session.run = AsyncMock(return_value=mock_result)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_driver.session.return_value = mock_session_cm
+
+        return mock_session
+
+    @pytest.mark.asyncio
+    async def test_execute_routes_to_traverse(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() routes graph.traverse to traverse()."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            self._setup_mock_session_for_traverse(mock_driver)
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.traverse",
+                "payload": {
+                    "start_node_id": 123,
+                    "relationship_types": ["KNOWS"],
+                    "direction": "outgoing",
+                    "max_depth": 2,
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result is not None
+            assert result.result.status == "success"
+            assert result.handler_id == "graph-handler"
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_unknown_operation_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() raises RuntimeHostError for unknown operations."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.unknown_operation",
+                "payload": {},
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "not supported" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_missing_operation_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() raises error when operation is missing."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "payload": {},
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "operation" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_invalid_operation_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() raises error when operation is not a string."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": 123,  # Invalid type
+                "payload": {},
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "operation" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_not_initialized_raises_error(
+        self, handler: HandlerGraph
+    ) -> None:
+        """Test execute() raises RuntimeHostError when handler not initialized."""
+        envelope = {
+            "operation": "graph.execute_query",
+            "payload": {
+                "query": "MATCH (n) RETURN n",
+            },
+            "correlation_id": str(uuid4()),
+        }
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await handler.execute(envelope)
+
+        assert "not initialized" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_execute_preserves_correlation_id(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test correlation_id is propagated through execute()."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            self._setup_mock_session_for_query(mock_driver)
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            test_correlation_id = str(uuid4())
+            envelope = {
+                "operation": "graph.execute_query",
+                "payload": {
+                    "query": "MATCH (n) RETURN n",
+                    "parameters": {},
+                },
+                "correlation_id": test_correlation_id,
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result is not None
+            # The result should include the correlation_id
+            assert result.correlation_id is not None
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_missing_payload_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() raises error when payload is missing."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.execute_query",
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "payload" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_invalid_payload_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test execute() raises error when payload is not a dict."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.execute_query",
+                "payload": "invalid",  # Should be dict
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "payload" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+
 class TestHandlerGraphLogWarnings:
     """Test suite for log warning assertions."""
 
@@ -1166,5 +1591,7 @@ __all__: list[str] = [
     "TestHandlerGraphDescribe",
     "TestHandlerGraphCircuitBreaker",
     "TestHandlerGraphLifecycle",
+    "TestHandlerGraphSupportedOperations",
+    "TestHandlerGraphExecuteDispatcher",
     "TestHandlerGraphLogWarnings",
 ]

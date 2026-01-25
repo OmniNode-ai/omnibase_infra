@@ -47,6 +47,7 @@ from neo4j.exceptions import (
 )
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_core.models.graph import (
     ModelGraphBatchResult,
     ModelGraphDatabaseNode,
@@ -61,20 +62,42 @@ from omnibase_core.models.graph import (
     ModelGraphTraversalResult,
 )
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumResponseStatus
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.handlers.models.graph import (
+    ModelGraphExecutePayload,
+    ModelGraphHandlerPayload,
+    ModelGraphQueryPayload,
+    ModelGraphRecord,
+)
+from omnibase_infra.handlers.models.model_graph_handler_response import (
+    ModelGraphHandlerResponse,
+)
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 from omnibase_spi.protocols.storage import ProtocolGraphDatabaseHandler
 
 logger = logging.getLogger(__name__)
 
 HANDLER_ID_GRAPH: str = "graph-handler"
+
+SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
+    {
+        "graph.execute_query",
+        "graph.execute_query_batch",
+        "graph.create_node",
+        "graph.create_relationship",
+        "graph.delete_node",
+        "graph.delete_relationship",
+        "graph.traverse",
+    }
+)
+
 _DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
     "ONEX_GRAPH_TIMEOUT",
     30.0,
@@ -87,7 +110,9 @@ _DEFAULT_POOL_SIZE: int = 50
 _HEALTH_CACHE_SECONDS: float = 10.0
 
 
-class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
+class HandlerGraph(
+    MixinAsyncCircuitBreaker, MixinEnvelopeExtraction, ProtocolGraphDatabaseHandler
+):
     """Graph database handler implementing ProtocolGraphDatabaseHandler.
 
     Provides typed graph database operations using neo4j async driver,
@@ -1155,5 +1180,507 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
             supports_transactions=self.supports_transactions,
         )
 
+    async def execute(
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph operation from envelope.
 
-__all__: list[str] = ["HandlerGraph", "HANDLER_ID_GRAPH"]
+        Dispatches to specialized methods based on operation field.
+        This method enables contract-based handler discovery via HandlerPluginLoader.
+
+        Supported operations:
+            - graph.execute_query: Execute a Cypher query
+            - graph.execute_query_batch: Execute multiple queries in transaction
+            - graph.create_node: Create a node with labels and properties
+            - graph.create_relationship: Create relationship between nodes
+            - graph.delete_node: Delete a node (optionally with DETACH)
+            - graph.delete_relationship: Delete a relationship
+            - graph.traverse: Traverse graph from starting node
+
+        Args:
+            envelope: Request envelope containing:
+                - operation: Graph operation (graph.execute_query, etc.)
+                - payload: dict with operation-specific parameters
+                - correlation_id: Optional correlation ID for tracing
+                - envelope_id: Optional envelope ID for causality tracking
+
+        Returns:
+            ModelHandlerOutput wrapping the operation result with correlation tracking.
+
+        Raises:
+            RuntimeHostError: If handler not initialized or invalid input.
+            InfraConnectionError: If graph database connection fails.
+            InfraAuthenticationError: If authentication fails.
+
+        Envelope-Based Routing:
+            This handler uses envelope-based operation routing. See CLAUDE.md section
+            "Intent Model Architecture > Envelope-Based Handler Routing" for the full
+            design pattern and how orchestrators translate intents to handler envelopes.
+        """
+        correlation_id = self._extract_correlation_id(envelope)
+        input_envelope_id = self._extract_envelope_id(envelope)
+
+        if not self._initialized or self._driver is None:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="execute",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "HandlerGraph not initialized. Call initialize() first.",
+                context=ctx,
+            )
+
+        operation = envelope.get("operation")
+        if not isinstance(operation, str):
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="execute",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing or invalid 'operation' in envelope",
+                context=ctx,
+            )
+
+        if operation not in SUPPORTED_OPERATIONS:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation=operation,
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Operation '{operation}' not supported. "
+                f"Available: {', '.join(sorted(SUPPORTED_OPERATIONS))}",
+                context=ctx,
+            )
+
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict):
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation=operation,
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing or invalid 'payload' in envelope",
+                context=ctx,
+            )
+
+        # Route to appropriate handler based on operation
+        if operation == "graph.execute_query":
+            return await self._execute_query_operation(
+                payload, correlation_id, input_envelope_id
+            )
+        elif operation == "graph.execute_query_batch":
+            return await self._execute_query_batch_operation(
+                payload, correlation_id, input_envelope_id
+            )
+        elif operation == "graph.create_node":
+            return await self._create_node_operation(
+                payload, correlation_id, input_envelope_id
+            )
+        elif operation == "graph.create_relationship":
+            return await self._create_relationship_operation(
+                payload, correlation_id, input_envelope_id
+            )
+        elif operation == "graph.delete_node":
+            return await self._delete_node_operation(
+                payload, correlation_id, input_envelope_id
+            )
+        elif operation == "graph.delete_relationship":
+            return await self._delete_relationship_operation(
+                payload, correlation_id, input_envelope_id
+            )
+        else:  # graph.traverse - validated above
+            return await self._traverse_operation(
+                payload, correlation_id, input_envelope_id
+            )
+
+    async def _execute_query_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.execute_query operation."""
+        query = payload.get("query")
+        if not isinstance(query, str):
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="graph.execute_query",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing or invalid 'query' in payload",
+                context=ctx,
+            )
+
+        parameters = payload.get("parameters")
+        params_dict: Mapping[str, JsonType] | None = None
+        if parameters is not None:
+            if not isinstance(parameters, dict):
+                ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.GRAPH,
+                    operation="graph.execute_query",
+                    target_name="graph_handler",
+                    correlation_id=correlation_id,
+                )
+                raise RuntimeHostError(
+                    "Invalid 'parameters' in payload - must be a dict",
+                    context=ctx,
+                )
+            params_dict = parameters  # type: ignore[assignment]
+
+        result = await self.execute_query(query, params_dict)
+
+        # Convert records to ModelGraphRecord format
+        # Note: Type ignore needed due to dict variance - dict[str, JsonType] vs dict[str, object]
+        records = [
+            ModelGraphRecord(data=record)  # type: ignore[arg-type]
+            for record in result.records
+        ]
+
+        query_payload = ModelGraphQueryPayload(
+            cypher=query,
+            records=records,
+            summary={
+                "query_type": result.summary.query_type,
+                "database": result.summary.database,
+                "contains_updates": result.summary.contains_updates,
+                "execution_time_ms": result.execution_time_ms,
+                "nodes_created": result.counters.nodes_created,
+                "nodes_deleted": result.counters.nodes_deleted,
+                "relationships_created": result.counters.relationships_created,
+                "relationships_deleted": result.counters.relationships_deleted,
+            },
+        )
+
+        return self._build_graph_response(
+            query_payload, correlation_id, input_envelope_id
+        )
+
+    async def _execute_query_batch_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.execute_query_batch operation."""
+        queries_raw = payload.get("queries")
+        if not isinstance(queries_raw, list):
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="graph.execute_query_batch",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing or invalid 'queries' in payload - must be a list",
+                context=ctx,
+            )
+
+        # Convert to list of tuples
+        queries: list[tuple[str, Mapping[str, JsonType] | None]] = []
+        for q in queries_raw:
+            if isinstance(q, dict):
+                query_str = q.get("query")
+                params = q.get("parameters")
+                if isinstance(query_str, str):
+                    queries.append(
+                        (query_str, params if isinstance(params, dict) else None)  # type: ignore[arg-type]
+                    )
+
+        transaction = bool(payload.get("transaction", True))
+        result = await self.execute_query_batch(queries, transaction=transaction)
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher="BATCH",
+            counters={
+                "success": result.success,
+                "rollback_occurred": result.rollback_occurred,
+                "query_count": len(result.results),
+                "transaction_id": str(result.transaction_id)
+                if result.transaction_id
+                else None,
+            },
+            success=result.success,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _create_node_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.create_node operation."""
+        labels = payload.get("labels", [])
+        if not isinstance(labels, list):
+            labels = []
+        labels_list: list[str] = [str(lbl) for lbl in labels]
+
+        properties = payload.get("properties", {})
+        if not isinstance(properties, dict):
+            properties = {}
+        props_dict: Mapping[str, JsonType] = properties  # type: ignore[assignment]
+
+        result = await self.create_node(labels_list, props_dict)
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher=f"CREATE (:{':'.join(labels_list)} ...)",
+            counters={
+                "nodes_created": 1,
+                "node_id": result.id,
+                "element_id": result.element_id,
+                "labels": result.labels,
+                "properties": result.properties,
+            },
+            success=True,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _create_relationship_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.create_relationship operation."""
+        from_node_id = payload.get("from_node_id")
+        to_node_id = payload.get("to_node_id")
+        relationship_type = payload.get("relationship_type")
+
+        if not from_node_id or not to_node_id or not relationship_type:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="graph.create_relationship",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing required fields: from_node_id, to_node_id, relationship_type",
+                context=ctx,
+            )
+
+        properties = payload.get("properties")
+        props_dict: Mapping[str, JsonType] | None = None
+        if properties is not None and isinstance(properties, dict):
+            props_dict = properties  # type: ignore[assignment]
+
+        result = await self.create_relationship(
+            from_node_id=str(from_node_id),
+            to_node_id=str(to_node_id),
+            relationship_type=str(relationship_type),
+            properties=props_dict,
+        )
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher=f"CREATE ()-[:{relationship_type}]->()",
+            counters={
+                "relationships_created": 1,
+                "relationship_id": result.id,
+                "element_id": result.element_id,
+                "type": result.type,
+                "start_node_id": result.start_node_id,
+                "end_node_id": result.end_node_id,
+            },
+            success=True,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _delete_node_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.delete_node operation."""
+        node_id = payload.get("node_id")
+        if not node_id:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="graph.delete_node",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing required field: node_id",
+                context=ctx,
+            )
+
+        detach = bool(payload.get("detach", False))
+        result = await self.delete_node(str(node_id), detach=detach)
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher=f"{'DETACH ' if detach else ''}DELETE (n)",
+            counters={
+                "nodes_deleted": 1 if result.success else 0,
+                "relationships_deleted": result.relationships_deleted,
+                "execution_time_ms": result.execution_time_ms,
+            },
+            success=result.success,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _delete_relationship_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.delete_relationship operation."""
+        relationship_id = payload.get("relationship_id")
+        if not relationship_id:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="graph.delete_relationship",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing required field: relationship_id",
+                context=ctx,
+            )
+
+        result = await self.delete_relationship(str(relationship_id))
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher="DELETE [r]",
+            counters={
+                "relationships_deleted": result.relationships_deleted,
+                "execution_time_ms": result.execution_time_ms,
+            },
+            success=result.success,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _traverse_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.traverse operation."""
+        start_node_id = payload.get("start_node_id")
+        if not start_node_id:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="graph.traverse",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing required field: start_node_id",
+                context=ctx,
+            )
+
+        relationship_types = payload.get("relationship_types")
+        rel_types: list[str] | None = None
+        if isinstance(relationship_types, list):
+            rel_types = [str(rt) for rt in relationship_types]
+
+        direction = str(payload.get("direction", "outgoing"))
+        max_depth_raw = payload.get("max_depth", 1)
+        max_depth = int(max_depth_raw) if isinstance(max_depth_raw, int | float) else 1
+
+        # Build filters if provided
+        filters = None
+        filters_raw = payload.get("filters")
+        if isinstance(filters_raw, dict):
+            filters = ModelGraphTraversalFilters(
+                node_labels=filters_raw.get("node_labels"),  # type: ignore[arg-type]
+                node_properties=filters_raw.get("node_properties"),  # type: ignore[arg-type]
+            )
+
+        result = await self.traverse(
+            start_node_id=str(start_node_id),
+            relationship_types=rel_types,
+            direction=direction,
+            max_depth=max_depth,
+            filters=filters,
+        )
+
+        # Convert nodes to records
+        records = []
+        for node in result.nodes:
+            records.append(
+                ModelGraphRecord(
+                    data={
+                        "id": node.id,
+                        "element_id": node.element_id,
+                        "labels": node.labels,
+                        "properties": node.properties,
+                    }
+                )
+            )
+
+        query_payload = ModelGraphQueryPayload(
+            cypher=f"TRAVERSE from {start_node_id}",
+            records=records,
+            summary={
+                "depth_reached": result.depth_reached,
+                "nodes_found": len(result.nodes),
+                "relationships_found": len(result.relationships),
+                "paths_found": len(result.paths),
+                "execution_time_ms": result.execution_time_ms,
+            },
+        )
+
+        return self._build_graph_response(
+            query_payload, correlation_id, input_envelope_id
+        )
+
+    def _build_graph_response(
+        self,
+        typed_payload: ModelGraphQueryPayload | ModelGraphExecutePayload,
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Build standardized ModelGraphHandlerResponse wrapped in ModelHandlerOutput.
+
+        This helper method ensures consistent response formatting across all
+        graph operations, matching the pattern used by HandlerDb and HandlerConsul.
+
+        Args:
+            typed_payload: Strongly-typed payload (query or execute).
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping ModelGraphHandlerResponse.
+        """
+        response = ModelGraphHandlerResponse(
+            status=EnumResponseStatus.SUCCESS,
+            payload=ModelGraphHandlerPayload(data=typed_payload),
+            correlation_id=correlation_id,
+        )
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_GRAPH,
+            result=response,
+        )
+
+
+__all__: list[str] = ["HandlerGraph", "HANDLER_ID_GRAPH", "SUPPORTED_OPERATIONS"]

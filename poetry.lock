@@ -2796,14 +2796,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.9.1"
+version = "0.9.4"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.9.1-py3-none-any.whl", hash = "sha256:02c94bfac24710c35cd0fba4578977e1111daa880e650313bb7021b82d582987"},
-    {file = "omnibase_core-0.9.1.tar.gz", hash = "sha256:2102a45eb50a377bd8889a3699f8ec162d78ec74e53c9b44d2b7ed1014c5a26d"},
+    {file = "omnibase_core-0.9.4-py3-none-any.whl", hash = "sha256:31ecabb94b2b2e8b8b4ef964a5669844d847eea77e613e97d8a81096387bdf99"},
+    {file = "omnibase_core-0.9.4.tar.gz", hash = "sha256:8bf1e3000135ca7bff743b09ce1e9dde9be73eb9abfe1d0de47f0ec9698da9d0"},
 ]
 
 [package.dependencies]
@@ -2824,18 +2824,18 @@ metrics = ["prometheus-client (>=0.21.0,<1.0.0)"]
 
 [[package]]
 name = "omnibase-spi"
-version = "0.5.0"
+version = "0.6.0"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_spi-0.5.0-py3-none-any.whl", hash = "sha256:af5079880ee19c3dc8cb70569b65a4603ca08000d1304c77fb0ee9b2c0e31408"},
-    {file = "omnibase_spi-0.5.0.tar.gz", hash = "sha256:3dfbbcb5830755b4d8d638cd3b33c7a05fd9a22d615ad55a8f1ce87d31db43d4"},
+    {file = "omnibase_spi-0.6.0-py3-none-any.whl", hash = "sha256:f8033015ec793e13e39fb3ad523b0fd03ffac69d872594ab796e9917888b7355"},
+    {file = "omnibase_spi-0.6.0.tar.gz", hash = "sha256:3b4462e0827e9b2a36b684634396406968e639a097aede8060836d2c91ae0426"},
 ]
 
 [package.dependencies]
-omnibase-core = ">=0.7.0"
+omnibase-core = ">=0.9.4"
 pydantic = ">=2.11.7"
 typing-extensions = ">=4.5.0"
 
@@ -5212,4 +5212,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "8a17e16819d0f19bfd02e614a2998846bc1657ee1058a3b0f374ed793a181882"
+content-hash = "6a76ff717999386df99b8bae41090a1596751e4659d36d8739aa4a4565f36cd1"
