@@ -39,6 +39,18 @@ from omnibase_infra.services.service_timeout_scanner import (
     ModelTimeoutQueryResult,
     ServiceTimeoutScanner,
 )
+
+# Session services (moved from omniclaude in OMN-1526)
+from omnibase_infra.services.session import (
+    ConfigSessionConsumer,
+    ConfigSessionStorage,
+    ConsumerMetrics,
+    EnumCircuitState,
+    ProtocolSessionAggregator,
+    SessionEventConsumer,
+    SessionSnapshotStore,
+    SessionStoreNotInitializedError,
+)
 from omnibase_infra.services.snapshot import (
     ServiceSnapshot,
     StoreSnapshotInMemory,
@@ -65,4 +77,13 @@ __all__ = [
     "StoreSnapshotPostgres",
     "TimeoutEmitter",
     "TimeoutScanner",
+    # Session services (OMN-1526)
+    "ConfigSessionConsumer",
+    "ConfigSessionStorage",
+    "ConsumerMetrics",
+    "EnumCircuitState",
+    "ProtocolSessionAggregator",
+    "SessionEventConsumer",
+    "SessionSnapshotStore",
+    "SessionStoreNotInitializedError",
 ]
