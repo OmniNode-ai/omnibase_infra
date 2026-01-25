@@ -7,8 +7,12 @@ Moved from omniclaude as part of OMN-1526 architectural cleanup.
 
 from __future__ import annotations
 
-from pydantic import Field
+import logging
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigSessionConsumer(BaseSettings):
@@ -84,3 +88,33 @@ class ConfigSessionConsumer(BaseSettings):
         le=3600,
         description="Time before circuit half-opens",
     )
+    circuit_breaker_half_open_successes: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Number of successful requests required to close circuit from half-open state",
+    )
+
+    @model_validator(mode="after")
+    def validate_timing_relationships(self) -> ConfigSessionConsumer:
+        """Validate timing relationships between configuration values.
+
+        Warns if circuit breaker timeout is very short relative to batch processing,
+        which could cause premature circuit opens during normal batch operations.
+
+        Returns:
+            Self if validation passes.
+        """
+        batch_timeout_seconds = self.batch_timeout_ms / 1000
+        min_recommended_circuit_timeout = batch_timeout_seconds * 2
+
+        if self.circuit_breaker_timeout_seconds < min_recommended_circuit_timeout:
+            logger.warning(
+                "Circuit breaker timeout (%ds) is less than 2x batch timeout (%.1fs). "
+                "This may cause premature circuit opens during normal batch processing. "
+                "Recommended minimum: %ds",
+                self.circuit_breaker_timeout_seconds,
+                batch_timeout_seconds,
+                int(min_recommended_circuit_timeout),
+            )
+        return self

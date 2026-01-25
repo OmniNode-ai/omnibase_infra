@@ -49,6 +49,7 @@ from omnibase_infra.services.session import (
     ProtocolSessionAggregator,
     SessionEventConsumer,
     SessionSnapshotStore,
+    SessionStoreNotInitializedError,
 )
 from omnibase_infra.services.snapshot import (
     ServiceSnapshot,
@@ -84,4 +85,5 @@ __all__ = [
     "ProtocolSessionAggregator",
     "SessionEventConsumer",
     "SessionSnapshotStore",
+    "SessionStoreNotInitializedError",
 ]

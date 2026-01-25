@@ -275,6 +275,7 @@ class SessionEventConsumer:
         self._circuit_opened_at: datetime | None = None
         self._circuit_lock = asyncio.Lock()
         self._consumer_paused = False  # Track pause state for circuit breaker
+        self._half_open_successes = 0  # Track successes in half-open state
 
         # Metrics
         self.metrics = ConsumerMetrics()
@@ -898,7 +899,8 @@ class SessionEventConsumer:
         """Record a processing failure for circuit breaker.
 
         Increments consecutive failure count and opens circuit if
-        threshold is exceeded.
+        threshold is exceeded. Also resets half-open success counter
+        when circuit opens.
         """
         async with self._circuit_lock:
             self._consecutive_failures += 1
@@ -907,6 +909,7 @@ class SessionEventConsumer:
                 if self._circuit_state != EnumCircuitState.OPEN:
                     self._circuit_state = EnumCircuitState.OPEN
                     self._circuit_opened_at = datetime.now(UTC)
+                    self._half_open_successes = 0
                     await self.metrics.record_circuit_open()
 
                     logger.warning(
@@ -921,24 +924,42 @@ class SessionEventConsumer:
     async def _record_success(self) -> None:
         """Record a processing success for circuit breaker.
 
-        Resets consecutive failure count and closes circuit if in
-        half-open state. Also ensures consumer is resumed if it was paused.
+        Resets consecutive failure count. In half-open state, tracks
+        successful requests and closes circuit once threshold is met.
+        Also ensures consumer is resumed if it was paused.
         """
         should_resume = False
         async with self._circuit_lock:
             self._consecutive_failures = 0
 
             if self._circuit_state == EnumCircuitState.HALF_OPEN:
-                self._circuit_state = EnumCircuitState.CLOSED
-                self._circuit_opened_at = None
-                should_resume = self._consumer_paused
+                self._half_open_successes += 1
 
-                logger.info(
-                    "Circuit breaker closed after successful request",
-                    extra={
-                        "consumer_id": self._consumer_id,
-                    },
-                )
+                if (
+                    self._half_open_successes
+                    >= self._config.circuit_breaker_half_open_successes
+                ):
+                    self._circuit_state = EnumCircuitState.CLOSED
+                    self._circuit_opened_at = None
+                    self._half_open_successes = 0
+                    should_resume = self._consumer_paused
+
+                    logger.info(
+                        "Circuit breaker closed after successful requests in half-open",
+                        extra={
+                            "consumer_id": self._consumer_id,
+                            "successes_required": self._config.circuit_breaker_half_open_successes,
+                        },
+                    )
+                else:
+                    logger.debug(
+                        "Circuit breaker half-open success recorded",
+                        extra={
+                            "consumer_id": self._consumer_id,
+                            "current_successes": self._half_open_successes,
+                            "required_successes": self._config.circuit_breaker_half_open_successes,
+                        },
+                    )
 
         # Resume consumer outside the lock if needed (safety check)
         if should_resume:
@@ -973,6 +994,7 @@ class SessionEventConsumer:
             "group_id": self._config.group_id,
             "topics": self._config.topics,
             "consecutive_failures": self._consecutive_failures,
+            "half_open_successes": self._half_open_successes,
             "metrics": metrics_snapshot,
         }
 

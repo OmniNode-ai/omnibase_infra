@@ -13,6 +13,10 @@ Table Schema:
 
 See migrations/016_create_session_snapshots.sql for full schema.
 
+Idempotency Cleanup:
+    The idempotency table has a 24-hour TTL. Call cleanup_expired_idempotency()
+    periodically (e.g., hourly) to remove expired records and prevent table bloat.
+
 Moved from omniclaude as part of OMN-1526 architectural cleanup.
 """
 
@@ -32,6 +36,15 @@ if TYPE_CHECKING:
     from asyncpg import Connection, Pool
 
 logger = logging.getLogger(__name__)
+
+
+class SessionStoreNotInitializedError(RuntimeError):
+    """Raised when SessionSnapshotStore operations are called before initialize().
+
+    This error indicates the store's connection pool has not been created.
+    Call initialize() before performing any database operations.
+    """
+
 
 # Idempotency domain constant
 _IDEMPOTENCY_DOMAIN = "claude_session"
@@ -161,10 +174,10 @@ class SessionSnapshotStore:
             The connection pool.
 
         Raises:
-            RuntimeError: If store not initialized.
+            SessionStoreNotInitializedError: If store not initialized.
         """
         if self._pool is None:
-            raise RuntimeError(
+            raise SessionStoreNotInitializedError(
                 "SessionSnapshotStore not initialized. Call initialize() first."
             )
         return self._pool
@@ -611,7 +624,38 @@ class SessionSnapshotStore:
     ) -> int:
         """Remove expired idempotency records.
 
-        Deletes records where expires_at < NOW().
+        Deletes records where expires_at < NOW(). This prevents the idempotency
+        table from growing unbounded over time.
+
+        Scheduling Guidance:
+            This method should be called periodically to clean up expired records.
+            Recommended approaches:
+
+            1. **Cron Job / Scheduled Task**: Run every hour or daily
+               ```python
+               # Example with APScheduler
+               scheduler.add_job(
+                   lambda: asyncio.run(store.cleanup_expired_idempotency(uuid4())),
+                   'interval',
+                   hours=1,
+               )
+               ```
+
+            2. **Background Task**: Run in consumer after N messages processed
+               ```python
+               if messages_processed % 1000 == 0:
+                   await store.cleanup_expired_idempotency(correlation_id)
+               ```
+
+            3. **Startup Cleanup**: Run once when consumer starts
+               ```python
+               await store.initialize()
+               await store.cleanup_expired_idempotency(uuid4())  # Initial cleanup
+               ```
+
+            The default TTL is 24 hours (set in database migration). Cleanup frequency
+            should be adjusted based on message volume - high-volume systems may need
+            more frequent cleanup.
 
         Args:
             correlation_id: Correlation ID for tracing.
@@ -620,7 +664,7 @@ class SessionSnapshotStore:
             Count of removed records.
 
         Raises:
-            RuntimeError: If store not initialized.
+            SessionStoreNotInitializedError: If store not initialized.
             asyncpg.PostgresError: If database operation fails.
         """
         pool = self._require_pool()
@@ -950,4 +994,4 @@ class SessionSnapshotStore:
         return 0
 
 
-__all__ = ["SessionSnapshotStore"]
+__all__ = ["SessionSnapshotStore", "SessionStoreNotInitializedError"]

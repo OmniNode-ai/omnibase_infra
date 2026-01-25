@@ -37,11 +37,15 @@ from omnibase_infra.services.session.consumer import (
 from omnibase_infra.services.session.protocol_session_aggregator import (
     ProtocolSessionAggregator,
 )
-from omnibase_infra.services.session.store import SessionSnapshotStore
+from omnibase_infra.services.session.store import (
+    SessionSnapshotStore,
+    SessionStoreNotInitializedError,
+)
 
 __all__ = [
     # Storage
     "SessionSnapshotStore",
+    "SessionStoreNotInitializedError",
     "ConfigSessionStorage",
     # Consumer
     "SessionEventConsumer",
