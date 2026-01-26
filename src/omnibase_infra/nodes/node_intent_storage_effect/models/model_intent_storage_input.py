@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Intent Storage Input Model for Intent Storage Operations.
+
+This module provides ModelIntentStorageInput, representing the input
+for storing a classified intent in the graph database.
+
+Architecture:
+    ModelIntentStorageInput is constructed from IntentClassifiedEvent payloads
+    and contains:
+    - intent_type: The classified intent type
+    - session_id: Optional session identifier for grouping
+    - payload: Intent-specific data to store as node properties
+    - correlation_id: Optional correlation ID for tracing
+
+    This model serves as the canonical input for the intent.store operation.
+
+Related:
+    - NodeIntentStorageEffect: Effect node that processes this input
+    - ModelIntentStorageOutput: Output model containing storage result
+    - HandlerIntent: Handler that executes storage operations
+"""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_core.types import JsonType
+
+
+class ModelIntentStorageInput(BaseModel):
+    """Input model for intent storage operations.
+
+    Defines the required fields for storing a classified intent as a
+    graph node in Memgraph.
+
+    Immutability:
+        This model uses frozen=True to ensure inputs are immutable
+        once created, enabling safe reuse and caching.
+
+    Attributes:
+        intent_type: The classified intent type (e.g., "query", "action").
+        session_id: Optional session identifier for grouping related intents.
+        payload: Intent-specific data to store as node properties.
+        correlation_id: Optional correlation ID for request tracing.
+
+    Example:
+        >>> input_model = ModelIntentStorageInput(
+        ...     intent_type="query",
+        ...     session_id="sess-12345",
+        ...     payload={"query": "What is ONEX?", "confidence": 0.95},
+        ... )
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    intent_type: str = Field(
+        ...,
+        description="The classified intent type",
+        min_length=1,
+        max_length=256,
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session identifier for grouping related intents",
+        max_length=256,
+    )
+    payload: dict[str, JsonType] = Field(
+        default_factory=dict,
+        description="Intent-specific data to store as node properties",
+    )
+    correlation_id: UUID | None = Field(
+        default=None,
+        description="Correlation ID for request tracing",
+    )
+
+    def has_session(self) -> bool:
+        """Check if this input has a session identifier.
+
+        Returns:
+            True if session_id is provided.
+        """
+        return self.session_id is not None
+
+    def to_storage_properties(self) -> dict[str, JsonType]:
+        """Convert input to storage-friendly properties dict.
+
+        Returns:
+            Dictionary containing all intent properties for graph storage,
+            including intent_type and session_id merged with payload.
+        """
+        properties: dict[str, JsonType] = {
+            "intent_type": self.intent_type,
+        }
+        if self.session_id:
+            properties["session_id"] = self.session_id
+        if self.correlation_id:
+            properties["correlation_id"] = str(self.correlation_id)
+        # Merge payload properties
+        properties.update(self.payload)
+        return properties
+
+
+__all__ = ["ModelIntentStorageInput"]
