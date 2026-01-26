@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "omnibase_infra"
-version = "0.2.3"
+version = "0.2.4"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = ["OmniNode Team <team@omninode.ai>"]
 license = "MIT"
@@ -35,8 +35,8 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.9.4: Core release with latest updates
-omnibase-core = "^0.9.4"
+# omnibase-core v0.9.5: Topic suffix validation utilities (OMN-1537)
+omnibase-core = "^0.9.5"
 # omnibase-spi v0.6.0: Protocol updates for omnibase-core 0.9.4 compatibility
 omnibase-spi = "^0.6.0"
 

@@ -91,13 +91,22 @@ Security Design (Intentional Fail-Open Architecture):
     - validator_routing_coverage.py: Routing gap detection (module docstring)
 """
 
+# Topic suffix validation models (OMN-1537)
+from omnibase_core.models.validation import (
+    ModelTopicSuffixParts,
+    ModelTopicValidationResult,
+)
 from omnibase_core.validation import (
     CircularImportValidator,
     ModelModuleImportResult,
+    compose_full_topic,
+    is_valid_topic_suffix,
+    parse_topic_suffix,
     validate_all,
     validate_architecture,
     validate_contracts,
     validate_patterns,
+    validate_topic_suffix,
     validate_union_usage,
 )
 
@@ -222,6 +231,13 @@ __all__: list[str] = [
     "NODE_ARCHETYPE_EXPECTED_CATEGORIES",  # Node archetype categories
     "TOPIC_CATEGORY_PATTERNS",  # Topic category patterns
     "TOPIC_SUFFIXES",  # Topic suffix constants
+    # Topic suffix validation (OMN-1537)
+    "ModelTopicSuffixParts",  # Topic suffix parsed parts
+    "ModelTopicValidationResult",  # Topic validation result
+    "compose_full_topic",  # Compose full topic from parts
+    "is_valid_topic_suffix",  # Check if topic suffix is valid
+    "parse_topic_suffix",  # Parse topic suffix into parts
+    "validate_topic_suffix",  # Validate topic suffix format
     # Errors
     "ChainPropagationError",  # Chain propagation error (OMN-951)
     "ExecutionShapeViolationError",  # Execution shape violation
