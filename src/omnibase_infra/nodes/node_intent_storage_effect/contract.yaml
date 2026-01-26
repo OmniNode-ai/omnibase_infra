@@ -1,0 +1,194 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeIntentStorageEffect
+#
+# Capability-oriented effect node for intent storage operations.
+# Wraps HandlerIntent for graph-based intent persistence in Memgraph.
+#
+# This contract defines the interface for storing and querying intents
+# as graph nodes, enabling session-based intent retrieval and distribution
+# analysis.
+#
+# Related Tickets:
+#   - OMN-1509: Intent Processing System
+#   - WS-1: Intent Storage Effect Node
+# Contract identifiers
+name: "node_intent_storage_effect"
+contract_name: "node_intent_storage_effect"
+node_name: "node_intent_storage_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Capability-oriented effect node for intent storage operations. Handles storing classified intents in Memgraph graph database and querying intents by session or distribution statistics.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelIntentStorageInput"
+  module: "omnibase_infra.nodes.node_intent_storage_effect.models"
+  description: "Input model for intent storage operations (classified intent event)."
+output_model:
+  name: "ModelIntentStorageOutput"
+  module: "omnibase_infra.nodes.node_intent_storage_effect.models"
+  description: "Output model for intent storage results (storage confirmation)."
+# Capability declaration (capability-oriented naming)
+capabilities:
+  - name: "intent.storage"
+    description: "Store, query, and analyze intents in graph database"
+    version: "1.0.0"
+  - name: "intent.storage.store"
+    description: "Store classified intents as graph nodes"
+  - name: "intent.storage.query_session"
+    description: "Query intents by session identifier"
+  - name: "intent.storage.query_distribution"
+    description: "Get intent distribution statistics"
+# Event-driven topic configuration
+# Uses {env}.{namespace} placeholders for environment-aware topics
+consumed_events:
+  - topic: "{env}.{namespace}.onex.evt.intent-classified.v1"
+    event_type: "IntentClassifiedEvent"
+    description: "Classified intent ready for storage"
+  - topic: "{env}.{namespace}.onex.cmd.intent-query-session.v1"
+    event_type: "IntentQuerySessionCommand"
+    message_category: "COMMAND"
+    description: "Command to query intents by session"
+  - topic: "{env}.{namespace}.onex.cmd.intent-query-distribution.v1"
+    event_type: "IntentQueryDistributionCommand"
+    message_category: "COMMAND"
+    description: "Command to get intent distribution statistics"
+published_events:
+  - topic: "{env}.{namespace}.onex.evt.intent-stored.v1"
+    event_type: "IntentStoredEvent"
+    description: "Confirmation that intent was stored successfully"
+  - topic: "{env}.{namespace}.onex.evt.intent-session-query-result.v1"
+    event_type: "IntentSessionQueryResultEvent"
+    description: "Result of session-based intent query"
+  - topic: "{env}.{namespace}.onex.evt.intent-distribution-result.v1"
+    event_type: "IntentDistributionResultEvent"
+    description: "Result of intent distribution statistics query"
+# IO operations (EFFECT node specific)
+# Note: correlation_id is required (UUID) for all operations.
+# Callers must provide a correlation_id for tracing.
+io_operations:
+  - operation: "intent.store"
+    description: "Store a classified intent as a graph node"
+    input_fields:
+      - intent_type: "str"
+      - session_id: "str | None"
+      - payload: "dict[str, object]"
+      - correlation_id: "UUID"
+    output_fields:
+      - node_id: "str"
+      - element_id: "str"
+      - success: "bool"
+    # Not idempotent: Each call creates a new graph node with unique element_id.
+    # Duplicate calls with same input will create multiple nodes.
+    # Use correlation_id for deduplication at the caller level if needed.
+    idempotent: false
+  - operation: "intent.query_session"
+    description: "Query intents by session identifier"
+    input_fields:
+      - session_id: "str"
+      - correlation_id: "UUID"
+    output_fields:
+      - intents: "list[dict]"
+      - count: "int"
+    idempotent: true
+  - operation: "intent.query_distribution"
+    description: "Get intent count and distribution by intent_type"
+    input_fields:
+      - correlation_id: "UUID"
+    output_fields:
+      - total_count: "int"
+      - distribution: "dict[str, int]"
+    idempotent: true
+# Handler routing (wraps HandlerIntent which wraps HandlerGraph)
+handler_routing:
+  routing_strategy: "operation_match"
+  default_handler: "memgraph"
+  handlers:
+    - handler_type: "memgraph"
+      handler:
+        name: "HandlerIntent"
+        module: "omnibase_infra.handlers.handler_intent"
+      description: "Memgraph graph database handler for intent storage"
+      supported_operations:
+        - "intent.store"
+        - "intent.query_session"
+        - "intent.query_distribution"
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "handler_intent"
+    type: "handler"
+    class_name: "HandlerIntent"
+    module: "omnibase_infra.handlers.handler_intent"
+    description: "Intent handler for graph operations"
+  - name: "handler_graph"
+    type: "handler"
+    class_name: "HandlerGraph"
+    module: "omnibase_infra.handlers.handler_graph"
+    description: "Underlying graph handler (Memgraph)"
+    transitive: true
+# Error handling configuration
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+  error_types:
+    - name: "GraphConnectionError"
+      description: "Unable to connect to Memgraph"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "GraphTimeoutError"
+      description: "Graph operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "IntentNotFoundError"
+      description: "Intent not found in graph"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "ValidationError"
+      description: "Input validation failed"
+      recoverable: false
+      retry_strategy: "none"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  timeout_ms: 5000
+  checks:
+    - name: "graph_backend"
+      type: "connection"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-01-26"
+  tags:
+    - effect
+    - intent
+    - storage
+    - graph
+    - memgraph
+    - capability-oriented

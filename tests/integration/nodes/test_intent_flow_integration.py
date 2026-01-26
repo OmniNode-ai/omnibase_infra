@@ -780,16 +780,3 @@ class TestIntentPayloadSerialization:
                 )
             else:
                 pytest.fail(f"Unexpected payload type: {type(original_payload)}")
-
-
-# =============================================================================
-# Module Exports
-# =============================================================================
-
-__all__ = [
-    "TestReducerExtensionTypeEmission",
-    "TestExtensionTypeIntentRouting",
-    "TestEffectLayerRequestFormatting",
-    "TestEndToEndExtensionTypeFlow",
-    "TestIntentPayloadSerialization",
-]
