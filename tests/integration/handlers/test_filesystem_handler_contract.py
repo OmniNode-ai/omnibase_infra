@@ -238,7 +238,7 @@ class TestFilesystemHandlerContractSchema:
         assert contract.contract_version.major == EXPECTED_CONTRACT_VERSION["major"]
         assert contract.contract_version.minor == EXPECTED_CONTRACT_VERSION["minor"]
         assert contract.contract_version.patch == EXPECTED_CONTRACT_VERSION["patch"]
-        assert contract.descriptor.handler_kind == EXPECTED_HANDLER_KIND
+        assert contract.descriptor.node_archetype == EXPECTED_HANDLER_KIND
 
     def test_filesystem_handler_contract_has_required_fields(
         self, raw_contract_data: dict
@@ -249,7 +249,7 @@ class TestFilesystemHandlerContractSchema:
         - handler_id
         - name
         - contract_version
-        - descriptor (with handler_kind)
+        - descriptor (with node_archetype)
         - input_model
         - output_model
         """
@@ -267,9 +267,9 @@ class TestFilesystemHandlerContractSchema:
                 f"Required field '{field}' missing from filesystem handler contract"
             )
 
-        # Verify descriptor has handler_kind
-        assert "handler_kind" in raw_contract_data.get("descriptor", {}), (
-            "descriptor.handler_kind is required"
+        # Verify descriptor has node_archetype
+        assert "node_archetype" in raw_contract_data.get("descriptor", {}), (
+            "descriptor.node_archetype is required"
         )
 
     def test_filesystem_handler_contract_descriptor_fields(
@@ -278,13 +278,13 @@ class TestFilesystemHandlerContractSchema:
         """Verify the descriptor section contains expected effect handler fields.
 
         Effect handlers should specify:
-        - handler_kind: effect
+        - node_archetype: effect
         - purity: side_effecting
         - Additional effect-specific configuration
         """
         descriptor = raw_contract_data.get("descriptor", {})
 
-        assert descriptor.get("handler_kind") == "effect", (
+        assert descriptor.get("node_archetype") == "effect", (
             "FileSystem handler should be an 'effect' handler"
         )
         assert descriptor.get("purity") == "side_effecting", (

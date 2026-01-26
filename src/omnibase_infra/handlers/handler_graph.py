@@ -33,6 +33,7 @@ Circuit Breaker Pattern:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Mapping
 from uuid import UUID, uuid4
@@ -47,6 +48,7 @@ from neo4j.exceptions import (
 )
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_core.models.graph import (
     ModelGraphBatchResult,
     ModelGraphDatabaseNode,
@@ -61,20 +63,42 @@ from omnibase_core.models.graph import (
     ModelGraphTraversalResult,
 )
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumResponseStatus
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.handlers.models.graph import (
+    ModelGraphExecutePayload,
+    ModelGraphHandlerPayload,
+    ModelGraphQueryPayload,
+    ModelGraphRecord,
+)
+from omnibase_infra.handlers.models.model_graph_handler_response import (
+    ModelGraphHandlerResponse,
+)
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 from omnibase_spi.protocols.storage import ProtocolGraphDatabaseHandler
 
 logger = logging.getLogger(__name__)
 
 HANDLER_ID_GRAPH: str = "graph-handler"
+
+SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
+    {
+        "graph.execute_query",
+        "graph.execute_query_batch",
+        "graph.create_node",
+        "graph.create_relationship",
+        "graph.delete_node",
+        "graph.delete_relationship",
+        "graph.traverse",
+    }
+)
+
 _DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
     "ONEX_GRAPH_TIMEOUT",
     30.0,
@@ -86,8 +110,14 @@ _DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
 _DEFAULT_POOL_SIZE: int = 50
 _HEALTH_CACHE_SECONDS: float = 10.0
 
+# Cypher label validation: alphanumeric and underscore only
+# This prevents injection attacks via malicious label values
+_CYPHER_LABEL_PATTERN: re.Pattern[str] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
+
+class HandlerGraph(
+    MixinAsyncCircuitBreaker, MixinEnvelopeExtraction, ProtocolGraphDatabaseHandler
+):
     """Graph database handler implementing ProtocolGraphDatabaseHandler.
 
     Provides typed graph database operations using neo4j async driver,
@@ -536,6 +566,36 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
                 f"Batch execution failed: {type(e).__name__}", context=ctx
             ) from e
 
+    def _validate_cypher_labels(
+        self, labels: list[str], operation: str, correlation_id: UUID
+    ) -> None:
+        """Validate that all labels are safe for Cypher queries.
+
+        Labels are embedded directly in Cypher queries (not parameterized),
+        so they must be validated to prevent injection attacks.
+
+        Args:
+            labels: List of labels to validate.
+            operation: Operation name for error context.
+            correlation_id: Correlation ID for error context.
+
+        Raises:
+            RuntimeHostError: If any label contains unsafe characters.
+        """
+        for label in labels:
+            if not _CYPHER_LABEL_PATTERN.match(label):
+                ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.GRAPH,
+                    operation=operation,
+                    target_name="graph_handler",
+                    correlation_id=correlation_id,
+                )
+                raise RuntimeHostError(
+                    f"Invalid label '{label}': labels must start with a letter or "
+                    f"underscore and contain only alphanumeric characters and underscores",
+                    context=ctx,
+                )
+
     async def create_node(
         self,
         labels: list[str],
@@ -560,6 +620,9 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
         # Check circuit breaker
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("create_node", correlation_id)
+
+        # Validate labels to prevent Cypher injection
+        self._validate_cypher_labels(labels, "create_node", correlation_id)
 
         # Build Cypher query with labels
         labels_str = ":".join(labels) if labels else ""
@@ -644,6 +707,20 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
         # Check circuit breaker
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("create_relationship", correlation_id)
+
+        # Validate relationship type to prevent Cypher injection
+        if not _CYPHER_LABEL_PATTERN.match(relationship_type):
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="create_relationship",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Invalid relationship_type '{relationship_type}': must start with a "
+                f"letter or underscore and contain only alphanumeric characters and underscores",
+                context=ctx,
+            )
 
         # Determine if IDs are element IDs (strings with colons) or internal IDs
         from_is_element_id = isinstance(from_node_id, str) and ":" in from_node_id
@@ -925,6 +1002,29 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
         is_element_id = isinstance(start_node_id, str) and ":" in str(start_node_id)
         start_time = time.perf_counter()
 
+        # Validate relationship types to prevent Cypher injection
+        if relationship_types:
+            for rel_type in relationship_types:
+                if not _CYPHER_LABEL_PATTERN.match(rel_type):
+                    ctx = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.GRAPH,
+                        operation="traverse",
+                        target_name="graph_handler",
+                        correlation_id=correlation_id,
+                    )
+                    raise RuntimeHostError(
+                        f"Invalid relationship_type '{rel_type}': must start with a "
+                        f"letter or underscore and contain only alphanumeric characters "
+                        f"and underscores",
+                        context=ctx,
+                    )
+
+        # Validate filter labels to prevent Cypher injection
+        if filters and filters.node_labels:
+            self._validate_cypher_labels(
+                filters.node_labels, "traverse", correlation_id
+            )
+
         # Build match clause for start node
         if is_element_id:
             start_match = "MATCH (start) WHERE elementId(start) = $start_id"
@@ -1155,5 +1255,761 @@ class HandlerGraph(MixinAsyncCircuitBreaker, ProtocolGraphDatabaseHandler):
             supports_transactions=self.supports_transactions,
         )
 
+    async def execute(
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph operation from envelope.
 
-__all__: list[str] = ["HandlerGraph", "HANDLER_ID_GRAPH"]
+        Dispatches to specialized methods based on operation field.
+        This method enables contract-based handler discovery via HandlerPluginLoader.
+
+        Supported operations:
+            - graph.execute_query: Execute a Cypher query
+            - graph.execute_query_batch: Execute multiple queries in transaction
+            - graph.create_node: Create a node with labels and properties
+            - graph.create_relationship: Create relationship between nodes
+            - graph.delete_node: Delete a node (optionally with DETACH)
+            - graph.delete_relationship: Delete a relationship
+            - graph.traverse: Traverse graph from starting node
+
+        Args:
+            envelope: Request envelope containing:
+                - operation: Graph operation (graph.execute_query, etc.)
+                - payload: dict with operation-specific parameters
+                - correlation_id: Optional correlation ID for tracing
+                - envelope_id: Optional envelope ID for causality tracking
+
+        Returns:
+            ModelHandlerOutput wrapping the operation result with correlation tracking.
+
+        Raises:
+            RuntimeHostError: If handler not initialized or invalid input.
+            InfraConnectionError: If graph database connection fails.
+            InfraAuthenticationError: If authentication fails.
+
+        Envelope-Based Routing:
+            This handler uses envelope-based operation routing. See CLAUDE.md section
+            "Intent Model Architecture > Envelope-Based Handler Routing" for the full
+            design pattern and how orchestrators translate intents to handler envelopes.
+        """
+        correlation_id = self._extract_correlation_id(envelope)
+        input_envelope_id = self._extract_envelope_id(envelope)
+
+        if not self._initialized or self._driver is None:
+            raise RuntimeHostError(
+                "HandlerGraph not initialized. Call initialize() first.",
+                context=self._error_context("execute", correlation_id),
+            )
+
+        operation = envelope.get("operation")
+        if not isinstance(operation, str):
+            raise RuntimeHostError(
+                "Missing or invalid 'operation' in envelope",
+                context=self._error_context("execute", correlation_id),
+            )
+
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict):
+            raise RuntimeHostError(
+                "Missing or invalid 'payload' in envelope",
+                context=self._error_context(operation, correlation_id),
+            )
+
+        # Dispatch table maps operation strings to handler methods
+        dispatch_table = {
+            "graph.execute_query": self._execute_query_operation,
+            "graph.execute_query_batch": self._execute_query_batch_operation,
+            "graph.create_node": self._create_node_operation,
+            "graph.create_relationship": self._create_relationship_operation,
+            "graph.delete_node": self._delete_node_operation,
+            "graph.delete_relationship": self._delete_relationship_operation,
+            "graph.traverse": self._traverse_operation,
+        }
+
+        handler = dispatch_table.get(operation)
+        if handler is None:
+            raise RuntimeHostError(
+                f"Operation '{operation}' not supported. "
+                f"Available: {', '.join(sorted(dispatch_table.keys()))}",
+                context=self._error_context(operation, correlation_id),
+            )
+
+        return await handler(payload, correlation_id, input_envelope_id)
+
+    async def _execute_query_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.execute_query operation.
+
+        Validates that payload contains required 'query' field and optional
+        'parameters' dict, then delegates to execute_query() and converts
+        the result to ModelHandlerOutput format.
+
+        Args:
+            payload: Request payload with 'query' and optional 'parameters'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping query results.
+
+        Raises:
+            RuntimeHostError: If query field missing or parameters invalid.
+        """
+        query = payload.get("query")
+        if not isinstance(query, str):
+            raise RuntimeHostError(
+                "Missing or invalid 'query' in payload",
+                context=self._error_context("graph.execute_query", correlation_id),
+            )
+
+        parameters = payload.get("parameters")
+        params_dict: Mapping[str, JsonType] | None = None
+        if parameters is not None:
+            if not isinstance(parameters, dict):
+                raise RuntimeHostError(
+                    "Invalid 'parameters' in payload - must be a dict",
+                    context=self._error_context("graph.execute_query", correlation_id),
+                )
+            # Type ignore: dict variance - dict[str, object] to Mapping[str, JsonType]
+            params_dict = parameters  # type: ignore[assignment]
+
+        try:
+            result = await self.execute_query(query, params_dict)
+        except (InfraConnectionError, InfraAuthenticationError, RuntimeHostError):
+            # Already has proper context, re-raise as-is
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Query execution failed: {e}",
+                context=self._error_context("graph.execute_query", correlation_id),
+            ) from e
+
+        # Convert records to ModelGraphRecord format
+        # Note: Type ignore needed due to dict variance - dict[str, JsonType] vs dict[str, object]
+        records = [
+            ModelGraphRecord(data=record)  # type: ignore[arg-type]
+            for record in result.records
+        ]
+
+        query_payload = ModelGraphQueryPayload(
+            cypher=query,
+            records=records,
+            summary={
+                "query_type": result.summary.query_type,
+                "database": result.summary.database,
+                "contains_updates": result.summary.contains_updates,
+                "execution_time_ms": result.execution_time_ms,
+                "nodes_created": result.counters.nodes_created,
+                "nodes_deleted": result.counters.nodes_deleted,
+                "relationships_created": result.counters.relationships_created,
+                "relationships_deleted": result.counters.relationships_deleted,
+            },
+        )
+
+        return self._build_graph_response(
+            query_payload, correlation_id, input_envelope_id
+        )
+
+    async def _execute_query_batch_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.execute_query_batch operation.
+
+        Validates batch query structure with fail-fast semantics:
+        - 'queries' must be a list of dicts
+        - Each query dict must have 'query' (str) and optional 'parameters' (dict)
+        - 'transaction' must be boolean if provided
+
+        Args:
+            payload: Request payload with 'queries' list and optional 'transaction'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping batch execution results.
+
+        Raises:
+            RuntimeHostError: If queries list invalid or any query malformed.
+        """
+        queries_raw = payload.get("queries")
+        if not isinstance(queries_raw, list):
+            raise RuntimeHostError(
+                "Missing or invalid 'queries' in payload - must be a list",
+                context=self._error_context(
+                    "graph.execute_query_batch", correlation_id
+                ),
+            )
+
+        # Convert to list of tuples with fail-fast validation
+        queries: list[tuple[str, Mapping[str, JsonType] | None]] = []
+        for idx, q in enumerate(queries_raw):
+            if not isinstance(q, dict):
+                raise RuntimeHostError(
+                    f"Query at index {idx} must be a dict, got {type(q).__name__}",
+                    context=self._error_context(
+                        "graph.execute_query_batch", correlation_id
+                    ),
+                )
+            query_str = q.get("query")
+            if not isinstance(query_str, str):
+                raise RuntimeHostError(
+                    f"Query at index {idx} missing or invalid 'query' field",
+                    context=self._error_context(
+                        "graph.execute_query_batch", correlation_id
+                    ),
+                )
+            params = q.get("parameters")
+            if params is not None and not isinstance(params, dict):
+                raise RuntimeHostError(
+                    f"Query at index {idx} has invalid 'parameters' - must be dict or null",
+                    context=self._error_context(
+                        "graph.execute_query_batch", correlation_id
+                    ),
+                )
+            # Type ignore: dict variance - dict[str, object] to Mapping[str, JsonType]
+            queries.append(
+                (query_str, params if isinstance(params, dict) else None)  # type: ignore[arg-type]
+            )
+
+        # Validate transaction is boolean - don't silently coerce other types
+        transaction_raw = payload.get("transaction", True)
+        if not isinstance(transaction_raw, bool):
+            raise RuntimeHostError(
+                f"Invalid 'transaction' in payload - must be boolean, "
+                f"got {type(transaction_raw).__name__}",
+                context=self._error_context(
+                    "graph.execute_query_batch", correlation_id
+                ),
+            )
+        transaction = transaction_raw
+
+        try:
+            result = await self.execute_query_batch(queries, transaction=transaction)
+        except (InfraConnectionError, InfraAuthenticationError, RuntimeHostError):
+            # Already has proper context, re-raise as-is
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Batch query execution failed: {e}",
+                context=self._error_context(
+                    "graph.execute_query_batch", correlation_id
+                ),
+            ) from e
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher="BATCH",
+            counters={
+                "success": result.success,
+                "rollback_occurred": result.rollback_occurred,
+                "query_count": len(result.results),
+                "transaction_id": str(result.transaction_id)
+                if result.transaction_id
+                else None,
+            },
+            success=result.success,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _create_node_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.create_node operation.
+
+        Validates optional 'labels' (list of strings) and 'properties' (dict),
+        then delegates to create_node() method.
+
+        Args:
+            payload: Request payload with optional 'labels' and 'properties'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping created node details.
+
+        Raises:
+            RuntimeHostError: If labels or properties have invalid types.
+        """
+        labels_raw = payload.get("labels")
+        if labels_raw is not None:
+            if not isinstance(labels_raw, list):
+                raise RuntimeHostError(
+                    "Invalid 'labels' in payload - must be a list of strings",
+                    context=self._error_context("graph.create_node", correlation_id),
+                )
+            labels_list: list[str] = [str(lbl) for lbl in labels_raw]
+        else:
+            labels_list = []
+
+        properties_raw = payload.get("properties")
+        if properties_raw is not None:
+            if not isinstance(properties_raw, dict):
+                raise RuntimeHostError(
+                    "Invalid 'properties' in payload - must be a dict",
+                    context=self._error_context("graph.create_node", correlation_id),
+                )
+            # Type ignore: dict variance - dict[str, object] to Mapping[str, JsonType]
+            props_dict: Mapping[str, JsonType] = properties_raw  # type: ignore[assignment]
+        else:
+            props_dict = {}
+
+        try:
+            result = await self.create_node(labels_list, props_dict)
+        except (InfraConnectionError, InfraAuthenticationError, RuntimeHostError):
+            # Already has proper context, re-raise as-is
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Node creation failed: {e}",
+                context=self._error_context("graph.create_node", correlation_id),
+            ) from e
+
+        labels_str = ":" + ":".join(labels_list) if labels_list else "n"
+        execute_payload = ModelGraphExecutePayload(
+            cypher=f"CREATE ({labels_str} ...)",
+            counters={
+                "nodes_created": 1,
+                "node_id": result.id,
+                "element_id": result.element_id,
+                "labels": result.labels,
+                "properties": result.properties,
+            },
+            success=True,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _create_relationship_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.create_relationship operation.
+
+        Validates required fields 'from_node_id', 'to_node_id', 'relationship_type'
+        and optional 'properties' dict, then delegates to create_relationship().
+
+        Args:
+            payload: Request payload with node IDs, relationship type, and properties.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping created relationship details.
+
+        Raises:
+            RuntimeHostError: If required fields missing or properties invalid.
+        """
+        from_node_id = payload.get("from_node_id")
+        to_node_id = payload.get("to_node_id")
+        relationship_type = payload.get("relationship_type")
+
+        if from_node_id is None or to_node_id is None or relationship_type is None:
+            raise RuntimeHostError(
+                "Missing required fields: from_node_id, to_node_id, relationship_type",
+                context=self._error_context(
+                    "graph.create_relationship", correlation_id
+                ),
+            )
+
+        properties = payload.get("properties")
+        props_dict: Mapping[str, JsonType] | None = None
+        if properties is not None:
+            if not isinstance(properties, dict):
+                raise RuntimeHostError(
+                    "Invalid 'properties' in payload - must be a dict",
+                    context=self._error_context(
+                        "graph.create_relationship", correlation_id
+                    ),
+                )
+            # Type ignore: dict variance - dict[str, object] to Mapping[str, JsonType]
+            props_dict = properties  # type: ignore[assignment]
+
+        try:
+            result = await self.create_relationship(
+                from_node_id=str(from_node_id),
+                to_node_id=str(to_node_id),
+                relationship_type=str(relationship_type),
+                properties=props_dict,
+            )
+        except (InfraConnectionError, InfraAuthenticationError, RuntimeHostError):
+            # Already has proper context, re-raise as-is
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Relationship creation failed: {e}",
+                context=self._error_context(
+                    "graph.create_relationship", correlation_id
+                ),
+            ) from e
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher=f"CREATE ()-[:{relationship_type}]->()",
+            counters={
+                "relationships_created": 1,
+                "relationship_id": result.id,
+                "element_id": result.element_id,
+                "type": result.type,
+                "start_node_id": result.start_node_id,
+                "end_node_id": result.end_node_id,
+            },
+            success=True,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _delete_node_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.delete_node operation.
+
+        Validates required 'node_id' and optional 'detach' boolean. The detach
+        flag must be explicitly boolean to prevent accidental cascade deletes.
+
+        Args:
+            payload: Request payload with 'node_id' and optional 'detach'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping deletion result.
+
+        Raises:
+            RuntimeHostError: If node_id missing or detach is non-boolean.
+        """
+        node_id = payload.get("node_id")
+        if node_id is None:
+            raise RuntimeHostError(
+                "Missing required field: node_id",
+                context=self._error_context("graph.delete_node", correlation_id),
+            )
+
+        # Validate detach is boolean - don't silently coerce to prevent accidental deletes
+        detach_raw = payload.get("detach", False)
+        if not isinstance(detach_raw, bool):
+            raise RuntimeHostError(
+                f"Invalid 'detach' in payload - must be boolean, "
+                f"got {type(detach_raw).__name__}",
+                context=self._error_context("graph.delete_node", correlation_id),
+            )
+        detach = detach_raw
+
+        try:
+            result = await self.delete_node(str(node_id), detach=detach)
+        except (InfraConnectionError, InfraAuthenticationError, RuntimeHostError):
+            # Already has proper context, re-raise as-is
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Node deletion failed: {e}",
+                context=self._error_context("graph.delete_node", correlation_id),
+            ) from e
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher=f"{'DETACH ' if detach else ''}DELETE (n)",
+            counters={
+                "nodes_deleted": 1 if result.success else 0,
+                "relationships_deleted": result.relationships_deleted,
+                "execution_time_ms": result.execution_time_ms,
+            },
+            success=result.success,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _delete_relationship_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.delete_relationship operation.
+
+        Validates required 'relationship_id' field, then delegates to
+        delete_relationship() method.
+
+        Args:
+            payload: Request payload with 'relationship_id'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping deletion result.
+
+        Raises:
+            RuntimeHostError: If relationship_id field is missing.
+        """
+        relationship_id = payload.get("relationship_id")
+        if relationship_id is None:
+            raise RuntimeHostError(
+                "Missing required field: relationship_id",
+                context=self._error_context(
+                    "graph.delete_relationship", correlation_id
+                ),
+            )
+
+        try:
+            result = await self.delete_relationship(str(relationship_id))
+        except (InfraConnectionError, InfraAuthenticationError, RuntimeHostError):
+            # Already has proper context, re-raise as-is
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Relationship deletion failed: {e}",
+                context=self._error_context(
+                    "graph.delete_relationship", correlation_id
+                ),
+            ) from e
+
+        execute_payload = ModelGraphExecutePayload(
+            cypher="DELETE [r]",
+            counters={
+                "relationships_deleted": result.relationships_deleted,
+                "execution_time_ms": result.execution_time_ms,
+            },
+            success=result.success,
+        )
+
+        return self._build_graph_response(
+            execute_payload, correlation_id, input_envelope_id
+        )
+
+    async def _traverse_operation(
+        self,
+        payload: dict[str, object],
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Execute graph.traverse operation.
+
+        Validates traversal parameters with strict type checking:
+        - 'start_node_id': required
+        - 'relationship_types': optional list of strings
+        - 'direction': optional, must be 'outgoing', 'incoming', or 'both'
+        - 'max_depth': optional, must be positive integer
+        - 'filters': optional dict with 'node_labels' (list) and 'node_properties' (dict)
+
+        Args:
+            payload: Request payload with traversal configuration.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping traversal results (nodes, relationships, paths).
+
+        Raises:
+            RuntimeHostError: If start_node_id missing or parameters have invalid types.
+        """
+        start_node_id = payload.get("start_node_id")
+        if start_node_id is None:
+            raise RuntimeHostError(
+                "Missing required field: start_node_id",
+                context=self._error_context("graph.traverse", correlation_id),
+            )
+
+        # relationship_types - optional, but if provided must be list
+        relationship_types = payload.get("relationship_types")
+        rel_types: list[str] | None = None
+        if relationship_types is not None:
+            if not isinstance(relationship_types, list):
+                raise RuntimeHostError(
+                    f"Invalid 'relationship_types' - must be list, "
+                    f"got {type(relationship_types).__name__}",
+                    context=self._error_context("graph.traverse", correlation_id),
+                )
+            rel_types = [str(rt) for rt in relationship_types]
+
+        # direction - optional with default, but if provided must be valid string
+        direction_raw = payload.get("direction")
+        if direction_raw is None:
+            direction = "outgoing"
+        elif not isinstance(direction_raw, str):
+            raise RuntimeHostError(
+                f"Invalid 'direction' - must be string, "
+                f"got {type(direction_raw).__name__}",
+                context=self._error_context("graph.traverse", correlation_id),
+            )
+        elif direction_raw not in ("outgoing", "incoming", "both"):
+            raise RuntimeHostError(
+                f"Invalid 'direction' value '{direction_raw}' - "
+                f"must be 'outgoing', 'incoming', or 'both'",
+                context=self._error_context("graph.traverse", correlation_id),
+            )
+        else:
+            direction = direction_raw
+
+        # max_depth - optional with default, but if provided must be positive integer
+        max_depth_raw = payload.get("max_depth")
+        if max_depth_raw is None:
+            max_depth = 1
+        elif not isinstance(max_depth_raw, int | float):
+            raise RuntimeHostError(
+                f"Invalid 'max_depth' - must be int or float, "
+                f"got {type(max_depth_raw).__name__}",
+                context=self._error_context("graph.traverse", correlation_id),
+            )
+        else:
+            max_depth = int(max_depth_raw)
+            if max_depth <= 0:
+                raise RuntimeHostError(
+                    f"Invalid 'max_depth' value {max_depth} - must be a positive integer",
+                    context=self._error_context("graph.traverse", correlation_id),
+                )
+
+        # filters - optional, but if provided must be dict with validated fields
+        filters = None
+        filters_raw = payload.get("filters")
+        if filters_raw is not None:
+            if not isinstance(filters_raw, dict):
+                raise RuntimeHostError(
+                    f"Invalid 'filters' - must be dict, "
+                    f"got {type(filters_raw).__name__}",
+                    context=self._error_context("graph.traverse", correlation_id),
+                )
+
+            # Validate node_labels - must be list or None
+            node_labels = filters_raw.get("node_labels")
+            if node_labels is not None and not isinstance(node_labels, list):
+                raise RuntimeHostError(
+                    f"Invalid 'filters.node_labels' - must be list, "
+                    f"got {type(node_labels).__name__}",
+                    context=self._error_context("graph.traverse", correlation_id),
+                )
+
+            # Validate node_properties - must be dict or None
+            node_properties = filters_raw.get("node_properties")
+            if node_properties is not None and not isinstance(node_properties, dict):
+                raise RuntimeHostError(
+                    f"Invalid 'filters.node_properties' - must be dict, "
+                    f"got {type(node_properties).__name__}",
+                    context=self._error_context("graph.traverse", correlation_id),
+                )
+
+            # Type ignore: list[object] to list[str] - validated above as list
+            # Type ignore: dict[str, object] to dict[str, JsonType] - validated above as dict
+            filters = ModelGraphTraversalFilters(
+                node_labels=node_labels,  # type: ignore[arg-type]
+                node_properties=node_properties,  # type: ignore[arg-type]
+            )
+
+        try:
+            result = await self.traverse(
+                start_node_id=str(start_node_id),
+                relationship_types=rel_types,
+                direction=direction,
+                max_depth=max_depth,
+                filters=filters,
+            )
+        except (InfraConnectionError, InfraAuthenticationError, RuntimeHostError):
+            # Already has proper context, re-raise as-is
+            raise
+        except Exception as e:
+            raise RuntimeHostError(
+                f"Traversal failed: {e}",
+                context=self._error_context("graph.traverse", correlation_id),
+            ) from e
+
+        # Convert nodes to records
+        records = []
+        for node in result.nodes:
+            records.append(
+                ModelGraphRecord(
+                    data={
+                        "id": node.id,
+                        "element_id": node.element_id,
+                        "labels": node.labels,
+                        "properties": node.properties,
+                    }
+                )
+            )
+
+        query_payload = ModelGraphQueryPayload(
+            cypher=f"TRAVERSE from {start_node_id}",
+            records=records,
+            summary={
+                "depth_reached": result.depth_reached,
+                "nodes_found": len(result.nodes),
+                "relationships_found": len(result.relationships),
+                "paths_found": len(result.paths),
+                "execution_time_ms": result.execution_time_ms,
+            },
+        )
+
+        return self._build_graph_response(
+            query_payload, correlation_id, input_envelope_id
+        )
+
+    def _error_context(
+        self, operation: str, correlation_id: UUID
+    ) -> ModelInfraErrorContext:
+        """Create standardized error context for graph operations.
+
+        Args:
+            operation: The operation name (e.g., "graph.execute_query").
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            ModelInfraErrorContext configured for graph handler.
+        """
+        return ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.GRAPH,
+            operation=operation,
+            target_name="graph_handler",
+            correlation_id=correlation_id,
+        )
+
+    def _build_graph_response(
+        self,
+        typed_payload: ModelGraphQueryPayload | ModelGraphExecutePayload,
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
+        """Build standardized ModelGraphHandlerResponse wrapped in ModelHandlerOutput.
+
+        This helper method ensures consistent response formatting across all
+        graph operations, matching the pattern used by HandlerDb and HandlerConsul.
+
+        Args:
+            typed_payload: Strongly-typed payload (query or execute).
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping ModelGraphHandlerResponse.
+        """
+        response = ModelGraphHandlerResponse(
+            status=EnumResponseStatus.SUCCESS,
+            payload=ModelGraphHandlerPayload(data=typed_payload),
+            correlation_id=correlation_id,
+        )
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_GRAPH,
+            result=response,
+        )
+
+
+__all__: list[str] = ["HandlerGraph", "HANDLER_ID_GRAPH", "SUPPORTED_OPERATIONS"]
