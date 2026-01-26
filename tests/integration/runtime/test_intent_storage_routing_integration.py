@@ -46,7 +46,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
-from typing import cast
+from typing import TypeGuard
 from uuid import UUID, uuid4
 
 import pytest
@@ -58,6 +58,41 @@ from omnibase_infra.event_bus.models import ModelEventMessage
 
 # Type alias for emit callback signature
 EmitCallback = Callable[[dict[str, object]], Coroutine[object, object, None]]
+
+
+# =============================================================================
+# Type Guards
+# =============================================================================
+
+
+def is_dict_payload(value: object) -> TypeGuard[dict[str, object]]:
+    """Type guard to narrow payload to dict[str, object].
+
+    Args:
+        value: Value to check.
+
+    Returns:
+        True if value is a dict, enabling type narrowing.
+    """
+    return isinstance(value, dict)
+
+
+def extract_intent_type(envelope: dict[str, object]) -> object:
+    """Extract intent_type from envelope payload with type narrowing.
+
+    Args:
+        envelope: Event envelope containing payload.
+
+    Returns:
+        The intent_type value from the payload.
+
+    Raises:
+        AssertionError: If payload is not a dict.
+    """
+    payload = envelope["payload"]
+    assert is_dict_payload(payload), "Expected dict payload"
+    return payload["intent_type"]
+
 
 # =============================================================================
 # Test Constants
@@ -428,8 +463,7 @@ class TestIntentStorageRouting:
 
         # Verify intent types in order
         processed_types = [
-            cast("dict[str, object]", e["payload"])["intent_type"]
-            for e in mock_handler.captured_envelopes
+            extract_intent_type(e) for e in mock_handler.captured_envelopes
         ]
         assert processed_types == intent_types, "Intents should be processed in order"
 
@@ -496,7 +530,8 @@ class TestIntentStoredEventEmission:
         assert stored["event_type"] == "dev.omniintelligence.onex.evt.intent-stored.v1"
         assert stored["correlation_id"] == str(correlation_id)
         assert "payload" in stored
-        stored_payload = cast("dict[str, object]", stored["payload"])
+        stored_payload = stored["payload"]
+        assert is_dict_payload(stored_payload), "Expected dict payload"
         assert "intent_id" in stored_payload
         assert "stored_at" in stored_payload
 
@@ -704,11 +739,13 @@ class TestEnvelopeStructure:
             pytest.fail("Stored event not received")
 
         stored = stored_events[0]
-        stored_payload = cast("dict[str, object]", stored["payload"])
+        stored_payload = stored["payload"]
+        assert is_dict_payload(stored_payload), "Expected dict payload"
 
         # Verify original payload is included
         assert "original_payload" in stored_payload
-        original = cast("dict[str, object]", stored_payload["original_payload"])
+        original = stored_payload["original_payload"]
+        assert is_dict_payload(original), "Expected dict original_payload"
         assert original["session_id"] == session_id
         assert original["intent_type"] == "navigation"
 

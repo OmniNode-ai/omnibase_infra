@@ -48,7 +48,10 @@ Note:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, cast
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -104,6 +107,22 @@ class RegistryInfraIntentStorage:
 
     # Default handler type
     DEFAULT_HANDLER_TYPE = "memgraph"
+
+    @staticmethod
+    def _is_registered(handler_key: str) -> bool:
+        """Check if a handler is already registered for the given key.
+
+        This is a private helper method used to detect re-registration
+        attempts, which may indicate container lifecycle issues or
+        missing clear() calls in tests.
+
+        Args:
+            handler_key: The handler key to check (e.g., "handler_intent.memgraph").
+
+        Returns:
+            True if a handler is already registered for this key, False otherwise.
+        """
+        return handler_key in _HANDLER_STORAGE
 
     @staticmethod
     def register(_container: ModelONEXContainer) -> None:
@@ -196,10 +215,26 @@ class RegistryInfraIntentStorage:
             f"{RegistryInfraIntentStorage.HANDLER_KEY}."
             f"{RegistryInfraIntentStorage.DEFAULT_HANDLER_TYPE}"
         )
+
+        # Warn if re-registering over an existing handler
+        if RegistryInfraIntentStorage._is_registered(handler_key):
+            logger.warning(
+                "Re-registering handler '%s'. This may indicate container lifecycle "
+                "issues or missing clear() calls in tests.",
+                handler_key,
+            )
+
         _HANDLER_STORAGE[handler_key] = handler
 
         # Also register as default
-        _HANDLER_STORAGE[RegistryInfraIntentStorage.HANDLER_KEY + ".default"] = handler
+        default_key = RegistryInfraIntentStorage.HANDLER_KEY + ".default"
+        if RegistryInfraIntentStorage._is_registered(default_key):
+            logger.warning(
+                "Re-registering handler '%s'. This may indicate container lifecycle "
+                "issues or missing clear() calls in tests.",
+                default_key,
+            )
+        _HANDLER_STORAGE[default_key] = handler
 
     @staticmethod
     def get_handler(
