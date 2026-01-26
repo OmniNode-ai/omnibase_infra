@@ -11,7 +11,7 @@ Architecture:
     - intent_type: The classified intent type
     - session_id: Optional session identifier for grouping
     - payload: Intent-specific data to store as node properties
-    - correlation_id: Optional correlation ID for tracing
+    - correlation_id: Required correlation ID for tracing (fail-fast validation)
 
     This model serves as the canonical input for the intent.store operation.
 
@@ -44,13 +44,15 @@ class ModelIntentStorageInput(BaseModel):
         intent_type: The classified intent type (e.g., "query", "action").
         session_id: Optional session identifier for grouping related intents.
         payload: Intent-specific data to store as node properties.
-        correlation_id: Optional correlation ID for request tracing.
+        correlation_id: Required correlation ID for request tracing.
 
     Example:
+        >>> from uuid import uuid4
         >>> input_model = ModelIntentStorageInput(
         ...     intent_type="query",
         ...     session_id="sess-12345",
         ...     payload={"query": "What is ONEX?", "confidence": 0.95},
+        ...     correlation_id=uuid4(),
         ... )
     """
 
@@ -71,9 +73,9 @@ class ModelIntentStorageInput(BaseModel):
         default_factory=dict,
         description="Intent-specific data to store as node properties",
     )
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Correlation ID for request tracing",
+    correlation_id: UUID = Field(
+        ...,
+        description="Correlation ID for request tracing (required for observability)",
     )
 
     def has_session(self) -> bool:
@@ -89,16 +91,26 @@ class ModelIntentStorageInput(BaseModel):
 
         Returns:
             Dictionary containing all intent properties for graph storage,
-            including intent_type and session_id merged with payload.
+            including intent_type, correlation_id, and session_id merged with payload.
+
+        Raises:
+            ValueError: If payload contains reserved keys that would conflict
+                with structured fields (intent_type, session_id, correlation_id).
         """
+        reserved_keys = {"intent_type", "session_id", "correlation_id"}
+        conflicting = reserved_keys & self.payload.keys()
+        if conflicting:
+            raise ValueError(
+                f"Payload cannot contain reserved keys: {sorted(conflicting)}"
+            )
+
         properties: dict[str, JsonType] = {
             "intent_type": self.intent_type,
+            "correlation_id": str(self.correlation_id),
         }
         if self.session_id:
             properties["session_id"] = self.session_id
-        if self.correlation_id:
-            properties["correlation_id"] = str(self.correlation_id)
-        # Merge payload properties
+
         properties.update(self.payload)
         return properties
 
