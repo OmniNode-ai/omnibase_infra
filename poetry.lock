@@ -2796,14 +2796,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.9.5"
+version = "0.9.6"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.9.5-py3-none-any.whl", hash = "sha256:068d52a4a4af344ec0e6097c20dec25025568eb3dc1b519003033d371e9dd131"},
-    {file = "omnibase_core-0.9.5.tar.gz", hash = "sha256:07d95e26a6757747608fa8aba1ad0a633101465ca7a065a94ab71ccad146423d"},
+    {file = "omnibase_core-0.9.6-py3-none-any.whl", hash = "sha256:a66b2029c1234649dacfc2f195966259563462e0b969115177c9a1a3eb120470"},
+    {file = "omnibase_core-0.9.6.tar.gz", hash = "sha256:067291c78ae1e5ec67dce4af7097f759dfbfdce3231aa460af92e351c57657b8"},
 ]
 
 [package.dependencies]
@@ -2824,18 +2824,18 @@ metrics = ["prometheus-client (>=0.21.0,<1.0.0)"]
 
 [[package]]
 name = "omnibase-spi"
-version = "0.6.0"
+version = "0.6.1"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_spi-0.6.0-py3-none-any.whl", hash = "sha256:f8033015ec793e13e39fb3ad523b0fd03ffac69d872594ab796e9917888b7355"},
-    {file = "omnibase_spi-0.6.0.tar.gz", hash = "sha256:3b4462e0827e9b2a36b684634396406968e639a097aede8060836d2c91ae0426"},
+    {file = "omnibase_spi-0.6.1-py3-none-any.whl", hash = "sha256:2b1da2f0c0d6c31e26af9f61116ceb094bcf11ae824ce62124bc0076f48d45fb"},
+    {file = "omnibase_spi-0.6.1.tar.gz", hash = "sha256:9009e609ea711b4e2f747e6d11ae15b781565be3de58e985dc4c112999739634"},
 ]
 
 [package.dependencies]
-omnibase-core = ">=0.9.4"
+omnibase-core = ">=0.9.6"
 pydantic = ">=2.11.7"
 typing-extensions = ">=4.5.0"
 
@@ -5212,4 +5212,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "fc8d7c740d66ebf5628c2391fe2821f893118ba10717de755d93c0137b0c3c13"
+content-hash = "cc1736c4dfae18a611f95d15d8f85635214a6834cf34976cd23f9335179c5d6d"
