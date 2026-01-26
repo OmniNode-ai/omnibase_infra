@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.types import JsonType
 
@@ -78,6 +78,32 @@ class ModelIntentStorageInput(BaseModel):
         description="Correlation ID for request tracing (required for observability)",
     )
 
+    @field_validator("payload")
+    @classmethod
+    def validate_no_reserved_keys(cls, v: dict[str, JsonType]) -> dict[str, JsonType]:
+        """Validate payload does not contain reserved keys.
+
+        Reserved keys (intent_type, session_id, correlation_id) are used as
+        structured fields and cannot appear in the payload to prevent conflicts
+        during storage property merging.
+
+        Args:
+            v: The payload dictionary to validate.
+
+        Returns:
+            The validated payload dictionary.
+
+        Raises:
+            ValueError: If payload contains any reserved keys.
+        """
+        reserved_keys = {"intent_type", "session_id", "correlation_id"}
+        conflicting = reserved_keys & v.keys()
+        if conflicting:
+            raise ValueError(
+                f"Payload cannot contain reserved keys: {sorted(conflicting)}"
+            )
+        return v
+
     def has_session(self) -> bool:
         """Check if this input has a session identifier.
 
@@ -93,17 +119,11 @@ class ModelIntentStorageInput(BaseModel):
             Dictionary containing all intent properties for graph storage,
             including intent_type, correlation_id, and session_id merged with payload.
 
-        Raises:
-            ValueError: If payload contains reserved keys that would conflict
-                with structured fields (intent_type, session_id, correlation_id).
+        Note:
+            Reserved key validation (intent_type, session_id, correlation_id)
+            is performed at model construction time via field_validator,
+            so this method can safely merge payload with structured fields.
         """
-        reserved_keys = {"intent_type", "session_id", "correlation_id"}
-        conflicting = reserved_keys & self.payload.keys()
-        if conflicting:
-            raise ValueError(
-                f"Payload cannot contain reserved keys: {sorted(conflicting)}"
-            )
-
         properties: dict[str, JsonType] = {
             "intent_type": self.intent_type,
             "correlation_id": str(self.correlation_id),

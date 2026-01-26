@@ -56,6 +56,10 @@ if TYPE_CHECKING:
 
 __all__ = ["RegistryInfraIntentStorage"]
 
+# TODO(ServiceRegistry-v2): Migrate to container.service_registry once v2.0
+# supports dict-style access for multi-handler routing. Current module-level
+# storage is a workaround for v1.0 limitations. See docstring Note section.
+#
 # Module-level storage for handlers and metadata
 # ServiceRegistry in v1.0 doesn't support dict-style access needed for
 # handler routing

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Integration tests for intent classification to storage routing (OMN-1509).
 
 This module validates the runtime correctly routes `intent.classified` events
@@ -56,6 +56,9 @@ logger = logging.getLogger(__name__)
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
 
+# Type alias for emit callback signature
+EmitCallback = Callable[[dict[str, object]], Coroutine[object, object, None]]
+
 # =============================================================================
 # Test Constants
 # =============================================================================
@@ -95,9 +98,7 @@ class MockIntentStorageHandler:
         """Initialize the mock handler."""
         self.captured_envelopes: list[dict[str, object]] = []
         self.invocation_count: int = 0
-        self.emit_callback: (
-            Callable[[dict[str, object]], Coroutine[object, object, None]] | None
-        ) = None
+        self.emit_callback: EmitCallback | None = None
         self.should_succeed: bool = True
         self._initialized: bool = False
 
