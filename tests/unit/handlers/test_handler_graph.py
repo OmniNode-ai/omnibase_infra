@@ -1144,6 +1144,77 @@ class TestHandlerGraphSupportedOperations:
                 f"Operation '{operation}' should be prefixed with 'graph.'"
             )
 
+    def test_supported_operations_count_matches_handlers(self) -> None:
+        """Test SUPPORTED_OPERATIONS count matches expected handler count.
+
+        This test serves as a synchronization check between SUPPORTED_OPERATIONS
+        and the dispatch_table in execute(). If we add a new operation to
+        SUPPORTED_OPERATIONS, we must add a handler. If we add a new handler,
+        we must add it to SUPPORTED_OPERATIONS.
+
+        This test fails if counts don't match, prompting investigation.
+        """
+        from omnibase_infra.handlers.handler_graph import SUPPORTED_OPERATIONS
+
+        # If we add a new operation to SUPPORTED_OPERATIONS, we must add a handler
+        # If we add a new handler, we must add it to SUPPORTED_OPERATIONS
+        # This test fails if counts don't match, prompting investigation
+        assert len(SUPPORTED_OPERATIONS) == 7, (
+            f"SUPPORTED_OPERATIONS has {len(SUPPORTED_OPERATIONS)} operations, "
+            "expected 7. Did you add a new operation without updating dispatch_table "
+            "or vice versa?"
+        )
+
+    @pytest.mark.asyncio
+    async def test_supported_operations_matches_dispatch_table(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test SUPPORTED_OPERATIONS matches the dispatch_table keys in execute().
+
+        This test verifies that every operation in SUPPORTED_OPERATIONS has a
+        corresponding handler in the dispatch_table. If an operation passes the
+        SUPPORTED_OPERATIONS check but has no handler, the defensive check in
+        execute() would raise "No handler registered for operation".
+
+        The test calls execute() with each supported operation and verifies that
+        any error raised is due to payload validation, NOT due to missing handler.
+        """
+        from omnibase_infra.handlers.handler_graph import SUPPORTED_OPERATIONS
+
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            # Verify that every SUPPORTED_OPERATION has a handler in dispatch_table
+            for operation in SUPPORTED_OPERATIONS:
+                # This will raise RuntimeHostError if operation not in dispatch_table
+                # We don't need the operation to succeed, just not raise "not supported"
+                # or "No handler registered"
+                envelope = {
+                    "operation": operation,
+                    "payload": {},  # Will fail validation but NOT operation lookup
+                    "correlation_id": str(uuid4()),
+                }
+                try:
+                    await handler.execute(envelope)
+                except RuntimeHostError as e:
+                    error_msg = str(e).lower()
+                    # Should fail on payload validation, NOT on missing handler
+                    assert "not supported" not in error_msg, (
+                        f"Operation '{operation}' in SUPPORTED_OPERATIONS "
+                        "but not in dispatch_table"
+                    )
+                    assert "no handler registered" not in error_msg, (
+                        f"Operation '{operation}' in SUPPORTED_OPERATIONS "
+                        "but has no handler in dispatch_table"
+                    )
+                    # Payload validation errors are expected and acceptable
+                    # (e.g., "Missing or invalid 'query'", "Missing required field")
+
+            await handler.shutdown()
+
 
 class TestHandlerGraphExecuteDispatcher:
     """Test HandlerGraph execute() method routing."""
@@ -1826,6 +1897,35 @@ class TestHandlerGraphExecuteDispatcher:
                 "operation": "graph.create_node",
                 "payload": {
                     "labels": ["Person"],
+                    "properties": "not-a-dict",  # Invalid type
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "properties" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_create_relationship_invalid_properties_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test create_relationship raises error when properties is not a dict."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.create_relationship",
+                "payload": {
+                    "from_node_id": 123,
+                    "to_node_id": 124,
+                    "relationship_type": "KNOWS",
                     "properties": "not-a-dict",  # Invalid type
                 },
                 "correlation_id": str(uuid4()),

@@ -1487,7 +1487,14 @@ class HandlerGraph(
 
         properties = payload.get("properties")
         props_dict: Mapping[str, JsonType] | None = None
-        if properties is not None and isinstance(properties, dict):
+        if properties is not None:
+            if not isinstance(properties, dict):
+                raise RuntimeHostError(
+                    "Invalid 'properties' in payload - must be a dict",
+                    context=self._error_context(
+                        "graph.create_relationship", correlation_id
+                    ),
+                )
             # Type ignore: dict variance - dict[str, object] to Mapping[str, JsonType]
             props_dict = properties  # type: ignore[assignment]
 
