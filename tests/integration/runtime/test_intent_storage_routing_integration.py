@@ -43,12 +43,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+
+logger = logging.getLogger(__name__)
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
@@ -224,9 +227,9 @@ class MockEventRouter:
 
             # Route to handler
             await self.handler.execute(envelope)
-        except Exception as e:
+        except Exception:
             # Log error but don't crash the router
-            print(f"Router error: {e}")
+            logging.exception("Router error")
 
 
 # =============================================================================
@@ -840,15 +843,3 @@ class TestEdgeCases:
         )
 
         await unsubscribe()
-
-
-# =============================================================================
-# Module Exports
-# =============================================================================
-
-__all__ = [
-    "TestIntentStorageRouting",
-    "TestIntentStoredEventEmission",
-    "TestEnvelopeStructure",
-    "TestEdgeCases",
-]

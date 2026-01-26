@@ -77,8 +77,8 @@ published_events:
     event_type: "IntentDistributionResultEvent"
     description: "Result of intent distribution statistics query"
 # IO operations (EFFECT node specific)
-# Note: correlation_id is optional (UUID | None) for all operations.
-# If not provided, implementations should generate one for tracing.
+# Note: correlation_id is required (UUID) for all operations.
+# Callers must provide a correlation_id for tracing.
 io_operations:
   - operation: "intent.store"
     description: "Store a classified intent as a graph node"
@@ -86,7 +86,7 @@ io_operations:
       - intent_type: "str"
       - session_id: "str | None"
       - payload: "dict[str, object]"
-      - correlation_id: "UUID | None"
+      - correlation_id: "UUID"
     output_fields:
       - node_id: "str"
       - element_id: "str"
@@ -96,7 +96,7 @@ io_operations:
     description: "Query intents by session identifier"
     input_fields:
       - session_id: "str"
-      - correlation_id: "UUID | None"
+      - correlation_id: "UUID"
     output_fields:
       - intents: "list[dict]"
       - count: "int"
@@ -104,7 +104,7 @@ io_operations:
   - operation: "intent.query_distribution"
     description: "Get intent count and distribution by intent_type"
     input_fields:
-      - correlation_id: "UUID | None"
+      - correlation_id: "UUID"
     output_fields:
       - total_count: "int"
       - distribution: "dict[str, int]"
@@ -181,7 +181,7 @@ health_check:
 metadata:
   author: "OmniNode Team"
   license: "MIT"
-  created: "2025-01-26"
+  created: "2026-01-26"
   tags:
     - effect
     - intent
