@@ -91,6 +91,9 @@ io_operations:
       - node_id: "str"
       - element_id: "str"
       - success: "bool"
+    # Not idempotent: Each call creates a new graph node with unique element_id.
+    # Duplicate calls with same input will create multiple nodes.
+    # Use correlation_id for deduplication at the caller level if needed.
     idempotent: false
   - operation: "intent.query_session"
     description: "Query intents by session identifier"

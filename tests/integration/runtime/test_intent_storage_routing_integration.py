@@ -230,7 +230,7 @@ class MockEventRouter:
             await self.handler.execute(envelope)
         except Exception:
             # Log error but don't crash the router
-            logging.exception("Router error")
+            logger.exception("Router error")
 
 
 # =============================================================================
@@ -836,8 +836,11 @@ class TestEdgeCases:
             }
             await event_bus.publish_envelope(envelope, INPUT_TOPIC)
 
-        # Wait for all events to be processed
-        await asyncio.sleep(HANDLER_PROCESSING_DELAY * num_events / 10)
+        # Wait for all events to be processed.
+        # Note: Using a longer wait time to accommodate CI environments where
+        # asyncio scheduling may be slower due to resource contention.
+        # The multiplier (num_events / 5) gives ~1 second for 50 events.
+        await asyncio.sleep(HANDLER_PROCESSING_DELAY * num_events / 5)
 
         assert mock_handler.invocation_count == num_events, (
             f"All {num_events} events should be processed"

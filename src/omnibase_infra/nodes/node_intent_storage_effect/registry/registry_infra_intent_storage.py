@@ -154,7 +154,8 @@ class RegistryInfraIntentStorage:
             handler: HandlerIntent instance to register (must be initialized).
 
         Raises:
-            TypeError: If handler is not a HandlerIntent instance.
+            ProtocolConfigurationError: If handler does not implement the required
+                protocol methods (initialize, shutdown, execute).
 
         Example:
             >>> from omnibase_infra.handlers.handler_intent import HandlerIntent
@@ -162,19 +163,32 @@ class RegistryInfraIntentStorage:
             >>> await handler.initialize({"graph_handler": graph_handler})
             >>> RegistryInfraIntentStorage.register_handler(container, handler)
         """
-        # Import at runtime for isinstance check
-        from omnibase_infra.handlers.handler_intent import (
-            HandlerIntent as HandlerIntentClass,
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.errors import (
+            ModelInfraErrorContext,
+            ProtocolConfigurationError,
         )
 
-        # NOTE: isinstance() is intentionally used here for:
+        # NOTE: Protocol-based duck typing is used here per ONEX conventions.
+        # We verify the handler implements required methods rather than checking
+        # concrete class inheritance. This enables:
         # 1. Fail-fast validation: Immediately reject invalid handlers
-        # 2. Type safety: Verify the handler is the expected type
-        # 3. Clear error messages: TypeError with specific class name aids debugging
-        if not isinstance(handler, HandlerIntentClass):
-            raise TypeError(
-                f"Handler must be a HandlerIntent instance, "
-                f"got {type(handler).__name__}"
+        # 2. Duck typing: Any object with the required methods is accepted
+        # 3. Testability: Mock handlers can be injected without subclassing
+        required_methods = ["initialize", "shutdown", "execute"]
+        missing = [
+            m for m in required_methods if not callable(getattr(handler, m, None))
+        ]
+        if missing:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="register_handler",
+                target_name="intent_handler",
+            )
+            raise ProtocolConfigurationError(
+                f"Handler missing required protocol methods: {missing}. "
+                f"Got {type(handler).__name__}",
+                context=context,
             )
 
         # Store handler in module-level storage

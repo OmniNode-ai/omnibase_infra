@@ -27,6 +27,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
 
 
@@ -94,13 +96,14 @@ class ModelIntentStorageInput(BaseModel):
             The validated payload dictionary.
 
         Raises:
-            ValueError: If payload contains any reserved keys.
+            OnexError: If payload contains any reserved keys.
         """
         reserved_keys = {"intent_type", "session_id", "correlation_id"}
         conflicting = reserved_keys & v.keys()
         if conflicting:
-            raise ValueError(
-                f"Payload cannot contain reserved keys: {sorted(conflicting)}"
+            raise OnexError(
+                message=f"Payload cannot contain reserved keys: {sorted(conflicting)}",
+                error_code=EnumCoreErrorCode.VALIDATION_ERROR,
             )
         return v
 

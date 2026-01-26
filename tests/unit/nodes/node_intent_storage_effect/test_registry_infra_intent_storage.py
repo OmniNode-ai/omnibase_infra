@@ -3,13 +3,13 @@
 """Unit tests for RegistryInfraIntentStorage.
 
 This module validates the registry functionality for intent storage node
-dependencies, including handler registration, retrieval, type validation,
+dependencies, including handler registration, retrieval, protocol validation,
 and storage clearing.
 
 Test Coverage:
     - register(): Protocol metadata registration with module-level storage
-    - register_handler(): Handler binding with type validation (isinstance)
-    - register_handler(): TypeError raised for invalid handler types
+    - register_handler(): Handler binding with protocol-based duck typing
+    - register_handler(): ProtocolConfigurationError raised for invalid handlers
     - get_handler(): Handler retrieval by type or default
     - get_handler(): Returns None for non-existent handlers
     - clear(): Clears all handlers and metadata
@@ -23,14 +23,23 @@ Note:
     The registry uses module-level storage (_HANDLER_STORAGE, _PROTOCOL_METADATA)
     instead of container.service_registry. Tests must clear this storage between
     runs to avoid test pollution.
+
+Protocol-Based Validation:
+    Handler validation uses duck typing per ONEX conventions. Handlers must
+    implement the required methods (initialize, shutdown, execute) but do not
+    need to inherit from any specific class. This enables:
+    - Mock handlers for testing without subclassing
+    - Alternative implementations without coupling to HandlerIntent
+    - Clean dependency injection patterns
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.nodes.node_intent_storage_effect.registry import (
     RegistryInfraIntentStorage,
 )
@@ -40,9 +49,6 @@ from omnibase_infra.nodes.node_intent_storage_effect.registry.registry_infra_int
     _HANDLER_STORAGE,
     _PROTOCOL_METADATA,
 )
-
-# Patch target for HandlerIntent isinstance checks
-_HANDLER_INTENT_PATCH_TARGET = "omnibase_infra.handlers.handler_intent.HandlerIntent"
 
 # =============================================================================
 # Test Fixtures
@@ -171,11 +177,8 @@ class TestRegistryInfraIntentStorageRegisterHandler:
         mock_handler_intent: MagicMock,
     ) -> None:
         """register_handler() adds handler under typed key."""
-        # Patch the HandlerIntent class at the source module so isinstance check passes
-        with patch(_HANDLER_INTENT_PATCH_TARGET, MagicMock):
-            RegistryInfraIntentStorage.register_handler(
-                mock_container, mock_handler_intent
-            )
+        # MagicMock passes duck typing validation (has callable attributes)
+        RegistryInfraIntentStorage.register_handler(mock_container, mock_handler_intent)
 
         expected_key = (
             f"{RegistryInfraIntentStorage.HANDLER_KEY}."
@@ -190,55 +193,57 @@ class TestRegistryInfraIntentStorageRegisterHandler:
         mock_handler_intent: MagicMock,
     ) -> None:
         """register_handler() also sets the handler as default."""
-        with patch(_HANDLER_INTENT_PATCH_TARGET, MagicMock):
-            RegistryInfraIntentStorage.register_handler(
-                mock_container, mock_handler_intent
-            )
+        # MagicMock passes duck typing validation (has callable attributes)
+        RegistryInfraIntentStorage.register_handler(mock_container, mock_handler_intent)
 
         default_key = f"{RegistryInfraIntentStorage.HANDLER_KEY}.default"
         assert default_key in _HANDLER_STORAGE
         assert _HANDLER_STORAGE[default_key] is mock_handler_intent
 
-    def test_register_handler_raises_type_error_for_invalid_handler(
+    def test_register_handler_raises_protocol_error_for_invalid_handler(
         self,
         mock_container: MagicMock,
     ) -> None:
-        """register_handler() raises TypeError for non-HandlerIntent handlers."""
+        """register_handler() raises ProtocolConfigurationError for handlers
+        missing required protocol methods.
+        """
         invalid_handler = "not a handler"
 
-        with pytest.raises(TypeError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             RegistryInfraIntentStorage.register_handler(mock_container, invalid_handler)  # type: ignore[arg-type]
 
-        assert "HandlerIntent instance" in str(exc_info.value)
+        assert "missing required protocol methods" in str(exc_info.value)
         assert "str" in str(exc_info.value)
 
-    def test_register_handler_raises_type_error_for_none(
+    def test_register_handler_raises_protocol_error_for_none(
         self,
         mock_container: MagicMock,
     ) -> None:
-        """register_handler() raises TypeError when handler is None."""
-        with pytest.raises(TypeError) as exc_info:
+        """register_handler() raises ProtocolConfigurationError when handler is None."""
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             RegistryInfraIntentStorage.register_handler(mock_container, None)  # type: ignore[arg-type]
 
-        assert "HandlerIntent instance" in str(exc_info.value)
+        assert "missing required protocol methods" in str(exc_info.value)
         assert "NoneType" in str(exc_info.value)
 
-    def test_register_handler_raises_type_error_for_mock_without_patch(
+    def test_register_handler_accepts_duck_typed_handler(
         self,
         mock_container: MagicMock,
         mock_handler_intent: MagicMock,
     ) -> None:
-        """register_handler() raises TypeError for MagicMock without patching.
+        """register_handler() accepts any handler with required protocol methods.
 
-        This verifies that the isinstance check works correctly and rejects
-        objects that are not actual HandlerIntent instances.
+        This verifies duck typing works correctly - MagicMock has callable
+        attributes for any method name, so it passes protocol validation.
+        This enables mock handlers for testing without subclassing.
         """
-        with pytest.raises(TypeError) as exc_info:
-            RegistryInfraIntentStorage.register_handler(
-                mock_container, mock_handler_intent
-            )
+        # MagicMock auto-creates callable attributes, so it passes protocol checks
+        # No patch needed - duck typing accepts any object with required methods
+        RegistryInfraIntentStorage.register_handler(mock_container, mock_handler_intent)
 
-        assert "HandlerIntent instance" in str(exc_info.value)
+        # Verify handler was registered
+        retrieved = RegistryInfraIntentStorage.get_handler(mock_container)
+        assert retrieved is mock_handler_intent
 
     def test_register_handler_with_none_service_registry(
         self,
@@ -246,11 +251,11 @@ class TestRegistryInfraIntentStorageRegisterHandler:
         mock_handler_intent: MagicMock,
     ) -> None:
         """register_handler() handles None service_registry gracefully."""
-        with patch(_HANDLER_INTENT_PATCH_TARGET, MagicMock):
-            # Should not raise
-            RegistryInfraIntentStorage.register_handler(
-                container_with_none_registry, mock_handler_intent
-            )
+        # MagicMock passes duck typing validation (has callable attributes)
+        # Should not raise
+        RegistryInfraIntentStorage.register_handler(
+            container_with_none_registry, mock_handler_intent
+        )
 
         # Handler should be registered
         expected_key = (
@@ -274,10 +279,8 @@ class TestRegistryInfraIntentStorageGetHandler:
         mock_handler_intent: MagicMock,
     ) -> None:
         """get_handler() retrieves handler by specific type."""
-        with patch(_HANDLER_INTENT_PATCH_TARGET, MagicMock):
-            RegistryInfraIntentStorage.register_handler(
-                mock_container, mock_handler_intent
-            )
+        # MagicMock passes duck typing validation (has callable attributes)
+        RegistryInfraIntentStorage.register_handler(mock_container, mock_handler_intent)
 
         retrieved = RegistryInfraIntentStorage.get_handler(
             mock_container,
@@ -292,10 +295,8 @@ class TestRegistryInfraIntentStorageGetHandler:
         mock_handler_intent: MagicMock,
     ) -> None:
         """get_handler() retrieves default handler when no type specified."""
-        with patch(_HANDLER_INTENT_PATCH_TARGET, MagicMock):
-            RegistryInfraIntentStorage.register_handler(
-                mock_container, mock_handler_intent
-            )
+        # MagicMock passes duck typing validation (has callable attributes)
+        RegistryInfraIntentStorage.register_handler(mock_container, mock_handler_intent)
 
         retrieved = RegistryInfraIntentStorage.get_handler(mock_container)
 
@@ -363,10 +364,8 @@ class TestRegistryInfraIntentStorageClear:
         mock_handler_intent: MagicMock,
     ) -> None:
         """clear() removes all registered handlers."""
-        with patch(_HANDLER_INTENT_PATCH_TARGET, MagicMock):
-            RegistryInfraIntentStorage.register_handler(
-                mock_container, mock_handler_intent
-            )
+        # MagicMock passes duck typing validation (has callable attributes)
+        RegistryInfraIntentStorage.register_handler(mock_container, mock_handler_intent)
 
         # Verify handler is registered
         assert len(_HANDLER_STORAGE) > 0
@@ -408,21 +407,16 @@ class TestRegistryInfraIntentStorageClear:
         mock_handler_intent: MagicMock,
     ) -> None:
         """clear() allows handlers and metadata to be re-registered."""
-        with patch(_HANDLER_INTENT_PATCH_TARGET, MagicMock):
-            RegistryInfraIntentStorage.register(mock_container)
-            RegistryInfraIntentStorage.register_handler(
-                mock_container, mock_handler_intent
-            )
+        # MagicMock passes duck typing validation (has callable attributes)
+        RegistryInfraIntentStorage.register(mock_container)
+        RegistryInfraIntentStorage.register_handler(mock_container, mock_handler_intent)
 
         # Clear
         RegistryInfraIntentStorage.clear()
 
         # Re-register
-        with patch(_HANDLER_INTENT_PATCH_TARGET, MagicMock):
-            RegistryInfraIntentStorage.register(mock_container)
-            RegistryInfraIntentStorage.register_handler(
-                mock_container, mock_handler_intent
-            )
+        RegistryInfraIntentStorage.register(mock_container)
+        RegistryInfraIntentStorage.register_handler(mock_container, mock_handler_intent)
 
         # Verify re-registration worked
         assert RegistryInfraIntentStorage.HANDLER_KEY in _PROTOCOL_METADATA
@@ -445,12 +439,3 @@ class TestRegistryConstants:
     def test_default_handler_type_constant(self) -> None:
         """DEFAULT_HANDLER_TYPE constant is correctly defined."""
         assert RegistryInfraIntentStorage.DEFAULT_HANDLER_TYPE == "memgraph"
-
-
-__all__: list[str] = [
-    "TestRegistryInfraIntentStorageRegister",
-    "TestRegistryInfraIntentStorageRegisterHandler",
-    "TestRegistryInfraIntentStorageGetHandler",
-    "TestRegistryInfraIntentStorageClear",
-    "TestRegistryConstants",
-]
