@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Intent Storage Input Model for Intent Storage Operations.
 
 This module provides ModelIntentStorageInput, representing the input

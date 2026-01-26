@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Intent Storage Output Model for Intent Storage Operations.
 
 This module provides ModelIntentStorageOutput, representing the result
@@ -49,7 +49,7 @@ class ModelIntentStorageOutput(BaseModel):
         element_id: The graph element ID for the stored intent.
         labels: Graph labels applied to the node (e.g., ["Intent"]).
         properties: The stored properties (for verification).
-        correlation_id: Correlation ID for request tracing.
+        correlation_id: Correlation ID for request tracing (required).
         error: Sanitized error message if operation failed.
         duration_ms: Time taken for the operation in milliseconds.
 
@@ -89,9 +89,9 @@ class ModelIntentStorageOutput(BaseModel):
         default_factory=dict,
         description="The stored properties (for verification)",
     )
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Correlation ID for request tracing",
+    correlation_id: UUID = Field(
+        ...,
+        description="Correlation ID for request tracing (required for traceability)",
     )
     error: str | None = Field(
         default=None,

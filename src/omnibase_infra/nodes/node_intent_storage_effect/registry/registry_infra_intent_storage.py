@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Registry for Intent Storage Node Dependencies.
 
 This module provides RegistryInfraIntentStorage, which registers
@@ -18,6 +18,26 @@ Related:
     - HandlerIntent: Intent handler for graph operations
     - HandlerGraph: Underlying Memgraph graph handler
     - ModelONEXContainer: ONEX dependency injection container
+
+Testing:
+    This module uses module-level state (``_HANDLER_STORAGE``, ``_PROTOCOL_METADATA``)
+    for handler storage. Tests MUST call ``RegistryInfraIntentStorage.clear()`` in
+    setup and teardown fixtures to prevent test pollution between test cases.
+
+    Failure to clear state can cause:
+    - Tests passing in isolation but failing when run together
+    - Handlers from previous tests leaking into subsequent tests
+    - Flaky test behavior that is difficult to debug
+
+    Recommended fixture pattern:
+
+    .. code-block:: python
+
+        @pytest.fixture(autouse=True)
+        def clear_registry():
+            RegistryInfraIntentStorage.clear()
+            yield
+            RegistryInfraIntentStorage.clear()
 
 Note:
     This registry uses a module-level dict for handler storage because the
@@ -194,9 +214,28 @@ class RegistryInfraIntentStorage:
 
     @staticmethod
     def clear() -> None:
-        """Clear all registered handlers.
+        """Clear all registered handlers and protocol metadata.
 
-        Primarily used for testing to reset state between tests.
+        Resets all module-level state to empty dicts. This method is essential
+        for test isolation.
+
+        Warning:
+            This method MUST be called in test setup and teardown to prevent
+            test pollution. Module-level state persists across test cases within
+            the same Python process. Failing to call this method can cause:
+
+            - Handlers from previous tests affecting subsequent tests
+            - Tests passing individually but failing when run together
+            - Non-deterministic test failures that are difficult to reproduce
+
+        Example:
+            .. code-block:: python
+
+                @pytest.fixture(autouse=True)
+                def clear_registry():
+                    RegistryInfraIntentStorage.clear()
+                    yield
+                    RegistryInfraIntentStorage.clear()
         """
         _HANDLER_STORAGE.clear()
         _PROTOCOL_METADATA.clear()

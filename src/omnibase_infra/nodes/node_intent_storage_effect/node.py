@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Node Intent Storage Effect - Capability-oriented intent storage node.
 
 This effect node provides intent storage capabilities using Memgraph graph database.

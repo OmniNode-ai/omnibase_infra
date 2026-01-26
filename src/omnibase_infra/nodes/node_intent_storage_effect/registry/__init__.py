@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Registry for Intent Storage Effect Node.
 
 This module exports the RegistryInfraIntentStorage for dependency registration.
