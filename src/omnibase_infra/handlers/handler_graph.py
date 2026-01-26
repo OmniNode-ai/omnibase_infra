@@ -1233,13 +1233,6 @@ class HandlerGraph(
                 context=self._error_context("execute", correlation_id),
             )
 
-        if operation not in SUPPORTED_OPERATIONS:
-            raise RuntimeHostError(
-                f"Operation '{operation}' not supported. "
-                f"Available: {', '.join(sorted(SUPPORTED_OPERATIONS))}",
-                context=self._error_context(operation, correlation_id),
-            )
-
         payload = envelope.get("payload")
         if not isinstance(payload, dict):
             raise RuntimeHostError(
@@ -1260,9 +1253,9 @@ class HandlerGraph(
 
         handler = dispatch_table.get(operation)
         if handler is None:
-            # Defensive check - should never happen due to SUPPORTED_OPERATIONS validation above
             raise RuntimeHostError(
-                f"No handler registered for operation '{operation}'",
+                f"Operation '{operation}' not supported. "
+                f"Available: {', '.join(sorted(dispatch_table.keys()))}",
                 context=self._error_context(operation, correlation_id),
             )
 
@@ -1450,8 +1443,9 @@ class HandlerGraph(
                 context=self._error_context("graph.create_node", correlation_id),
             ) from e
 
+        labels_str = ":" + ":".join(labels_list) if labels_list else "n"
         execute_payload = ModelGraphExecutePayload(
-            cypher=f"CREATE (:{':'.join(labels_list)} ...)",
+            cypher=f"CREATE ({labels_str} ...)",
             counters={
                 "nodes_created": 1,
                 "node_id": result.id,

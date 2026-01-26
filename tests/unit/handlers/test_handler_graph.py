@@ -1144,27 +1144,6 @@ class TestHandlerGraphSupportedOperations:
                 f"Operation '{operation}' should be prefixed with 'graph.'"
             )
 
-    def test_supported_operations_count_matches_handlers(self) -> None:
-        """Test SUPPORTED_OPERATIONS count matches expected handler count.
-
-        This test serves as a synchronization check between SUPPORTED_OPERATIONS
-        and the dispatch_table in execute(). If we add a new operation to
-        SUPPORTED_OPERATIONS, we must add a handler. If we add a new handler,
-        we must add it to SUPPORTED_OPERATIONS.
-
-        This test fails if counts don't match, prompting investigation.
-        """
-        from omnibase_infra.handlers.handler_graph import SUPPORTED_OPERATIONS
-
-        # If we add a new operation to SUPPORTED_OPERATIONS, we must add a handler
-        # If we add a new handler, we must add it to SUPPORTED_OPERATIONS
-        # This test fails if counts don't match, prompting investigation
-        assert len(SUPPORTED_OPERATIONS) == 7, (
-            f"SUPPORTED_OPERATIONS has {len(SUPPORTED_OPERATIONS)} operations, "
-            "expected 7. Did you add a new operation without updating dispatch_table "
-            "or vice versa?"
-        )
-
     @pytest.mark.asyncio
     async def test_supported_operations_matches_dispatch_table(
         self, handler: HandlerGraph, mock_driver: MagicMock
