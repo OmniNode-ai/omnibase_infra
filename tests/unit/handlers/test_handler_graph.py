@@ -2063,6 +2063,64 @@ class TestHandlerGraphExecuteDispatcher:
 
             await handler.shutdown()
 
+    @pytest.mark.asyncio
+    async def test_execute_traverse_invalid_node_labels_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test traverse raises error when filters.node_labels is not a list."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.traverse",
+                "payload": {
+                    "start_node_id": 123,
+                    "filters": {
+                        "node_labels": "not-a-list",  # Should be list
+                    },
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "node_labels" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_traverse_invalid_node_properties_type_raises_error(
+        self, handler: HandlerGraph, mock_driver: MagicMock
+    ) -> None:
+        """Test traverse raises error when filters.node_properties is not a dict."""
+        with patch(
+            "omnibase_infra.handlers.handler_graph.AsyncGraphDatabase"
+        ) as mock_db:
+            mock_db.driver.return_value = mock_driver
+            await handler.initialize(connection_uri="bolt://localhost:7687")
+
+            envelope = {
+                "operation": "graph.traverse",
+                "payload": {
+                    "start_node_id": 123,
+                    "filters": {
+                        "node_properties": ["not", "a", "dict"],  # Should be dict
+                    },
+                },
+                "correlation_id": str(uuid4()),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "node_properties" in str(exc_info.value).lower()
+
+            await handler.shutdown()
+
 
 class TestHandlerGraphLogWarnings:
     """Test suite for log warning assertions."""
