@@ -2,25 +2,25 @@
 # Copyright (c) 2026 OmniNode Team
 """Integration tests for intent classification to storage routing (OMN-1509).
 
-This module validates the runtime correctly routes `intent.classified` events
-to the intent storage handler and emits `intent.stored` events on success.
+This module validates the runtime correctly routes `intent-classified` events
+to the intent storage handler and emits `intent-stored` events on success.
 
 Test Flow:
     1. Start RuntimeHostProcess with intent_storage handler registered
-    2. Emit `dev.omniintelligence.intent.classified.v1` event to input topic
+    2. Emit `dev.omniintelligence.onex.evt.intent-classified.v1` event to input topic
     3. Verify handler receives envelope
-    4. Verify `intent.stored.v1` event emitted to output topic
+    4. Verify `intent-stored.v1` event emitted to output topic
 
 Architecture:
     The intent storage handler receives classified intent events and stores them
     in a graph database. On successful storage, it emits a confirmation event.
 
     Event Flow:
-        intent.classified.v1 -> IntentStorageHandler -> intent.stored.v1
+        intent-classified.v1 -> IntentStorageHandler -> intent-stored.v1
 
 Test Categories:
-    - TestIntentStorageRouting: Verify intent.classified events route to handler
-    - TestIntentStoredEventEmission: Verify intent.stored events on success
+    - TestIntentStorageRouting: Verify intent-classified events route to handler
+    - TestIntentStoredEventEmission: Verify intent-stored events on success
     - TestEnvelopeStructure: Verify handler receives correct envelope structure
 
 Running Tests:
@@ -63,16 +63,26 @@ EmitCallback = Callable[[dict[str, object]], Coroutine[object, object, None]]
 # Test Constants
 # =============================================================================
 
-# Topic names following ONEX event naming convention
-INPUT_TOPIC = "dev.omniintelligence.intent.classified.v1"
-OUTPUT_TOPIC = "dev.omniintelligence.intent.stored.v1"
+# Topic names following ONEX event naming convention:
+#   {env}.{namespace}.onex.{evt|cmd}.{event-name}.v{version}
+#
+# Components:
+#   - env: Environment (dev, staging, prod)
+#   - namespace: Service namespace (omniintelligence)
+#   - onex: ONEX platform identifier
+#   - evt|cmd: Message type (evt for events, cmd for commands)
+#   - event-name: Hyphenated event name (intent-classified, intent-stored)
+#   - version: Schema version (v1, v2, etc.)
+INPUT_TOPIC = "dev.omniintelligence.onex.evt.intent-classified.v1"
+OUTPUT_TOPIC = "dev.omniintelligence.onex.evt.intent-stored.v1"
 
 # Test timing constants
 MESSAGE_WAIT_TIMEOUT = 2.0
 HANDLER_PROCESSING_DELAY = 0.1
 
-# Test timestamp for reproducible tests
-TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+# Fixed timestamp for reproducible test assertions.
+# Using a clearly past date to avoid any timezone-related edge cases.
+FIXED_TEST_TIMESTAMP = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
 # =============================================================================
@@ -84,9 +94,9 @@ class MockIntentStorageHandler:
     """Mock intent storage handler for testing routing behavior.
 
     This handler simulates the behavior of an intent storage handler:
-    - Receives intent.classified envelopes
+    - Receives intent-classified envelopes
     - Stores intents (mocked)
-    - Emits intent.stored events via callback
+    - Emits intent-stored events via callback
 
     Attributes:
         captured_envelopes: List of envelopes received by the handler.
@@ -137,11 +147,11 @@ class MockIntentStorageHandler:
             # Emit stored event via callback if configured
             if self.emit_callback is not None:
                 stored_event = {
-                    "event_type": "intent.stored.v1",
+                    "event_type": "dev.omniintelligence.onex.evt.intent-stored.v1",
                     "correlation_id": correlation_id,
                     "payload": {
                         "intent_id": str(uuid4()),
-                        "stored_at": TEST_TIMESTAMP.isoformat(),
+                        "stored_at": FIXED_TEST_TIMESTAMP.isoformat(),
                         "original_payload": envelope.get("payload"),
                     },
                 }
@@ -151,7 +161,7 @@ class MockIntentStorageHandler:
                 "success": True,
                 "data": {
                     "intent_id": str(uuid4()),
-                    "stored_at": TEST_TIMESTAMP.isoformat(),
+                    "stored_at": FIXED_TEST_TIMESTAMP.isoformat(),
                 },
                 "correlation_id": correlation_id,
             }
@@ -217,20 +227,28 @@ class MockEventRouter:
 
         Args:
             msg: Event message from the bus.
+
+        Note:
+            Catches exceptions to prevent router crash during tests.
+            In production, errors would be logged and routed to DLQ.
         """
         try:
             envelope = json.loads(msg.value.decode("utf-8"))
 
             # Add operation field based on event type (simulating dispatcher logic)
             event_type = envelope.get("event_type", "")
-            if "intent.classified" in event_type:
+            if "intent-classified" in event_type:
                 envelope["operation"] = "intent.store"
 
             # Route to handler
             await self.handler.execute(envelope)
+        except json.JSONDecodeError:
+            logger.exception("Failed to decode message JSON")
+        except KeyError as e:
+            logger.exception("Missing required envelope field: %s", e)
         except Exception:
-            # Log error but don't crash the router
-            logger.exception("Router error")
+            # Catch-all for unexpected errors during testing
+            logger.exception("Unexpected router error")
 
 
 # =============================================================================
@@ -278,19 +296,19 @@ def classified_intent_envelope(
     correlation_id: UUID,
     session_id: str,
 ) -> dict[str, object]:
-    """Create a test intent.classified envelope.
+    """Create a test intent-classified envelope.
 
     Args:
         correlation_id: Correlation ID for tracing.
         session_id: Session ID for the intent.
 
     Returns:
-        dict representing an intent.classified event envelope.
+        dict representing an intent-classified event envelope.
     """
     return {
-        "event_type": "dev.omniintelligence.intent.classified.v1",
+        "event_type": "dev.omniintelligence.onex.evt.intent-classified.v1",
         "correlation_id": str(correlation_id),
-        "timestamp": TEST_TIMESTAMP.isoformat(),
+        "timestamp": FIXED_TEST_TIMESTAMP.isoformat(),
         "payload": {
             "session_id": session_id,
             "intent_type": "navigation",
@@ -322,10 +340,10 @@ class TestIntentStorageRouting:
         mock_handler: MockIntentStorageHandler,
         classified_intent_envelope: dict[str, object],
     ) -> None:
-        """Verify intent.classified events route to intent storage handler.
+        """Verify intent-classified events route to intent storage handler.
 
         This test validates:
-        1. Event bus correctly delivers intent.classified events
+        1. Event bus correctly delivers intent-classified events
         2. Router dispatches envelope to intent storage handler
         3. Handler receives the envelope for processing
         """
@@ -339,7 +357,7 @@ class TestIntentStorageRouting:
             router.route_message,
         )
 
-        # Publish intent.classified event
+        # Publish intent-classified event
         await event_bus.publish_envelope(classified_intent_envelope, INPUT_TOPIC)
 
         # Wait for processing
@@ -355,7 +373,10 @@ class TestIntentStorageRouting:
 
         # Verify envelope was routed correctly
         captured = mock_handler.captured_envelopes[0]
-        assert captured["event_type"] == "dev.omniintelligence.intent.classified.v1"
+        assert (
+            captured["event_type"]
+            == "dev.omniintelligence.onex.evt.intent-classified.v1"
+        )
         assert captured["operation"] == "intent.store", (
             "Router should set operation to intent.store"
         )
@@ -369,7 +390,7 @@ class TestIntentStorageRouting:
         mock_handler: MockIntentStorageHandler,
         session_id: str,
     ) -> None:
-        """Verify multiple intent.classified events are routed sequentially.
+        """Verify multiple intent-classified events are routed sequentially.
 
         Tests that the handler processes multiple intents correctly.
         """
@@ -381,13 +402,13 @@ class TestIntentStorageRouting:
             router.route_message,
         )
 
-        # Publish multiple intent.classified events
+        # Publish multiple intent-classified events
         intent_types = ["navigation", "search", "action", "confirmation"]
         for i, intent_type in enumerate(intent_types):
             envelope = {
-                "event_type": "dev.omniintelligence.intent.classified.v1",
+                "event_type": "dev.omniintelligence.onex.evt.intent-classified.v1",
                 "correlation_id": str(uuid4()),
-                "timestamp": TEST_TIMESTAMP.isoformat(),
+                "timestamp": FIXED_TEST_TIMESTAMP.isoformat(),
                 "payload": {
                     "session_id": session_id,
                     "intent_type": intent_type,
@@ -416,7 +437,7 @@ class TestIntentStorageRouting:
 
 
 class TestIntentStoredEventEmission:
-    """Tests for intent.stored event emission after successful storage."""
+    """Tests for intent-stored event emission after successful storage."""
 
     @pytest.mark.asyncio
     async def test_intent_stored_event_emitted_on_success(
@@ -426,12 +447,12 @@ class TestIntentStoredEventEmission:
         classified_intent_envelope: dict[str, object],
         correlation_id: UUID,
     ) -> None:
-        """Verify intent.stored event emitted after successful storage.
+        """Verify intent-stored event emitted after successful storage.
 
         This test validates the complete flow:
-        1. intent.classified arrives
+        1. intent-classified arrives
         2. Handler processes and stores
-        3. intent.stored event is emitted
+        3. intent-stored event is emitted
         """
         # Track emitted events
         stored_events: list[dict[str, object]] = []
@@ -457,7 +478,7 @@ class TestIntentStoredEventEmission:
             capture_stored_event,
         )
 
-        # Publish intent.classified event
+        # Publish intent-classified event
         await event_bus.publish_envelope(classified_intent_envelope, INPUT_TOPIC)
 
         # Wait for stored event
@@ -467,12 +488,12 @@ class TestIntentStoredEventEmission:
                 timeout=MESSAGE_WAIT_TIMEOUT,
             )
         except TimeoutError:
-            pytest.fail("intent.stored event not received within timeout")
+            pytest.fail("intent-stored event not received within timeout")
 
         # Verify stored event
         assert len(stored_events) == 1, "Should receive exactly one stored event"
         stored = stored_events[0]
-        assert stored["event_type"] == "intent.stored.v1"
+        assert stored["event_type"] == "dev.omniintelligence.onex.evt.intent-stored.v1"
         assert stored["correlation_id"] == str(correlation_id)
         assert "payload" in stored
         stored_payload = cast("dict[str, object]", stored["payload"])
@@ -489,7 +510,7 @@ class TestIntentStoredEventEmission:
         mock_handler: MockIntentStorageHandler,
         classified_intent_envelope: dict[str, object],
     ) -> None:
-        """Verify no intent.stored event when handler fails.
+        """Verify no intent-stored event when handler fails.
 
         When the handler fails to store the intent, no stored event should be
         emitted.
@@ -733,8 +754,8 @@ class TestEdgeCases:
 
         # Envelope without correlation_id
         envelope_no_corr = {
-            "event_type": "dev.omniintelligence.intent.classified.v1",
-            "timestamp": TEST_TIMESTAMP.isoformat(),
+            "event_type": "dev.omniintelligence.onex.evt.intent-classified.v1",
+            "timestamp": FIXED_TEST_TIMESTAMP.isoformat(),
             "payload": {
                 "session_id": session_id,
                 "intent_type": "test",
@@ -786,9 +807,9 @@ class TestEdgeCases:
         )
 
         envelope_empty = {
-            "event_type": "dev.omniintelligence.intent.classified.v1",
+            "event_type": "dev.omniintelligence.onex.evt.intent-classified.v1",
             "correlation_id": str(uuid4()),
-            "timestamp": TEST_TIMESTAMP.isoformat(),
+            "timestamp": FIXED_TEST_TIMESTAMP.isoformat(),
             "payload": {},
         }
 
@@ -824,9 +845,9 @@ class TestEdgeCases:
         num_events = 50
         for i in range(num_events):
             envelope = {
-                "event_type": "dev.omniintelligence.intent.classified.v1",
+                "event_type": "dev.omniintelligence.onex.evt.intent-classified.v1",
                 "correlation_id": str(uuid4()),
-                "timestamp": TEST_TIMESTAMP.isoformat(),
+                "timestamp": FIXED_TEST_TIMESTAMP.isoformat(),
                 "payload": {
                     "session_id": session_id,
                     "intent_type": f"intent_{i}",
