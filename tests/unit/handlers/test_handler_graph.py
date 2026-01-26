@@ -1753,8 +1753,11 @@ class TestHandlerGraphExecuteDispatcher:
             result = await handler.execute(envelope)
 
             assert result is not None
-            # The result should include the correlation_id
-            assert result.correlation_id is not None
+            # The result should include the correlation_id and match the input
+            assert str(result.correlation_id) == test_correlation_id, (
+                f"Expected correlation_id {test_correlation_id}, "
+                f"got {result.correlation_id}"
+            )
 
             await handler.shutdown()
 

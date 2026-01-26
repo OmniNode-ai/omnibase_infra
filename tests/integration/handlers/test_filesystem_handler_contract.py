@@ -249,7 +249,7 @@ class TestFilesystemHandlerContractSchema:
         - handler_id
         - name
         - contract_version
-        - descriptor (with handler_kind)
+        - descriptor (with node_archetype)
         - input_model
         - output_model
         """
@@ -278,7 +278,7 @@ class TestFilesystemHandlerContractSchema:
         """Verify the descriptor section contains expected effect handler fields.
 
         Effect handlers should specify:
-        - handler_kind: effect
+        - node_archetype: effect
         - purity: side_effecting
         - Additional effect-specific configuration
         """

@@ -33,6 +33,7 @@ Circuit Breaker Pattern:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Mapping
 from uuid import UUID, uuid4
@@ -108,6 +109,10 @@ _DEFAULT_TIMEOUT_SECONDS: float = parse_env_float(
 )
 _DEFAULT_POOL_SIZE: int = 50
 _HEALTH_CACHE_SECONDS: float = 10.0
+
+# Cypher label validation: alphanumeric and underscore only
+# This prevents injection attacks via malicious label values
+_CYPHER_LABEL_PATTERN: re.Pattern[str] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class HandlerGraph(
@@ -561,6 +566,36 @@ class HandlerGraph(
                 f"Batch execution failed: {type(e).__name__}", context=ctx
             ) from e
 
+    def _validate_cypher_labels(
+        self, labels: list[str], operation: str, correlation_id: UUID
+    ) -> None:
+        """Validate that all labels are safe for Cypher queries.
+
+        Labels are embedded directly in Cypher queries (not parameterized),
+        so they must be validated to prevent injection attacks.
+
+        Args:
+            labels: List of labels to validate.
+            operation: Operation name for error context.
+            correlation_id: Correlation ID for error context.
+
+        Raises:
+            RuntimeHostError: If any label contains unsafe characters.
+        """
+        for label in labels:
+            if not _CYPHER_LABEL_PATTERN.match(label):
+                ctx = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.GRAPH,
+                    operation=operation,
+                    target_name="graph_handler",
+                    correlation_id=correlation_id,
+                )
+                raise RuntimeHostError(
+                    f"Invalid label '{label}': labels must start with a letter or "
+                    f"underscore and contain only alphanumeric characters and underscores",
+                    context=ctx,
+                )
+
     async def create_node(
         self,
         labels: list[str],
@@ -585,6 +620,9 @@ class HandlerGraph(
         # Check circuit breaker
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("create_node", correlation_id)
+
+        # Validate labels to prevent Cypher injection
+        self._validate_cypher_labels(labels, "create_node", correlation_id)
 
         # Build Cypher query with labels
         labels_str = ":".join(labels) if labels else ""
@@ -669,6 +707,20 @@ class HandlerGraph(
         # Check circuit breaker
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("create_relationship", correlation_id)
+
+        # Validate relationship type to prevent Cypher injection
+        if not _CYPHER_LABEL_PATTERN.match(relationship_type):
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.GRAPH,
+                operation="create_relationship",
+                target_name="graph_handler",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Invalid relationship_type '{relationship_type}': must start with a "
+                f"letter or underscore and contain only alphanumeric characters and underscores",
+                context=ctx,
+            )
 
         # Determine if IDs are element IDs (strings with colons) or internal IDs
         from_is_element_id = isinstance(from_node_id, str) and ":" in from_node_id
@@ -949,6 +1001,29 @@ class HandlerGraph(
 
         is_element_id = isinstance(start_node_id, str) and ":" in str(start_node_id)
         start_time = time.perf_counter()
+
+        # Validate relationship types to prevent Cypher injection
+        if relationship_types:
+            for rel_type in relationship_types:
+                if not _CYPHER_LABEL_PATTERN.match(rel_type):
+                    ctx = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.GRAPH,
+                        operation="traverse",
+                        target_name="graph_handler",
+                        correlation_id=correlation_id,
+                    )
+                    raise RuntimeHostError(
+                        f"Invalid relationship_type '{rel_type}': must start with a "
+                        f"letter or underscore and contain only alphanumeric characters "
+                        f"and underscores",
+                        context=ctx,
+                    )
+
+        # Validate filter labels to prevent Cypher injection
+        if filters and filters.node_labels:
+            self._validate_cypher_labels(
+                filters.node_labels, "traverse", correlation_id
+            )
 
         # Build match clause for start node
         if is_element_id:
@@ -1267,7 +1342,23 @@ class HandlerGraph(
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
-        """Execute graph.execute_query operation."""
+        """Execute graph.execute_query operation.
+
+        Validates that payload contains required 'query' field and optional
+        'parameters' dict, then delegates to execute_query() and converts
+        the result to ModelHandlerOutput format.
+
+        Args:
+            payload: Request payload with 'query' and optional 'parameters'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping query results.
+
+        Raises:
+            RuntimeHostError: If query field missing or parameters invalid.
+        """
         query = payload.get("query")
         if not isinstance(query, str):
             raise RuntimeHostError(
@@ -1329,7 +1420,24 @@ class HandlerGraph(
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
-        """Execute graph.execute_query_batch operation."""
+        """Execute graph.execute_query_batch operation.
+
+        Validates batch query structure with fail-fast semantics:
+        - 'queries' must be a list of dicts
+        - Each query dict must have 'query' (str) and optional 'parameters' (dict)
+        - 'transaction' must be boolean if provided
+
+        Args:
+            payload: Request payload with 'queries' list and optional 'transaction'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping batch execution results.
+
+        Raises:
+            RuntimeHostError: If queries list invalid or any query malformed.
+        """
         queries_raw = payload.get("queries")
         if not isinstance(queries_raw, list):
             raise RuntimeHostError(
@@ -1370,7 +1478,17 @@ class HandlerGraph(
                 (query_str, params if isinstance(params, dict) else None)  # type: ignore[arg-type]
             )
 
-        transaction = bool(payload.get("transaction", True))
+        # Validate transaction is boolean - don't silently coerce other types
+        transaction_raw = payload.get("transaction", True)
+        if not isinstance(transaction_raw, bool):
+            raise RuntimeHostError(
+                f"Invalid 'transaction' in payload - must be boolean, "
+                f"got {type(transaction_raw).__name__}",
+                context=self._error_context(
+                    "graph.execute_query_batch", correlation_id
+                ),
+            )
+        transaction = transaction_raw
 
         try:
             result = await self.execute_query_batch(queries, transaction=transaction)
@@ -1408,7 +1526,22 @@ class HandlerGraph(
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
-        """Execute graph.create_node operation."""
+        """Execute graph.create_node operation.
+
+        Validates optional 'labels' (list of strings) and 'properties' (dict),
+        then delegates to create_node() method.
+
+        Args:
+            payload: Request payload with optional 'labels' and 'properties'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping created node details.
+
+        Raises:
+            RuntimeHostError: If labels or properties have invalid types.
+        """
         labels_raw = payload.get("labels")
         if labels_raw is not None:
             if not isinstance(labels_raw, list):
@@ -1466,7 +1599,22 @@ class HandlerGraph(
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
-        """Execute graph.create_relationship operation."""
+        """Execute graph.create_relationship operation.
+
+        Validates required fields 'from_node_id', 'to_node_id', 'relationship_type'
+        and optional 'properties' dict, then delegates to create_relationship().
+
+        Args:
+            payload: Request payload with node IDs, relationship type, and properties.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping created relationship details.
+
+        Raises:
+            RuntimeHostError: If required fields missing or properties invalid.
+        """
         from_node_id = payload.get("from_node_id")
         to_node_id = payload.get("to_node_id")
         relationship_type = payload.get("relationship_type")
@@ -1533,7 +1681,22 @@ class HandlerGraph(
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
-        """Execute graph.delete_node operation."""
+        """Execute graph.delete_node operation.
+
+        Validates required 'node_id' and optional 'detach' boolean. The detach
+        flag must be explicitly boolean to prevent accidental cascade deletes.
+
+        Args:
+            payload: Request payload with 'node_id' and optional 'detach'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping deletion result.
+
+        Raises:
+            RuntimeHostError: If node_id missing or detach is non-boolean.
+        """
         node_id = payload.get("node_id")
         if node_id is None:
             raise RuntimeHostError(
@@ -1541,7 +1704,15 @@ class HandlerGraph(
                 context=self._error_context("graph.delete_node", correlation_id),
             )
 
-        detach = bool(payload.get("detach", False))
+        # Validate detach is boolean - don't silently coerce to prevent accidental deletes
+        detach_raw = payload.get("detach", False)
+        if not isinstance(detach_raw, bool):
+            raise RuntimeHostError(
+                f"Invalid 'detach' in payload - must be boolean, "
+                f"got {type(detach_raw).__name__}",
+                context=self._error_context("graph.delete_node", correlation_id),
+            )
+        detach = detach_raw
 
         try:
             result = await self.delete_node(str(node_id), detach=detach)
@@ -1574,7 +1745,22 @@ class HandlerGraph(
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
-        """Execute graph.delete_relationship operation."""
+        """Execute graph.delete_relationship operation.
+
+        Validates required 'relationship_id' field, then delegates to
+        delete_relationship() method.
+
+        Args:
+            payload: Request payload with 'relationship_id'.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping deletion result.
+
+        Raises:
+            RuntimeHostError: If relationship_id field is missing.
+        """
         relationship_id = payload.get("relationship_id")
         if relationship_id is None:
             raise RuntimeHostError(
@@ -1616,7 +1802,26 @@ class HandlerGraph(
         correlation_id: UUID,
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelGraphHandlerResponse]:
-        """Execute graph.traverse operation."""
+        """Execute graph.traverse operation.
+
+        Validates traversal parameters with strict type checking:
+        - 'start_node_id': required
+        - 'relationship_types': optional list of strings
+        - 'direction': optional, must be 'outgoing', 'incoming', or 'both'
+        - 'max_depth': optional, must be positive integer
+        - 'filters': optional dict with 'node_labels' (list) and 'node_properties' (dict)
+
+        Args:
+            payload: Request payload with traversal configuration.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping traversal results (nodes, relationships, paths).
+
+        Raises:
+            RuntimeHostError: If start_node_id missing or parameters have invalid types.
+        """
         start_node_id = payload.get("start_node_id")
         if start_node_id is None:
             raise RuntimeHostError(
@@ -1655,7 +1860,7 @@ class HandlerGraph(
         else:
             direction = direction_raw
 
-        # max_depth - optional with default, but if provided must be numeric
+        # max_depth - optional with default, but if provided must be positive integer
         max_depth_raw = payload.get("max_depth")
         if max_depth_raw is None:
             max_depth = 1
@@ -1667,6 +1872,11 @@ class HandlerGraph(
             )
         else:
             max_depth = int(max_depth_raw)
+            if max_depth <= 0:
+                raise RuntimeHostError(
+                    f"Invalid 'max_depth' value {max_depth} - must be a positive integer",
+                    context=self._error_context("graph.traverse", correlation_id),
+                )
 
         # filters - optional, but if provided must be dict with validated fields
         filters = None
