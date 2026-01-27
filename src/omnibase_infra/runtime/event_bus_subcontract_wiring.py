@@ -57,6 +57,7 @@ from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
 from omnibase_core.protocols.event_bus.protocol_event_message import (
     ProtocolEventMessage,
 )
+from omnibase_infra.protocols import ProtocolDispatchEngine
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -123,7 +124,7 @@ class EventBusSubcontractWiring:
     def __init__(
         self,
         event_bus: ProtocolEventBusSubscriber,
-        dispatch_engine: object,
+        dispatch_engine: ProtocolDispatchEngine,
         environment: str,
     ) -> None:
         """Initialize event bus wiring.
@@ -133,7 +134,7 @@ class EventBusSubcontractWiring:
                 Must implement subscribe(topic, group_id, on_message) -> unsubscribe callable.
                 Duck typed per ONEX patterns.
             dispatch_engine: Engine to dispatch received messages to handlers.
-                Must implement dispatch(topic, envelope) method.
+                Must implement ProtocolDispatchEngine interface.
                 Must be frozen (registrations complete) before wiring subscriptions.
             environment: Environment prefix for topics (e.g., 'dev', 'prod').
                 Used to resolve topic suffixes to full topic names.
@@ -264,8 +265,8 @@ class EventBusSubcontractWiring:
             """Process incoming Kafka message and dispatch to engine."""
             try:
                 envelope = self._deserialize_to_envelope(message)
-                # NOTE: Duck typing - dispatch_engine implements MessageDispatchEngine interface
-                await self._dispatch_engine.dispatch(topic, envelope)  # type: ignore[attr-defined]
+                # Dispatch via ProtocolDispatchEngine interface
+                await self._dispatch_engine.dispatch(topic, envelope)
             except json.JSONDecodeError as e:
                 self._logger.exception(
                     "Failed to deserialize message from topic '%s': %s",
