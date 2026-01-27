@@ -1532,12 +1532,19 @@ class MessageDispatchEngine:
             # Extract operation name from envelope for binding lookup (fail-fast)
             operation = self._extract_operation_from_envelope(envelope, correlation_id)
 
+            # Create context for binding resolution (see constants.VALID_CONTEXT_PATHS)
+            dispatch_context: dict[str, object] = {
+                "now_iso": datetime.now(UTC).isoformat(),
+                "dispatcher_id": entry.dispatcher_id,
+                "correlation_id": correlation_id,
+            }
+
             # Resolve all bindings for this operation
             resolution = self._binding_resolver.resolve(
                 operation=operation,
                 bindings_subcontract=entry.operation_bindings,
                 envelope=envelope,
-                context=None,  # TODO: Pass dispatch context when available
+                context=dispatch_context,
                 correlation_id=correlation_id,
             )
 

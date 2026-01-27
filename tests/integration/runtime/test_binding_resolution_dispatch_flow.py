@@ -470,6 +470,91 @@ class TestBindingResolutionDispatchFlow:
         assert received["__debug_original_envelope"].correlation_id == correlation_id
         assert received["__debug_original_envelope"].trace_id == trace_id
 
+    @pytest.mark.asyncio
+    async def test_context_binding_resolution(
+        self,
+        dispatch_engine: MessageDispatchEngine,
+    ) -> None:
+        """Test ${context.*} bindings resolve correctly.
+
+        Verifies that context bindings (now_iso, dispatcher_id, correlation_id)
+        are properly resolved from the dispatch context.
+        """
+        context_bindings = ModelOperationBindingsSubcontract(
+            bindings={
+                "test.operation": [
+                    ModelParsedBinding(
+                        parameter_name="timestamp",
+                        source="context",
+                        path_segments=("now_iso",),
+                        required=True,
+                        original_expression="${context.now_iso}",
+                    ),
+                    ModelParsedBinding(
+                        parameter_name="dispatcher",
+                        source="context",
+                        path_segments=("dispatcher_id",),
+                        required=True,
+                        original_expression="${context.dispatcher_id}",
+                    ),
+                    ModelParsedBinding(
+                        parameter_name="corr_id",
+                        source="context",
+                        path_segments=("correlation_id",),
+                        required=False,
+                        original_expression="${context.correlation_id}",
+                    ),
+                ],
+            },
+        )
+
+        received_envelopes: list[object] = []
+
+        async def test_handler(envelope: object, context: object | None = None) -> None:
+            received_envelopes.append(envelope)
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="context-test-dispatcher",
+            dispatcher=test_handler,
+            category=EnumMessageCategory.EVENT,
+            message_types=None,
+            node_kind=EnumNodeKind.EFFECT,
+            operation_bindings=context_bindings,
+        )
+        dispatch_engine.register_route(create_test_route("context-test-dispatcher"))
+        dispatch_engine.freeze()
+
+        correlation_id = uuid4()
+        test_envelope = MockEventEnvelope(
+            correlation_id=correlation_id,
+            payload=MockSimplePayload(user_id="user-context-test"),
+        )
+
+        await dispatch_engine.dispatch(
+            topic="dev.test.events.v1",
+            envelope=test_envelope,
+        )
+
+        # Verify handler was called
+        assert len(received_envelopes) == 1
+        received = received_envelopes[0]
+        assert isinstance(received, dict)
+
+        bindings = received["__bindings"]
+
+        # Verify context bindings resolved
+        assert "timestamp" in bindings, "now_iso should resolve"
+        assert isinstance(bindings["timestamp"], str), "timestamp should be ISO string"
+        assert "T" in bindings["timestamp"], "Should be ISO format with T separator"
+
+        assert bindings["dispatcher"] == "context-test-dispatcher", (
+            "dispatcher_id should match registered dispatcher"
+        )
+
+        assert bindings["corr_id"] == correlation_id, (
+            "correlation_id from context should match envelope"
+        )
+
 
 class TestBindingResolutionEdgeCases:
     """Edge case tests for binding resolution."""
