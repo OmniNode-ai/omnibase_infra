@@ -459,9 +459,10 @@ class TestRuntimeE2EFlow:
         )
         group_id = f"e2e-runtime-{unique_node_id.hex[:8]}"
 
+        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         unsub = await real_kafka_event_bus.subscribe(
             topic=output_topic,
-            group_id=group_id,
+            group_id_override=group_id,
             on_message=on_completion,
         )
 

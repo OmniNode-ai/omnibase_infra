@@ -36,8 +36,6 @@
 bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
 # Environment identifier for message routing (e.g., "local", "dev", "staging", "prod")
 environment: "${KAFKA_ENVIRONMENT:-local}"
-# Consumer group identifier for message routing
-group: "${KAFKA_GROUP:-default}"
 # =============================================================================
 # Timeout and Retry Settings
 # =============================================================================

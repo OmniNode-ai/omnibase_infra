@@ -30,6 +30,19 @@ import pytest
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
+from omnibase_infra.models import ModelNodeIdentity
+
+
+# Test helper: Create a default node identity for tests
+def _test_identity(suffix: str = "") -> ModelNodeIdentity:
+    """Create a test node identity with optional suffix for uniqueness."""
+    return ModelNodeIdentity(
+        env="test",
+        service="test-service",
+        node_name=f"test-node{'-' + suffix if suffix else ''}",
+        version="v1",
+    )
+
 
 # =============================================================================
 # Test Fixtures
@@ -133,7 +146,9 @@ class TestConcurrentPublishOperations:
                 received_messages.append(msg)
 
         # Set up subscriber
-        await event_bus.subscribe("concurrent-topic", "group1", handler)
+        await event_bus.subscribe(
+            "concurrent-topic", _test_identity(), handler, group_id_override="group1"
+        )
 
         num_publishers = 5
         messages_per_publisher = 50
@@ -212,8 +227,9 @@ class TestConcurrentSubscribeUnsubscribe:
         async def subscribe_task(sub_id: int) -> None:
             unsub = await event_bus.subscribe(
                 topic="shared-topic",
-                group_id=f"group-{sub_id}",
+                node_identity=_test_identity(str(sub_id)),
                 on_message=handler,
+                group_id_override=f"group-{sub_id}",
             )
             async with lock:
                 unsubscribes.append(unsub)
@@ -242,8 +258,9 @@ class TestConcurrentSubscribeUnsubscribe:
         for i in range(num_subscribers):
             unsub = await event_bus.subscribe(
                 topic="shared-topic",
-                group_id=f"group-{i}",
+                node_identity=_test_identity(str(i)),
                 on_message=handler,
+                group_id_override=f"group-{i}",
             )
             unsubscribes.append(unsub)
 
@@ -276,8 +293,9 @@ class TestConcurrentSubscribeUnsubscribe:
             for _ in range(10):
                 unsub = await event_bus.subscribe(
                     topic="interleaved-topic",
-                    group_id=f"group-{sub_id}",
+                    node_identity=_test_identity(str(sub_id)),
                     on_message=handler,
+                    group_id_override=f"group-{sub_id}",
                 )
                 await asyncio.sleep(0)  # Yield to other tasks
                 await unsub()
@@ -306,8 +324,9 @@ class TestConcurrentSubscribeUnsubscribe:
         test_group = f"double-unsub-group-{id(self)}"
         unsub = await event_bus.subscribe(
             topic=test_topic,
-            group_id=test_group,
+            node_identity=_test_identity("double-unsub"),
             on_message=handler,
+            group_id_override=test_group,
         )
 
         # Call unsubscribe concurrently multiple times
@@ -347,7 +366,12 @@ class TestCircuitBreakerRaceConditions:
                 failure_count += 1
             raise ValueError("Intentional failure")
 
-        await event_bus.subscribe("circuit-topic", "fail-group", failing_handler)
+        await event_bus.subscribe(
+            "circuit-topic",
+            _test_identity("fail"),
+            failing_handler,
+            group_id_override="fail-group",
+        )
 
         # Send messages concurrently to trigger failures
         async def send_message(i: int) -> None:
@@ -388,7 +412,12 @@ class TestCircuitBreakerRaceConditions:
                 if should_fail and call_count <= 3:
                     raise ValueError("Intentional failure")
 
-        await event_bus.subscribe("reset-topic", "flaky-group", flaky_handler)
+        await event_bus.subscribe(
+            "reset-topic",
+            _test_identity("flaky"),
+            flaky_handler,
+            group_id_override="flaky-group",
+        )
 
         # Send 3 failing messages
         for i in range(3):
@@ -421,7 +450,12 @@ class TestCircuitBreakerRaceConditions:
         async def failing_handler(msg: ModelEventMessage) -> None:
             raise ValueError("Always fails")
 
-        await event_bus.subscribe("reset-test", "fail-group", failing_handler)
+        await event_bus.subscribe(
+            "reset-test",
+            _test_identity("fail"),
+            failing_handler,
+            group_id_override="fail-group",
+        )
 
         # Trigger circuit open
         for i in range(5):
@@ -630,8 +664,9 @@ class TestLifecycleRaceConditions:
                 try:
                     await event_bus.subscribe(
                         topic=f"topic-{i}",
-                        group_id=test_group,
+                        node_identity=_test_identity(str(i)),
                         on_message=handler,
+                        group_id_override=test_group,
                     )
                     async with lock:
                         subscribe_count += 1
@@ -700,7 +735,12 @@ class TestHealthCheckRaceConditions:
 
         async def subscribe_task() -> None:
             for i in range(50):
-                unsub = await event_bus.subscribe(f"topic-{i}", f"group-{i}", handler)
+                unsub = await event_bus.subscribe(
+                    f"topic-{i}",
+                    _test_identity(str(i)),
+                    handler,
+                    group_id_override=f"group-{i}",
+                )
                 await asyncio.sleep(0)
                 await unsub()
 
@@ -787,8 +827,9 @@ class TestInMemoryEventBusStress:
             try:
                 unsub = await event_bus.subscribe(
                     topic="mixed-topic",
-                    group_id=f"group-{sub_id}",
+                    node_identity=_test_identity(str(sub_id)),
                     on_message=handler,
+                    group_id_override=f"group-{sub_id}",
                 )
                 await asyncio.sleep(0.1)  # Let publishers run
                 await unsub()

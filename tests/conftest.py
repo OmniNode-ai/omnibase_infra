@@ -1090,6 +1090,38 @@ async def full_infrastructure_cleanup(
 # =============================================================================
 
 
+def make_runtime_config(**overrides: object) -> dict[str, object]:
+    """Create a runtime config dict with default required fields and optional overrides.
+
+    RuntimeHostProcess requires 'service_name' and 'node_name' in config for proper
+    node identity construction (OMN-1602). This helper provides default values for
+    these required fields while allowing specific test cases to override any config.
+
+    Args:
+        **overrides: Config keys to override or add to the default config.
+
+    Returns:
+        A config dict suitable for RuntimeHostProcess initialization.
+
+    Example:
+        >>> config = make_runtime_config()
+        >>> config["service_name"]
+        'test-service'
+
+        >>> config = make_runtime_config(input_topic="custom.input")
+        >>> config["input_topic"]
+        'custom.input'
+    """
+    config: dict[str, object] = {
+        "service_name": "test-service",
+        "node_name": "test-node",
+        "env": "test",
+        "version": "v1",
+    }
+    config.update(overrides)
+    return config
+
+
 def seed_mock_handlers(
     process: object,
     *,

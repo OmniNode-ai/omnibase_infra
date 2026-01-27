@@ -1017,9 +1017,10 @@ async def running_orchestrator_consumer(
     # Use unique group ID per test run to avoid cross-test coupling
     unique_group_id = f"e2e-orchestrator-test-{uuid4().hex[:8]}"
     # Subscribe to the introspection topic (topic is guaranteed to exist)
+    # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
     unsubscribe = await real_kafka_event_bus.subscribe(
         topic=validate_test_topic_exists,  # Use the ensured topic name
-        group_id=unique_group_id,
+        group_id_override=unique_group_id,
         on_message=orchestrator_pipeline.pipeline.process_message,
     )
 
@@ -1549,9 +1550,10 @@ class TestPipelineLifecycle:
             message_received.set()
 
         # Subscribe (topic is guaranteed to exist via validate_test_topic_exists fixture)
+        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=validate_test_topic_exists,
-            group_id=f"lifecycle-test-{unique_correlation_id.hex[:8]}",
+            group_id_override=f"lifecycle-test-{unique_correlation_id.hex[:8]}",
             on_message=handler,
         )
 
@@ -1605,9 +1607,10 @@ class TestPipelineLifecycle:
             message_count += 1
 
         # Subscribe and immediately unsubscribe (topic is guaranteed to exist)
+        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=validate_test_topic_exists,
-            group_id=f"shutdown-test-{unique_correlation_id.hex[:8]}",
+            group_id_override=f"shutdown-test-{unique_correlation_id.hex[:8]}",
             on_message=handler,
         )
 

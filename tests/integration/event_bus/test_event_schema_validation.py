@@ -552,7 +552,10 @@ class TestHeaderCompleteness:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await started_event_bus.subscribe("test.completeness", "test-group", handler)
+        # Use group_id_override for test isolation (OMN-1602)
+        await started_event_bus.subscribe(
+            "test.completeness", group_id_override="test-group", on_message=handler
+        )
         await started_event_bus.publish("test.completeness", None, b"test-value")
 
         assert len(received_messages) == 1
@@ -583,7 +586,10 @@ class TestHeaderCompleteness:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await started_event_bus.subscribe("test.custom", "test-group", handler)
+        # Use group_id_override for test isolation (OMN-1602)
+        await started_event_bus.subscribe(
+            "test.custom", group_id_override="test-group", on_message=handler
+        )
 
         custom_headers = ModelEventHeaders(
             source="custom-source",
@@ -628,7 +634,10 @@ class TestHeaderCompleteness:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await started_event_bus.subscribe("test.metadata", "test-group", handler)
+        # Use group_id_override for test isolation (OMN-1602)
+        await started_event_bus.subscribe(
+            "test.metadata", group_id_override="test-group", on_message=handler
+        )
         await started_event_bus.publish("test.metadata", b"msg-key", b"msg-value")
 
         assert len(received_messages) == 1
@@ -656,7 +665,10 @@ class TestHeaderCompleteness:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await started_event_bus.subscribe("test.unique", "test-group", handler)
+        # Use group_id_override for test isolation (OMN-1602)
+        await started_event_bus.subscribe(
+            "test.unique", group_id_override="test-group", on_message=handler
+        )
 
         # Publish multiple messages
         for i in range(5):

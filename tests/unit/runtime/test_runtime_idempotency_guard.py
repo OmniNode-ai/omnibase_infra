@@ -18,7 +18,7 @@ from omnibase_infra.idempotency import (
     StoreIdempotencyInmemory,
 )
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from tests.conftest import seed_mock_handlers
+from tests.conftest import make_runtime_config, seed_mock_handlers
 
 
 @pytest.fixture
@@ -51,15 +51,23 @@ def mock_handler() -> MagicMock:
 
 
 @pytest.fixture
-def idempotency_config() -> dict[str, ModelIdempotencyGuardConfig]:
-    """Create idempotency configuration for testing."""
+def idempotency_config() -> dict[str, object]:
+    """Create idempotency configuration for testing.
+
+    Includes required node identity fields (service_name, node_name)
+    for RuntimeHostProcess plus the idempotency config.
+    """
     return {
+        "service_name": "test-service",
+        "node_name": "test-node",
+        "env": "test",
+        "version": "v1",
         "idempotency": ModelIdempotencyGuardConfig(
             enabled=True,
             store_type="memory",
             domain_from_operation=True,
             skip_operations=["health.check", "metrics.get"],
-        )
+        ),
     }
 
 
@@ -71,7 +79,9 @@ class TestIdempotencyGuardDisabled:
         self, mock_event_bus: MagicMock
     ) -> None:
         """Idempotency guard is not configured when no config provided."""
-        process = RuntimeHostProcess(event_bus=mock_event_bus)
+        process = RuntimeHostProcess(
+            event_bus=mock_event_bus, config=make_runtime_config()
+        )
 
         assert process._idempotency_store is None
         assert process._idempotency_config is None
@@ -81,12 +91,12 @@ class TestIdempotencyGuardDisabled:
         self, mock_event_bus: MagicMock, mock_handler: MagicMock
     ) -> None:
         """Idempotency guard skips initialization when explicitly disabled."""
-        config = {
-            "idempotency": {
+        config = make_runtime_config(
+            idempotency={
                 "enabled": False,
                 "store_type": "memory",
             }
-        }
+        )
 
         with patch.object(
             RuntimeHostProcess,
@@ -411,14 +421,14 @@ class TestSkipOperations:
         mock_handler.health_check = AsyncMock(return_value={"healthy": True})
 
         # Configure with db.health as a skip operation (uses db handler which is registered)
-        config = {
-            "idempotency": {
+        config = make_runtime_config(
+            idempotency={
                 "enabled": True,
                 "store_type": "memory",
                 "domain_from_operation": True,
                 "skip_operations": ["db.health"],  # Skip health check operations
             }
-        }
+        )
 
         with patch.object(
             RuntimeHostProcess,

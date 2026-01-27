@@ -992,10 +992,11 @@ class TestSuite3ReIntrospection:
                     pass
 
         # Subscribe to request topic
+        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         group_id = f"e2e-test-registry-{correlation_id.hex[:8]}"
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=request_topic,
-            group_id=group_id,
+            group_id_override=group_id,
             on_message=on_message,
         )
 
@@ -1083,10 +1084,11 @@ class TestSuite3ReIntrospection:
                         pass
 
             # Subscribe to introspection topic
+            # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
             group_id = f"e2e-test-introspection-{unique_correlation_id.hex[:8]}"
             unsub_introspection = await real_kafka_event_bus.subscribe(
                 topic=introspection_topic,
-                group_id=group_id,
+                group_id_override=group_id,
                 on_message=on_introspection,
             )
 
@@ -1187,10 +1189,11 @@ class TestSuite3ReIntrospection:
                         pass
 
             # Subscribe to introspection topic
+            # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
             group_id = f"e2e-test-corr-{request_correlation_id.hex[:8]}"
             unsub = await real_kafka_event_bus.subscribe(
                 topic=introspection_topic,
-                group_id=group_id,
+                group_id_override=group_id,
                 on_message=on_introspection,
             )
 
@@ -1294,10 +1297,11 @@ class TestSuite4HeartbeatPublishing:
                     pass
 
         # Subscribe to heartbeat topic
+        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         group_id = f"e2e-heartbeat-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id=group_id,
+            group_id_override=group_id,
             on_message=on_heartbeat,
         )
 
@@ -1379,10 +1383,11 @@ class TestSuite4HeartbeatPublishing:
                     pass
 
         # Subscribe to heartbeat topic
+        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         group_id = f"e2e-heartbeat-fields-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id=group_id,
+            group_id_override=group_id,
             on_message=on_heartbeat,
         )
 
@@ -1588,10 +1593,11 @@ class TestHeartbeatPerformanceExtended:
                 except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                     pass
 
+        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         group_id = f"e2e-hb-consistency-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id=group_id,
+            group_id_override=group_id,
             on_message=on_heartbeat,
         )
 
