@@ -6,7 +6,7 @@ This module provides shared fixtures for the emit daemon integration tests.
 Fixtures handle Kafka topic management, daemon lifecycle, and test isolation.
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "192.168.86.200:29092")
+    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:9092")
 
 Related Tickets:
     - OMN-1610: Hook Event Daemon MVP

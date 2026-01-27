@@ -50,17 +50,23 @@ from pathlib import Path
 from types import TracebackType
 from typing import TypeVar
 
+from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.errors import OnexError
+from omnibase_core.types import JsonType
+
 logger = logging.getLogger(__name__)
 
 # Type variable for generic async runner
 _T = TypeVar("_T")
 
 
-class EmitClientError(Exception):
+class EmitClientError(OnexError):
     """Error communicating with emit daemon.
 
     Raised when the client cannot connect to the daemon, the daemon rejects
     the event, or a timeout occurs during communication.
+
+    Inherits from OnexError for consistent error handling across the ONEX platform.
 
     Attributes:
         reason: Optional detailed reason for the error (from daemon response).
@@ -76,14 +82,20 @@ class EmitClientError(Exception):
         ```
     """
 
-    def __init__(self, message: str, reason: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        reason: str | None = None,
+        error_code: EnumCoreErrorCode = EnumCoreErrorCode.OPERATION_FAILED,
+    ) -> None:
         """Initialize the error with a message and optional reason.
 
         Args:
             message: Human-readable error message
             reason: Optional detailed reason from daemon response
+            error_code: Error code from EnumCoreErrorCode, defaults to OPERATION_FAILED
         """
-        super().__init__(message)
+        super().__init__(message=message, error_code=error_code)
         self.reason = reason
 
 
@@ -230,33 +242,38 @@ class EmitClient:
                     timeout=self._timeout,
                 )
                 logger.debug(f"Connected to emit daemon at {self._socket_path}")
-            except FileNotFoundError:
+            except FileNotFoundError as e:
                 raise EmitClientError(
                     f"Emit daemon socket not found at {self._socket_path}. "
                     "Is the daemon running?",
                     reason="socket_not_found",
-                )
-            except PermissionError:
+                    error_code=EnumCoreErrorCode.RESOURCE_NOT_FOUND,
+                ) from e
+            except PermissionError as e:
                 raise EmitClientError(
                     f"Permission denied accessing emit daemon socket at {self._socket_path}",
                     reason="permission_denied",
-                )
-            except ConnectionRefusedError:
+                    error_code=EnumCoreErrorCode.PERMISSION_DENIED,
+                ) from e
+            except ConnectionRefusedError as e:
                 raise EmitClientError(
                     f"Connection refused to emit daemon at {self._socket_path}. "
                     "Is the daemon running?",
                     reason="connection_refused",
-                )
-            except TimeoutError:
+                    error_code=EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+                ) from e
+            except TimeoutError as e:
                 raise EmitClientError(
                     f"Timeout connecting to emit daemon at {self._socket_path}",
                     reason="connection_timeout",
-                )
+                    error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
+                ) from e
             except OSError as e:
                 raise EmitClientError(
                     f"Failed to connect to emit daemon: {e}",
                     reason="os_error",
-                )
+                    error_code=EnumCoreErrorCode.NETWORK_ERROR,
+                ) from e
 
     async def _disconnect(self) -> None:
         """Close connection to daemon socket.
@@ -276,7 +293,7 @@ class EmitClient:
                     self._reader = None
                     logger.debug("Disconnected from emit daemon")
 
-    async def _send_request(self, request: dict[str, object]) -> dict[str, object]:
+    async def _send_request(self, request: JsonType) -> dict[str, object]:
         """Send a request and receive response.
 
         Internal method for protocol communication.
@@ -329,35 +346,39 @@ class EmitClient:
                 )
             return response
 
-        except TimeoutError:
+        except TimeoutError as e:
             await self._disconnect()
             raise EmitClientError(
                 f"Timeout waiting for daemon response (timeout={self._timeout}s)",
                 reason="response_timeout",
-            )
+                error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
+            ) from e
         except json.JSONDecodeError as e:
             await self._disconnect()
             raise EmitClientError(
                 f"Invalid JSON response from daemon: {e}",
                 reason="invalid_json",
-            )
-        except ConnectionResetError:
+                error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+            ) from e
+        except ConnectionResetError as e:
             await self._disconnect()
             raise EmitClientError(
                 "Connection reset by emit daemon",
                 reason="connection_reset",
-            )
-        except BrokenPipeError:
+                error_code=EnumCoreErrorCode.NETWORK_ERROR,
+            ) from e
+        except BrokenPipeError as e:
             await self._disconnect()
             raise EmitClientError(
                 "Broken pipe to emit daemon",
                 reason="broken_pipe",
-            )
+                error_code=EnumCoreErrorCode.NETWORK_ERROR,
+            ) from e
 
     async def emit(
         self,
         event_type: str,
-        payload: dict[str, object],
+        payload: JsonType,
     ) -> str:
         """Emit an event via the daemon.
 
@@ -392,7 +413,7 @@ class EmitClient:
             print(f"Event queued with ID: {event_id}")
             ```
         """
-        request: dict[str, object] = {
+        request: JsonType = {
             "event_type": event_type,
             "payload": payload,
         }
@@ -450,7 +471,7 @@ class EmitClient:
             print(f"Spool size: {status['spool_size']}")
             ```
         """
-        request: dict[str, object] = {"command": "ping"}
+        request: JsonType = {"command": "ping"}
         response = await self._send_request(request)
 
         status = response.get("status")
@@ -506,7 +527,7 @@ class EmitClient:
     def emit_sync(
         self,
         event_type: str,
-        payload: dict[str, object],
+        payload: JsonType,
     ) -> str:
         """Synchronous wrapper for emit().
 
@@ -566,7 +587,7 @@ class EmitClient:
     async def _emit_and_disconnect(
         self,
         event_type: str,
-        payload: dict[str, object],
+        payload: JsonType,
     ) -> str:
         """Emit event and disconnect (for sync wrapper).
 
@@ -629,7 +650,7 @@ class EmitClient:
 
 async def emit_event(
     event_type: str,
-    payload: dict[str, object],
+    payload: JsonType,
     socket_path: Path | str = EmitClient.DEFAULT_SOCKET_PATH,
     timeout: float = EmitClient.DEFAULT_TIMEOUT,
 ) -> str:
@@ -664,10 +685,10 @@ async def emit_event(
 
 async def emit_event_with_fallback(
     event_type: str,
-    payload: dict[str, object],
+    payload: JsonType,
     socket_path: Path | str = EmitClient.DEFAULT_SOCKET_PATH,
     timeout: float = EmitClient.DEFAULT_TIMEOUT,
-    fallback: Callable[[str, dict[str, object]], Awaitable[str]] | None = None,
+    fallback: Callable[[str, JsonType], Awaitable[str]] | None = None,
 ) -> str:
     """Emit event via daemon, falling back to callback if daemon unavailable.
 

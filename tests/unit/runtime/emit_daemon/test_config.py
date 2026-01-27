@@ -102,8 +102,8 @@ class TestModelEmitDaemonConfigBootstrapServers:
 
     def test_valid_single_server_with_ip(self) -> None:
         """Test valid IP address bootstrap server passes validation."""
-        config = ModelEmitDaemonConfig(kafka_bootstrap_servers="192.168.86.200:29092")
-        assert config.kafka_bootstrap_servers == "192.168.86.200:29092"
+        config = ModelEmitDaemonConfig(kafka_bootstrap_servers="10.0.0.1:9092")
+        assert config.kafka_bootstrap_servers == "10.0.0.1:9092"
 
     def test_valid_multiple_servers(self) -> None:
         """Test valid comma-separated bootstrap servers pass validation."""

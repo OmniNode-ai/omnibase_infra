@@ -53,6 +53,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from omnibase_core.errors import OnexError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -201,7 +202,7 @@ class EmitDaemon:
             elif self._config.pid_path.exists():
                 # Another daemon is running
                 pid = self._config.pid_path.read_text().strip()
-                raise RuntimeError(
+                raise OnexError(
                     f"Another emit daemon is already running with PID {pid}"
                 )
 
@@ -217,7 +218,7 @@ class EmitDaemon:
             if self._event_bus is None:
                 kafka_config = ModelKafkaEventBusConfig(
                     bootstrap_servers=self._config.kafka_bootstrap_servers,
-                    environment="dev",
+                    environment=self._config.environment,
                     timeout_seconds=int(self._config.kafka_timeout_seconds),
                 )
                 self._event_bus = EventBusKafka(config=kafka_config)
@@ -612,8 +613,17 @@ class EmitDaemon:
                         # Wait for backoff period
                         await asyncio.sleep(backoff)
 
-                        # Re-enqueue
-                        await self._queue.enqueue(event)
+                        # Re-enqueue with error handling
+                        requeue_success = await self._queue.enqueue(event)
+                        if not requeue_success:
+                            logger.error(
+                                f"Failed to re-enqueue event {event.event_id} after backoff, event lost",
+                                extra={
+                                    "event_type": event.event_type,
+                                    "topic": event.topic,
+                                    "retry_count": event.retry_count,
+                                },
+                            )
 
             except asyncio.CancelledError:
                 logger.info("Publisher loop cancelled")
@@ -643,7 +653,12 @@ class EmitDaemon:
             value = json.dumps(event.payload).encode("utf-8")
 
             # Extract correlation_id from enriched payload (injected by registry)
-            payload_correlation_id = event.payload.get("correlation_id")
+            # Type guard: payload is always a dict in practice (created in _handle_event)
+            payload_correlation_id = (
+                event.payload.get("correlation_id")
+                if isinstance(event.payload, dict)
+                else None
+            )
             if isinstance(payload_correlation_id, str):
                 try:
                     correlation_id = UUID(payload_correlation_id)

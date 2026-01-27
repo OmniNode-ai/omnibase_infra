@@ -2,9 +2,10 @@
 # Copyright (c) 2025 OmniNode Team
 """Integration tests for the Hook Event Emit Daemon with real Kafka.
 
-These tests validate the full emit daemon lifecycle with Redpanda/Kafka
-at 192.168.86.200:29092. They verify that events flow through the daemon
-to Kafka and can be consumed correctly.
+These tests validate the full emit daemon lifecycle with a configured
+Kafka broker (set via KAFKA_BOOTSTRAP_SERVERS environment variable).
+They verify that events flow through the daemon to Kafka and can be
+consumed correctly.
 
 Test categories:
     - Lifecycle Tests: Daemon start/stop, PID file, socket management
@@ -14,7 +15,7 @@ Test categories:
     - Resilience Tests: Graceful shutdown, queue draining
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "192.168.86.200:29092")
+    KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:9092")
 
 Related Tickets:
     - OMN-1610: Hook Event Daemon MVP
@@ -78,7 +79,7 @@ DAEMON_STARTUP_WAIT_SECONDS = 2.0
 @pytest.fixture
 def kafka_bootstrap_servers() -> str:
     """Get Kafka bootstrap servers from environment."""
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "192.168.86.200:29092")
+    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
 
 @pytest.fixture
@@ -168,16 +169,20 @@ def temp_daemon_paths(tmp_path: Path):
 
 
 @pytest.fixture
-async def emit_daemon_config(
+def emit_daemon_config(
     temp_daemon_paths: tuple[Path, Path, Path],
     kafka_bootstrap_servers: str,
-) -> AsyncGenerator:
-    """Create emit daemon configuration for testing."""
+):
+    """Create emit daemon configuration for testing.
+
+    Returns:
+        ModelEmitDaemonConfig configured for testing with temporary paths.
+    """
     from omnibase_infra.runtime.emit_daemon.config import ModelEmitDaemonConfig
 
     socket_path, pid_path, spool_dir = temp_daemon_paths
 
-    config = ModelEmitDaemonConfig(
+    return ModelEmitDaemonConfig(
         socket_path=socket_path,
         pid_path=pid_path,
         spool_dir=spool_dir,
@@ -189,8 +194,6 @@ async def emit_daemon_config(
         kafka_timeout_seconds=10.0,
         shutdown_drain_seconds=5.0,
     )
-
-    return config
 
 
 @pytest.fixture
@@ -954,7 +957,7 @@ class TestEmitDaemonErrorHandling:
         # Create client with very short timeout
         client = EmitClient(
             socket_path=emit_daemon_config.socket_path,
-            timeout=0.001,  # 1ms - will likely timeout
+            timeout=0.01,  # 10ms - short enough to test timeout behavior
         )
 
         # This should either succeed quickly or timeout

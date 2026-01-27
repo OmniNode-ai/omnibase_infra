@@ -36,6 +36,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.types import JsonType
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,9 +92,9 @@ class ModelQueuedEvent(BaseModel):
         min_length=1,
         description="Kafka topic to publish to.",
     )
-    payload: dict[str, object] = Field(
+    payload: JsonType = Field(
         ...,
-        description="Event payload data.",
+        description="Event payload data (JSON-compatible value).",
     )
     partition_key: str | None = Field(
         default=None,
@@ -247,6 +249,15 @@ class BoundedEventQueue:
                     f"(memory: {len(self._memory_queue)}/{self._max_memory_queue})"
                 )
                 return True
+
+            # Memory full - check if spooling is disabled
+            if self._max_spool_messages == 0 or self._max_spool_bytes == 0:
+                logger.warning(
+                    f"Dropping event {event.event_id}: memory queue full "
+                    f"({len(self._memory_queue)}/{self._max_memory_queue}) "
+                    "and spooling is disabled (max_spool_messages=0 or max_spool_bytes=0)"
+                )
+                return False
 
             # Memory full, spool to disk
             return await self._spool_event(event)
@@ -520,8 +531,23 @@ class BoundedEventQueue:
 
         Returns:
             Number of events successfully moved to spool.
+
+        Note:
+            If spooling is disabled (max_spool_messages=0 or max_spool_bytes=0),
+            this method will log a warning and return 0 without draining any
+            events. Events in memory will be lost.
         """
         async with self._lock:
+            # Check if spooling is disabled
+            if self._max_spool_messages == 0 or self._max_spool_bytes == 0:
+                memory_count = len(self._memory_queue)
+                if memory_count > 0:
+                    logger.warning(
+                        f"Spooling is disabled (max_spool_messages=0 or max_spool_bytes=0). "
+                        f"{memory_count} events in memory will be lost during shutdown."
+                    )
+                return 0
+
             count = 0
             while self._memory_queue:
                 event = self._memory_queue.popleft()

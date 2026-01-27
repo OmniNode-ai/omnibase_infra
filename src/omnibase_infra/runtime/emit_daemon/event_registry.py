@@ -57,6 +57,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.errors import OnexError
+
 
 class ModelEventRegistration(BaseModel):
     """Registration configuration for a single event type.
@@ -233,7 +235,7 @@ class EventRegistry:
             Fully resolved Kafka topic name.
 
         Raises:
-            ValueError: If the event type is not registered.
+            OnexError: If the event type is not registered.
 
         Example:
             >>> registry = EventRegistry(environment="prod")
@@ -243,7 +245,7 @@ class EventRegistry:
         registration = self._registrations.get(event_type)
         if registration is None:
             registered = list(self._registrations.keys())
-            raise ValueError(
+            raise OnexError(
                 f"Unknown event type: '{event_type}'. Registered types: {registered}"
             )
         return registration.topic_template.format(env=self._environment)
@@ -267,7 +269,7 @@ class EventRegistry:
             Partition key value as string, or None if not applicable.
 
         Raises:
-            ValueError: If the event type is not registered.
+            OnexError: If the event type is not registered.
 
         Example:
             >>> registry = EventRegistry()
@@ -281,7 +283,7 @@ class EventRegistry:
         registration = self._registrations.get(event_type)
         if registration is None:
             registered = list(self._registrations.keys())
-            raise ValueError(
+            raise OnexError(
                 f"Unknown event type: '{event_type}'. Registered types: {registered}"
             )
 
@@ -312,7 +314,7 @@ class EventRegistry:
             True if validation passes.
 
         Raises:
-            ValueError: If the event type is not registered or if any
+            OnexError: If the event type is not registered or if any
                 required field is missing from the payload.
 
         Example:
@@ -329,12 +331,12 @@ class EventRegistry:
             ... )
             Traceback (most recent call last):
                 ...
-            ValueError: Missing required fields for 'prompt.submitted': ['prompt']
+            OnexError: Missing required fields for 'prompt.submitted': ['prompt']
         """
         registration = self._registrations.get(event_type)
         if registration is None:
             registered = list(self._registrations.keys())
-            raise ValueError(
+            raise OnexError(
                 f"Unknown event type: '{event_type}'. Registered types: {registered}"
             )
 
@@ -343,7 +345,7 @@ class EventRegistry:
         ]
 
         if missing_fields:
-            raise ValueError(
+            raise OnexError(
                 f"Missing required fields for '{event_type}': {missing_fields}"
             )
 
@@ -392,7 +394,7 @@ class EventRegistry:
             New dictionary with original payload plus injected metadata.
 
         Raises:
-            ValueError: If the event type is not registered.
+            OnexError: If the event type is not registered.
 
         Example:
             >>> registry = EventRegistry()
@@ -422,7 +424,7 @@ class EventRegistry:
         registration = self._registrations.get(event_type)
         if registration is None:
             registered = list(self._registrations.keys())
-            raise ValueError(
+            raise OnexError(
                 f"Unknown event type: '{event_type}'. Registered types: {registered}"
             )
 

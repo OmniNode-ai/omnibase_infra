@@ -31,6 +31,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from omnibase_core.errors import OnexError
+
 
 class ModelEmitDaemonConfig(BaseModel):
     """Configuration model for the Hook Event Emit Daemon.
@@ -58,7 +60,7 @@ class ModelEmitDaemonConfig(BaseModel):
 
     Example:
         >>> config = ModelEmitDaemonConfig(
-        ...     kafka_bootstrap_servers="192.168.86.200:29092",
+        ...     kafka_bootstrap_servers="kafka.example.com:9092",
         ...     socket_path=Path("/tmp/my-emit.sock"),
         ... )
         >>> print(config.max_payload_bytes)
@@ -187,12 +189,12 @@ class ModelEmitDaemonConfig(BaseModel):
             The validated path
 
         Raises:
-            ValueError: If the parent directory path is invalid
+            OnexError: If the parent directory path is invalid
         """
         parent = v.parent
         if parent.exists():
             if not parent.is_dir():
-                raise ValueError(f"Parent path exists but is not a directory: {parent}")
+                raise OnexError(f"Parent path exists but is not a directory: {parent}")
             return v
 
         # Check if grandparent exists (parent can be created)
@@ -200,7 +202,7 @@ class ModelEmitDaemonConfig(BaseModel):
         if grandparent.exists() and grandparent.is_dir():
             return v
 
-        raise ValueError(
+        raise OnexError(
             f"Parent directory does not exist and cannot be created: {parent}"
         )
 
@@ -219,11 +221,11 @@ class ModelEmitDaemonConfig(BaseModel):
             The validated path
 
         Raises:
-            ValueError: If no valid ancestor exists for directory creation
+            OnexError: If no valid ancestor exists for directory creation
         """
         if v.exists():
             if not v.is_dir():
-                raise ValueError(f"Spool path exists but is not a directory: {v}")
+                raise OnexError(f"Spool path exists but is not a directory: {v}")
             return v
 
         # Walk up the path to find an existing ancestor
@@ -233,11 +235,11 @@ class ModelEmitDaemonConfig(BaseModel):
             if current.exists():
                 if current.is_dir():
                     return v
-                raise ValueError(
+                raise OnexError(
                     f"Ancestor path exists but is not a directory: {current}"
                 )
 
-        raise ValueError(f"No valid ancestor directory found for spool path: {v}")
+        raise OnexError(f"No valid ancestor directory found for spool path: {v}")
 
     @field_validator("kafka_bootstrap_servers", mode="after")
     @classmethod
@@ -253,34 +255,32 @@ class ModelEmitDaemonConfig(BaseModel):
             The validated bootstrap servers string
 
         Raises:
-            ValueError: If the format is invalid
+            OnexError: If the format is invalid
         """
         servers = v.strip().split(",")
         for server in servers:
             server = server.strip()
             if not server:
-                raise ValueError("Bootstrap servers cannot contain empty entries")
+                raise OnexError("Bootstrap servers cannot contain empty entries")
             if ":" not in server:
-                raise ValueError(
+                raise OnexError(
                     f"Invalid bootstrap server format '{server}'. "
                     "Expected 'host:port' (e.g., 'localhost:9092')"
                 )
             host, port_str = server.rsplit(":", 1)
             if not host:
-                raise ValueError(
+                raise OnexError(
                     f"Invalid bootstrap server format '{server}'. Host cannot be empty"
                 )
             try:
                 port = int(port_str)
                 if port < 1 or port > 65535:
-                    raise ValueError(
+                    raise OnexError(
                         f"Invalid port {port} in '{server}'. "
                         "Port must be between 1 and 65535"
                     )
             except ValueError as e:
-                if "Invalid port" in str(e):
-                    raise
-                raise ValueError(
+                raise OnexError(
                     f"Invalid port '{port_str}' in '{server}'. "
                     "Port must be a valid integer"
                 ) from e
@@ -298,15 +298,15 @@ class ModelEmitDaemonConfig(BaseModel):
             The validated model instance
 
         Raises:
-            ValueError: If spool limits are inconsistent
+            OnexError: If spool limits are inconsistent
         """
         if self.max_spool_messages == 0 and self.max_spool_bytes > 0:
-            raise ValueError(
+            raise OnexError(
                 "Inconsistent spool limits: max_spool_messages is 0 (disabled) "
                 "but max_spool_bytes is non-zero. Set both to 0 to disable spooling."
             )
         if self.max_spool_bytes == 0 and self.max_spool_messages > 0:
-            raise ValueError(
+            raise OnexError(
                 "Inconsistent spool limits: max_spool_bytes is 0 (disabled) "
                 "but max_spool_messages is non-zero. Set both to 0 to disable spooling."
             )

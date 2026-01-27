@@ -215,6 +215,8 @@ def _send_socket_message(
         raise TimeoutError(f"Socket operation timed out: {e}") from e
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON response: {e}") from e
+    except OSError as e:
+        raise ConnectionError(f"Socket error: {e}") from e
     finally:
         sock.close()
 
@@ -337,11 +339,14 @@ def cmd_start(args: argparse.Namespace) -> None:
         root_logger = logging.getLogger()
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
+        # Ensure log directory exists before setting up file logging
+        log_dir = config.spool_dir.parent
+        log_dir.mkdir(parents=True, exist_ok=True)
         # Set up file-based logging instead
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            filename=str(config.spool_dir.parent / "emit-daemon.log"),
+            filename=str(log_dir / "emit-daemon.log"),
             filemode="a",
         )
 
@@ -433,7 +438,7 @@ def cmd_stop(args: argparse.Namespace) -> None:
         f"Warning: Daemon (PID: {pid}) did not stop within {wait_time}s",
         file=sys.stderr,
     )
-    print("You may need to force kill with: kill -9 {pid}", file=sys.stderr)
+    print(f"You may need to force kill with: kill -9 {pid}", file=sys.stderr)
     sys.exit(1)
 
 
