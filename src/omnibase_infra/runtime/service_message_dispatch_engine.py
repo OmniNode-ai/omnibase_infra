@@ -731,6 +731,19 @@ class MessageDispatchEngine:
             )
             self._dispatchers[dispatcher_id] = entry
 
+            # Log requirement for operation_bindings users
+            # NOTE: When operation_bindings is provided, envelopes dispatched to this
+            # handler MUST have an 'operation' attribute/key. The operation field is
+            # extracted at dispatch time via _extract_operation() and used to select
+            # the appropriate binding configuration. Missing operation fields will
+            # result in binding resolution failures at dispatch time.
+            if operation_bindings is not None:
+                self._logger.debug(
+                    "Dispatcher '%s' registered with operation_bindings. "
+                    "Envelopes MUST have an 'operation' attribute/key for binding resolution.",
+                    dispatcher_id,
+                )
+
             # Update category index
             self._dispatchers_by_category[category].append(dispatcher_id)
 
@@ -2025,9 +2038,20 @@ class MessageDispatchEngine:
         elif hasattr(original_payload, "__dict__"):
             # Plain Python object with attributes - serialize its __dict__
             # This handles domain objects that aren't Pydantic models
+            self._logger.warning(
+                "Serializing payload via __dict__ fallback for type %s. "
+                "Consider using a Pydantic model for explicit serialization control.",
+                type(original_payload).__name__,
+            )
             return self._serialize_dict_values(vars(original_payload))
         else:
             # Unknown type - attempt string conversion
+            self._logger.warning(
+                "Serializing payload via string fallback for type %s. "
+                "This may indicate a configuration error - payload types should be "
+                "Pydantic models, dicts, or JSON primitives.",
+                type(original_payload).__name__,
+            )
             return {"_raw": str(original_payload)}
 
     def _serialize_bindings(self, bindings: dict[str, JsonType]) -> dict[str, JsonType]:
@@ -2151,9 +2175,33 @@ class MessageDispatchEngine:
         # For other types, only convert if it results in a meaningful string
         # Filter out mock objects and other test artifacts
         str_value = str(value)
-        if str_value.startswith("<") and str_value.endswith(">"):
-            # Likely a mock object or internal type - return None
+
+        # Check for mock objects by module (most reliable)
+        value_module = type(value).__module__
+        if value_module.startswith("unittest.mock"):
             return None
+
+        # Check for common mock patterns in string representation
+        mock_patterns = ("Mock", "MagicMock", "AsyncMock")
+        if any(pattern in str_value for pattern in mock_patterns):
+            return None
+
+        # Check for Python internal repr patterns (more specific than just <...>)
+        # These patterns indicate non-serializable internal objects
+        if str_value.startswith("<") and str_value.endswith(">"):
+            internal_prefixes = (
+                "<class ",
+                "<function ",
+                "<module ",
+                "<bound method ",
+                "<built-in ",
+                "<coroutine ",
+                "<generator ",
+                "<async_generator ",
+            )
+            if any(str_value.startswith(prefix) for prefix in internal_prefixes):
+                return None
+
         return str_value
 
     def get_structured_metrics(self) -> ModelDispatchMetrics:

@@ -481,6 +481,14 @@ def load_operation_bindings_subcontract(
     if isinstance(version_data, dict):
         version = ModelSemVer(**version_data)
     else:
+        logger.warning(
+            "Invalid version format in operation_bindings section at %s: "
+            "expected dict with major/minor/patch, got %s. "
+            "Defaulting to 1.0.0. "
+            "Use format: version: { major: 1, minor: 0, patch: 0 }",
+            contract_path,
+            type(version_data).__name__,
+        )
         version = ModelSemVer(major=1, minor=0, patch=0)
 
     # Parse global_bindings (optional)
