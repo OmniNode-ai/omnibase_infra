@@ -429,7 +429,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                    ast.FunctionDef | ast.AsyncFunctionDef for AST method type checking
 # - 105 (2026-01-21): Contract-driven handler config loading (+4 unions)
 #                     ModelHandlerContract transport config fields and lifecycle types
-INFRA_MAX_UNIONS = 105
+# - 112 (2026-01-27): OMN-1610 emit daemon for persistent Kafka connections (+7 unions)
+#                     BoundedEventQueue, EmitClient, EventRegistry return types
+INFRA_MAX_UNIONS = 112
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

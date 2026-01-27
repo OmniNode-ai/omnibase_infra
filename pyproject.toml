@@ -14,6 +14,7 @@ packages = [{include = "omnibase_infra", from = "src"}]
 [tool.poetry.scripts]
 omni-infra = "omnibase_infra.cli.commands:cli"
 onex-runtime = "omnibase_infra.runtime.kernel:main"
+emit-daemon = "omnibase_infra.runtime.emit_daemon.cli:main"
 
 [tool.poetry.dependencies]
 python = "^3.12"

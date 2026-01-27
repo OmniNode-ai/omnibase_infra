@@ -1777,6 +1777,22 @@ pattern_exemptions:
     documentation:
       - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
     ticket: OMN-1602
+  # ==========================================================================
+  # Emit Daemon Field Type Exemptions (OMN-1610)
+  # ==========================================================================
+  # Fields that are intentionally str instead of UUID for specific reasons
+  - file_pattern: 'emit_daemon/queue\.py'
+    violation_pattern: "Field 'event_id' should use UUID type instead of str"
+    reason: event_id is a string representation of a UUID for JSON serialization compatibility.
+    documentation:
+      - src/omnibase_infra/runtime/emit_daemon/queue.py
+    ticket: OMN-1610
+  - file_pattern: 'emit_daemon/config\.py'
+    violation_pattern: "Field 'kafka_client_id' should use UUID type instead of str"
+    reason: kafka_client_id is a Kafka client identifier string, not a UUID.
+    documentation:
+      - Kafka client.id documentation
+    ticket: OMN-1610
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
