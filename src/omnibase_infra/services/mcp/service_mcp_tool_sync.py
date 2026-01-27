@@ -29,6 +29,7 @@ from omnibase_core.types import JsonType
 from omnibase_infra.models.mcp.model_mcp_tool_definition import (
     ModelMCPToolDefinition,
 )
+from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -77,7 +78,7 @@ class ServiceMCPToolSync:
     """
 
     # Topic for node registration events
-    TOPIC = "node.registration.v1"
+    TOPIC = SUFFIX_NODE_REGISTRATION
     GROUP_ID = "mcp-tool-sync"
 
     # MCP tag constants

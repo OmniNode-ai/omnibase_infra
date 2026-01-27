@@ -237,10 +237,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Event topic constants
-INTROSPECTION_TOPIC = "node.introspection"
-HEARTBEAT_TOPIC = "node.heartbeat"
-REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
+# Event topic constants - imported from canonical source
+from omnibase_infra.models.discovery.model_introspection_config import (
+    DEFAULT_HEARTBEAT_TOPIC as HEARTBEAT_TOPIC,
+)
+from omnibase_infra.models.discovery.model_introspection_config import (
+    DEFAULT_INTROSPECTION_TOPIC as INTROSPECTION_TOPIC,
+)
+from omnibase_infra.models.discovery.model_introspection_config import (
+    DEFAULT_REQUEST_INTROSPECTION_TOPIC as REQUEST_INTROSPECTION_TOPIC,
+)
 
 # Performance threshold constants (in milliseconds)
 PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
