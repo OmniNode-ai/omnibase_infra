@@ -49,6 +49,7 @@ from pathlib import Path
 
 import yaml
 
+from omnibase_infra import __version__
 from omnibase_infra.runtime.emit_daemon.config import ModelEmitDaemonConfig
 from omnibase_infra.runtime.emit_daemon.daemon import EmitDaemon
 
@@ -260,7 +261,15 @@ def _daemonize() -> None:
 
     Double-fork to prevent zombie processes and detach from terminal.
     After this call, the parent process should exit.
+
+    Raises:
+        SystemExit: On Windows (os.fork() is not available).
     """
+    # Check platform - fork() is Unix-only
+    if sys.platform == "win32":
+        print("Error: --daemonize is not supported on Windows", file=sys.stderr)
+        sys.exit(1)
+
     # First fork
     pid = os.fork()
     if pid > 0:
@@ -313,12 +322,15 @@ def cmd_start(args: argparse.Namespace) -> None:
 
     # Daemonize if requested
     if args.daemonize:
+        log_file = config.spool_dir.parent / "emit-daemon.log"
         print("Starting emit-daemon in background...")
         print(f"  Socket: {config.socket_path}")
         print(f"  PID file: {config.pid_path}")
         print(f"  Kafka: {config.kafka_bootstrap_servers}")
+        print(f"  Log file: {log_file}")
         _daemonize()
-        # After daemonize, we're in the child process with redirected stdio
+        # NOTE: After daemonize, stdio is redirected to /dev/null.
+        # Startup errors will appear in the log file above.
         # Set up file-based logging instead
         logging.basicConfig(
             level=logging.INFO,
@@ -602,6 +614,9 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Show version
+  emit-daemon --version
+
   # Start daemon in foreground
   emit-daemon start --kafka-servers localhost:9092
 
@@ -623,6 +638,12 @@ Examples:
   # Show resolved configuration
   emit-daemon config --config /path/to/config.yaml
 """,
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
 
     subparsers = parser.add_subparsers(

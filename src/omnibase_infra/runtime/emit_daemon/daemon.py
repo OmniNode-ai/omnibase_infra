@@ -51,7 +51,7 @@ import os
 import signal
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -134,7 +134,7 @@ class EmitDaemon:
         self._event_bus: EventBusKafka | None = event_bus
 
         # Event registry for topic resolution and payload enrichment
-        self._registry = EventRegistry(environment="dev")
+        self._registry = EventRegistry(environment=config.environment)
 
         # Bounded event queue with disk spool overflow
         self._queue = BoundedEventQueue(
@@ -648,12 +648,22 @@ class EmitDaemon:
             key = event.partition_key.encode("utf-8") if event.partition_key else None
             value = json.dumps(event.payload).encode("utf-8")
 
+            # Extract correlation_id from enriched payload (injected by registry)
+            payload_correlation_id = event.payload.get("correlation_id")
+            if isinstance(payload_correlation_id, str):
+                try:
+                    correlation_id = UUID(payload_correlation_id)
+                except ValueError:
+                    correlation_id = uuid4()
+            else:
+                correlation_id = uuid4()
+
             # Create event headers
             headers = ModelEventHeaders(
                 source="emit-daemon",
                 event_type=event.event_type,
                 timestamp=event.queued_at,
-                correlation_id=uuid4(),  # New correlation for Kafka transport
+                correlation_id=correlation_id,
             )
 
             # Publish to Kafka

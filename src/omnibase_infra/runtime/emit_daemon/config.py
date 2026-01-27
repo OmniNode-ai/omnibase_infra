@@ -19,6 +19,7 @@ Environment Variable Overrides:
     EMIT_DAEMON_SPOOL_DIR: Override spool_dir
     EMIT_DAEMON_KAFKA_BOOTSTRAP_SERVERS: Override kafka_bootstrap_servers
     EMIT_DAEMON_KAFKA_CLIENT_ID: Override kafka_client_id
+    EMIT_DAEMON_ENVIRONMENT: Override environment
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ class ModelEmitDaemonConfig(BaseModel):
         max_spool_bytes: Maximum total bytes in spool directory
         kafka_bootstrap_servers: Kafka broker addresses (host:port format)
         kafka_client_id: Client identifier for Kafka producer
+        environment: Deployment environment for topic naming
         socket_timeout_seconds: Timeout for socket read/write operations
         kafka_timeout_seconds: Timeout for Kafka produce operations
         shutdown_drain_seconds: Time to drain queues during graceful shutdown
@@ -125,6 +127,11 @@ class ModelEmitDaemonConfig(BaseModel):
         min_length=1,
         max_length=255,
         description="Client identifier for Kafka producer",
+    )
+    environment: str = Field(
+        default="dev",
+        pattern=r"^[a-z][a-z0-9-]*$",
+        description="Deployment environment (e.g., 'dev', 'staging', 'prod'). Used in topic names.",
     )
 
     # Timeout configurations
@@ -330,6 +337,7 @@ class ModelEmitDaemonConfig(BaseModel):
             "EMIT_DAEMON_SPOOL_DIR": ("spool_dir", Path),
             "EMIT_DAEMON_KAFKA_BOOTSTRAP_SERVERS": ("kafka_bootstrap_servers", str),
             "EMIT_DAEMON_KAFKA_CLIENT_ID": ("kafka_client_id", str),
+            "EMIT_DAEMON_ENVIRONMENT": ("environment", str),
             "EMIT_DAEMON_MAX_PAYLOAD_BYTES": ("max_payload_bytes", int),
             "EMIT_DAEMON_MAX_MEMORY_QUEUE": ("max_memory_queue", int),
             "EMIT_DAEMON_MAX_SPOOL_MESSAGES": ("max_spool_messages", int),
