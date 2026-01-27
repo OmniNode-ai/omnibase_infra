@@ -444,14 +444,15 @@ class TestComputeConsumerGroupIdPurposes:
         assert ".backfill." in result
 
 
-class TestComputeConsumerGroupIdLengthValidation:
-    """Tests for compute_consumer_group_id() length validation.
+class TestComputeConsumerGroupIdLengthHandling:
+    """Tests for compute_consumer_group_id() length handling.
 
-    Verifies that excessively long identities raise ValueError.
+    Verifies that long identities are truncated with hash suffix
+    instead of raising errors, maintaining Kafka's 255 char limit.
     """
 
-    def test_long_components_raise_value_error(self) -> None:
-        """Test that very long components cause ValueError for exceeding max length."""
+    def test_long_components_truncated_with_hash(self) -> None:
+        """Test that very long components are truncated with hash suffix."""
         # Create identity with very long components
         identity = ModelNodeIdentity(
             env="development_environment_with_very_long_name",
@@ -460,12 +461,18 @@ class TestComputeConsumerGroupIdLengthValidation:
             version="v1",
         )
 
-        # This should raise ValueError because combined length exceeds 255
-        with pytest.raises(ValueError, match="exceeds Kafka maximum length"):
-            compute_consumer_group_id(identity)
+        # Should succeed with truncation, not raise ValueError
+        result = compute_consumer_group_id(identity)
 
-    def test_length_validation_includes_components_in_error(self) -> None:
-        """Test that the error message includes component information."""
+        # Result should be exactly 255 characters (max length)
+        assert len(result) == KAFKA_CONSUMER_GROUP_MAX_LENGTH
+
+        # Should end with underscore + 8-char hash
+        assert result[-9] == "_"
+        assert len(result[-8:]) == 8
+
+    def test_truncation_is_deterministic(self) -> None:
+        """Test that truncation produces deterministic results."""
         identity = ModelNodeIdentity(
             env="x" * 100,
             service="y" * 100,
@@ -473,14 +480,70 @@ class TestComputeConsumerGroupIdLengthValidation:
             version="v1",
         )
 
-        with pytest.raises(ValueError) as exc_info:
-            compute_consumer_group_id(identity)
+        result1 = compute_consumer_group_id(identity)
+        result2 = compute_consumer_group_id(identity)
 
-        error_msg = str(exc_info.value)
-        assert "env=" in error_msg
-        assert "service=" in error_msg
-        assert "node_name=" in error_msg
-        assert "Consider using shorter component names" in error_msg
+        # Same identity should produce same truncated output
+        assert result1 == result2
+
+    def test_different_identities_different_hashes(self) -> None:
+        """Test that different long identities produce different hash suffixes."""
+        identity_a = ModelNodeIdentity(
+            env="a" * 100,
+            service="a" * 100,
+            node_name="a" * 100,
+            version="v1",
+        )
+        identity_b = ModelNodeIdentity(
+            env="b" * 100,
+            service="b" * 100,
+            node_name="b" * 100,
+            version="v1",
+        )
+
+        result_a = compute_consumer_group_id(identity_a)
+        result_b = compute_consumer_group_id(identity_b)
+
+        # Hash suffixes should differ
+        assert result_a[-8:] != result_b[-8:]
+
+    def test_normal_length_not_truncated(self) -> None:
+        """Test that normal-length identities are not truncated."""
+        identity = ModelNodeIdentity(
+            env="dev",
+            service="myservice",
+            node_name="mynode",
+            version="v1",
+        )
+
+        result = compute_consumer_group_id(identity)
+
+        # Should be the full canonical format without hash suffix
+        assert result == "dev.myservice.mynode.consume.v1"
+        assert "_" not in result[-9:]  # No hash suffix pattern
+
+    def test_purpose_affects_truncation_hash(self) -> None:
+        """Test that different purposes produce different hashes for long identities."""
+        identity = ModelNodeIdentity(
+            env="x" * 100,
+            service="y" * 100,
+            node_name="z" * 100,
+            version="v1",
+        )
+
+        result_consume = compute_consumer_group_id(
+            identity, EnumConsumerGroupPurpose.CONSUME
+        )
+        result_introspection = compute_consumer_group_id(
+            identity, EnumConsumerGroupPurpose.INTROSPECTION
+        )
+
+        # Both should be truncated to max length
+        assert len(result_consume) == KAFKA_CONSUMER_GROUP_MAX_LENGTH
+        assert len(result_introspection) == KAFKA_CONSUMER_GROUP_MAX_LENGTH
+
+        # Hash suffixes should differ due to different purpose in hash input
+        assert result_consume[-8:] != result_introspection[-8:]
 
 
 class TestModelNodeIdentity:
@@ -868,7 +931,7 @@ __all__: list[str] = [
     "TestNormalizeKafkaIdentifierEdgeCases",
     "TestComputeConsumerGroupId",
     "TestComputeConsumerGroupIdPurposes",
-    "TestComputeConsumerGroupIdLengthValidation",
+    "TestComputeConsumerGroupIdLengthHandling",
     "TestModelNodeIdentity",
     "TestEnumConsumerGroupPurpose",
     "TestIntegration",

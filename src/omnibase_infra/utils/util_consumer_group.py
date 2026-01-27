@@ -130,10 +130,9 @@ def compute_consumer_group_id(
         A canonical consumer group ID in the format:
         ``{env}.{service}.{node_name}.{purpose}.{version}``
 
-    Raises:
-        ValueError: If the computed group ID exceeds Kafka's 255 character limit.
-            The error message includes the computed length and the identity
-            components that caused the overflow.
+        If the combined length exceeds Kafka's 255 character limit, the result
+        is truncated with an 8-character hash suffix to preserve uniqueness
+        while fitting within the constraint.
 
     Example:
         >>> from omnibase_infra.models import ModelNodeIdentity
@@ -162,6 +161,20 @@ def compute_consumer_group_id(
         ... )
         >>> compute_consumer_group_id(identity_mixed)
         'dev.omni_intelligence.claude-hook-event-effect.consume.v1.0.0'
+
+        Long identities are automatically truncated with a hash suffix:
+
+        >>> long_identity = ModelNodeIdentity(
+        ...     env="development",
+        ...     service="a" * 100,
+        ...     node_name="b" * 100,
+        ...     version="v1",
+        ... )
+        >>> result = compute_consumer_group_id(long_identity)
+        >>> len(result) <= 255
+        True
+        >>> result.endswith("_" + result[-8:])  # Has hash suffix
+        True
 
     Note:
         The canonical format uses period (.) as the separator between components.
@@ -194,16 +207,20 @@ def compute_consumer_group_id(
         ]
     )
 
-    # Validate length constraint
+    # Handle length constraint with truncation + hash (same strategy as normalize_kafka_identifier)
+    # This can occur when multiple long components combine, even though each was individually
+    # truncated to 255 chars by normalize_kafka_identifier.
     if len(group_id) > KAFKA_CONSUMER_GROUP_MAX_LENGTH:
-        msg = (
-            f"Computed consumer group ID exceeds Kafka maximum length "
-            f"({len(group_id)} > {KAFKA_CONSUMER_GROUP_MAX_LENGTH}). "
-            f"Identity components: env={identity.env!r}, service={identity.service!r}, "
-            f"node_name={identity.node_name!r}, purpose={purpose.value!r}, "
-            f"version={identity.version!r}. Consider using shorter component names."
+        # Generate deterministic hash from original (pre-normalized) identity components
+        # to ensure the same identity always produces the same truncated group ID
+        hash_input = (
+            f"{identity.env}|{identity.service}|{identity.node_name}|"
+            f"{purpose.value}|{identity.version}"
         )
-        raise ValueError(msg)
+        hash_suffix = hashlib.sha256(hash_input.encode()).hexdigest()[:8]
+        # Reserve space for underscore + hash suffix (9 chars total)
+        max_prefix_length = KAFKA_CONSUMER_GROUP_MAX_LENGTH - 9
+        group_id = f"{group_id[:max_prefix_length]}_{hash_suffix}"
 
     return group_id
 
