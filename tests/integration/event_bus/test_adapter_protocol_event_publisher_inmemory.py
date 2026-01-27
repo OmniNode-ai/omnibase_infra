@@ -742,6 +742,34 @@ class TestLifecycle:
                 payload={"data": "should-fail"},
             )
 
+    @pytest.mark.asyncio
+    async def test_get_metrics_works_after_close(
+        self,
+        event_bus: EventBusInmemory,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify get_metrics() is still accessible after close for debugging.
+
+        Metrics should remain queryable after close to allow post-mortem
+        analysis and test assertions on final adapter state.
+        """
+        # Publish some events first
+        await adapter.publish(
+            event_type="before.close.event",
+            payload={"data": "test"},
+        )
+
+        # Close the adapter
+        await adapter.close()
+
+        # get_metrics should still work after close
+        metrics = await adapter.get_metrics()
+
+        # Verify metrics reflect the publish that happened before close
+        assert metrics["events_published"] == 1
+        assert metrics["events_failed"] == 0
+        assert isinstance(metrics, dict)
+
 
 # =============================================================================
 # Decode Helper Tests

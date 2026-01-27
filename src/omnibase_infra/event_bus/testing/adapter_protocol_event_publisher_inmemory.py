@@ -62,6 +62,7 @@ from omnibase_infra.event_bus.testing.model_publisher_metrics import (
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+    from omnibase_infra.types.typed_dict import TypedDictEnvelopeBuildParams
     from omnibase_spi.protocols.types.protocol_core_types import ContextValue
 
 logger = logging.getLogger(__name__)
@@ -244,7 +245,7 @@ class AdapterProtocolEventPublisherInmemory:
 
     def _build_envelope(
         self,
-        params: dict[str, object],
+        params: TypedDictEnvelopeBuildParams,
     ) -> ModelEventEnvelope[JsonType]:
         """Build a ModelEventEnvelope from publish parameters.
 
