@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# Contract for Graph Handler - Neo4j/Memgraph database operations
+name: "handler_graph"
+node_type: "EFFECT_GENERIC"
+description: "Graph database handler for Cypher queries via neo4j async driver (Memgraph/Neo4j)"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+input_model:
+  name: "ModelEventEnvelope"
+  module: "omnibase_core.models.events.model_event_envelope"
+output_model:
+  name: "ModelHandlerOutput"
+  module: "omnibase_core.models.dispatch.model_handler_output"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "graph"
+      handler:
+        name: "HandlerGraph"
+        module: "omnibase_infra.handlers.handler_graph"
+      supported_operations:
+        - "graph.execute_query"
+        - "graph.execute_query_batch"
+        - "graph.create_node"
+        - "graph.create_relationship"
+        - "graph.delete_node"
+        - "graph.delete_relationship"
+        - "graph.traverse"
+operation_bindings:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  global_bindings:
+    - parameter_name: "correlation_id"
+      expression: "${envelope.correlation_id}"
+      required: true
+  bindings:
+    "graph.execute_query":
+      - parameter_name: "query"
+        expression: "${payload.query}"
+        required: true
+      - parameter_name: "parameters"
+        expression: "${payload.parameters}"
+        required: false
+    "graph.execute_query_batch":
+      - parameter_name: "queries"
+        expression: "${payload.queries}"
+        required: true
+      - parameter_name: "transaction"
+        expression: "${payload.transaction}"
+        required: false
+    "graph.create_node":
+      - parameter_name: "labels"
+        expression: "${payload.labels}"
+        required: false
+      - parameter_name: "properties"
+        expression: "${payload.properties}"
+        required: false
+    "graph.create_relationship":
+      - parameter_name: "from_node_id"
+        expression: "${payload.from_node_id}"
+        required: true
+      - parameter_name: "to_node_id"
+        expression: "${payload.to_node_id}"
+        required: true
+      - parameter_name: "relationship_type"
+        expression: "${payload.relationship_type}"
+        required: true
+      - parameter_name: "properties"
+        expression: "${payload.properties}"
+        required: false
+    "graph.delete_node":
+      - parameter_name: "node_id"
+        expression: "${payload.node_id}"
+        required: true
+      - parameter_name: "detach"
+        expression: "${payload.detach}"
+        required: false
+    "graph.delete_relationship":
+      - parameter_name: "relationship_id"
+        expression: "${payload.relationship_id}"
+        required: true
+    "graph.traverse":
+      - parameter_name: "start_node_id"
+        expression: "${payload.start_node_id}"
+        required: true
+      - parameter_name: "relationship_types"
+        expression: "${payload.relationship_types}"
+        required: false
+      - parameter_name: "direction"
+        expression: "${payload.direction}"
+        required: false
+      - parameter_name: "max_depth"
+        expression: "${payload.max_depth}"
+        required: false
+      - parameter_name: "filters"
+        expression: "${payload.filters}"
+        required: false
+metadata:
+  handler_id: "graph-handler"
+  handler_type: "infra_handler"
+  handler_category: "effect"
+  transport_type: "graph"
+  security_features:
+    - "Parameterized Cypher queries"
+    - "Label validation for injection prevention"
+    - "Credential sanitization"
+  resilience_features:
+    - "Circuit breaker pattern"
+    - "Connection pool management"
+    - "Transaction support"
+  capabilities:
+    - "cypher"
+    - "parameterized_queries"
+    - "transactions"
+    - "node_crud"
+    - "relationship_crud"
+    - "traversal"
+    - "batch_operations"

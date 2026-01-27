@@ -7,10 +7,19 @@ with the RegistryProtocolBinding and RegistryEventBusBinding. It serves as
 the bridge between handler implementations and the registry system.
 
 The wiring module is responsible for:
-- Registering default handlers for standard protocol types
+- Registering default handlers from contract.yaml files
 - Registering handlers based on contract configuration
 - Validating that requested handler types are known and supported
 - Providing a summary of registered handlers for debugging
+
+Contract-Driven Handler Loading:
+    Handler classes are discovered and loaded from contract.yaml files located
+    in nodes/handlers/<handler_type>/contract.yaml. Each contract specifies:
+    - handler.module: The Python module path
+    - handler.name: The class name to load
+
+    This replaces the old hardcoded _KNOWN_HANDLERS dict with dynamic,
+    contract-based discovery.
 
 Event Bus Support:
     This module registers EventBusInmemory as the default event bus. For production
@@ -22,9 +31,10 @@ Event Bus Support:
     See kernel.py for event bus selection logic during runtime bootstrap.
 
 Design Principles:
+- Contract-driven: Handler configurations live in contract.yaml, not Python code
 - Explicit wiring: All handler registrations are explicit, not auto-discovered
-- Contract-driven: Supports wiring from contract configuration dicts
 - Validation: Unknown handler types raise clear errors
+- Fail-fast: Missing contracts raise FileNotFoundError immediately
 - Idempotent: Re-wiring the same handler is safe (overwrites previous)
 
 Adding New Handlers:
@@ -48,16 +58,24 @@ Adding New Handlers:
                 return {"success": True, "data": ...}
         ```
 
-    2. Add the handler to _KNOWN_HANDLERS dict with a type constant:
+    2. Create a contract.yaml in nodes/handlers/<type>/contract.yaml:
 
-        In handler_registry.py, add a constant:
-            HANDLER_TYPE_CUSTOM = "custom"
+        ```yaml
+        name: "handler_custom"
+        node_type: "EFFECT_GENERIC"
+        description: "Custom protocol handler"
+        handler_routing:
+          routing_strategy: "operation_match"
+          handlers:
+            - handler_type: "custom"
+              handler:
+                name: "MyCustomHandler"
+                module: "mypackage.handlers.handler_custom"
+        ```
 
-        In this module, add to _KNOWN_HANDLERS:
-            HANDLER_TYPE_CUSTOM: (MyCustomHandler, "Custom protocol handler"),
+    3. Add the contract path to _HANDLER_CONTRACT_PATHS in this module.
 
-    3. For runtime registration without modifying _KNOWN_HANDLERS, use
-       wire_custom_handler():
+    4. For runtime registration without contracts, use wire_custom_handler():
 
         ```python
         from omnibase_infra.runtime.util_wiring import wire_custom_handler
@@ -94,7 +112,7 @@ Example Usage:
         wire_handlers_from_contract,
     )
 
-    # Wire all default handlers
+    # Wire all default handlers from contracts
     summary = wire_default_handlers()
     print(f"Registered handlers: {summary['handlers']}")
     print(f"Registered event buses: {summary['event_buses']}")
@@ -113,19 +131,16 @@ Example Usage:
 
 from __future__ import annotations
 
+import importlib
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 from omnibase_core.types import JsonType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.handlers.handler_consul import HandlerConsul
-from omnibase_infra.handlers.handler_db import HandlerDb
-from omnibase_infra.handlers.handler_graph import HandlerGraph
-from omnibase_infra.handlers.handler_http import HandlerHttpRest
-from omnibase_infra.handlers.handler_intent import HandlerIntent
-from omnibase_infra.handlers.handler_mcp import HandlerMCP
-from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_CONSUL,
@@ -147,39 +162,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Known handler types that can be wired.
-#
-# Pattern: handler_type_constant -> (handler_class, description)
-#
-# - handler_type_constant: String constant defined in handler_registry.py
-#   (e.g., HANDLER_TYPE_HTTP = "http"). This is the key used to look up
-#   and route envelopes to the correct handler.
-#
-# - handler_class: The class implementing ProtocolHandler protocol.
-#   Must have async initialize(config) and async execute(envelope) methods.
-#   The wiring module registers the CLASS; RuntimeHostProcess instantiates it.
-#
-# - description: Human-readable description for logging and debugging.
-#   Appears in log messages when handlers are registered.
-#
-# To add a new handler:
-# 1. Define HANDLER_TYPE_XXX constant in handler_registry.py
-# 2. Import the handler class at the top of this module
-# 3. Add entry below: HANDLER_TYPE_XXX: (XxxHandler, "Description"),
-#
-# NOTE: HandlerHttpRest and HandlerDb use legacy execute(envelope: dict) signature.
-# They will be migrated to ProtocolHandler.execute(request, operation_config) in future.
-# Type ignore comments suppress MyPy errors during MVP phase.
-_KNOWN_HANDLERS: dict[str, tuple[type[ProtocolContainerAware], str]] = {
-    # NOTE: Handlers implement ProtocolHandler structurally but concrete types differ from protocol.
-    HANDLER_TYPE_CONSUL: (HandlerConsul, "HashiCorp Consul service discovery handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
-    HANDLER_TYPE_DATABASE: (HandlerDb, "PostgreSQL database handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
-    HANDLER_TYPE_GRAPH: (HandlerGraph, "Graph database (Memgraph/Neo4j) handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
-    HANDLER_TYPE_HTTP: (HandlerHttpRest, "HTTP REST protocol handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
-    # DEMO: Temporary registration - remove when contract-driven (OMN-1515)
-    HANDLER_TYPE_INTENT: (HandlerIntent, "Intent storage and query handler for demo"),  # type: ignore[dict-item]  # NOTE: structural subtyping
-    HANDLER_TYPE_MCP: (HandlerMCP, "Model Context Protocol handler for AI agents"),  # type: ignore[dict-item]  # NOTE: structural subtyping
-    HANDLER_TYPE_VAULT: (HandlerVault, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]  # NOTE: structural subtyping
+# Handler contract directory path.
+# Handler configurations are loaded from contract.yaml files in this directory.
+_HANDLERS_BASE = Path(__file__).parent.parent / "nodes" / "handlers"
+
+# Mapping of handler types to their contract paths.
+# Each entry maps a handler type constant to the path of its contract.yaml file.
+_HANDLER_CONTRACT_PATHS: dict[str, Path] = {
+    HANDLER_TYPE_CONSUL: _HANDLERS_BASE / "consul" / "contract.yaml",
+    HANDLER_TYPE_DATABASE: _HANDLERS_BASE / "db" / "contract.yaml",
+    HANDLER_TYPE_GRAPH: _HANDLERS_BASE / "graph" / "contract.yaml",
+    HANDLER_TYPE_HTTP: _HANDLERS_BASE / "http" / "contract.yaml",
+    HANDLER_TYPE_INTENT: _HANDLERS_BASE / "intent" / "contract.yaml",
+    HANDLER_TYPE_MCP: _HANDLERS_BASE / "mcp" / "contract.yaml",
+    HANDLER_TYPE_VAULT: _HANDLERS_BASE / "vault" / "contract.yaml",
 }
 
 # Known event bus kinds that can be wired via this module.
@@ -192,6 +188,109 @@ _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolContainerAware], str]] = {
 _KNOWN_EVENT_BUSES: dict[str, tuple[type[ProtocolEventBus], str]] = {
     EVENT_BUS_INMEMORY: (EventBusInmemory, "In-memory event bus for local/testing"),
 }
+
+
+def _load_handler_from_contract(
+    handler_type: str, contract_path: Path
+) -> tuple[type[ProtocolContainerAware], str]:
+    """Load handler class from a contract.yaml file.
+
+    Args:
+        handler_type: The handler type identifier (e.g., "consul", "db").
+        contract_path: Path to the contract.yaml file.
+
+    Returns:
+        Tuple of (handler_class, description).
+
+    Raises:
+        FileNotFoundError: If contract file does not exist.
+        ProtocolConfigurationError: If contract is malformed or handler cannot be loaded.
+    """
+    if not contract_path.exists():
+        raise FileNotFoundError(
+            f"Handler contract not found: {contract_path}. "
+            f"All handlers must have contract.yaml files."
+        )
+
+    with contract_path.open("r") as f:
+        contract = yaml.safe_load(f)
+
+    if contract is None:
+        context = ModelInfraErrorContext.with_correlation(
+            operation="load_handler_contract",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"Empty contract file: {contract_path}",
+            context=context,
+        )
+
+    handler_routing = contract.get("handler_routing", {})
+    handlers = handler_routing.get("handlers", [])
+
+    if not handlers:
+        context = ModelInfraErrorContext.with_correlation(
+            operation="load_handler_contract",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"No handlers defined in contract: {contract_path}",
+            context=context,
+        )
+
+    handler_def = handlers[0]
+    handler_info = handler_def.get("handler", {})
+    handler_module = handler_info.get("module")
+    handler_class_name = handler_info.get("name")
+
+    if not handler_module or not handler_class_name:
+        context = ModelInfraErrorContext.with_correlation(
+            operation="load_handler_contract",
+            target_name=str(contract_path),
+        )
+        raise ProtocolConfigurationError(
+            f"Missing handler module or name in contract: {contract_path}. "
+            f"Expected handler.module and handler.name fields.",
+            context=context,
+        )
+
+    try:
+        module = importlib.import_module(handler_module)
+    except ImportError as e:
+        context = ModelInfraErrorContext.with_correlation(
+            operation="import_handler_module",
+            target_name=handler_module,
+        )
+        raise ProtocolConfigurationError(
+            f"Failed to import handler module '{handler_module}': {e}",
+            context=context,
+        ) from e
+
+    try:
+        handler_class = getattr(module, handler_class_name)
+    except AttributeError as e:
+        context = ModelInfraErrorContext.with_correlation(
+            operation="load_handler_class",
+            target_name=f"{handler_module}.{handler_class_name}",
+        )
+        raise ProtocolConfigurationError(
+            f"Handler class '{handler_class_name}' not found in module '{handler_module}'",
+            context=context,
+        ) from e
+
+    description = contract.get("description", f"{handler_type} handler")
+
+    logger.debug(
+        "Loaded handler from contract",
+        extra={
+            "handler_type": handler_type,
+            "handler_class": handler_class_name,
+            "handler_module": handler_module,
+            "contract_path": str(contract_path),
+        },
+    )
+
+    return handler_class, description
 
 
 def wire_default_handlers() -> dict[str, list[str]]:
@@ -240,17 +339,21 @@ def wire_default_handlers() -> dict[str, list[str]]:
     handler_registry = get_handler_registry()
     event_bus_registry = get_event_bus_registry()
 
-    # Register all known handlers
-    for handler_type, (handler_cls, description) in _KNOWN_HANDLERS.items():
+    # Register all handlers from contracts
+    for handler_type, contract_path in _HANDLER_CONTRACT_PATHS.items():
+        handler_cls, description = _load_handler_from_contract(
+            handler_type, contract_path
+        )
         # NOTE: Handlers implement ProtocolHandler structurally but don't inherit from it.
         # Mypy cannot verify structural subtyping for registration argument.
         handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]  # NOTE: structural subtyping
         logger.debug(
-            "Registered handler",
+            "Registered handler from contract",
             extra={
                 "handler_type": handler_type,
                 "handler_class": handler_cls.__name__,
                 "description": description,
+                "contract_path": str(contract_path),
             },
         )
 
@@ -379,28 +482,32 @@ def wire_handlers_from_contract(
                 )
                 continue
 
-            # Validate handler type is known
-            if handler_type not in _KNOWN_HANDLERS:
-                known_types = sorted(_KNOWN_HANDLERS.keys())
+            # Validate handler type is known (has a contract)
+            if handler_type not in _HANDLER_CONTRACT_PATHS:
+                known_types = sorted(_HANDLER_CONTRACT_PATHS.keys())
                 raise ProtocolConfigurationError(
                     f"Unknown handler type: {handler_type!r}. "
                     f"Known types: {known_types}",
                     context=_make_error_context("validate_handler_type", handler_type),
                 )
 
-            # Register the handler
-            handler_cls, description = _KNOWN_HANDLERS[handler_type]
+            # Load and register the handler from contract
+            contract_path = _HANDLER_CONTRACT_PATHS[handler_type]
+            handler_cls, description = _load_handler_from_contract(
+                handler_type, contract_path
+            )
             # NOTE: Handlers implement ProtocolHandler structurally but don't inherit from it.
             # Mypy cannot verify structural subtyping for registration argument.
             handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]  # NOTE: structural subtyping
             registered_handlers.append(handler_type)
 
             logger.debug(
-                "Registered handler from contract",
+                "Registered handler from contract config",
                 extra={
                     "handler_type": handler_type,
                     "handler_class": handler_cls.__name__,
                     "description": description,
+                    "contract_path": str(contract_path),
                 },
             )
 
@@ -471,14 +578,16 @@ def wire_handlers_from_contract(
 def get_known_handler_types() -> list[str]:
     """Get list of known handler types that can be wired.
 
+    Handler types are discovered from contract.yaml files in nodes/handlers/.
+
     Returns:
         Sorted list of handler type strings.
 
     Example:
         >>> get_known_handler_types()
-        ['db', 'http']
+        ['consul', 'db', 'graph', 'http', 'intent', 'mcp', 'vault']
     """
-    return sorted(_KNOWN_HANDLERS.keys())
+    return sorted(_HANDLER_CONTRACT_PATHS.keys())
 
 
 def get_known_event_bus_kinds() -> list[str]:

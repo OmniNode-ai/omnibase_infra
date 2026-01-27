@@ -5,6 +5,9 @@
 This module exports all infrastructure-specific Pydantic models.
 """
 
+from omnibase_infra.models.bindings import (
+    ModelParsedBinding,
+)
 from omnibase_infra.models.dispatch import (
     EnumDispatchStatus,
     EnumTopicStandard,
@@ -75,6 +78,8 @@ from omnibase_infra.models.validation import (
 )
 
 __all__: list[str] = [
+    # Binding models
+    "ModelParsedBinding",
     # Dispatch models
     "EnumDispatchStatus",
     "EnumTopicStandard",

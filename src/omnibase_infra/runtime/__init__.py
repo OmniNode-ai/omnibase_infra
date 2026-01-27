@@ -182,6 +182,16 @@ from omnibase_infra.runtime.protocol_handler_plugin_loader import (
     ProtocolHandlerPluginLoader,
 )
 
+# Binding expression resolver (OMN-1518)
+from omnibase_infra.runtime.binding_resolver import (
+    BindingExpressionParser,
+    OperationBindingResolver,
+    MAX_EXPRESSION_LENGTH,
+    MAX_PATH_SEGMENTS,
+    VALID_CONTEXT_PATHS,
+    VALID_SOURCES,
+)
+
 # Handler discovery protocol and implementation (OMN-1133)
 from omnibase_infra.runtime.protocol_handler_discovery import (
     ProtocolHandlerDiscovery,
@@ -354,6 +364,13 @@ __all__: list[str] = [
     "load_handler_contract_config",
     # Binding config resolver (OMN-765)
     "BindingConfigResolver",
+    # Binding expression resolver (OMN-1518)
+    "BindingExpressionParser",
+    "OperationBindingResolver",
+    "MAX_EXPRESSION_LENGTH",
+    "MAX_PATH_SEGMENTS",
+    "VALID_CONTEXT_PATHS",
+    "VALID_SOURCES",
     # Handler discovery protocol and implementation (OMN-1133)
     "ContractHandlerDiscovery",
     "ProtocolHandlerDiscovery",

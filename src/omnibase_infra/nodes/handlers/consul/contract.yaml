@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# Contract for Consul Handler - Service discovery and KV store operations
+name: "handler_consul"
+node_type: "EFFECT_GENERIC"
+description: "HashiCorp Consul handler for service discovery and KV store operations"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+input_model:
+  name: "ModelEventEnvelope"
+  module: "omnibase_core.models.events.model_event_envelope"
+output_model:
+  name: "ModelHandlerOutput"
+  module: "omnibase_core.models.dispatch.model_handler_output"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "consul"
+      handler:
+        name: "HandlerConsul"
+        module: "omnibase_infra.handlers.handler_consul"
+      supported_operations:
+        - "consul.kv_get"
+        - "consul.kv_put"
+        - "consul.register"
+        - "consul.deregister"
+operation_bindings:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  global_bindings:
+    - parameter_name: "correlation_id"
+      expression: "${envelope.correlation_id}"
+      required: true
+  bindings:
+    "consul.kv_get":
+      - parameter_name: "key"
+        expression: "${payload.key}"
+        required: true
+    "consul.kv_put":
+      - parameter_name: "key"
+        expression: "${payload.key}"
+        required: true
+      - parameter_name: "value"
+        expression: "${payload.value}"
+        required: true
+    "consul.register":
+      - parameter_name: "service_id"
+        expression: "${payload.service_id}"
+        required: true
+      - parameter_name: "service_name"
+        expression: "${payload.service_name}"
+        required: true
+      - parameter_name: "address"
+        expression: "${payload.address}"
+        required: false
+      - parameter_name: "port"
+        expression: "${payload.port}"
+        required: false
+      - parameter_name: "tags"
+        expression: "${payload.tags}"
+        required: false
+    "consul.deregister":
+      - parameter_name: "service_id"
+        expression: "${payload.service_id}"
+        required: true
+metadata:
+  handler_id: "consul-handler"
+  handler_type: "infra_handler"
+  handler_category: "effect"
+  transport_type: "consul"
+  security_features:
+    - "SecretStr protection for ACL tokens"
+    - "Sanitized error messages"
+  resilience_features:
+    - "Circuit breaker pattern"
+    - "Exponential backoff retry"
+    - "Thread pool management"

@@ -152,7 +152,15 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumMessageCategory,
 )
-from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.errors import (
+    BindingResolutionError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
+from omnibase_infra.models.bindings import (
+    ModelBindingResolutionResult,
+    ModelOperationBindingsSubcontract,
+)
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
     ModelDispatchLogContext,
@@ -165,6 +173,7 @@ from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRou
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
 )
+from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.utils import sanitize_error_message
 
@@ -254,11 +263,16 @@ ContextAwareDispatcherFunc = Callable[
 
 # Sync-only dispatcher type for use with run_in_executor
 # Used internally after runtime type narrowing via inspect.iscoroutinefunction
-_SyncDispatcherFunc = Callable[[ModelEventEnvelope[object]], DispatcherOutput]
+# Union with dict supports materialized envelopes with __bindings namespace
+_SyncDispatcherFunc = Callable[
+    [ModelEventEnvelope[object] | dict[str, object]], DispatcherOutput
+]
 
 # Sync-only context-aware dispatcher type for use with run_in_executor
+# Union with dict supports materialized envelopes with __bindings namespace
 _SyncContextAwareDispatcherFunc = Callable[
-    [ModelEventEnvelope[object], ModelDispatchContext], DispatcherOutput
+    [ModelEventEnvelope[object] | dict[str, object], ModelDispatchContext],
+    DispatcherOutput,
 ]
 
 
@@ -283,6 +297,10 @@ class DispatchEntryInternal:
         accepts_context: Cached result of signature inspection indicating
             whether the dispatcher accepts a context parameter (2+ params).
             Computed once at registration time for performance.
+        operation_bindings: Optional declarative bindings for resolving
+            handler parameters from envelope/payload/context. When set,
+            bindings are resolved BEFORE handler execution and materialized
+            into a new envelope with __bindings namespace.
     """
 
     __slots__ = (
@@ -292,6 +310,7 @@ class DispatchEntryInternal:
         "dispatcher_id",
         "message_types",
         "node_kind",
+        "operation_bindings",
     )
 
     def __init__(
@@ -302,6 +321,7 @@ class DispatchEntryInternal:
         message_types: set[str] | None,
         node_kind: EnumNodeKind | None = None,
         accepts_context: bool = False,
+        operation_bindings: ModelOperationBindingsSubcontract | None = None,
     ) -> None:
         self.dispatcher_id = dispatcher_id
         self.dispatcher = dispatcher
@@ -309,6 +329,9 @@ class DispatchEntryInternal:
         self.message_types = message_types  # None means "all types"
         self.node_kind = node_kind  # None means no context injection
         self.accepts_context = accepts_context  # Cached: dispatcher has 2+ params
+        self.operation_bindings = (
+            operation_bindings  # Declarative bindings for this dispatcher
+        )
 
 
 class MessageDispatchEngine:
@@ -460,6 +483,10 @@ class MessageDispatchEngine:
         # Delegates time injection rule enforcement to a single source of truth.
         self._context_enforcer: DispatchContextEnforcer = DispatchContextEnforcer()
 
+        # Binding resolver for declarative operation bindings.
+        # Resolves ${source.path} expressions from envelope/payload/context.
+        self._binding_resolver: OperationBindingResolver = OperationBindingResolver()
+
     def register_route(self, route: ModelDispatchRoute) -> None:
         """
         Register a routing rule.
@@ -542,6 +569,7 @@ class MessageDispatchEngine:
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
         node_kind: None = None,
+        operation_bindings: ModelOperationBindingsSubcontract | None = None,
     ) -> None: ...  # Stub: no node_kind -> DispatcherFunc (no context)
 
     @overload
@@ -553,6 +581,7 @@ class MessageDispatchEngine:
         message_types: set[str] | None = None,
         *,
         node_kind: EnumNodeKind,
+        operation_bindings: ModelOperationBindingsSubcontract | None = None,
     ) -> None: ...  # Stub: with node_kind -> ContextAwareDispatcherFunc (gets context)
 
     def register_dispatcher(
@@ -562,6 +591,7 @@ class MessageDispatchEngine:
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
         node_kind: EnumNodeKind | None = None,
+        operation_bindings: ModelOperationBindingsSubcontract | None = None,
     ) -> None:
         """
         Register a message dispatcher.
@@ -585,6 +615,11 @@ class MessageDispatchEngine:
                 - REDUCER/COMPUTE: now=None (deterministic execution)
                 - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
                 When None, dispatcher is called without context.
+            operation_bindings: Optional declarative bindings for resolving
+                handler parameters from envelope/payload/context. When provided,
+                bindings are resolved BEFORE handler execution and materialized
+                into a new envelope with __bindings namespace. The original
+                envelope is NEVER mutated.
 
         Raises:
             ModelOnexError: If engine is frozen (INVALID_STATE)
@@ -688,6 +723,7 @@ class MessageDispatchEngine:
                 message_types=message_types,
                 node_kind=node_kind,
                 accepts_context=accepts_context,
+                operation_bindings=operation_bindings,
             )
             self._dispatchers[dispatcher_id] = entry
 
@@ -1475,9 +1511,52 @@ class MessageDispatchEngine:
 
         .. versionchanged:: 0.5.0
             Added support for context-aware dispatchers via ``node_kind``.
+
+        .. versionchanged:: 0.2.6
+            Added binding resolution before handler execution (OMN-1518).
         """
         dispatcher = entry.dispatcher
 
+        # =================================================================
+        # Binding Resolution Phase (OMN-1518)
+        # =================================================================
+        # Resolve bindings BEFORE handler execution.
+        # INVARIANT: Original envelope is NEVER mutated.
+        envelope_for_handler: ModelEventEnvelope[object] | dict[str, object] = envelope
+        if entry.operation_bindings is not None:
+            # Extract operation name from envelope for binding lookup
+            operation = self._extract_operation_from_envelope(envelope)
+
+            # Extract correlation_id for error context and tracing
+            correlation_id = self._extract_correlation_id(envelope)
+
+            # Resolve all bindings for this operation
+            resolution = self._binding_resolver.resolve(
+                operation=operation,
+                bindings_subcontract=entry.operation_bindings,
+                envelope=envelope,
+                context=None,  # TODO: Pass dispatch context when available
+                correlation_id=correlation_id,
+            )
+
+            if not resolution.success:
+                # Fail fast on binding resolution failure
+                raise BindingResolutionError(
+                    f"Binding resolution failed: {resolution.error}",
+                    operation_name=resolution.operation_name,
+                    parameter_name="unknown",
+                    expression="unknown",
+                    correlation_id=correlation_id,
+                )
+
+            # Materialize envelope with bindings (never mutate original)
+            envelope_for_handler = self._materialize_envelope_with_bindings(
+                envelope, resolution
+            )
+
+        # =================================================================
+        # Context Creation Phase
+        # =================================================================
         # Create context ONLY if both conditions are met:
         # 1. node_kind is set (time injection rules apply)
         # 2. dispatcher accepts context (will actually use it)
@@ -1487,6 +1566,9 @@ class MessageDispatchEngine:
         if entry.node_kind is not None and entry.accepts_context:
             context = self._create_context_for_entry(entry, envelope)
 
+        # =================================================================
+        # Dispatcher Execution Phase
+        # =================================================================
         # Check if dispatcher is async
         # Note: context is only non-None when entry.accepts_context is True,
         # so checking `context is not None` is sufficient to determine whether
@@ -1495,9 +1577,9 @@ class MessageDispatchEngine:
             if context is not None:
                 # NOTE: Dispatcher signature varies - context param may be optional.
                 # Return type depends on dispatcher implementation (dict or model).
-                return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
+                return await dispatcher(envelope_for_handler, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
             # NOTE: Return type depends on dispatcher implementation (dict or model).
-            return await dispatcher(envelope)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
+            return await dispatcher(envelope_for_handler)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
         else:
             # Sync dispatcher execution via ThreadPoolExecutor
             # -----------------------------------------------
@@ -1520,7 +1602,7 @@ class MessageDispatchEngine:
                     sync_ctx_dispatcher,
                     # NOTE: run_in_executor expects positional args as *args,
                     # type checker cannot verify generic envelope type matches dispatcher.
-                    envelope,  # type: ignore[arg-type]  # NOTE: generic envelope type erasure
+                    envelope_for_handler,  # type: ignore[arg-type]  # NOTE: generic envelope type erasure
                     context,
                 )
             else:
@@ -1532,7 +1614,7 @@ class MessageDispatchEngine:
                     sync_dispatcher,
                     # NOTE: run_in_executor expects positional args as *args,
                     # type checker cannot verify generic envelope type matches dispatcher.
-                    envelope,  # type: ignore[arg-type]  # NOTE: generic envelope type erasure
+                    envelope_for_handler,  # type: ignore[arg-type]  # NOTE: generic envelope type erasure
                 )
 
     def _create_context_for_entry(
@@ -1683,6 +1765,110 @@ class MessageDispatchEngine:
                 e,
             )
             return False
+
+    def _extract_operation_from_envelope(self, envelope: object) -> str:
+        """Extract operation name from envelope.
+
+        Supports both dict-based envelopes and Pydantic model envelopes
+        with an ``operation`` attribute.
+
+        Args:
+            envelope: Event envelope (dict or Pydantic model).
+
+        Returns:
+            Operation name string, or ``"unknown"`` if not found.
+
+        .. versionadded:: 0.2.6
+            Added as part of OMN-1518 - Declarative operation bindings.
+        """
+        if isinstance(envelope, dict):
+            return str(envelope.get("operation", "unknown"))
+        if hasattr(envelope, "operation"):
+            return str(getattr(envelope, "operation", "unknown"))
+        return "unknown"
+
+    def _extract_correlation_id(self, envelope: object) -> UUID | None:
+        """Extract correlation_id from envelope.
+
+        Supports both dict-based envelopes and Pydantic model envelopes
+        with a ``correlation_id`` attribute. Handles both UUID and string values.
+
+        Args:
+            envelope: Event envelope (dict or Pydantic model).
+
+        Returns:
+            UUID correlation_id if found and valid, None otherwise.
+
+        .. versionadded:: 0.2.6
+            Added as part of OMN-1518 - Declarative operation bindings.
+        """
+        cid: object = None
+        if isinstance(envelope, dict):
+            cid = envelope.get("correlation_id")
+        elif hasattr(envelope, "correlation_id"):
+            cid = getattr(envelope, "correlation_id", None)
+
+        if isinstance(cid, UUID):
+            return cid
+        if isinstance(cid, str):
+            try:
+                return UUID(cid)
+            except ValueError:
+                return None
+        return None
+
+    def _materialize_envelope_with_bindings(
+        self,
+        original_envelope: object,
+        resolution: ModelBindingResolutionResult,
+    ) -> dict[str, object]:
+        """Create new envelope with __bindings namespace.
+
+        INVARIANT: original_envelope is NEVER mutated.
+
+        This method creates a new dict containing:
+        - ``payload``: Extracted from original envelope
+        - ``__bindings``: Resolved binding parameters
+        - ``_original_envelope``: Reference to original for metadata access
+
+        The ``__bindings`` namespace allows handlers to access resolved
+        parameters without needing to parse expressions themselves.
+
+        Args:
+            original_envelope: Original event envelope (dict or model).
+            resolution: Binding resolution result with resolved_parameters.
+
+        Returns:
+            New dict with payload, __bindings, and original envelope reference.
+
+        Example:
+            >>> materialized = engine._materialize_envelope_with_bindings(
+            ...     original_envelope={"payload": {"sql": "SELECT 1"}},
+            ...     resolution=resolution,
+            ... )
+            >>> materialized["__bindings"]
+            {'sql': 'SELECT 1', 'limit': 100}
+
+        .. versionadded:: 0.2.6
+            Added as part of OMN-1518 - Declarative operation bindings.
+        """
+        # Extract original payload
+        original_payload: object
+        if isinstance(original_envelope, dict):
+            original_payload = original_envelope.get("payload", original_envelope)
+        elif hasattr(original_envelope, "payload"):
+            original_payload = getattr(original_envelope, "payload", original_envelope)
+        else:
+            original_payload = original_envelope
+
+        # Create new envelope with bindings namespace
+        # INVARIANT: Never mutate original
+        return {
+            "payload": original_payload,
+            "__bindings": resolution.resolved_parameters,
+            # Preserve envelope metadata for downstream access
+            "_original_envelope": original_envelope,
+        }
 
     def get_structured_metrics(self) -> ModelDispatchMetrics:
         """
