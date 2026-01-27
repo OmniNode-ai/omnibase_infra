@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# Contract for HTTP Handler - REST API operations
+name: "handler_http"
+node_type: "EFFECT_GENERIC"
+description: "HTTP REST handler for GET and POST operations using httpx async client"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+input_model:
+  name: "ModelEventEnvelope"
+  module: "omnibase_core.models.events.model_event_envelope"
+output_model:
+  name: "ModelHandlerOutput"
+  module: "omnibase_core.models.dispatch.model_handler_output"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "http"
+      handler:
+        name: "HandlerHttpRest"
+        module: "omnibase_infra.handlers.handler_http"
+      supported_operations:
+        - "http.get"
+        - "http.post"
+operation_bindings:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  global_bindings:
+    - parameter_name: "correlation_id"
+      expression: "${envelope.correlation_id}"
+      required: true
+  bindings:
+    "http.get":
+      - parameter_name: "url"
+        expression: "${payload.url}"
+        required: true
+      - parameter_name: "headers"
+        expression: "${payload.headers}"
+        required: false
+    "http.post":
+      - parameter_name: "url"
+        expression: "${payload.url}"
+        required: true
+      - parameter_name: "headers"
+        expression: "${payload.headers}"
+        required: false
+      - parameter_name: "body"
+        expression: "${payload.body}"
+        required: false
+metadata:
+  handler_id: "http-handler"
+  handler_type: "infra_handler"
+  handler_category: "effect"
+  transport_type: "http"
+  security_features:
+    - "Configurable request/response size limits"
+    - "Pre-read Content-Length validation"
+    - "Streaming body validation"
+    - "DoS protection"
+  resilience_features:
+    - "Configurable timeout"
+    - "Follow redirects"
+  notes:
+    - "PUT, DELETE, PATCH deferred to Beta"
+    - "Retry logic deferred to Beta"
+    - "Rate limiting deferred to Beta"

@@ -95,6 +95,9 @@ See Also:
 """
 
 from omnibase_infra.enums import EnumDispatchStatus, EnumTopicStandard
+from omnibase_infra.models.dispatch.model_debug_trace_snapshot import (
+    ModelDebugTraceSnapshot,
+)
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_error import ModelDispatchError
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
@@ -112,6 +115,9 @@ from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
 from omnibase_infra.models.dispatch.model_dispatcher_registration import (
     ModelDispatcherRegistration,
 )
+from omnibase_infra.models.dispatch.model_materialized_dispatch import (
+    ModelMaterializedDispatch,
+)
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 from omnibase_infra.models.dispatch.model_topic_parser import (
     ModelTopicParser,
@@ -128,9 +134,11 @@ __all__ = [
     "EnumDispatchStatus",
     "EnumTopicStandard",
     # Models
+    "ModelDebugTraceSnapshot",
     "ModelDispatchContext",
     "ModelDispatchError",
     "ModelDispatchLogContext",
+    "ModelMaterializedDispatch",
     "ModelDispatchMetadata",
     "ModelDispatchMetrics",
     "ModelDispatchOutcome",

@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# Contract for Intent Handler - Graph-based intent storage operations
+name: "handler_intent"
+node_type: "EFFECT_GENERIC"
+description: "Intent handler wrapping HandlerGraph for intent-specific graph operations (DEMO)"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+input_model:
+  name: "ModelEventEnvelope"
+  module: "omnibase_core.models.events.model_event_envelope"
+output_model:
+  name: "ModelHandlerOutput"
+  module: "omnibase_core.models.dispatch.model_handler_output"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "intent"
+      handler:
+        name: "HandlerIntent"
+        module: "omnibase_infra.handlers.handler_intent"
+      supported_operations:
+        - "intent.store"
+        - "intent.query_session"
+        - "intent.query_distribution"
+operation_bindings:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  global_bindings:
+    - parameter_name: "correlation_id"
+      expression: "${envelope.correlation_id}"
+      required: true
+  bindings:
+    "intent.store":
+      - parameter_name: "intent_type"
+        expression: "${payload.intent_type}"
+        required: true
+      - parameter_name: "session_id"
+        expression: "${payload.session_id}"
+        required: false
+    "intent.query_session":
+      - parameter_name: "session_id"
+        expression: "${payload.session_id}"
+        required: true
+    # No payload bindings required - aggregates all intents by type (read-only)
+    "intent.query_distribution": []
+metadata:
+  handler_id: "intent-handler"
+  handler_type: "intent_handler"
+  handler_category: "effect"
+  transport_type: "graph"
+  notes:
+    - "TEMPORARY demo wiring - will be replaced by contract-driven routing"
+    - "intent.store is NOT idempotent (creates new node each call)"
+    - "intent.query_session is idempotent (read-only)"
+    - "intent.query_distribution is idempotent (read-only aggregation)"
+  dependencies:
+    - "Requires pre-initialized HandlerGraph instance"

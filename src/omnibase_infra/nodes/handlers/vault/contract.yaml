@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# Contract for Vault Handler - HashiCorp Vault secret management
+name: "handler_vault"
+node_type: "EFFECT_GENERIC"
+description: "HashiCorp Vault handler for secret management operations using hvac client"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+input_model:
+  name: "ModelEventEnvelope"
+  module: "omnibase_core.models.events.model_event_envelope"
+output_model:
+  name: "ModelHandlerOutput"
+  module: "omnibase_core.models.dispatch.model_handler_output"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "vault"
+      handler:
+        name: "HandlerVault"
+        module: "omnibase_infra.handlers.handler_vault"
+      supported_operations:
+        - "vault.read_secret"
+        - "vault.write_secret"
+        - "vault.delete_secret"
+        - "vault.list_secrets"
+        - "vault.renew_token"
+operation_bindings:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  global_bindings:
+    - parameter_name: "correlation_id"
+      expression: "${envelope.correlation_id}"
+      required: true
+  bindings:
+    "vault.read_secret":
+      - parameter_name: "path"
+        expression: "${payload.path}"
+        required: true
+      - parameter_name: "mount_point"
+        expression: "${payload.mount_point}"
+        required: false
+    "vault.write_secret":
+      - parameter_name: "path"
+        expression: "${payload.path}"
+        required: true
+      - parameter_name: "secret"
+        expression: "${payload.secret}"
+        required: true
+      - parameter_name: "mount_point"
+        expression: "${payload.mount_point}"
+        required: false
+    "vault.delete_secret":
+      - parameter_name: "path"
+        expression: "${payload.path}"
+        required: true
+      - parameter_name: "mount_point"
+        expression: "${payload.mount_point}"
+        required: false
+    "vault.list_secrets":
+      - parameter_name: "path"
+        expression: "${payload.path}"
+        required: true
+      - parameter_name: "mount_point"
+        expression: "${payload.mount_point}"
+        required: false
+    # No payload bindings required - renews the current auth token from connection config
+    "vault.renew_token": []
+metadata:
+  handler_id: "vault-handler"
+  handler_type: "infra_handler"
+  handler_category: "effect"
+  transport_type: "vault"
+  security_features:
+    - "SecretStr protection for tokens"
+    - "Sanitized error messages"
+    - "SSL verification enabled by default"
+    - "Automatic token renewal management"
+  resilience_features:
+    - "Circuit breaker pattern"
+    - "Exponential backoff retry"
+    - "Thread pool management"
+    - "Token expiration tracking"

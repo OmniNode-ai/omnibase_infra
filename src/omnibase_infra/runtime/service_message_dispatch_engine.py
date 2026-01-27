@@ -146,13 +146,24 @@ from pydantic import ValidationError
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_core.types import PrimitiveValue
+from omnibase_core.types import JsonType, PrimitiveValue
 from omnibase_infra.enums import (
     EnumDispatchStatus,
     EnumInfraTransportType,
     EnumMessageCategory,
 )
-from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.errors import (
+    BindingResolutionError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
+from omnibase_infra.models.bindings import (
+    ModelBindingResolutionResult,
+    ModelOperationBindingsSubcontract,
+)
+from omnibase_infra.models.dispatch.model_debug_trace_snapshot import (
+    ModelDebugTraceSnapshot,
+)
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
     ModelDispatchLogContext,
@@ -165,6 +176,10 @@ from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRou
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
 )
+from omnibase_infra.models.dispatch.model_materialized_dispatch import (
+    ModelMaterializedDispatch,
+)
+from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.utils import sanitize_error_message
 
@@ -254,11 +269,14 @@ ContextAwareDispatcherFunc = Callable[
 
 # Sync-only dispatcher type for use with run_in_executor
 # Used internally after runtime type narrowing via inspect.iscoroutinefunction
-_SyncDispatcherFunc = Callable[[ModelEventEnvelope[object]], DispatcherOutput]
+# All envelopes are materialized to dict format with __bindings namespace
+_SyncDispatcherFunc = Callable[[dict[str, object]], DispatcherOutput]
 
 # Sync-only context-aware dispatcher type for use with run_in_executor
+# All envelopes are materialized to dict format with __bindings namespace
 _SyncContextAwareDispatcherFunc = Callable[
-    [ModelEventEnvelope[object], ModelDispatchContext], DispatcherOutput
+    [dict[str, object], ModelDispatchContext],
+    DispatcherOutput,
 ]
 
 
@@ -283,6 +301,10 @@ class DispatchEntryInternal:
         accepts_context: Cached result of signature inspection indicating
             whether the dispatcher accepts a context parameter (2+ params).
             Computed once at registration time for performance.
+        operation_bindings: Optional declarative bindings for resolving
+            handler parameters from envelope/payload/context. When set,
+            bindings are resolved BEFORE handler execution and materialized
+            into a new envelope with __bindings namespace.
     """
 
     __slots__ = (
@@ -292,6 +314,7 @@ class DispatchEntryInternal:
         "dispatcher_id",
         "message_types",
         "node_kind",
+        "operation_bindings",
     )
 
     def __init__(
@@ -302,6 +325,7 @@ class DispatchEntryInternal:
         message_types: set[str] | None,
         node_kind: EnumNodeKind | None = None,
         accepts_context: bool = False,
+        operation_bindings: ModelOperationBindingsSubcontract | None = None,
     ) -> None:
         self.dispatcher_id = dispatcher_id
         self.dispatcher = dispatcher
@@ -309,6 +333,9 @@ class DispatchEntryInternal:
         self.message_types = message_types  # None means "all types"
         self.node_kind = node_kind  # None means no context injection
         self.accepts_context = accepts_context  # Cached: dispatcher has 2+ params
+        self.operation_bindings = (
+            operation_bindings  # Declarative bindings for this dispatcher
+        )
 
 
 class MessageDispatchEngine:
@@ -460,6 +487,10 @@ class MessageDispatchEngine:
         # Delegates time injection rule enforcement to a single source of truth.
         self._context_enforcer: DispatchContextEnforcer = DispatchContextEnforcer()
 
+        # Binding resolver for declarative operation bindings.
+        # Resolves ${source.path} expressions from envelope/payload/context.
+        self._binding_resolver: OperationBindingResolver = OperationBindingResolver()
+
     def register_route(self, route: ModelDispatchRoute) -> None:
         """
         Register a routing rule.
@@ -542,6 +573,7 @@ class MessageDispatchEngine:
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
         node_kind: None = None,
+        operation_bindings: ModelOperationBindingsSubcontract | None = None,
     ) -> None: ...  # Stub: no node_kind -> DispatcherFunc (no context)
 
     @overload
@@ -553,6 +585,7 @@ class MessageDispatchEngine:
         message_types: set[str] | None = None,
         *,
         node_kind: EnumNodeKind,
+        operation_bindings: ModelOperationBindingsSubcontract | None = None,
     ) -> None: ...  # Stub: with node_kind -> ContextAwareDispatcherFunc (gets context)
 
     def register_dispatcher(
@@ -562,6 +595,7 @@ class MessageDispatchEngine:
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
         node_kind: EnumNodeKind | None = None,
+        operation_bindings: ModelOperationBindingsSubcontract | None = None,
     ) -> None:
         """
         Register a message dispatcher.
@@ -585,6 +619,11 @@ class MessageDispatchEngine:
                 - REDUCER/COMPUTE: now=None (deterministic execution)
                 - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
                 When None, dispatcher is called without context.
+            operation_bindings: Optional declarative bindings for resolving
+                handler parameters from envelope/payload/context. When provided,
+                bindings are resolved BEFORE handler execution and materialized
+                into a new envelope with __bindings namespace. The original
+                envelope is NEVER mutated.
 
         Raises:
             ModelOnexError: If engine is frozen (INVALID_STATE)
@@ -688,8 +727,22 @@ class MessageDispatchEngine:
                 message_types=message_types,
                 node_kind=node_kind,
                 accepts_context=accepts_context,
+                operation_bindings=operation_bindings,
             )
             self._dispatchers[dispatcher_id] = entry
+
+            # Log requirement for operation_bindings users
+            # NOTE: When operation_bindings is provided, envelopes dispatched to this
+            # handler MUST have an 'operation' attribute/key. The operation field is
+            # extracted at dispatch time via _extract_operation() and used to select
+            # the appropriate binding configuration. Missing operation fields will
+            # result in binding resolution failures at dispatch time.
+            if operation_bindings is not None:
+                self._logger.debug(
+                    "Dispatcher '%s' registered with operation_bindings. "
+                    "Envelopes MUST have an 'operation' attribute/key for binding resolution.",
+                    dispatcher_id,
+                )
 
             # Update category index
             self._dispatchers_by_category[category].append(dispatcher_id)
@@ -1048,7 +1101,9 @@ class MessageDispatchEngine:
             )
 
             try:
-                result = await self._execute_dispatcher(dispatcher_entry, envelope)
+                result = await self._execute_dispatcher(
+                    dispatcher_entry, envelope, topic
+                )
                 dispatcher_duration_ms = (
                     time.perf_counter() - dispatcher_start_time
                 ) * 1000
@@ -1433,6 +1488,7 @@ class MessageDispatchEngine:
         self,
         entry: DispatchEntryInternal,
         envelope: ModelEventEnvelope[object],
+        topic: str,
     ) -> DispatcherOutput:
         """
         Execute a dispatcher (sync or async).
@@ -1475,9 +1531,87 @@ class MessageDispatchEngine:
 
         .. versionchanged:: 0.5.0
             Added support for context-aware dispatchers via ``node_kind``.
+
+        .. versionchanged:: 0.2.6
+            Added binding resolution before handler execution (OMN-1518).
         """
         dispatcher = entry.dispatcher
 
+        # =================================================================
+        # Binding Resolution Phase (OMN-1518)
+        # =================================================================
+        # ALWAYS materialize envelope to dict format for consistent dispatcher API.
+        # INVARIANT: Original envelope is NEVER mutated.
+        resolved_bindings: dict[str, JsonType] = {}
+
+        if entry.operation_bindings is not None:
+            # Extract correlation_id FIRST for error context and tracing
+            correlation_id = self._extract_correlation_id(envelope)
+
+            # Extract operation name from envelope for binding lookup (fail-fast)
+            operation = self._extract_operation_from_envelope(envelope, correlation_id)
+
+            # Create context for binding resolution (see constants.VALID_CONTEXT_PATHS)
+            dispatch_context: dict[str, object] = {
+                "now_iso": datetime.now(UTC).isoformat(),
+                "dispatcher_id": entry.dispatcher_id,
+                "correlation_id": correlation_id,
+            }
+
+            # Check for declared additional_context_paths that are not provided
+            # This is a CONTRACT: if handler declares additional_context_paths,
+            # the dispatch engine should provide them. Log warning if missing.
+            declared_additional_paths = (
+                entry.operation_bindings.additional_context_paths
+            )
+            if declared_additional_paths:
+                missing_paths = [
+                    path
+                    for path in declared_additional_paths
+                    if path not in dispatch_context
+                ]
+                if missing_paths:
+                    self._logger.warning(
+                        "Dispatcher '%s' declares additional_context_paths %s "
+                        "but these are not provided in dispatch context. "
+                        "Bindings using these paths will resolve to None unless "
+                        "they have defaults. correlation_id=%s",
+                        entry.dispatcher_id,
+                        missing_paths,
+                        correlation_id,
+                    )
+
+            # Resolve all bindings for this operation
+            resolution = self._binding_resolver.resolve(
+                operation=operation,
+                bindings_subcontract=entry.operation_bindings,
+                envelope=envelope,
+                context=dispatch_context,
+                correlation_id=correlation_id,
+            )
+
+            if not resolution.success:
+                # Fail fast on binding resolution failure
+                raise BindingResolutionError(
+                    f"Binding resolution failed: {resolution.error}",
+                    operation_name=resolution.operation_name,
+                    parameter_name="unknown",
+                    expression="unknown",
+                    correlation_id=correlation_id,
+                )
+
+            # dict() creates a shallow copy to avoid mutating the resolution result
+            resolved_bindings = dict(resolution.resolved_parameters)
+
+        # ALWAYS materialize envelope with bindings (never mutate original)
+        # Empty dict for __bindings if no bindings configured
+        envelope_for_handler: dict[str, JsonType] = (
+            self._materialize_envelope_with_bindings(envelope, resolved_bindings, topic)
+        )
+
+        # =================================================================
+        # Context Creation Phase
+        # =================================================================
         # Create context ONLY if both conditions are met:
         # 1. node_kind is set (time injection rules apply)
         # 2. dispatcher accepts context (will actually use it)
@@ -1487,6 +1621,9 @@ class MessageDispatchEngine:
         if entry.node_kind is not None and entry.accepts_context:
             context = self._create_context_for_entry(entry, envelope)
 
+        # =================================================================
+        # Dispatcher Execution Phase
+        # =================================================================
         # Check if dispatcher is async
         # Note: context is only non-None when entry.accepts_context is True,
         # so checking `context is not None` is sufficient to determine whether
@@ -1495,9 +1632,9 @@ class MessageDispatchEngine:
             if context is not None:
                 # NOTE: Dispatcher signature varies - context param may be optional.
                 # Return type depends on dispatcher implementation (dict or model).
-                return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
+                return await dispatcher(envelope_for_handler, context)  # type: ignore[call-arg,no-any-return]  # NOTE: dispatcher signature varies
             # NOTE: Return type depends on dispatcher implementation (dict or model).
-            return await dispatcher(envelope)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
+            return await dispatcher(envelope_for_handler)  # type: ignore[no-any-return]  # NOTE: dispatcher return type varies
         else:
             # Sync dispatcher execution via ThreadPoolExecutor
             # -----------------------------------------------
@@ -1515,24 +1652,26 @@ class MessageDispatchEngine:
                 sync_ctx_dispatcher = cast(
                     "_SyncContextAwareDispatcherFunc", dispatcher
                 )
+                # NOTE: run_in_executor arg-type check fails because envelope_for_handler
+                # is dict[str, JsonType] but dispatcher expects dict[str, object].
+                # JsonType is a subset of object, so this is safe at runtime.
                 return await loop.run_in_executor(
                     None,
-                    sync_ctx_dispatcher,
-                    # NOTE: run_in_executor expects positional args as *args,
-                    # type checker cannot verify generic envelope type matches dispatcher.
-                    envelope,  # type: ignore[arg-type]  # NOTE: generic envelope type erasure
+                    sync_ctx_dispatcher,  # type: ignore[arg-type]
+                    envelope_for_handler,
                     context,
                 )
             else:
                 # Cast to sync-only type - safe because iscoroutinefunction check above
                 # guarantees this branch only executes for non-async callables
                 sync_dispatcher = cast("_SyncDispatcherFunc", dispatcher)
+                # NOTE: run_in_executor arg-type check fails because envelope_for_handler
+                # is dict[str, JsonType] but dispatcher expects dict[str, object].
+                # JsonType is a subset of object, so this is safe at runtime.
                 return await loop.run_in_executor(
                     None,
-                    sync_dispatcher,
-                    # NOTE: run_in_executor expects positional args as *args,
-                    # type checker cannot verify generic envelope type matches dispatcher.
-                    envelope,  # type: ignore[arg-type]  # NOTE: generic envelope type erasure
+                    sync_dispatcher,  # type: ignore[arg-type]
+                    envelope_for_handler,
                 )
 
     def _create_context_for_entry(
@@ -1683,6 +1822,410 @@ class MessageDispatchEngine:
                 e,
             )
             return False
+
+    def _extract_operation_from_envelope(
+        self, envelope: object, correlation_id: UUID | None = None
+    ) -> str:
+        """Extract operation name from envelope.
+
+        Supports both dict-based envelopes and Pydantic model envelopes
+        with an ``operation`` attribute.
+
+        Args:
+            envelope: Event envelope (dict or Pydantic model).
+            correlation_id: Optional correlation ID for error context.
+
+        Returns:
+            Operation name string.
+
+        Raises:
+            BindingResolutionError: When operation cannot be extracted. This
+                error is raised in the following cases:
+
+                1. **Dict envelope without ``operation`` key**: The envelope is a dict
+                   but does not contain an ``"operation"`` key.
+                2. **Model envelope without ``operation`` attribute**: The envelope is
+                   a Pydantic model or object but lacks an ``operation`` attribute.
+                3. **Empty/None operation value**: The operation key/attribute exists
+                   but has a None or falsy value.
+
+        Fail-Fast Behavior:
+            This method implements fail-fast semantics. If an operation cannot be
+            extracted, it raises ``BindingResolutionError`` immediately rather than
+            returning a fallback value. This ensures:
+
+            - Early detection of misconfigured envelopes
+            - Clear error messages with diagnostic context
+            - No silent failures from attempting to resolve bindings for "unknown" operation
+
+        Note:
+            If ``entry.operation_bindings`` is ``None`` (no bindings configured),
+            this method is not called at all, avoiding unnecessary extraction.
+
+        .. versionadded:: 0.2.6
+            Added as part of OMN-1518 - Declarative operation bindings.
+
+        .. versionchanged:: 0.2.7
+            Changed from fallback-to-unknown to fail-fast behavior.
+        """
+        # Dict-based envelopes (common for Kafka/JSON payloads)
+        if isinstance(envelope, dict):
+            operation = envelope.get("operation")
+            if operation is not None:
+                return str(operation)
+            # NOTE: Do not log envelope.keys() - may contain sensitive field names
+            raise BindingResolutionError(
+                "Operation extraction failed: dict envelope missing 'operation' key. "
+                f"Ensure envelope contains 'operation' key (found {len(envelope)} keys).",
+                operation_name="extraction_failed",
+                parameter_name="operation",
+                expression="envelope['operation']",
+                missing_segment="operation",
+                correlation_id=correlation_id,
+            )
+
+        # Pydantic model or object with operation attribute
+        if hasattr(envelope, "operation"):
+            operation = getattr(envelope, "operation", None)
+            if operation is not None:
+                return str(operation)
+            raise BindingResolutionError(
+                "Operation extraction failed: envelope has 'operation' attribute "
+                f"but value is None or falsy. Envelope type: {type(envelope).__name__}",
+                operation_name="extraction_failed",
+                parameter_name="operation",
+                expression="envelope.operation",
+                missing_segment="operation",
+                correlation_id=correlation_id,
+            )
+
+        # No operation attribute at all
+        raise BindingResolutionError(
+            "Operation extraction failed: envelope has no 'operation' attribute. "
+            f"Envelope type: {type(envelope).__name__}",
+            operation_name="extraction_failed",
+            parameter_name="operation",
+            expression="envelope.operation or envelope['operation']",
+            missing_segment="operation",
+            correlation_id=correlation_id,
+        )
+
+    def _extract_correlation_id(self, envelope: object) -> UUID | None:
+        """Extract correlation_id from envelope.
+
+        Supports both dict-based envelopes and Pydantic model envelopes
+        with a ``correlation_id`` attribute. Handles both UUID and string values.
+
+        Args:
+            envelope: Event envelope (dict or Pydantic model).
+
+        Returns:
+            UUID correlation_id if found and valid, None otherwise.
+
+        .. versionadded:: 0.2.6
+            Added as part of OMN-1518 - Declarative operation bindings.
+        """
+        cid: object = None
+        if isinstance(envelope, dict):
+            cid = envelope.get("correlation_id")
+        elif hasattr(envelope, "correlation_id"):
+            cid = getattr(envelope, "correlation_id", None)
+
+        if isinstance(cid, UUID):
+            return cid
+        if isinstance(cid, str):
+            try:
+                return UUID(cid)
+            except ValueError:
+                return None
+        return None
+
+    def _materialize_envelope_with_bindings(
+        self,
+        original_envelope: object,
+        resolved_bindings: dict[str, JsonType],
+        topic: str,
+    ) -> dict[str, JsonType]:
+        """Create new JSON-safe envelope with __bindings namespace.
+
+        INVARIANT: original_envelope is NEVER mutated.
+        INVARIANT: All output values are JSON-serializable.
+
+        This method ALWAYS creates a new dict containing:
+        - ``payload``: Event payload as JSON-safe dict
+        - ``__bindings``: Resolved binding parameters (empty dict if no bindings)
+        - ``__debug_trace``: Serialized trace metadata snapshot (debug only)
+
+        The dispatch boundary is a **serialization boundary**. All data crossing
+        this layer must be transport-safe (JSON-serializable) to enable:
+        - Event replay from logs or Kafka
+        - Distributed dispatch across processes
+        - Observability tooling (logging, tracing, dashboards)
+
+        Warning:
+            ``__debug_trace`` is provided ONLY for debugging and observability.
+            It is a serialized snapshot of trace metadata, NOT the live envelope.
+
+            **DO NOT**:
+            - Use ``__debug_trace`` for business logic
+            - Assume ``__debug_trace`` reflects complete envelope state
+            - Depend on specific fields being present
+
+        Args:
+            original_envelope: Original event envelope (dict or model).
+            resolved_bindings: JSON-safe resolved binding parameters (may be empty).
+            topic: The topic this message was received on.
+
+        Returns:
+            New dict conforming to ModelMaterializedDispatch schema.
+            All values are JSON-serializable (transport-safe).
+
+        Example:
+            >>> materialized = engine._materialize_envelope_with_bindings(
+            ...     original_envelope={"payload": {"sql": "SELECT 1"}},
+            ...     resolved_bindings={"sql": "SELECT 1", "limit": 100},
+            ...     topic="dev.db.commands.v1",
+            ... )
+            >>> materialized["__bindings"]
+            {'sql': 'SELECT 1', 'limit': 100}
+
+        .. versionadded:: 0.2.6
+            Added as part of OMN-1518 - Declarative operation bindings.
+
+        .. versionchanged:: 0.2.8
+            Changed to strict JSON-safe contract:
+            - Payload is serialized to dict (Pydantic models call model_dump)
+            - Bindings values are serialized (UUIDs/datetimes → strings)
+            - __debug_original_envelope replaced with __debug_trace snapshot
+            - Return type changed to dict[str, JsonType]
+        """
+        # Extract and serialize payload to JSON-safe dict
+        payload_json = self._serialize_payload(original_envelope)
+
+        # Serialize bindings to JSON-safe values
+        bindings_json = self._serialize_bindings(resolved_bindings)
+
+        # Create debug trace snapshot (serialized, non-authoritative)
+        debug_trace = self._create_debug_trace_snapshot(original_envelope, topic)
+
+        # Build materialized dict conforming to ModelMaterializedDispatch schema
+        # NOTE: debug_trace is dict[str, str | None] which is a subset of JsonType
+        materialized: dict[str, JsonType] = {
+            "payload": payload_json,
+            "__bindings": bindings_json,
+            "__debug_trace": cast("JsonType", debug_trace),
+        }
+
+        # Validate against schema to enforce contract invariants
+        # This catches shape drift and provides clear error messages
+        ModelMaterializedDispatch.model_validate(materialized)
+
+        return materialized
+
+    def _serialize_payload(self, original_envelope: object) -> JsonType:
+        """Extract and serialize payload to JSON-safe dict.
+
+        Handlers that need typed Pydantic models should hydrate locally:
+            ``ModelFoo.model_validate(dispatch["payload"])``
+
+        Args:
+            original_envelope: Original event envelope (dict or model).
+
+        Returns:
+            JSON-safe payload (dict for complex types, wrapped for primitives).
+        """
+        # Extract original payload
+        original_payload: object
+        if isinstance(original_envelope, dict):
+            original_payload = original_envelope.get("payload", original_envelope)
+        elif hasattr(original_envelope, "payload"):
+            original_payload = getattr(original_envelope, "payload", original_envelope)
+        else:
+            original_payload = original_envelope
+
+        # Serialize to JSON-safe format
+        if hasattr(original_payload, "model_dump"):
+            # Pydantic model - serialize to dict with JSON mode
+            # NOTE: model_dump returns Any, but we know it's JSON-compatible
+            return original_payload.model_dump(mode="json")  # type: ignore[union-attr, no-any-return]
+        elif isinstance(original_payload, dict):
+            # Dict - recursively serialize values
+            return self._serialize_dict_values(original_payload)
+        elif isinstance(original_payload, (str, int, float, bool, type(None))):
+            # JSON primitive - wrap to maintain dict structure
+            # NOTE: This is a last-resort escape hatch. Prefer dict payloads.
+            return {"_raw": original_payload}
+        elif isinstance(original_payload, list):
+            # List - recursively serialize elements
+            return [self._serialize_value(item) for item in original_payload]
+        elif hasattr(original_payload, "__dict__"):
+            # Plain Python object with attributes - serialize its __dict__
+            # This handles domain objects that aren't Pydantic models
+            self._logger.warning(
+                "Serializing payload via __dict__ fallback for type %s. "
+                "Consider using a Pydantic model for explicit serialization control.",
+                type(original_payload).__name__,
+            )
+            return self._serialize_dict_values(vars(original_payload))
+        else:
+            # Unknown type - attempt string conversion
+            self._logger.warning(
+                "Serializing payload via string fallback for type %s. "
+                "This may indicate a configuration error - payload types should be "
+                "Pydantic models, dicts, or JSON primitives.",
+                type(original_payload).__name__,
+            )
+            return {"_raw": str(original_payload)}
+
+    def _serialize_bindings(self, bindings: dict[str, JsonType]) -> dict[str, JsonType]:
+        """Ensure binding values are JSON-safe (idempotent serialization).
+
+        When bindings are already JSON-safe (from OperationBindingResolver),
+        this method is effectively a no-op but provides defensive serialization.
+
+        Args:
+            bindings: Dict of resolved binding parameters (already JSON-safe).
+
+        Returns:
+            Dict with JSON-safe values.
+        """
+        return {key: self._serialize_value(value) for key, value in bindings.items()}
+
+    def _serialize_value(self, value: object) -> JsonType:
+        """Serialize a single value to JSON-safe type.
+
+        Args:
+            value: Any value to serialize.
+
+        Returns:
+            JSON-safe representation.
+        """
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value  # type: ignore[return-value]
+        elif isinstance(value, UUID):
+            return str(value)
+        elif isinstance(value, datetime):
+            return value.isoformat()
+        elif hasattr(value, "model_dump"):
+            # Pydantic model - model_dump returns Any, but we know it's JSON-compatible
+            return value.model_dump(mode="json")  # type: ignore[union-attr, no-any-return]
+        elif isinstance(value, dict):
+            return self._serialize_dict_values(value)
+        elif isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        else:
+            # Unknown type - string conversion
+            return str(value)
+
+    def _serialize_dict_values(self, d: dict[str, object]) -> dict[str, JsonType]:
+        """Recursively serialize dict values."""
+        return {key: self._serialize_value(value) for key, value in d.items()}
+
+    def _create_debug_trace_snapshot(
+        self, original_envelope: object, topic: str
+    ) -> dict[str, str | None]:
+        """Create serialized trace metadata snapshot.
+
+        This snapshot is for debugging and observability ONLY.
+        It is NOT authoritative and should NOT be used for business logic.
+
+        Args:
+            original_envelope: Original event envelope.
+            topic: The topic this message was received on.
+
+        Returns:
+            Dict with serialized trace metadata (all strings or None).
+        """
+        # Extract trace fields safely (any missing field → None)
+        event_type: str | None = None
+        correlation_id: str | None = None
+        trace_id: str | None = None
+        causation_id: str | None = None
+        timestamp: str | None = None
+        partition_key: str | None = None
+
+        if isinstance(original_envelope, dict):
+            event_type = self._safe_str(original_envelope.get("event_type"))
+            correlation_id = self._safe_str(original_envelope.get("correlation_id"))
+            trace_id = self._safe_str(original_envelope.get("trace_id"))
+            causation_id = self._safe_str(original_envelope.get("causation_id"))
+            timestamp = self._safe_str(original_envelope.get("timestamp"))
+            partition_key = self._safe_str(original_envelope.get("partition_key"))
+        else:
+            # Pydantic model or other object - use getattr
+            # All fields go through _safe_str to handle non-string types gracefully
+            event_type = self._safe_str(getattr(original_envelope, "event_type", None))
+            correlation_id = self._safe_str(
+                getattr(original_envelope, "correlation_id", None)
+            )
+            trace_id = self._safe_str(getattr(original_envelope, "trace_id", None))
+            causation_id = self._safe_str(
+                getattr(original_envelope, "causation_id", None)
+            )
+            timestamp = self._safe_str(getattr(original_envelope, "timestamp", None))
+            partition_key = self._safe_str(
+                getattr(original_envelope, "partition_key", None)
+            )
+
+        # Build snapshot using the model for validation
+        snapshot = ModelDebugTraceSnapshot(
+            event_type=event_type,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            causation_id=causation_id,
+            topic=topic,
+            timestamp=timestamp,
+            partition_key=partition_key,
+        )
+
+        return snapshot.model_dump()
+
+    def _safe_str(self, value: object) -> str | None:
+        """Safely convert value to string or None.
+
+        This method is defensive - it only returns a string if the value
+        can be meaningfully converted. Mock objects and other test artifacts
+        are filtered out to avoid polluting trace snapshots.
+        """
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, UUID):
+            return str(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        # For other types, only convert if it results in a meaningful string
+        # Filter out mock objects and other test artifacts
+        str_value = str(value)
+
+        # Check for mock objects by module (most reliable)
+        value_module = type(value).__module__
+        if value_module.startswith("unittest.mock"):
+            return None
+
+        # Check for common mock patterns in string representation
+        mock_patterns = ("Mock", "MagicMock", "AsyncMock")
+        if any(pattern in str_value for pattern in mock_patterns):
+            return None
+
+        # Check for Python internal repr patterns (more specific than just <...>)
+        # These patterns indicate non-serializable internal objects
+        if str_value.startswith("<") and str_value.endswith(">"):
+            internal_prefixes = (
+                "<class ",
+                "<function ",
+                "<module ",
+                "<bound method ",
+                "<built-in ",
+                "<coroutine ",
+                "<generator ",
+                "<async_generator ",
+            )
+            if any(str_value.startswith(prefix) for prefix in internal_prefixes):
+                return None
+
+        return str_value
 
     def get_structured_metrics(self) -> ModelDispatchMetrics:
         """

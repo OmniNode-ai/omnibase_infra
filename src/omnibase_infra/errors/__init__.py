@@ -22,6 +22,7 @@ Exports:
     EventBusRegistryError: Event bus registry operation errors
     ChainPropagationError: Correlation/causation chain validation errors
     ArchitectureViolationError: Architecture validation errors (blocks startup)
+    BindingResolutionError: Binding resolution errors (declarative operation bindings)
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -90,6 +91,7 @@ Error Sanitization Guidelines:
 from omnibase_infra.errors.error_architecture_violation import (
     ArchitectureViolationError,
 )
+from omnibase_infra.errors.error_binding_resolution import BindingResolutionError
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.errors.error_compute_registry import ComputeRegistryError
 from omnibase_infra.errors.error_consul import InfraConsulError
@@ -125,6 +127,8 @@ from omnibase_infra.models.errors.model_timeout_error_context import (
 __all__: list[str] = [
     # Architecture validation errors
     "ArchitectureViolationError",
+    # Binding resolution errors
+    "BindingResolutionError",
     "ChainPropagationError",
     "ComputeRegistryError",
     "ContainerValidationError",
