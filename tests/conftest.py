@@ -73,25 +73,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from dotenv import load_dotenv
 
-# =============================================================================
-# pytest_plugins - Share fixtures across the test suite
-# =============================================================================
-# IMPORTANT: pytest_plugins MUST be defined in the top-level conftest.py.
-# Defining pytest_plugins in nested conftest files is deprecated and raises
-# an error in pytest 8+. See:
-# https://docs.pytest.org/en/stable/deprecations.html#pytest-plugins-in-non-top-level-conftest-files
-#
-# This makes fixtures from tests/integration/handlers/conftest.py available
-# throughout the test suite, including:
-#   - initialized_consul_handler, consul_config
-#   - initialized_db_handler, db_config
-#   - vault_handler, vault_config
-#   - initialized_qdrant_handler, qdrant_config
-#   - initialized_graph_handler, graph_config
-#   - mock_container (from handlers conftest)
-# =============================================================================
-pytest_plugins = ["tests.integration.handlers.conftest"]
-
 # Load environment variables from .env file at test session start
 # This enables tests to use infrastructure config (CONSUL_HOST, KAFKA_BOOTSTRAP_SERVERS, etc.)
 # without needing to set env vars on command line
