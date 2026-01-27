@@ -293,6 +293,16 @@ kafka-consumer-groups.sh --describe --group dev.omniintelligence.claude_hook_eve
 - **Hash computation**: O(1) for SHA-256 (fixed input size after truncation)
 - **Total derivation**: O(m) where m is sum of all component lengths
 
+### Hash Computation Details
+
+When group IDs exceed 255 characters, a hash suffix is computed from the original identity components. The hash input uses pipe (`|`) as a separator:
+
+```
+{env}|{service}|{node_name}|{purpose}|{version}
+```
+
+**Important**: Changing this separator would produce different hash suffixes, effectively creating new consumer groups and orphaning existing ones. This format is considered stable and should not be modified without a migration plan.
+
 ## References
 
 - **OMN-1602**: Derived Kafka Consumer Group IDs

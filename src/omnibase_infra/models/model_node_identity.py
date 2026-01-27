@@ -16,7 +16,7 @@ lifecycle. Once created, a node identity cannot be modified.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class ModelNodeIdentity(BaseModel):
@@ -39,7 +39,9 @@ class ModelNodeIdentity(BaseModel):
             "registration_orchestrator"). Uniquely identifies the node within
             its service.
         version: Version string for the node (e.g., "v1", "v2.0.0").
-            Enables version-aware routing and registration.
+            Enables version-aware routing and registration. While any non-empty
+            string is accepted, semver-style prefixed with 'v' is recommended
+            for consistency (e.g., 'v1', 'v1.0.0', 'v2.1.3').
 
     Example:
         >>> identity = ModelNodeIdentity(
@@ -98,11 +100,12 @@ class ModelNodeIdentity(BaseModel):
 
     @field_validator("env", "service", "node_name", "version", mode="after")
     @classmethod
-    def _validate_non_empty(cls, v: str) -> str:
+    def _validate_non_empty(cls, v: str, info: ValidationInfo) -> str:
         """Validate that string fields are non-empty and not whitespace-only.
 
         Args:
             v: The string value to validate.
+            info: Pydantic validation context containing field name.
 
         Returns:
             The validated string value.
@@ -110,11 +113,12 @@ class ModelNodeIdentity(BaseModel):
         Raises:
             ValueError: If the value is empty or contains only whitespace.
         """
+        field_name = info.field_name
         if not v:
-            msg = "Field must not be empty"
+            msg = f"'{field_name}' must not be empty"
             raise ValueError(msg)
         if not v.strip():
-            msg = "Field must not contain only whitespace"
+            msg = f"'{field_name}' must not contain only whitespace"
             raise ValueError(msg)
         return v
 
