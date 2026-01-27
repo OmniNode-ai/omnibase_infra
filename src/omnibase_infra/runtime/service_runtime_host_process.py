@@ -2496,9 +2496,9 @@ class RuntimeHostProcess:
                 )
                 wired_count += 1
                 logger.info(
-                    "Wired %d subscription(s) for handler '%s'",
-                    len(subcontract.subscribe_topics),
+                    "Wired subscription(s) for handler '%s': topics=%s",
                     descriptor.name or handler_type,
+                    subcontract.subscribe_topics,
                 )
 
         if wired_count > 0:

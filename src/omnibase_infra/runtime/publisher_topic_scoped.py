@@ -139,7 +139,13 @@ class PublisherTopicScoped:
             ...     allowed_topics={"onex.events.v1"},
             ...     environment="dev",
             ... )
+
+        Raises:
+            ValueError: If environment is empty or whitespace-only.
         """
+        if not environment or not environment.strip():
+            raise ValueError("environment must be a non-empty string")
+
         self._event_bus = event_bus
         self._allowed_topics = allowed_topics
         self._environment = environment

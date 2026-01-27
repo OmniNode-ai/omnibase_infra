@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
+from pydantic import ValidationError
 
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -142,7 +143,13 @@ class EventBusSubcontractWiring:
         Note:
             The dispatch_engine should be frozen before wiring subscriptions.
             Attempting to dispatch to an unfrozen engine will raise an error.
+
+        Raises:
+            ValueError: If environment is empty or whitespace-only.
         """
+        if not environment or not environment.strip():
+            raise ValueError("environment must be a non-empty string")
+
         self._event_bus = event_bus
         self._dispatch_engine = dispatch_engine
         self._environment = environment
@@ -430,9 +437,9 @@ def load_event_bus_subcontract(
             e,
         )
         return None
-    except Exception as e:
+    except ValidationError as e:
         _logger.warning(
-            "Failed to load event_bus subcontract from %s: %s",
+            "Invalid event_bus subcontract in %s: %s",
             contract_path,
             e,
         )

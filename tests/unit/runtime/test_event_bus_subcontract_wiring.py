@@ -160,6 +160,7 @@ class TestTopicResolution:
 class TestWireSubscriptions:
     """Tests for wiring subscriptions from subcontract."""
 
+    @pytest.mark.asyncio
     async def test_wire_subscriptions_creates_subscriptions(
         self,
         wiring: EventBusSubcontractWiring,
@@ -172,6 +173,7 @@ class TestWireSubscriptions:
         # Should subscribe to both topics
         assert mock_event_bus.subscribe.call_count == 2
 
+    @pytest.mark.asyncio
     async def test_wire_subscriptions_uses_correct_topics(
         self,
         wiring: EventBusSubcontractWiring,
@@ -186,6 +188,7 @@ class TestWireSubscriptions:
         assert "dev.onex.evt.node.introspected.v1" in topics
         assert "dev.onex.evt.node.registered.v1" in topics
 
+    @pytest.mark.asyncio
     async def test_wire_subscriptions_uses_correct_group_ids(
         self,
         wiring: EventBusSubcontractWiring,
@@ -201,6 +204,7 @@ class TestWireSubscriptions:
         group_ids = [call.kwargs["group_id"] for call in calls]
         assert all(gid == "dev.registration-handler" for gid in group_ids)
 
+    @pytest.mark.asyncio
     async def test_wire_subscriptions_stores_unsubscribe_callables(
         self,
         wiring: EventBusSubcontractWiring,
@@ -213,6 +217,7 @@ class TestWireSubscriptions:
         # Wiring should have stored 2 unsubscribe callables
         assert len(wiring._unsubscribe_callables) == 2
 
+    @pytest.mark.asyncio
     async def test_wire_subscriptions_with_empty_topics(
         self,
         wiring: EventBusSubcontractWiring,
@@ -228,6 +233,7 @@ class TestWireSubscriptions:
 
         mock_event_bus.subscribe.assert_not_called()
 
+    @pytest.mark.asyncio
     async def test_wire_subscriptions_with_default_topics(
         self,
         wiring: EventBusSubcontractWiring,
@@ -251,6 +257,7 @@ class TestWireSubscriptions:
 class TestDispatchCallback:
     """Tests for callback creation and dispatch bridging."""
 
+    @pytest.mark.asyncio
     async def test_dispatch_callback_calls_dispatch_engine(
         self,
         wiring: EventBusSubcontractWiring,
@@ -264,6 +271,7 @@ class TestDispatchCallback:
 
         mock_dispatch_engine.dispatch.assert_called_once()
 
+    @pytest.mark.asyncio
     async def test_dispatch_callback_passes_topic(
         self,
         wiring: EventBusSubcontractWiring,
@@ -279,6 +287,7 @@ class TestDispatchCallback:
         call_args = mock_dispatch_engine.dispatch.call_args
         assert call_args[0][0] == topic
 
+    @pytest.mark.asyncio
     async def test_dispatch_callback_passes_envelope(
         self,
         wiring: EventBusSubcontractWiring,
@@ -295,6 +304,7 @@ class TestDispatchCallback:
         # Envelope should be deserialized from message
         assert envelope is not None
 
+    @pytest.mark.asyncio
     async def test_dispatch_callback_raises_on_invalid_json(
         self,
         wiring: EventBusSubcontractWiring,
@@ -316,6 +326,7 @@ class TestDispatchCallback:
         with pytest.raises(json.JSONDecodeError):
             await callback(invalid_message)
 
+    @pytest.mark.asyncio
     async def test_dispatch_callback_propagates_dispatch_errors(
         self,
         wiring: EventBusSubcontractWiring,
@@ -338,6 +349,7 @@ class TestDispatchCallback:
 class TestCleanup:
     """Tests for cleanup and lifecycle management."""
 
+    @pytest.mark.asyncio
     async def test_cleanup_calls_all_unsubscribe_callables(
         self,
         wiring: EventBusSubcontractWiring,
@@ -356,6 +368,7 @@ class TestCleanup:
         unsubscribe_mock_1.assert_called_once()
         unsubscribe_mock_2.assert_called_once()
 
+    @pytest.mark.asyncio
     async def test_cleanup_clears_callables_list(
         self,
         wiring: EventBusSubcontractWiring,
@@ -369,6 +382,7 @@ class TestCleanup:
         await wiring.cleanup()
         assert len(wiring._unsubscribe_callables) == 0
 
+    @pytest.mark.asyncio
     async def test_cleanup_is_idempotent(
         self,
         wiring: EventBusSubcontractWiring,
@@ -387,6 +401,7 @@ class TestCleanup:
         # Unsubscribe should only be called once per subscription
         assert unsubscribe_mock.call_count == 2  # 2 topics, 1 call each
 
+    @pytest.mark.asyncio
     async def test_cleanup_handles_unsubscribe_errors(
         self,
         wiring: EventBusSubcontractWiring,

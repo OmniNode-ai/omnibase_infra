@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 
 
 @runtime_checkable
@@ -79,10 +80,10 @@ class ProtocolDispatchEngine(Protocol):
                     self,
                     topic: str,
                     envelope: ModelEventEnvelope[object],
-                ) -> None:
+                ) -> ModelDispatchResult | None:
                     '''Dispatch envelope to appropriate handler.'''
                     handler = self._resolve_handler(topic, envelope)
-                    await handler.handle(envelope)
+                    return await handler.handle(envelope)
 
             # Verify protocol compliance via duck typing
             engine = MyDispatchEngine()
@@ -100,7 +101,7 @@ class ProtocolDispatchEngine(Protocol):
         self,
         topic: str,
         envelope: ModelEventEnvelope[object],
-    ) -> None:
+    ) -> ModelDispatchResult | None:
         """Dispatch an event envelope to the appropriate handler(s).
 
         Routes the envelope to handlers registered for the given topic.
@@ -130,6 +131,11 @@ class ProtocolDispatchEngine(Protocol):
                 Example: "dev.onex.evt.node.introspected.v1"
             envelope: The deserialized event envelope containing the payload.
                 The payload type varies by topic/event type.
+
+        Returns:
+            ModelDispatchResult if the implementation returns dispatch metrics/results,
+            None if the implementation does not track results. Callers should not
+            depend on the return value for correctness.
 
         Raises:
             InfraDispatchError: If no handler is registered for the topic/message type.
