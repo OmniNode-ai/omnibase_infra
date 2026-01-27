@@ -112,9 +112,7 @@ class TestInMemoryEventBusProperties:
     def test_custom_properties(self) -> None:
         """Test custom property values."""
         event_bus = EventBusInmemory(
-            environment="staging",
-            group="worker-group",
-            max_history=2000,
+            environment="staging", group="worker-group", max_history=2000
         )
         assert event_bus.environment == "staging"
         assert event_bus.group == "worker-group"
@@ -246,7 +244,7 @@ class TestInMemoryEventBusSubscribe:
             received.append(msg)
 
         unsubscribe = await event_bus.subscribe(
-            "test-topic", make_test_node_identity(), handler, group_id_override="group1"
+            "test-topic", make_test_node_identity(), handler
         )
 
         await event_bus.publish("test-topic", b"key1", b"value1")
@@ -275,18 +273,8 @@ class TestInMemoryEventBusSubscribe:
         async def handler2(msg: ModelEventMessage) -> None:
             received2.append(msg)
 
-        await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("1"),
-            handler1,
-            group_id_override="group1",
-        )
-        await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("2"),
-            handler2,
-            group_id_override="group2",
-        )
+        await event_bus.subscribe("test-topic", make_test_node_identity("1"), handler1)
+        await event_bus.subscribe("test-topic", make_test_node_identity("2"), handler2)
 
         await event_bus.publish("test-topic", None, b"test")
 
@@ -311,12 +299,8 @@ class TestInMemoryEventBusSubscribe:
         async def handler2(msg: ModelEventMessage) -> None:
             received2.append(msg)
 
-        await event_bus.subscribe(
-            "topic1", make_test_node_identity("1"), handler1, group_id_override="group1"
-        )
-        await event_bus.subscribe(
-            "topic2", make_test_node_identity("2"), handler2, group_id_override="group2"
-        )
+        await event_bus.subscribe("topic1", make_test_node_identity("1"), handler1)
+        await event_bus.subscribe("topic2", make_test_node_identity("2"), handler2)
 
         await event_bus.publish("topic1", None, b"for-topic1")
         await event_bus.publish("topic2", None, b"for-topic2")
@@ -339,7 +323,7 @@ class TestInMemoryEventBusSubscribe:
             received.append(msg)
 
         unsubscribe = await event_bus.subscribe(
-            "test-topic", make_test_node_identity(), handler, group_id_override="group1"
+            "test-topic", make_test_node_identity(), handler
         )
         await event_bus.publish("test-topic", None, b"first")
         assert len(received) == 1
@@ -359,7 +343,7 @@ class TestInMemoryEventBusSubscribe:
             pass
 
         unsubscribe = await event_bus.subscribe(
-            "test-topic", make_test_node_identity(), handler, group_id_override="group1"
+            "test-topic", make_test_node_identity(), handler
         )
         await unsubscribe()
         await unsubscribe()  # Should not raise
@@ -380,16 +364,10 @@ class TestInMemoryEventBusSubscribe:
             received.append(msg)
 
         await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("fail"),
-            failing_handler,
-            group_id_override="fail-group",
+            "test-topic", make_test_node_identity("fail"), failing_handler
         )
         await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("good"),
-            good_handler,
-            group_id_override="good-group",
+            "test-topic", make_test_node_identity("good"), good_handler
         )
 
         # Should not raise, and good_handler should still receive
@@ -411,18 +389,8 @@ class TestInMemoryEventBusSubscribe:
             nonlocal call_count
             call_count += 1
 
-        await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("1"),
-            handler,
-            group_id_override="group1",
-        )
-        await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("2"),
-            handler,
-            group_id_override="group2",
-        )
+        await event_bus.subscribe("test-topic", make_test_node_identity("1"), handler)
+        await event_bus.subscribe("test-topic", make_test_node_identity("2"), handler)
 
         await event_bus.publish("test-topic", None, b"test")
 
@@ -599,14 +567,10 @@ class TestInMemoryEventBusSubscriberCount:
 
         assert await event_bus.get_subscriber_count() == 0
 
-        await event_bus.subscribe(
-            "topic1", make_test_node_identity("1"), handler, group_id_override="g1"
-        )
+        await event_bus.subscribe("topic1", make_test_node_identity("1"), handler)
         assert await event_bus.get_subscriber_count() == 1
 
-        await event_bus.subscribe(
-            "topic2", make_test_node_identity("2"), handler, group_id_override="g2"
-        )
+        await event_bus.subscribe("topic2", make_test_node_identity("2"), handler)
         assert await event_bus.get_subscriber_count() == 2
 
         await event_bus.close()
@@ -621,15 +585,9 @@ class TestInMemoryEventBusSubscriberCount:
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
-        await event_bus.subscribe(
-            "topic1", make_test_node_identity("1"), handler, group_id_override="g1"
-        )
-        await event_bus.subscribe(
-            "topic1", make_test_node_identity("2"), handler, group_id_override="g2"
-        )
-        await event_bus.subscribe(
-            "topic2", make_test_node_identity("3"), handler, group_id_override="g3"
-        )
+        await event_bus.subscribe("topic1", make_test_node_identity("1"), handler)
+        await event_bus.subscribe("topic1", make_test_node_identity("2"), handler)
+        await event_bus.subscribe("topic2", make_test_node_identity("3"), handler)
 
         assert await event_bus.get_subscriber_count() == 3
         assert await event_bus.get_subscriber_count(topic="topic1") == 2
@@ -649,10 +607,10 @@ class TestInMemoryEventBusSubscriberCount:
             pass
 
         unsub1 = await event_bus.subscribe(
-            "topic1", make_test_node_identity("1"), handler, group_id_override="g1"
+            "topic1", make_test_node_identity("1"), handler
         )
         unsub2 = await event_bus.subscribe(
-            "topic1", make_test_node_identity("2"), handler, group_id_override="g2"
+            "topic1", make_test_node_identity("2"), handler
         )
 
         assert await event_bus.get_subscriber_count() == 2
@@ -694,12 +652,8 @@ class TestInMemoryEventBusTopics:
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
-        await event_bus.subscribe(
-            "topic1", make_test_node_identity("1"), handler, group_id_override="g1"
-        )
-        await event_bus.subscribe(
-            "topic2", make_test_node_identity("2"), handler, group_id_override="g2"
-        )
+        await event_bus.subscribe("topic1", make_test_node_identity("1"), handler)
+        await event_bus.subscribe("topic2", make_test_node_identity("2"), handler)
 
         topics = await event_bus.get_topics()
         assert set(topics) == {"topic1", "topic2"}
@@ -717,11 +671,9 @@ class TestInMemoryEventBusTopics:
             pass
 
         unsub = await event_bus.subscribe(
-            "topic1", make_test_node_identity("1"), handler, group_id_override="g1"
+            "topic1", make_test_node_identity("1"), handler
         )
-        await event_bus.subscribe(
-            "topic2", make_test_node_identity("2"), handler, group_id_override="g2"
-        )
+        await event_bus.subscribe("topic2", make_test_node_identity("2"), handler)
 
         topics = await event_bus.get_topics()
         assert set(topics) == {"topic1", "topic2"}
@@ -752,12 +704,7 @@ class TestInMemoryEventBusBroadcast:
             received.append(msg)
 
         # Subscribe to broadcast topic
-        await event_bus.subscribe(
-            "test.broadcast",
-            make_test_node_identity(),
-            handler,
-            group_id_override="group1",
-        )
+        await event_bus.subscribe("test.broadcast", make_test_node_identity(), handler)
         await event_bus.broadcast_to_environment("test_cmd", {"key": "value"})
 
         assert len(received) == 1
@@ -781,10 +728,7 @@ class TestInMemoryEventBusBroadcast:
 
         # Subscribe to production broadcast topic
         await event_bus.subscribe(
-            "production.broadcast",
-            make_test_node_identity(),
-            handler,
-            group_id_override="group1",
+            "production.broadcast", make_test_node_identity(), handler
         )
         await event_bus.broadcast_to_environment(
             "deploy_cmd", {"version": "1.0"}, target_environment="production"
@@ -806,10 +750,7 @@ class TestInMemoryEventBusBroadcast:
 
         # Subscribe to group topic
         await event_bus.subscribe(
-            "test.target-group",
-            make_test_node_identity(),
-            handler,
-            group_id_override="group1",
+            "test.target-group", make_test_node_identity(), handler
         )
         await event_bus.send_to_group("test_cmd", {"key": "value"}, "target-group")
 
@@ -939,12 +880,8 @@ class TestInMemoryEventBusHealthCheck:
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
-        await event_bus.subscribe(
-            "topic1", make_test_node_identity("1"), handler, group_id_override="g1"
-        )
-        await event_bus.subscribe(
-            "topic2", make_test_node_identity("2"), handler, group_id_override="g2"
-        )
+        await event_bus.subscribe("topic1", make_test_node_identity("1"), handler)
+        await event_bus.subscribe("topic2", make_test_node_identity("2"), handler)
         await event_bus.publish("topic1", None, b"msg1")
         await event_bus.publish("topic1", None, b"msg2")
 
@@ -1028,11 +965,7 @@ class TestInMemoryEventBusConcurrency:
                 await event_bus.publish("test-topic", None, f"msg-{start + i}".encode())
 
         # Run multiple publishers concurrently
-        await asyncio.gather(
-            publish_batch(0),
-            publish_batch(100),
-            publish_batch(200),
-        )
+        await asyncio.gather(publish_batch(0), publish_batch(100), publish_batch(200))
 
         history = await event_bus.get_event_history(limit=50)
         assert len(history) == 30
@@ -1051,10 +984,7 @@ class TestInMemoryEventBusConcurrency:
 
         async def subscribe_unsubscribe(group_id: str) -> None:
             unsub = await event_bus.subscribe(
-                "test-topic",
-                make_test_node_identity(group_id),
-                handler,
-                group_id_override=group_id,
+                "test-topic", make_test_node_identity(group_id), handler
             )
             await asyncio.sleep(0.01)
             await unsub()
@@ -1082,9 +1012,7 @@ class TestInMemoryEventBusConcurrency:
             async with lock:
                 received.append(msg)
 
-        await event_bus.subscribe(
-            "test-topic", make_test_node_identity(), handler, group_id_override="group1"
-        )
+        await event_bus.subscribe("test-topic", make_test_node_identity(), handler)
 
         # Publish messages concurrently
         await asyncio.gather(
@@ -1143,10 +1071,7 @@ class TestInMemoryEventBusEdgeCases:
             received.append(msg)
 
         await event_bus.subscribe(
-            "topic-with-special-chars",
-            make_test_node_identity(),
-            handler,
-            group_id_override="group1",
+            "topic-with-special-chars", make_test_node_identity(), handler
         )
         await event_bus.publish("topic-with-special-chars", None, b"test")
 
@@ -1168,12 +1093,7 @@ class TestInMemoryEventBusEdgeCases:
 
         # Test with Japanese characters
         unicode_topic = "topic-日本語-テスト"
-        await event_bus.subscribe(
-            unicode_topic,
-            make_test_node_identity(),
-            handler,
-            group_id_override="group1",
-        )
+        await event_bus.subscribe(unicode_topic, make_test_node_identity(), handler)
         await event_bus.publish(unicode_topic, None, b"test")
 
         assert len(received) == 1
@@ -1192,12 +1112,7 @@ class TestInMemoryEventBusEdgeCases:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe(
-            "test",
-            make_test_node_identity(),
-            handler,
-            group_id_override="group-with.dots_and-dashes",
-        )
+        await event_bus.subscribe("test", make_test_node_identity(), handler)
         await event_bus.publish("test", None, b"test")
 
         assert len(received) == 1
@@ -1239,12 +1154,8 @@ class TestInMemoryEventBusEdgeCases:
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
-        await event_bus.subscribe(
-            "topic1", make_test_node_identity("1"), handler, group_id_override="g1"
-        )
-        await event_bus.subscribe(
-            "topic2", make_test_node_identity("2"), handler, group_id_override="g2"
-        )
+        await event_bus.subscribe("topic1", make_test_node_identity("1"), handler)
+        await event_bus.subscribe("topic2", make_test_node_identity("2"), handler)
 
         assert await event_bus.get_subscriber_count() == 2
 
@@ -1297,10 +1208,7 @@ class TestInMemoryEventBusCircuitBreaker:
             raise ValueError("Intentional failure")
 
         await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("fail"),
-            failing_handler,
-            group_id_override="fail-group",
+            "test-topic", make_test_node_identity("fail"), failing_handler
         )
         for _ in range(6):
             await event_bus.publish("test-topic", None, b"test")
@@ -1323,10 +1231,7 @@ class TestInMemoryEventBusCircuitBreaker:
                 raise ValueError("Intentional failure")
 
         await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("flaky"),
-            flaky_handler,
-            group_id_override="flaky-group",
+            "test-topic", make_test_node_identity("flaky"), flaky_handler
         )
         for _ in range(3):
             await event_bus.publish("test-topic", None, b"test")
@@ -1350,16 +1255,14 @@ class TestInMemoryEventBusCircuitBreaker:
             call_count += 1
             raise ValueError("Intentional failure")
 
-        await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("fail"),
-            failing_handler,
-            group_id_override="fail-group",
-        )
+        identity = make_test_node_identity("fail")
+        await event_bus.subscribe("test-topic", identity, failing_handler)
         for _ in range(6):
             await event_bus.publish("test-topic", None, b"test")
         assert call_count == 5
-        reset = await event_bus.reset_subscriber_circuit("test-topic", "fail-group")
+        # Use the derived consumer group ID format
+        derived_group_id = f"{identity.env}.{identity.service}.{identity.node_name}.consume.{identity.version}"
+        reset = await event_bus.reset_subscriber_circuit("test-topic", derived_group_id)
         assert reset is True
         await event_bus.publish("test-topic", None, b"test")
         assert call_count == 6
@@ -1375,16 +1278,15 @@ class TestInMemoryEventBusCircuitBreaker:
         async def failing_handler(msg: ModelEventMessage) -> None:
             raise ValueError("Intentional failure")
 
-        await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("fail"),
-            failing_handler,
-            group_id_override="fail-group",
-        )
+        identity = make_test_node_identity("fail")
+        await event_bus.subscribe("test-topic", identity, failing_handler)
         for _ in range(3):
             await event_bus.publish("test-topic", None, b"test")
         status = await event_bus.get_circuit_breaker_status()
-        assert status["failure_counts"]["test-topic:fail-group"] == 3
+        # Use the derived consumer group ID format
+        derived_group_id = f"{identity.env}.{identity.service}.{identity.node_name}.consume.{identity.version}"
+        circuit_key = f"test-topic:{derived_group_id}"
+        assert status["failure_counts"][circuit_key] == 3
         assert len(status["open_circuits"]) == 0
         for _ in range(3):
             await event_bus.publish("test-topic", None, b"test")
@@ -1410,17 +1312,16 @@ class TestInMemoryEventBusCircuitBreaker:
         async def failing_handler(msg: ModelEventMessage) -> None:
             raise ValueError("Intentional failure")
 
-        await event_bus.subscribe(
-            "test-topic",
-            make_test_node_identity("fail"),
-            failing_handler,
-            group_id_override="fail-group",
-        )
+        identity = make_test_node_identity("fail")
+        await event_bus.subscribe("test-topic", identity, failing_handler)
         for _ in range(3):
             await event_bus.publish("test-topic", None, b"test")
 
         status = await event_bus.get_circuit_breaker_status()
-        assert status["failure_counts"]["test-topic:fail-group"] == 3
+        # Use the derived consumer group ID format
+        derived_group_id = f"{identity.env}.{identity.service}.{identity.node_name}.consume.{identity.version}"
+        circuit_key = f"test-topic:{derived_group_id}"
+        assert status["failure_counts"][circuit_key] == 3
 
         await event_bus.close()
 

@@ -66,9 +66,7 @@ from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
 # Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
 from .conftest import make_e2e_test_identity, wait_for_consumer_ready
-from .verification_helpers import (
-    wait_for_postgres_registration,
-)
+from .verification_helpers import wait_for_postgres_registration
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -507,10 +505,7 @@ class OrchestratorPipeline:
             return ModelNodeIntrospectionEvent.model_validate(payload)
 
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(
-                "Failed to deserialize message",
-                extra={"error": str(e)},
-            )
+            logger.warning("Failed to deserialize message", extra={"error": str(e)})
             return None
 
     async def _execute_effects(
@@ -572,10 +567,7 @@ class OrchestratorPipeline:
         return self._sequence_counter
 
     async def _persist_projection(
-        self,
-        event: ModelNodeIntrospectionEvent,
-        now: datetime,
-        correlation_id: UUID,
+        self, event: ModelNodeIntrospectionEvent, now: datetime, correlation_id: UUID
     ) -> None:
         """Persist the registration projection.
 
@@ -659,8 +651,7 @@ async def mock_postgres_adapter() -> AsyncMock:
 
 @pytest.fixture
 async def registry_effect_node(
-    mock_consul_client: AsyncMock,
-    mock_postgres_adapter: AsyncMock,
+    mock_consul_client: AsyncMock, mock_postgres_adapter: AsyncMock
 ) -> NodeRegistryEffect:
     """Create NodeRegistryEffect with mock backends.
 
@@ -674,8 +665,7 @@ async def registry_effect_node(
     from omnibase_infra.nodes.effects import NodeRegistryEffect
 
     return NodeRegistryEffect(
-        consul_client=mock_consul_client,
-        postgres_adapter=mock_postgres_adapter,
+        consul_client=mock_consul_client, postgres_adapter=mock_postgres_adapter
     )
 
 
@@ -726,9 +716,7 @@ async def orchestrator_pipeline(
 
 
 @pytest.fixture
-async def validate_test_topic_exists(
-    real_kafka_event_bus: EventBusKafka,
-) -> str:
+async def validate_test_topic_exists(real_kafka_event_bus: EventBusKafka) -> str:
     """Validate and return the pre-existing test topic name.
 
     This fixture validates that the test topic (e2e-test.node.introspection.v1)
@@ -813,10 +801,7 @@ async def validate_test_topic_exists(
 
     try:
         # Step 1: Connect to Kafka admin API with explicit timeout
-        logger.debug(
-            "Connecting to Kafka admin API at %s",
-            bootstrap_servers,
-        )
+        logger.debug("Connecting to Kafka admin API at %s", bootstrap_servers)
         admin_client = AIOKafkaAdminClient(
             bootstrap_servers=bootstrap_servers,
             request_timeout_ms=30000,  # 30 second timeout for admin operations
@@ -973,10 +958,7 @@ async def validate_test_topic_exists(
                 await admin_client.close()
             except Exception as close_err:
                 # Log but don't fail on close errors
-                logger.warning(
-                    "Error closing Kafka admin client: %s",
-                    close_err,
-                )
+                logger.warning("Error closing Kafka admin client: %s", close_err)
 
     return TEST_INTROSPECTION_TOPIC
 
@@ -1017,12 +999,10 @@ async def running_orchestrator_consumer(
     # Use unique group ID per test run to avoid cross-test coupling
     unique_group_id = f"e2e-orchestrator-test-{uuid4().hex[:8]}"
     # Subscribe to the introspection topic (topic is guaranteed to exist)
-    # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
     unsubscribe = await real_kafka_event_bus.subscribe(
         topic=validate_test_topic_exists,  # Use the ensured topic name
         node_identity=make_e2e_test_identity("orchestrator"),
         on_message=orchestrator_pipeline.pipeline.process_message,
-        group_id_override=unique_group_id,
     )
 
     # Wait for consumer to be ready to receive messages.
@@ -1438,9 +1418,7 @@ class TestFullPipelineWithRealInfrastructure:
         assert projection.node_type == "effect"
 
     async def test_reducer_generates_correct_intents(
-        self,
-        unique_node_id: UUID,
-        unique_correlation_id: UUID,
+        self, unique_node_id: UUID, unique_correlation_id: UUID
     ) -> None:
         """Test that reducer generates Consul and PostgreSQL intents.
 
@@ -1497,8 +1475,7 @@ class TestFullPipelineWithRealInfrastructure:
         from omnibase_infra.nodes.effects.models import ModelRegistryRequest
 
         effect = NodeRegistryEffect(
-            consul_client=mock_consul_client,
-            postgres_adapter=mock_postgres_adapter,
+            consul_client=mock_consul_client, postgres_adapter=mock_postgres_adapter
         )
 
         request = ModelRegistryRequest(
@@ -1551,12 +1528,10 @@ class TestPipelineLifecycle:
             message_received.set()
 
         # Subscribe (topic is guaranteed to exist via validate_test_topic_exists fixture)
-        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=validate_test_topic_exists,
             node_identity=make_e2e_test_identity("lifecycle"),
             on_message=handler,
-            group_id_override=f"lifecycle-test-{unique_correlation_id.hex[:8]}",
         )
 
         try:
@@ -1609,12 +1584,10 @@ class TestPipelineLifecycle:
             message_count += 1
 
         # Subscribe and immediately unsubscribe (topic is guaranteed to exist)
-        # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=validate_test_topic_exists,
             node_identity=make_e2e_test_identity("shutdown"),
             on_message=handler,
-            group_id_override=f"shutdown-test-{unique_correlation_id.hex[:8]}",
         )
 
         # Brief wait before testing shutdown (tests cleanup, not message receipt).

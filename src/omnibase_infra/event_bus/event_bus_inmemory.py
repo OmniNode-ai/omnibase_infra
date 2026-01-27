@@ -470,7 +470,6 @@ class EventBusInmemory:
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
         *,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
-        group_id_override: str | None = None,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to topic with callback handler.
 
@@ -478,8 +477,7 @@ class EventBusInmemory:
         Returns an unsubscribe function to remove the subscription.
 
         The consumer group ID is derived from the node identity using the canonical
-        format: ``{env}.{service}.{node_name}.{purpose}.{version}``. An explicit
-        override can be provided for backwards compatibility or special cases.
+        format: ``{env}.{service}.{node_name}.{purpose}.{version}``.
 
         Note: For the in-memory implementation, the consumer group ID is used for
         internal tracking and circuit breaker isolation, but does not affect actual
@@ -492,9 +490,6 @@ class EventBusInmemory:
             on_message: Async callback invoked for each message
             purpose: Consumer group purpose classification. Defaults to CONSUME.
                 Used in the consumer group ID derivation for disambiguation.
-            group_id_override: Explicit consumer group ID override. If provided,
-                bypasses the identity-based derivation. Use for backwards
-                compatibility or special consumer group patterns.
 
         Returns:
             Async unsubscribe function to remove this subscription
@@ -523,21 +518,12 @@ class EventBusInmemory:
                 purpose=EnumConsumerGroupPurpose.INTROSPECTION,
             )
 
-            # With explicit override
-            unsubscribe = await bus.subscribe(
-                "events", identity, handler,
-                group_id_override="legacy-group-id",
-            )
-
             # ... later ...
             await unsubscribe()
             ```
         """
-        # Derive consumer group ID (override takes precedence)
-        if group_id_override:
-            effective_group_id = group_id_override
-        else:
-            effective_group_id = compute_consumer_group_id(node_identity, purpose)
+        # Derive consumer group ID from node identity (no overrides allowed)
+        effective_group_id = compute_consumer_group_id(node_identity, purpose)
 
         async with self._lock:
             self._subscribers[topic].append((effective_group_id, on_message))

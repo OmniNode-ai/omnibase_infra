@@ -919,7 +919,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
         *,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
-        group_id_override: str | None = None,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to topic with callback handler.
 
@@ -927,8 +926,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         Returns an unsubscribe function to remove the subscription.
 
         The consumer group ID is derived from the node identity using the canonical
-        format: ``{env}.{service}.{node_name}.{purpose}.{version}``. An explicit
-        override can be provided for backwards compatibility or special cases.
+        format: ``{env}.{service}.{node_name}.{purpose}.{version}``.
 
         Note: Unlike typical Kafka consumer groups, this implementation maintains
         a subscriber registry and fans out messages to all registered callbacks,
@@ -941,9 +939,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
             on_message: Async callback invoked for each message
             purpose: Consumer group purpose classification. Defaults to CONSUME.
                 Used in the consumer group ID derivation for disambiguation.
-            group_id_override: Explicit consumer group ID override. If provided,
-                bypasses the identity-based derivation. Use for backwards
-                compatibility or special consumer group patterns.
 
         Returns:
             Async unsubscribe function to remove this subscription
@@ -972,12 +967,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 purpose=EnumConsumerGroupPurpose.INTROSPECTION,
             )
 
-            # With explicit override
-            unsubscribe = await bus.subscribe(
-                "events", identity, handler,
-                group_id_override="legacy-group-id",
-            )
-
             # ... later ...
             await unsubscribe()
             ```
@@ -985,11 +974,8 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         subscription_id = str(uuid4())
         correlation_id = uuid4()
 
-        # Derive consumer group ID (override takes precedence)
-        if group_id_override:
-            effective_group_id = group_id_override
-        else:
-            effective_group_id = compute_consumer_group_id(node_identity, purpose)
+        # Derive consumer group ID from node identity (no overrides allowed)
+        effective_group_id = compute_consumer_group_id(node_identity, purpose)
 
         # Validate topic name
         self._validate_topic_name(topic, correlation_id)
@@ -1079,8 +1065,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
             )
             raise ProtocolConfigurationError(
                 f"Consumer group ID is required for topic '{topic}'. "
-                "Use compute_consumer_group_id() to derive from ModelNodeIdentity, "
-                "or pass group_id_override for backwards compatibility or special cases.",
+                "Internal error: compute_consumer_group_id() should have been called.",
                 context=context,
                 parameter="group_id",
                 value=group_id,

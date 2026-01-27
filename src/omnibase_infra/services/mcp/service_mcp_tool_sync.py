@@ -79,7 +79,6 @@ class ServiceMCPToolSync:
 
     # Topic for node registration events
     TOPIC = "node.registration.v1"
-    GROUP_ID = "mcp-tool-sync"
 
     # MCP tag constants
     TAG_MCP_ENABLED = "mcp-enabled"
@@ -151,7 +150,6 @@ class ServiceMCPToolSync:
             "ServiceMCPToolSync initialized",
             extra={
                 "topic": self.TOPIC,
-                "group_id": self.GROUP_ID,
             },
         )
 
@@ -173,57 +171,38 @@ class ServiceMCPToolSync:
 
         correlation_id = uuid4()
 
-        logger.info(
-            "Starting MCP tool sync",
-            extra={
-                "topic": self.TOPIC,
-                "group_id": self.GROUP_ID,
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-        # OMN-1602: Create typed node identity for Kafka consumer group derivation.
+        # OMN-1602: Typed node identity for consumer group derivation.
         #
         # Identity Field Rationale:
-        # -------------------------
-        # env (dynamic):
-        #   Derived from self._bus.environment to follow the deployment context.
-        #   This ensures the consumer group is environment-specific (e.g., "local",
-        #   "dev", "prod"), preventing cross-environment message consumption.
-        #
-        # service="mcp" (hardcoded):
-        #   The MCP (Model Context Protocol) service is a singleton within each
-        #   deployment. There is exactly one MCP service instance per environment,
-        #   so this identifier is fixed by design.
-        #
-        # node_name="tool_sync" (hardcoded):
-        #   Identifies the specific function within the MCP service. The MCP service
-        #   has multiple components (discovery, registry, sync); "tool_sync" uniquely
-        #   identifies this Kafka consumer that handles tool hot-reload events.
-        #
-        # version="v1" (hardcoded):
-        #   This is the consumer group protocol version, NOT the application version.
-        #   It indicates the message processing contract this consumer implements.
-        #   Changing this would create a new consumer group, causing message replay.
-        #   Only increment when the message processing logic changes incompatibly.
-        #
-        # group_id_override (backward compatibility):
-        #   Uses the existing GROUP_ID constant ("mcp-tool-sync") to maintain
-        #   continuity with pre-OMN-1602 consumer groups. Without this override,
-        #   the derived ID would be "local-mcp-tool_sync-v1" (or similar), which
-        #   would orphan the existing consumer group and replay all messages.
-        #   This override can be removed once all environments have migrated.
+        # - env: From bus.environment for deployment-specific consumer groups
+        # - service="mcp": MCP is a singleton per environment
+        # - node_name="tool_sync": Unique consumer within the MCP service
+        # - version="v1": Consumer protocol version (increment on breaking changes)
         sync_identity = ModelNodeIdentity(
             env=self._bus.environment,
             service="mcp",
             node_name="tool_sync",
             version="v1",
         )
+
+        logger.info(
+            "Starting MCP tool sync",
+            extra={
+                "topic": self.TOPIC,
+                "node_identity": {
+                    "env": sync_identity.env,
+                    "service": sync_identity.service,
+                    "node_name": sync_identity.node_name,
+                    "version": sync_identity.version,
+                },
+                "correlation_id": str(correlation_id),
+            },
+        )
+
         self._unsubscribe = await self._bus.subscribe(
             topic=self.TOPIC,
             node_identity=sync_identity,
             on_message=self._on_message,
-            group_id_override=self.GROUP_ID,  # Backward compat with existing group
         )
 
         self._started = True
@@ -577,7 +556,7 @@ class ServiceMCPToolSync:
         return {
             "service_name": "ServiceMCPToolSync",
             "topic": self.TOPIC,
-            "group_id": self.GROUP_ID,
+            "group_id_derived": True,  # Group ID derived from ModelNodeIdentity
             "is_running": self._started,
         }
 

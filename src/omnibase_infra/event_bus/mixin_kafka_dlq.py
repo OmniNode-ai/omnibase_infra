@@ -211,7 +211,7 @@ class MixinKafkaDlq:
         error: Exception,
         correlation_id: UUID,
         *,
-        consumer_group: str = "unknown",
+        consumer_group: str,
     ) -> None:
         """Publish failed message to dead letter queue with metrics and alerting.
 
@@ -233,7 +233,7 @@ class MixinKafkaDlq:
             error: The exception that caused the failure
             correlation_id: Correlation ID for tracking
             consumer_group: Consumer group ID that processed the message.
-                Defaults to "unknown" for backwards compatibility.
+                Required for DLQ traceability.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
@@ -507,7 +507,7 @@ class MixinKafkaDlq:
         correlation_id: UUID,
         failure_type: str,
         *,
-        consumer_group: str = "unknown",
+        consumer_group: str,
     ) -> None:
         """Publish raw Kafka message to DLQ when deserialization fails.
 
@@ -523,7 +523,7 @@ class MixinKafkaDlq:
             correlation_id: Correlation ID for tracking
             failure_type: Type of failure (e.g., "deserialization_error")
             consumer_group: Consumer group ID that processed the message.
-                Defaults to "unknown" for backwards compatibility.
+                Required for DLQ traceability.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise

@@ -100,9 +100,7 @@ class TestConcurrentPublishOperations:
         async def publish_to_topic(topic_id: int) -> None:
             for i in range(messages_per_topic):
                 await event_bus.publish(
-                    topic=f"topic-{topic_id}",
-                    key=None,
-                    value=f"msg-{i}".encode(),
+                    topic=f"topic-{topic_id}", key=None, value=f"msg-{i}".encode()
                 )
 
         # Launch publishers for each topic concurrently
@@ -135,10 +133,7 @@ class TestConcurrentPublishOperations:
 
         # Set up subscriber
         await event_bus.subscribe(
-            "concurrent-topic",
-            make_test_node_identity(),
-            handler,
-            group_id_override="group1",
+            "concurrent-topic", make_test_node_identity(), handler
         )
 
         num_publishers = 5
@@ -171,11 +166,7 @@ class TestConcurrentPublishOperations:
         offsets: list[str] = []
 
         async def publish_and_record() -> None:
-            await event_bus.publish(
-                topic="offset-test",
-                key=None,
-                value=b"test",
-            )
+            await event_bus.publish(topic="offset-test", key=None, value=b"test")
 
         # Launch all publishes concurrently
         await asyncio.gather(*[publish_and_record() for _ in range(num_concurrent)])
@@ -220,7 +211,6 @@ class TestConcurrentSubscribeUnsubscribe:
                 topic="shared-topic",
                 node_identity=make_test_node_identity(str(sub_id)),
                 on_message=handler,
-                group_id_override=f"group-{sub_id}",
             )
             async with lock:
                 unsubscribes.append(unsub)
@@ -251,7 +241,6 @@ class TestConcurrentSubscribeUnsubscribe:
                 topic="shared-topic",
                 node_identity=make_test_node_identity(str(i)),
                 on_message=handler,
-                group_id_override=f"group-{i}",
             )
             unsubscribes.append(unsub)
 
@@ -286,7 +275,6 @@ class TestConcurrentSubscribeUnsubscribe:
                     topic="interleaved-topic",
                     node_identity=make_test_node_identity(str(sub_id)),
                     on_message=handler,
-                    group_id_override=f"group-{sub_id}",
                 )
                 await asyncio.sleep(0)  # Yield to other tasks
                 await unsub()
@@ -317,7 +305,6 @@ class TestConcurrentSubscribeUnsubscribe:
             topic=test_topic,
             node_identity=make_test_node_identity("double-unsub"),
             on_message=handler,
-            group_id_override=test_group,
         )
 
         # Call unsubscribe concurrently multiple times
@@ -342,9 +329,7 @@ class TestCircuitBreakerRaceConditions:
     async def test_concurrent_failures_trigger_circuit_open(self) -> None:
         """Test that concurrent failures properly trigger circuit breaker."""
         event_bus = EventBusInmemory(
-            environment="test",
-            group="test-group",
-            circuit_breaker_threshold=5,
+            environment="test", group="test-group", circuit_breaker_threshold=5
         )
         await event_bus.start()
 
@@ -358,18 +343,13 @@ class TestCircuitBreakerRaceConditions:
             raise ValueError("Intentional failure")
 
         await event_bus.subscribe(
-            "circuit-topic",
-            make_test_node_identity("fail"),
-            failing_handler,
-            group_id_override="fail-group",
+            "circuit-topic", make_test_node_identity("fail"), failing_handler
         )
 
         # Send messages concurrently to trigger failures
         async def send_message(i: int) -> None:
             await event_bus.publish(
-                topic="circuit-topic",
-                key=None,
-                value=f"msg-{i}".encode(),
+                topic="circuit-topic", key=None, value=f"msg-{i}".encode()
             )
 
         # Send more messages than threshold to ensure circuit opens
@@ -386,9 +366,7 @@ class TestCircuitBreakerRaceConditions:
     async def test_concurrent_success_resets_circuit_breaker(self) -> None:
         """Test that successful operations reset failure count correctly."""
         event_bus = EventBusInmemory(
-            environment="test",
-            group="test-group",
-            circuit_breaker_threshold=5,
+            environment="test", group="test-group", circuit_breaker_threshold=5
         )
         await event_bus.start()
 
@@ -403,12 +381,12 @@ class TestCircuitBreakerRaceConditions:
                 if should_fail and call_count <= 3:
                     raise ValueError("Intentional failure")
 
-        await event_bus.subscribe(
-            "reset-topic",
-            make_test_node_identity("flaky"),
-            flaky_handler,
-            group_id_override="flaky-group",
-        )
+        identity = make_test_node_identity("flaky")
+        await event_bus.subscribe("reset-topic", identity, flaky_handler)
+
+        # Use the derived consumer group ID format
+        derived_group_id = f"{identity.env}.{identity.service}.{identity.node_name}.consume.{identity.version}"
+        circuit_key = f"reset-topic:{derived_group_id}"
 
         # Send 3 failing messages
         for i in range(3):
@@ -416,7 +394,7 @@ class TestCircuitBreakerRaceConditions:
 
         # Verify failure count (should be 3)
         status = await event_bus.get_circuit_breaker_status()
-        assert status["failure_counts"]["reset-topic:flaky-group"] == 3
+        assert status["failure_counts"][circuit_key] == 3
 
         # Now send success
         should_fail = False
@@ -424,7 +402,7 @@ class TestCircuitBreakerRaceConditions:
 
         # Verify failure count reset
         status = await event_bus.get_circuit_breaker_status()
-        assert "reset-topic:flaky-group" not in status["failure_counts"]
+        assert circuit_key not in status["failure_counts"]
 
         await event_bus.close()
 
@@ -432,21 +410,18 @@ class TestCircuitBreakerRaceConditions:
     async def test_concurrent_circuit_reset_operations(self) -> None:
         """Test concurrent circuit reset operations are safe."""
         event_bus = EventBusInmemory(
-            environment="test",
-            group="test-group",
-            circuit_breaker_threshold=3,
+            environment="test", group="test-group", circuit_breaker_threshold=3
         )
         await event_bus.start()
 
         async def failing_handler(msg: ModelEventMessage) -> None:
             raise ValueError("Always fails")
 
-        await event_bus.subscribe(
-            "reset-test",
-            make_test_node_identity("fail"),
-            failing_handler,
-            group_id_override="fail-group",
-        )
+        identity = make_test_node_identity("fail")
+        await event_bus.subscribe("reset-test", identity, failing_handler)
+
+        # Use the derived consumer group ID format
+        derived_group_id = f"{identity.env}.{identity.service}.{identity.node_name}.consume.{identity.version}"
 
         # Trigger circuit open
         for i in range(5):
@@ -459,7 +434,7 @@ class TestCircuitBreakerRaceConditions:
         # Concurrent resets should all be safe
         results = await asyncio.gather(
             *[
-                event_bus.reset_subscriber_circuit("reset-test", "fail-group")
+                event_bus.reset_subscriber_circuit("reset-test", derived_group_id)
                 for _ in range(10)
             ]
         )
@@ -506,12 +481,7 @@ class TestEventHistoryConsistency:
                 await asyncio.sleep(0)  # Yield to other tasks
 
         # Run publishers and readers concurrently
-        await asyncio.gather(
-            publish_task(),
-            publish_task(),
-            read_task(),
-            read_task(),
-        )
+        await asyncio.gather(publish_task(), publish_task(), read_task(), read_task())
 
         assert publish_count == 200
         assert read_count == 100
@@ -541,9 +511,7 @@ class TestEventHistoryConsistency:
         """Test that max_history is respected under concurrent writes."""
         max_history = 100
         event_bus = EventBusInmemory(
-            environment="test",
-            group="test-group",
-            max_history=max_history,
+            environment="test", group="test-group", max_history=max_history
         )
         await event_bus.start()
 
@@ -611,9 +579,7 @@ class TestLifecycleRaceConditions:
             for i in range(50):
                 try:
                     await event_bus.publish(
-                        topic="during-close",
-                        key=None,
-                        value=f"msg-{i}".encode(),
+                        topic="during-close", key=None, value=f"msg-{i}".encode()
                     )
                     async with lock:
                         success_count += 1
@@ -657,7 +623,6 @@ class TestLifecycleRaceConditions:
                         topic=f"topic-{i}",
                         node_identity=make_test_node_identity(str(i)),
                         on_message=handler,
-                        group_id_override=test_group,
                     )
                     async with lock:
                         subscribe_count += 1
@@ -727,10 +692,7 @@ class TestHealthCheckRaceConditions:
         async def subscribe_task() -> None:
             for i in range(50):
                 unsub = await event_bus.subscribe(
-                    f"topic-{i}",
-                    make_test_node_identity(str(i)),
-                    handler,
-                    group_id_override=f"group-{i}",
+                    f"topic-{i}", make_test_node_identity(str(i)), handler
                 )
                 await asyncio.sleep(0)
                 await unsub()
@@ -742,11 +704,7 @@ class TestHealthCheckRaceConditions:
                     health_results.append(result)
                 await asyncio.sleep(0)
 
-        await asyncio.gather(
-            publish_task(),
-            subscribe_task(),
-            health_task(),
-        )
+        await asyncio.gather(publish_task(), subscribe_task(), health_task())
 
         # All health checks should succeed without error
         assert len(health_results) == 50
@@ -820,7 +778,6 @@ class TestInMemoryEventBusStress:
                     topic="mixed-topic",
                     node_identity=make_test_node_identity(str(sub_id)),
                     on_message=handler,
-                    group_id_override=f"group-{sub_id}",
                 )
                 await asyncio.sleep(0.1)  # Let publishers run
                 await unsub()

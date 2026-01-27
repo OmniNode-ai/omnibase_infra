@@ -471,10 +471,7 @@ async def wait_for_kafka_event(
         version="v1",
     )
     unsubscribe = await event_bus.subscribe(
-        topic=topic,
-        node_identity=test_identity,
-        on_message=handler,
-        group_id_override=group_id,
+        topic=topic, node_identity=test_identity, on_message=handler
     )
 
     try:
@@ -603,10 +600,7 @@ async def collect_registration_events(
     for topic in topics:
         try:
             unsub = await event_bus.subscribe(
-                topic=topic,
-                node_identity=test_identity,
-                on_message=handler,
-                group_id_override=group_id,
+                topic=topic, node_identity=test_identity, on_message=handler
             )
             unsubscribers.append(unsub)
         except (TimeoutError, ConnectionError, OSError) as e:
@@ -805,8 +799,7 @@ async def verify_state_transition(
 
 
 def assert_registration_state(
-    projection: ModelRegistrationProjection,
-    expected_state: EnumRegistrationState,
+    projection: ModelRegistrationProjection, expected_state: EnumRegistrationState
 ) -> None:
     """Assert registration is in expected state.
 
@@ -829,8 +822,7 @@ def assert_registration_state(
 
 
 def assert_heartbeat_updated(
-    projection: ModelRegistrationProjection,
-    min_heartbeat_time: datetime,
+    projection: ModelRegistrationProjection, min_heartbeat_time: datetime
 ) -> None:
     """Assert last_heartbeat_at is after min_heartbeat_time.
 

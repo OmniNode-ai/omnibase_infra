@@ -132,7 +132,6 @@ def make_test_node_identity(
         'kafka-tests'
 
     Note:
-        When group_id_override is used in subscribe(), the identity is not
         used for consumer group derivation, but it's still required by the
         subscribe() signature.
 
@@ -141,10 +140,7 @@ def make_test_node_identity(
     """
     actual_node_name = f"{node_name}-{suffix}" if suffix else node_name
     return ModelNodeIdentity(
-        env=env,
-        service=service,
-        node_name=actual_node_name,
-        version=version,
+        env=env, service=service, node_name=actual_node_name, version=version
     )
 
 
@@ -241,10 +237,7 @@ def check_service_registry_available() -> bool:
 
 
 def assert_has_methods(
-    obj: object,
-    required_methods: list[str],
-    *,
-    protocol_name: str | None = None,
+    obj: object, required_methods: list[str], *, protocol_name: str | None = None
 ) -> None:
     """Assert that an object has all required methods (duck typing conformance).
 
@@ -282,10 +275,7 @@ def assert_has_methods(
 
 
 def assert_has_async_methods(
-    obj: object,
-    required_methods: list[str],
-    *,
-    protocol_name: str | None = None,
+    obj: object, required_methods: list[str], *, protocol_name: str | None = None
 ) -> None:
     """Assert that an object has all required async methods.
 
@@ -895,10 +885,7 @@ async def cleanup_consul_test_services(
 
     except Exception as e:
         # Note: exc_info omitted for consistency with other cleanup handlers
-        logger.warning(
-            "Consul test cleanup failed: %s",
-            sanitize_error_message(e),
-        )
+        logger.warning("Consul test cleanup failed: %s", sanitize_error_message(e))
 
 
 @pytest.fixture
@@ -977,7 +964,7 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
                 WHERE metadata::text LIKE '%test%'
                    OR metadata::text LIKE '%integration%'
                    OR status = 'TEST'
-                """,
+                """
             )
         except asyncpg.UndefinedTableError:
             pass  # Table doesn't exist, nothing to cleanup
@@ -996,10 +983,7 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
         # Note: exc_info omitted to prevent credential exposure in tracebacks
         # (DSN contains password and would be visible in exception traceback)
         # Exception is sanitized to prevent DSN/credential leakage
-        logger.warning(
-            "PostgreSQL test cleanup failed: %s",
-            sanitize_error_message(e),
-        )
+        logger.warning("PostgreSQL test cleanup failed: %s", sanitize_error_message(e))
 
 
 @pytest.fixture
@@ -1041,9 +1025,7 @@ async def cleanup_kafka_test_consumer_groups() -> AsyncGenerator[None, None]:
         from aiokafka.admin import AIOKafkaAdminClient
         from aiokafka.errors import KafkaError
 
-        admin_client = AIOKafkaAdminClient(
-            bootstrap_servers=bootstrap_servers,
-        )
+        admin_client = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
 
         try:
             await admin_client.start()
@@ -1084,10 +1066,7 @@ async def cleanup_kafka_test_consumer_groups() -> AsyncGenerator[None, None]:
 
     except Exception as e:
         # Note: exc_info omitted for consistency with other cleanup handlers
-        logger.warning(
-            "Kafka test cleanup failed: %s",
-            sanitize_error_message(e),
-        )
+        logger.warning("Kafka test cleanup failed: %s", sanitize_error_message(e))
 
 
 @pytest.fixture
@@ -1329,11 +1308,7 @@ async def event_bus() -> AsyncGenerator[object, None]:
     """
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
-    bus = EventBusInmemory(
-        environment="test",
-        group="test-group",
-        max_history=1000,
-    )
+    bus = EventBusInmemory(environment="test", group="test-group", max_history=1000)
     await bus.start()
     yield bus
     await bus.close()

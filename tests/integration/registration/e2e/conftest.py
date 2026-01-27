@@ -69,10 +69,7 @@ from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
 from tests.conftest import check_service_registry_available
-from tests.infrastructure_config import (
-    DEFAULT_CONSUL_PORT,
-    DEFAULT_POSTGRES_PORT,
-)
+from tests.infrastructure_config import DEFAULT_CONSUL_PORT, DEFAULT_POSTGRES_PORT
 
 # Load environment configuration with priority:
 # 1. .env.docker in this directory (for Docker compose infrastructure)
@@ -135,8 +132,7 @@ def make_e2e_test_identity(suffix: str = "") -> ModelNodeIdentity:
     """Create a test node identity for E2E tests.
 
     Provides a consistent identity for subscribe() calls in E2E tests.
-    When group_id_override is used, the identity is not used for consumer
-    group derivation, but it's still required by the subscribe() signature.
+    The identity is used to derive a unique consumer group ID.
 
     Args:
         suffix: Optional suffix to differentiate test identities.
@@ -144,20 +140,12 @@ def make_e2e_test_identity(suffix: str = "") -> ModelNodeIdentity:
     Returns:
         A ModelNodeIdentity configured for E2E testing.
 
-    Note:
-        For E2E tests using group_id_override, this identity serves as a
-        placeholder since the override takes precedence. For tests without
-        override, this identity derives the consumer group ID.
-
     .. versionadded:: 0.2.6
         Added as part of OMN-1602 to support typed node identity in subscribe().
     """
     node_name = f"e2e_test_node{suffix}" if suffix else "e2e_test_node"
     return ModelNodeIdentity(
-        env="test",
-        service="e2e_tests",
-        node_name=node_name,
-        version="v1",
+        env="test", service="e2e_tests", node_name=node_name, version="v1"
     )
 
 
@@ -347,12 +335,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
         )
 
     dsn = _build_postgres_dsn()
-    pool = await asyncpg.create_pool(
-        dsn,
-        min_size=2,
-        max_size=10,
-        command_timeout=60.0,
-    )
+    pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10, command_timeout=60.0)
 
     # Ensure registration_projections schema exists
     # The schema SQL is idempotent (uses IF NOT EXISTS throughout)
@@ -372,9 +355,7 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
 
 
 @pytest.fixture
-async def wired_container(
-    postgres_pool: asyncpg.Pool,
-) -> ModelONEXContainer:
+async def wired_container(postgres_pool: asyncpg.Pool) -> ModelONEXContainer:
     """Container with infrastructure services and registration handlers wired.
 
     This fixture creates a fully wired ModelONEXContainer with:
@@ -669,9 +650,7 @@ async def cleanup_consul_services(
 
 
 @pytest.fixture
-async def real_projector(
-    postgres_pool: asyncpg.Pool,
-) -> ProjectorShell:
+async def real_projector(postgres_pool: asyncpg.Pool) -> ProjectorShell:
     """Create ProjectorShell for persisting handler outputs.
 
     Uses ProjectorPluginLoader to load the registration projector from
@@ -756,8 +735,7 @@ async def timeout_emitter(
 
 @pytest.fixture
 async def heartbeat_handler(
-    projection_reader: ProjectionReaderRegistration,
-    real_projector: ProjectorShell,
+    projection_reader: ProjectionReaderRegistration, real_projector: ProjectorShell
 ) -> HandlerNodeHeartbeat:
     """HandlerNodeHeartbeat for E2E heartbeat tests.
 
@@ -785,8 +763,7 @@ async def heartbeat_handler(
 
 @pytest.fixture
 async def timeout_coordinator(
-    timeout_scanner: TimeoutScanner,
-    timeout_emitter: TimeoutEmitter,
+    timeout_scanner: TimeoutScanner, timeout_emitter: TimeoutEmitter
 ) -> TimeoutCoordinator:
     """TimeoutCoordinator for E2E timeout tests.
 
@@ -860,8 +837,7 @@ def unique_correlation_id() -> UUID:
 
 @pytest.fixture
 async def introspectable_test_node(
-    real_kafka_event_bus: EventBusKafka,
-    unique_node_id: UUID,
+    real_kafka_event_bus: EventBusKafka, unique_node_id: UUID
 ) -> ProtocolIntrospectableTestNode:
     """Test node implementing MixinNodeIntrospection for E2E testing.
 
@@ -930,8 +906,7 @@ async def introspectable_test_node(
             return {"status": "handled", "request": request}
 
     return IntrospectableTestNode(
-        node_id=unique_node_id,
-        event_bus=real_kafka_event_bus,
+        node_id=unique_node_id, event_bus=real_kafka_event_bus
     )
 
 
@@ -1011,8 +986,7 @@ class ProtocolIntrospectableTestNode(Protocol):
 
 @pytest.fixture
 def introspection_event_factory(
-    unique_node_id: UUID,
-    unique_correlation_id: UUID,
+    unique_node_id: UUID, unique_correlation_id: UUID
 ) -> Callable[..., ModelNodeIntrospectionEvent]:
     """Factory for creating ModelNodeIntrospectionEvent instances.
 
@@ -1124,8 +1098,7 @@ def deterministic_clock() -> DeterministicClock:
 
 @pytest.fixture
 async def cleanup_projections(
-    postgres_pool: asyncpg.Pool,
-    unique_node_id: UUID,
+    postgres_pool: asyncpg.Pool, unique_node_id: UUID
 ) -> AsyncGenerator[None, None]:
     """Cleanup test projections after test completion.
 
@@ -1254,8 +1227,7 @@ def configure_e2e_logging() -> None:
         handler = logging.StreamHandler()
         handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
-            "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-            datefmt="%H:%M:%S",
+            "%(asctime)s | %(name)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S"
         )
         handler.setFormatter(formatter)
         e2e_logger.addHandler(handler)
