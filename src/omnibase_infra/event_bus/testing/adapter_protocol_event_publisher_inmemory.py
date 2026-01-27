@@ -223,6 +223,10 @@ class AdapterProtocolEventPublisherInmemory:
             return True
 
         except Exception as e:
+            # NOTE: Intentionally broad exception catch for test adapter.
+            # Test adapters should gracefully handle all errors and return False
+            # rather than propagate exceptions that would crash test harnesses.
+            # This allows test assertions on publish failure (e.g., assert result is False).
             # Update failure metrics
             self._metrics.events_failed += 1
             self._metrics.current_failures += 1

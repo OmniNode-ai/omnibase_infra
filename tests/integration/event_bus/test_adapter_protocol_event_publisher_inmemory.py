@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncGenerator
-from datetime import UTC
 from typing import Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
