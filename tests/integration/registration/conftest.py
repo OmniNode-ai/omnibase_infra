@@ -3,7 +3,8 @@
 """Pytest configuration and fixtures for registration integration tests.
 
 This conftest imports fixtures from the handlers conftest to enable
-Consul, PostgreSQL, and Kafka integration testing in registration tests.
+Consul, PostgreSQL, Graph, Qdrant, Vault, and HTTP integration testing
+in registration tests.
 
 Fixture Import Pattern
 ----------------------

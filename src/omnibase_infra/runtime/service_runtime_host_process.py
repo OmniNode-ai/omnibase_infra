@@ -2307,22 +2307,31 @@ class RuntimeHostProcess:
                 )
                 return []
 
-            # Convert string UUIDs to UUID objects
-            return [UUID(nid) for nid in node_ids_raw if isinstance(nid, str)]
+            # Convert string UUIDs to UUID objects (skip invalid entries)
+            subscribers: list[UUID] = []
+            invalid_ids: list[str] = []
+            for nid in node_ids_raw:
+                if not isinstance(nid, str):
+                    continue
+                try:
+                    subscribers.append(UUID(nid))
+                except ValueError:
+                    invalid_ids.append(nid)
+
+            if invalid_ids:
+                logger.warning(
+                    "Invalid UUIDs in topic subscriber list",
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(correlation_id),
+                        "invalid_count": len(invalid_ids),
+                    },
+                )
+            return subscribers
 
         except json.JSONDecodeError as e:
             logger.warning(
                 "Failed to parse topic subscriber JSON",
-                extra={
-                    "topic": topic,
-                    "error": str(e),
-                },
-            )
-            return []
-        except ValueError as e:
-            # Invalid UUID format
-            logger.warning(
-                "Invalid UUID in topic subscriber list",
                 extra={
                     "topic": topic,
                     "error": str(e),

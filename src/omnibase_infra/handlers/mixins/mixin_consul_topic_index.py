@@ -323,7 +323,20 @@ class MixinConsulTopicIndex:
         # Get previous registrations
         previous_key = f"onex/nodes/{node_id}/event_bus/subscribe_topics"
         previous_result = await self._kv_get_raw(previous_key, correlation_id)
-        old_topics = set(json.loads(previous_result) if previous_result else [])
+        try:
+            old_topics = set(json.loads(previous_result) if previous_result else [])
+        except (json.JSONDecodeError, TypeError) as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="consul.kv_get_raw",
+                target_name="consul_handler",
+            )
+            raise InfraConsulError(
+                "Invalid JSON in Consul topic index",
+                context=context,
+                consul_key=previous_key,
+            ) from e
         new_topics = set(event_bus.subscribe_topic_strings)
 
         # Compute delta
@@ -385,7 +398,20 @@ class MixinConsulTopicIndex:
         # NOTE: Non-atomic read-modify-write. See _update_topic_index for details.
         key = f"onex/topics/{topic}/subscribers"
         existing = await self._kv_get_raw(key, correlation_id)
-        subscribers = set(json.loads(existing) if existing else [])
+        try:
+            subscribers = set(json.loads(existing) if existing else [])
+        except (json.JSONDecodeError, TypeError) as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="consul.kv_get_raw",
+                target_name="consul_handler",
+            )
+            raise InfraConsulError(
+                "Invalid JSON in Consul topic subscriber list",
+                context=context,
+                consul_key=key,
+            ) from e
         subscribers.add(node_id)
         await self._kv_put_raw(key, json.dumps(sorted(subscribers)), correlation_id)
 
@@ -427,7 +453,20 @@ class MixinConsulTopicIndex:
         key = f"onex/topics/{topic}/subscribers"
         existing = await self._kv_get_raw(key, correlation_id)
         if existing:
-            subscribers = set(json.loads(existing))
+            try:
+                subscribers = set(json.loads(existing))
+            except (json.JSONDecodeError, TypeError) as e:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_get_raw",
+                    target_name="consul_handler",
+                )
+                raise InfraConsulError(
+                    "Invalid JSON in Consul topic subscriber list",
+                    context=context,
+                    consul_key=key,
+                ) from e
             subscribers.discard(node_id)
             await self._kv_put_raw(key, json.dumps(sorted(subscribers)), correlation_id)
 
@@ -462,7 +501,20 @@ class MixinConsulTopicIndex:
         key = f"onex/topics/{topic}/subscribers"
         existing = await self._kv_get_raw(key, correlation_id)
         if existing:
-            return sorted(json.loads(existing))
+            try:
+                return sorted(json.loads(existing))
+            except (json.JSONDecodeError, TypeError) as e:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_get_raw",
+                    target_name="consul_handler",
+                )
+                raise InfraConsulError(
+                    "Invalid JSON in Consul topic subscriber list",
+                    context=context,
+                    consul_key=key,
+                ) from e
         return []
 
 

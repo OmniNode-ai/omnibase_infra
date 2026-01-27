@@ -679,13 +679,13 @@ class TestIdempotencyE2E:
         )
 
         try:
-            # Register with v1 config
-            await handler._store_node_event_bus(
+            # Register with v1 config - update index FIRST, then store
+            await handler._update_topic_index(
                 node_id=unique_node_id,
                 event_bus=config_v1,
                 correlation_id=correlation_id,
             )
-            await handler._update_topic_index(
+            await handler._store_node_event_bus(
                 node_id=unique_node_id,
                 event_bus=config_v1,
                 correlation_id=correlation_id,

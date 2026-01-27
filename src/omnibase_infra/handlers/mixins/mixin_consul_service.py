@@ -153,35 +153,43 @@ class MixinConsulService:
     def _parse_event_bus_config(
         self,
         event_bus_data: dict[str, object],
+        correlation_id: UUID,
     ) -> ModelNodeEventBusConfig:
         """Parse event_bus_config from payload dict to typed model.
 
         Args:
             event_bus_data: Raw event_bus_config dict from payload.
+            correlation_id: Correlation ID for tracing.
 
         Returns:
             Parsed ModelNodeEventBusConfig instance.
+
+        Raises:
+            RuntimeHostError: If any topic entry has an invalid or missing topic.
         """
         subscribe_topics: list[ModelEventBusTopicEntry] = []
         publish_topics: list[ModelEventBusTopicEntry] = []
 
         raw_subscribe = event_bus_data.get("subscribe_topics")
         if isinstance(raw_subscribe, list):
-            for entry in raw_subscribe:
+            for idx, entry in enumerate(raw_subscribe):
                 if isinstance(entry, dict):
-                    topic = str(entry.get("topic", ""))
-                    if not topic:
-                        logger.warning(
-                            "Skipping subscribe_topics entry with missing/empty topic",
-                            extra={
-                                "entry_keys": list(entry.keys()),
-                                "event_type": entry.get("event_type"),
-                            },
+                    raw_topic = entry.get("topic")
+                    # Validate topic is a non-empty string BEFORE any coercion
+                    if not isinstance(raw_topic, str) or not raw_topic:
+                        ctx = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.CONSUL,
+                            operation="parse_event_bus_config",
                         )
-                        continue
+                        raise RuntimeHostError(
+                            f"Invalid or missing 'topic' in subscribe_topics entry at index {idx}: "
+                            f"expected non-empty string, got {type(raw_topic).__name__}",
+                            context=ctx,
+                        )
                     subscribe_topics.append(
                         ModelEventBusTopicEntry(
-                            topic=topic,
+                            topic=raw_topic,
                             event_type=entry.get("event_type")
                             if isinstance(entry.get("event_type"), str)
                             else None,
@@ -196,21 +204,24 @@ class MixinConsulService:
 
         raw_publish = event_bus_data.get("publish_topics")
         if isinstance(raw_publish, list):
-            for entry in raw_publish:
+            for idx, entry in enumerate(raw_publish):
                 if isinstance(entry, dict):
-                    topic = str(entry.get("topic", ""))
-                    if not topic:
-                        logger.warning(
-                            "Skipping publish_topics entry with missing/empty topic",
-                            extra={
-                                "entry_keys": list(entry.keys()),
-                                "event_type": entry.get("event_type"),
-                            },
+                    raw_topic = entry.get("topic")
+                    # Validate topic is a non-empty string BEFORE any coercion
+                    if not isinstance(raw_topic, str) or not raw_topic:
+                        ctx = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.CONSUL,
+                            operation="parse_event_bus_config",
                         )
-                        continue
+                        raise RuntimeHostError(
+                            f"Invalid or missing 'topic' in publish_topics entry at index {idx}: "
+                            f"expected non-empty string, got {type(raw_topic).__name__}",
+                            context=ctx,
+                        )
                     publish_topics.append(
                         ModelEventBusTopicEntry(
-                            topic=topic,
+                            topic=raw_topic,
                             event_type=entry.get("event_type")
                             if isinstance(entry.get("event_type"), str)
                             else None,
@@ -337,7 +348,20 @@ class MixinConsulService:
         event_bus_data = payload.get("event_bus_config")
         node_id = payload.get("node_id")
 
-        if isinstance(event_bus_data, dict) and isinstance(node_id, str) and node_id:
+        # Fail fast: if event_bus_config is present, node_id is REQUIRED
+        if isinstance(event_bus_data, dict):
+            if not isinstance(node_id, str) or not node_id:
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.register",
+                )
+                raise RuntimeHostError(
+                    "event_bus_config requires a valid 'node_id': "
+                    f"expected non-empty string, got {type(node_id).__name__}",
+                    context=ctx,
+                )
+
             logger.info(
                 "Processing event_bus_config for node %s",
                 node_id,
@@ -345,7 +369,7 @@ class MixinConsulService:
             )
 
             # Parse the event bus config
-            event_bus = self._parse_event_bus_config(event_bus_data)
+            event_bus = self._parse_event_bus_config(event_bus_data, correlation_id)
 
             # Update topic index FIRST (uses old topics from previous registration)
             # This computes delta and updates reverse index

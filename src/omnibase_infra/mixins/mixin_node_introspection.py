@@ -1450,7 +1450,16 @@ class MixinNodeIntrospection:
         except ValueError as e:
             # Fail-fast: topic resolution failure prevents introspection
             # This is intentional - misconfigured topics should not be published
-            raise ValueError(f"Event bus extraction failed: {e}") from e
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="get_introspection_data",
+                target_name=str(node_id_uuid),
+            )
+            raise ProtocolConfigurationError(
+                f"Event bus extraction failed: {e}",
+                context=context,
+                parameter="event_bus",
+            ) from e
 
         # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
