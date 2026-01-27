@@ -169,9 +169,19 @@ class MixinConsulService:
         if isinstance(raw_subscribe, list):
             for entry in raw_subscribe:
                 if isinstance(entry, dict):
+                    topic = str(entry.get("topic", ""))
+                    if not topic:
+                        logger.warning(
+                            "Skipping subscribe_topics entry with missing/empty topic",
+                            extra={
+                                "entry_keys": list(entry.keys()),
+                                "event_type": entry.get("event_type"),
+                            },
+                        )
+                        continue
                     subscribe_topics.append(
                         ModelEventBusTopicEntry(
-                            topic=str(entry.get("topic", "")),
+                            topic=topic,
                             event_type=entry.get("event_type")
                             if isinstance(entry.get("event_type"), str)
                             else None,
@@ -188,9 +198,19 @@ class MixinConsulService:
         if isinstance(raw_publish, list):
             for entry in raw_publish:
                 if isinstance(entry, dict):
+                    topic = str(entry.get("topic", ""))
+                    if not topic:
+                        logger.warning(
+                            "Skipping publish_topics entry with missing/empty topic",
+                            extra={
+                                "entry_keys": list(entry.keys()),
+                                "event_type": entry.get("event_type"),
+                            },
+                        )
+                        continue
                     publish_topics.append(
                         ModelEventBusTopicEntry(
-                            topic=str(entry.get("topic", "")),
+                            topic=topic,
                             event_type=entry.get("event_type")
                             if isinstance(entry.get("event_type"), str)
                             else None,

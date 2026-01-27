@@ -60,6 +60,9 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import (
     EnvelopeValidationError,
+    InfraConsulError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -2323,6 +2326,36 @@ class RuntimeHostProcess:
                 extra={
                     "topic": topic,
                     "error": str(e),
+                },
+            )
+            return []
+        except InfraConsulError as e:
+            logger.warning(
+                "Consul error querying topic subscribers",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraConsulError",
+                },
+            )
+            return []
+        except InfraTimeoutError as e:
+            logger.warning(
+                "Timeout querying topic subscribers",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraTimeoutError",
+                },
+            )
+            return []
+        except InfraUnavailableError as e:
+            logger.warning(
+                "Service unavailable for topic subscriber query",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraUnavailableError",
                 },
             )
             return []

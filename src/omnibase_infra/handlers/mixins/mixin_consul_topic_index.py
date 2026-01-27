@@ -303,7 +303,17 @@ class MixinConsulTopicIndex:
 
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
+
+        Note:
+            This operation is NOT atomic. In high-concurrency scenarios with multiple
+            nodes updating the same topic's subscriber list simultaneously, race
+            conditions may occur. For MVP, this is an accepted limitation.
+
+            For production with high concurrency, consider:
+            - Using Consul transactions (txn endpoint) for atomic read-modify-write
+            - Implementing optimistic locking with Consul's ModifyIndex
         """
+        # NOTE: Non-atomic read-modify-write. See docstring for concurrency notes.
         logger.debug(
             "Updating topic index for node %s",
             node_id,
@@ -367,7 +377,12 @@ class MixinConsulTopicIndex:
 
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
+
+        Note:
+            Non-atomic read-modify-write. See _update_topic_index docstring for
+            concurrency notes. Accepted MVP limitation.
         """
+        # NOTE: Non-atomic read-modify-write. See _update_topic_index for details.
         key = f"onex/topics/{topic}/subscribers"
         existing = await self._kv_get_raw(key, correlation_id)
         subscribers = set(json.loads(existing) if existing else [])
@@ -403,7 +418,12 @@ class MixinConsulTopicIndex:
 
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
+
+        Note:
+            Non-atomic read-modify-write. See _update_topic_index docstring for
+            concurrency notes. Accepted MVP limitation.
         """
+        # NOTE: Non-atomic read-modify-write. See _update_topic_index for details.
         key = f"onex/topics/{topic}/subscribers"
         existing = await self._kv_get_raw(key, correlation_id)
         if existing:
