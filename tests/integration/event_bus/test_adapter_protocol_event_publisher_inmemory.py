@@ -33,6 +33,7 @@ from omnibase_infra.event_bus.testing import (
     AdapterProtocolEventPublisherInmemory,
     decode_inmemory_event,
 )
+from omnibase_spi.protocols.event_bus import ProtocolEventPublisher
 
 # =============================================================================
 # Fixtures
@@ -975,3 +976,13 @@ class TestProtocolCompliance:
         ]
         for key in required_keys:
             assert key in metrics, f"get_metrics missing required key: {key}"
+
+    def test_adapter_assignable_to_protocol(
+        self,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify adapter is assignable to ProtocolEventPublisher (static type check)."""
+        # This assignment validates protocol compatibility at type-check time.
+        # If the adapter's method signatures drift from the protocol,
+        # mypy/pyright will report an error on this line.
+        _publisher: ProtocolEventPublisher = adapter
