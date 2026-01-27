@@ -1046,6 +1046,15 @@ class MixinNodeIntrospection:
             # Strip whitespace from suffix to handle YAML formatting artifacts
             suffix = suffix.strip()
 
+            # Fail-fast: check for unresolved placeholders BEFORE format validation
+            # This provides more helpful error messages when placeholders aren't resolved
+            if "{" in suffix or "}" in suffix:
+                raise ValueError(
+                    f"Unresolved placeholder in topic: '{suffix}'. "
+                    "Ensure all placeholders like {env} or {namespace} are resolved "
+                    "before topic validation."
+                )
+
             # Validate suffix format (alphanumeric, dots, hyphens, underscores)
             import re
 
@@ -1063,20 +1072,6 @@ class MixinNodeIntrospection:
                 )
 
             full_topic = f"{env_prefix}.{suffix}"
-
-            # Fail-fast: check for unresolved placeholders
-            if "{" in full_topic or "}" in full_topic:
-                context = ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.RUNTIME,
-                    operation="_extract_event_bus_config",
-                    target_name=full_topic,
-                )
-                raise ProtocolConfigurationError(
-                    f"Unresolved placeholder in topic: '{full_topic}'. "
-                    "Ensure all placeholders like {{env}} or {{namespace}} are resolved.",
-                    context=context,
-                    parameter="topic",
-                )
 
             return full_topic
 
@@ -1472,12 +1467,25 @@ class MixinNodeIntrospection:
 
         # Extract event_bus config from contract (OMN-1613)
         # Resolves topic suffixes to full environment-qualified topics
-        # Note: _extract_event_bus_config raises ProtocolConfigurationError directly
-        # for misconfigured topics (unresolved placeholders, invalid format).
-        # We let this propagate as fail-fast behavior is intentional.
+        # ValueError from _extract_event_bus_config (unresolved placeholders) is
+        # wrapped in ProtocolConfigurationError for consistent error handling.
+        # ProtocolConfigurationError (invalid format) propagates directly.
         event_bus_config: ModelNodeEventBusConfig | None = None
         env_prefix = os.getenv("ONEX_ENV", "dev")
-        event_bus_config = self._extract_event_bus_config(env_prefix)
+        try:
+            event_bus_config = self._extract_event_bus_config(env_prefix)
+        except ValueError as e:
+            # Wrap ValueError in ProtocolConfigurationError for fail-fast behavior
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="get_introspection_data",
+                target_name="event_bus",
+            )
+            raise ProtocolConfigurationError(
+                f"Event bus extraction failed: {e}",
+                context=context,
+                parameter="event_bus",
+            ) from e
 
         # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
