@@ -35,10 +35,10 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.9.6: Version bump
-omnibase-core = "^0.9.6"
-# omnibase-spi v0.6.1: Version bump (pending publication)
-omnibase-spi = "^0.6.1"
+# omnibase-core v0.9.7: Version bump
+omnibase-core = "^0.9.7"
+# omnibase-spi v0.6.2: Version bump
+omnibase-spi = "^0.6.2"
 
 # ============================================================================
 # External Dependency Security Guidance
