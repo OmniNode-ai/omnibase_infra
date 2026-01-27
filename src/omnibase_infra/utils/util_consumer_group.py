@@ -86,13 +86,8 @@ def normalize_kafka_identifier(value: str) -> str:
     # Step 2: Replace invalid characters with underscore
     result = _INVALID_CHAR_PATTERN.sub("_", result)
 
-    # Step 3: Collapse consecutive separators into single separator
-    # Preserve the first separator type in each sequence
-    def collapse_separators(match: re.Match[str]) -> str:
-        """Return first character of separator sequence."""
-        return match.group(0)[0]
-
-    result = _CONSECUTIVE_SEPARATOR_PATTERN.sub(collapse_separators, result)
+    # Step 3: Collapse consecutive separators, preserving the first separator type
+    result = _CONSECUTIVE_SEPARATOR_PATTERN.sub(lambda m: m.group(0)[0], result)
 
     # Step 4: Strip leading and trailing separators
     result = _EDGE_SEPARATOR_PATTERN.sub("", result)

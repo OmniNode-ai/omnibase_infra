@@ -23,8 +23,21 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
+from omnibase_infra.models import ModelNodeIdentity
+
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+
+
+def _test_identity(suffix: str = "") -> ModelNodeIdentity:
+    """Create a test node identity for subscribe() calls."""
+    return ModelNodeIdentity(
+        env="test",
+        service="integration-tests",
+        node_name=f"schema-validation{'-' + suffix if suffix else ''}",
+        version="v1",
+    )
+
 
 # =============================================================================
 # Fixtures
@@ -554,7 +567,10 @@ class TestHeaderCompleteness:
 
         # Use group_id_override for test isolation (OMN-1602)
         await started_event_bus.subscribe(
-            "test.completeness", group_id_override="test-group", on_message=handler
+            "test.completeness",
+            _test_identity("completeness"),
+            handler,
+            group_id_override="test-group",
         )
         await started_event_bus.publish("test.completeness", None, b"test-value")
 
@@ -588,7 +604,10 @@ class TestHeaderCompleteness:
 
         # Use group_id_override for test isolation (OMN-1602)
         await started_event_bus.subscribe(
-            "test.custom", group_id_override="test-group", on_message=handler
+            "test.custom",
+            _test_identity("custom"),
+            handler,
+            group_id_override="test-group",
         )
 
         custom_headers = ModelEventHeaders(
@@ -636,7 +655,10 @@ class TestHeaderCompleteness:
 
         # Use group_id_override for test isolation (OMN-1602)
         await started_event_bus.subscribe(
-            "test.metadata", group_id_override="test-group", on_message=handler
+            "test.metadata",
+            _test_identity("metadata"),
+            handler,
+            group_id_override="test-group",
         )
         await started_event_bus.publish("test.metadata", b"msg-key", b"msg-value")
 
@@ -667,7 +689,10 @@ class TestHeaderCompleteness:
 
         # Use group_id_override for test isolation (OMN-1602)
         await started_event_bus.subscribe(
-            "test.unique", group_id_override="test-group", on_message=handler
+            "test.unique",
+            _test_identity("unique"),
+            handler,
+            group_id_override="test-group",
         )
 
         # Publish multiple messages
