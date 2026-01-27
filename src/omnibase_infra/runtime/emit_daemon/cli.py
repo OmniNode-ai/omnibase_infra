@@ -45,6 +45,7 @@ import os
 import signal
 import socket
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -331,6 +332,11 @@ def cmd_start(args: argparse.Namespace) -> None:
         _daemonize()
         # NOTE: After daemonize, stdio is redirected to /dev/null.
         # Startup errors will appear in the log file above.
+        # Clear any existing handlers to ensure reconfiguration works
+        # (logging.basicConfig() is a no-op if handlers already exist)
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
         # Set up file-based logging instead
         logging.basicConfig(
             level=logging.INFO,
@@ -410,8 +416,6 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
     # Wait for graceful shutdown
     wait_time = DEFAULT_SHUTDOWN_WAIT
-    import time
-
     for _ in range(int(wait_time * 10)):  # Check every 0.1s
         if not _is_process_running(pid):
             print("Daemon stopped successfully")

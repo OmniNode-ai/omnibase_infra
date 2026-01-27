@@ -98,12 +98,6 @@ class EmitDaemon:
         ```
     """
 
-    # Maximum retry attempts before dropping an event
-    MAX_RETRY_ATTEMPTS: int = 3
-
-    # Base backoff delay in seconds for exponential backoff
-    BACKOFF_BASE_SECONDS: float = 1.0
-
     def __init__(
         self,
         config: ModelEmitDaemonConfig,
@@ -572,7 +566,7 @@ class EmitDaemon:
         Runs continuously until stopped. On publish failure:
         - Increment retry_count
         - Re-queue with exponential backoff
-        - After MAX_RETRY_ATTEMPTS, log error and drop event
+        - After max_retry_attempts (from config), log error and drop event
         """
         logger.info("Publisher loop started")
 
@@ -593,7 +587,7 @@ class EmitDaemon:
                     # Increment retry count
                     event.retry_count += 1
 
-                    if event.retry_count >= self.MAX_RETRY_ATTEMPTS:
+                    if event.retry_count >= self._config.max_retry_attempts:
                         # Max retries exceeded - drop event
                         logger.error(
                             f"Dropping event {event.event_id} after {event.retry_count} retries",
@@ -604,11 +598,11 @@ class EmitDaemon:
                         )
                     else:
                         # Re-queue with backoff
-                        backoff = self.BACKOFF_BASE_SECONDS * (
+                        backoff = self._config.backoff_base_seconds * (
                             2 ** (event.retry_count - 1)
                         )
                         logger.warning(
-                            f"Publish failed for {event.event_id}, retry {event.retry_count}/{self.MAX_RETRY_ATTEMPTS} in {backoff}s",
+                            f"Publish failed for {event.event_id}, retry {event.retry_count}/{self._config.max_retry_attempts} in {backoff}s",
                             extra={
                                 "event_type": event.event_type,
                                 "topic": event.topic,

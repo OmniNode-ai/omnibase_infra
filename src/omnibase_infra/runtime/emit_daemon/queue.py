@@ -415,36 +415,102 @@ class BoundedEventQueue:
             return None
 
     def memory_size(self) -> int:
-        """Number of events in memory queue.
+        """Number of events in memory queue (approximate).
 
         Returns:
             Count of events currently in the in-memory queue.
 
+        Warning:
+            This method does NOT acquire the lock. The returned value may be
+            inconsistent during concurrent enqueue/dequeue operations. Use
+            :meth:`memory_size_locked` when an accurate count is required.
+
         Note:
-            This is not protected by the lock, so the value may be
-            slightly stale in concurrent scenarios.
+            Suitable for monitoring, logging, and approximate status reporting
+            where eventual consistency is acceptable.
         """
         return len(self._memory_queue)
 
+    async def memory_size_locked(self) -> int:
+        """Number of events in memory queue (thread-safe).
+
+        Acquires the queue lock before reading the size, ensuring a consistent
+        value even during concurrent operations.
+
+        Returns:
+            Accurate count of events currently in the in-memory queue.
+
+        Note:
+            Use this method when an accurate count is required (e.g., for
+            capacity decisions or precise status reporting). For approximate
+            monitoring where lock contention is undesirable, use :meth:`memory_size`.
+        """
+        async with self._lock:
+            return len(self._memory_queue)
+
     def spool_size(self) -> int:
-        """Number of events in disk spool.
+        """Number of events in disk spool (approximate).
 
         Returns:
             Count of events currently in the disk spool.
 
+        Warning:
+            This method does NOT acquire the lock. The returned value may be
+            inconsistent during concurrent enqueue/dequeue operations. Use
+            :meth:`spool_size_locked` when an accurate count is required.
+
         Note:
-            This is not protected by the lock, so the value may be
-            slightly stale in concurrent scenarios.
+            Suitable for monitoring, logging, and approximate status reporting
+            where eventual consistency is acceptable.
         """
         return len(self._spool_files)
 
+    async def spool_size_locked(self) -> int:
+        """Number of events in disk spool (thread-safe).
+
+        Acquires the queue lock before reading the size, ensuring a consistent
+        value even during concurrent operations.
+
+        Returns:
+            Accurate count of events currently in the disk spool.
+
+        Note:
+            Use this method when an accurate count is required (e.g., for
+            capacity decisions or precise status reporting). For approximate
+            monitoring where lock contention is undesirable, use :meth:`spool_size`.
+        """
+        async with self._lock:
+            return len(self._spool_files)
+
     def total_size(self) -> int:
-        """Total events (memory + spool).
+        """Total events in memory and spool (approximate).
 
         Returns:
             Total count of events across memory and disk spool.
+
+        Warning:
+            This method does NOT acquire the lock. The returned value may be
+            inconsistent during concurrent operations since it reads memory
+            and spool sizes separately. Use :meth:`total_size_locked` when
+            an accurate count is required.
         """
         return self.memory_size() + self.spool_size()
+
+    async def total_size_locked(self) -> int:
+        """Total events in memory and spool (thread-safe).
+
+        Acquires the queue lock before reading sizes, ensuring a consistent
+        total even during concurrent operations.
+
+        Returns:
+            Accurate total count of events across memory and disk spool.
+
+        Note:
+            Use this method when an accurate count is required. For approximate
+            monitoring where lock contention is undesirable, use :meth:`total_size`.
+        """
+        async with self._lock:
+            return len(self._memory_queue) + len(self._spool_files)
 
     async def drain_to_spool(self) -> int:
         """Move all memory events to spool for graceful shutdown.

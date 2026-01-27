@@ -20,6 +20,8 @@ Environment Variable Overrides:
     EMIT_DAEMON_KAFKA_BOOTSTRAP_SERVERS: Override kafka_bootstrap_servers
     EMIT_DAEMON_KAFKA_CLIENT_ID: Override kafka_client_id
     EMIT_DAEMON_ENVIRONMENT: Override environment
+    EMIT_DAEMON_MAX_RETRY_ATTEMPTS: Override max_retry_attempts
+    EMIT_DAEMON_BACKOFF_BASE_SECONDS: Override backoff_base_seconds
 """
 
 from __future__ import annotations
@@ -51,6 +53,8 @@ class ModelEmitDaemonConfig(BaseModel):
         socket_timeout_seconds: Timeout for socket read/write operations
         kafka_timeout_seconds: Timeout for Kafka produce operations
         shutdown_drain_seconds: Time to drain queues during graceful shutdown
+        max_retry_attempts: Maximum retry attempts before dropping an event
+        backoff_base_seconds: Base backoff delay in seconds for exponential backoff
 
     Example:
         >>> config = ModelEmitDaemonConfig(
@@ -152,6 +156,20 @@ class ModelEmitDaemonConfig(BaseModel):
         ge=0.0,
         le=300.0,
         description="Time to drain queues during graceful shutdown in seconds",
+    )
+
+    # Retry configurations
+    max_retry_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum retry attempts before dropping an event",
+    )
+    backoff_base_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=30.0,
+        description="Base backoff delay in seconds for exponential backoff",
     )
 
     @field_validator("socket_path", "pid_path", mode="after")
@@ -315,6 +333,8 @@ class ModelEmitDaemonConfig(BaseModel):
             EMIT_DAEMON_SOCKET_TIMEOUT_SECONDS -> socket_timeout_seconds
             EMIT_DAEMON_KAFKA_TIMEOUT_SECONDS -> kafka_timeout_seconds
             EMIT_DAEMON_SHUTDOWN_DRAIN_SECONDS -> shutdown_drain_seconds
+            EMIT_DAEMON_MAX_RETRY_ATTEMPTS -> max_retry_attempts
+            EMIT_DAEMON_BACKOFF_BASE_SECONDS -> backoff_base_seconds
 
         Args:
             **kwargs: Base configuration values to use if env vars not set
@@ -345,6 +365,8 @@ class ModelEmitDaemonConfig(BaseModel):
             "EMIT_DAEMON_SOCKET_TIMEOUT_SECONDS": ("socket_timeout_seconds", float),
             "EMIT_DAEMON_KAFKA_TIMEOUT_SECONDS": ("kafka_timeout_seconds", float),
             "EMIT_DAEMON_SHUTDOWN_DRAIN_SECONDS": ("shutdown_drain_seconds", float),
+            "EMIT_DAEMON_MAX_RETRY_ATTEMPTS": ("max_retry_attempts", int),
+            "EMIT_DAEMON_BACKOFF_BASE_SECONDS": ("backoff_base_seconds", float),
         }
 
         # Build final configuration dict with proper types

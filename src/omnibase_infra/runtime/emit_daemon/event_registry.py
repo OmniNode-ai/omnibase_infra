@@ -363,7 +363,7 @@ class EventRegistry:
 
         Injected fields:
         - correlation_id: Trace ID for the event chain (auto-generated if None)
-        - causation_id: ID of the event that caused this event (None if not provided)
+        - causation_id: ID of the event that caused this event (None if root event)
         - emitted_at: ISO-8601 timestamp of when the event was emitted
         - schema_version: Version of the event schema from registration
 
@@ -372,7 +372,21 @@ class EventRegistry:
             payload: Event payload dictionary to enrich.
             correlation_id: Optional correlation ID for tracing. If None,
                 a new UUID will be generated.
-            causation_id: Optional causation ID linking to the causing event.
+            causation_id: Optional ID of the event that directly caused this event.
+                This parameter enables event chain tracing by linking derived events
+                back to their source. It should be populated when:
+
+                - An event handler processes event A and emits event B as a result
+                - A saga/workflow step emits a follow-up event
+                - Any event is produced as a direct consequence of another event
+
+                When None (the default), indicates this is a root event with no
+                direct cause in the event stream (e.g., user-initiated actions,
+                scheduled jobs, external triggers).
+
+                Note: This is an extension point for future event chain tracing
+                functionality. Current EmitDaemon usage passes None for all events
+                since hook events are root events initiated by user actions.
 
         Returns:
             New dictionary with original payload plus injected metadata.
@@ -382,19 +396,27 @@ class EventRegistry:
 
         Example:
             >>> registry = EventRegistry()
-            >>> enriched = registry.inject_metadata(
+            >>> # Root event (no causation_id)
+            >>> root_event = registry.inject_metadata(
             ...     "prompt.submitted",
             ...     {"prompt": "Hello"},
             ...     correlation_id="corr-123",
-            ...     causation_id="cause-456",
             ... )
-            >>> enriched["correlation_id"]
-            'corr-123'
-            >>> enriched["causation_id"]
-            'cause-456'
-            >>> "emitted_at" in enriched
+            >>> root_event["causation_id"] is None
             True
-            >>> enriched["schema_version"]
+            >>>
+            >>> # Derived event (with causation_id linking to root)
+            >>> derived_event = registry.inject_metadata(
+            ...     "tool.executed",
+            ...     {"tool_name": "search"},
+            ...     correlation_id="corr-123",  # Same correlation for chain
+            ...     causation_id=root_event["correlation_id"],  # Links to cause
+            ... )
+            >>> derived_event["causation_id"]
+            'corr-123'
+            >>> "emitted_at" in derived_event
+            True
+            >>> derived_event["schema_version"]
             '1.0.0'
         """
         registration = self._registrations.get(event_type)
