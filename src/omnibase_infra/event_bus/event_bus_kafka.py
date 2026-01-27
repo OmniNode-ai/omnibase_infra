@@ -310,9 +310,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         # Apply config values
         self._bootstrap_servers = config.bootstrap_servers
         self._environment = config.environment
-        # Consumer group is now derived via compute_consumer_group_id() in subscribe()
-        # This fallback is only used when group_id is empty (legacy compatibility)
-        self._group = "default"
         self._timeout_seconds = config.timeout_seconds
         self._max_retry_attempts = config.max_retry_attempts
         self._retry_backoff_base = config.retry_backoff_base
@@ -466,15 +463,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         """
         return self._environment
 
-    @property
-    def group(self) -> str:
-        """Get the consumer group identifier.
-
-        Returns:
-            Consumer group string
-        """
-        return self._group
-
     async def start(self) -> None:
         """Start the event bus and connect to Kafka.
 
@@ -527,7 +515,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                     "EventBusKafka started",
                     extra={
                         "environment": self._environment,
-                        "group": self._group,
                         "bootstrap_servers": self._sanitize_bootstrap_servers(
                             self._bootstrap_servers
                         ),
@@ -628,7 +615,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         Args:
             config: Configuration dictionary with optional keys:
                 - environment: Override environment setting
-                - group: Override group setting
                 - bootstrap_servers: Override bootstrap servers
                 - timeout_seconds: Override timeout setting
         """
@@ -636,8 +622,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         async with self._lock:
             if "environment" in config:
                 self._environment = str(config["environment"])
-            if "group" in config:
-                self._group = str(config["group"])
             if "bootstrap_servers" in config:
                 self._bootstrap_servers = str(config["bootstrap_servers"])
             if "timeout_seconds" in config:
@@ -712,7 +696,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
 
         logger.info(
             "EventBusKafka closed",
-            extra={"environment": self._environment, "group": self._group},
+            extra={"environment": self._environment},
         )
 
     async def publish(
@@ -755,7 +739,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         # Create headers if not provided
         if headers is None:
             headers = ModelEventHeaders(
-                source=f"{self._environment}.{self._group}",
+                source=self._environment,
                 event_type=topic,
                 timestamp=datetime.now(UTC),
             )
@@ -1072,6 +1056,8 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 The ID is used directly without any prefix modification.
 
         Raises:
+            ProtocolConfigurationError: If group_id is empty (must be derived from
+                compute_consumer_group_id or provided as explicit override)
             InfraTimeoutError: If consumer startup times out after timeout_seconds
             InfraConnectionError: If consumer fails to connect to Kafka brokers
         """
@@ -1082,8 +1068,22 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
         # Use group_id directly - it's already fully qualified from compute_consumer_group_id()
-        # or an explicit override. Fall back to default group only if empty.
-        effective_group_id = group_id.strip() if group_id else self._group
+        # or an explicit override. Empty group_id indicates a bug in the caller.
+        effective_group_id = group_id.strip()
+        if not effective_group_id:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="start_consumer",
+                target_name=f"kafka.{topic}",
+                correlation_id=correlation_id,
+            )
+            raise ProtocolConfigurationError(
+                f"Consumer group ID is required for topic '{topic}'. "
+                "Use compute_consumer_group_id() to derive from ModelNodeIdentity.",
+                context=context,
+                parameter="group_id",
+                value=group_id,
+            )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
@@ -1403,7 +1403,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 - healthy: Whether the bus is operational
                 - started: Whether start() has been called
                 - environment: Current environment
-                - group: Current consumer group
                 - bootstrap_servers: Kafka bootstrap servers
                 - circuit_state: Current circuit breaker state
                 - subscriber_count: Total number of active subscriptions
@@ -1434,7 +1433,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
             "healthy": started and producer_healthy,
             "started": started,
             "environment": self._environment,
-            "group": self._group,
             "bootstrap_servers": self._sanitize_bootstrap_servers(
                 self._bootstrap_servers
             ),

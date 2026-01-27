@@ -268,14 +268,12 @@ class TestMixinInitializationOrder:
 
         MixinKafkaBroadcast requires:
         - self._environment
-        - self._group
         - self.publish() method
         """
         bus = EventBusKafka()
 
         # Required attributes should exist
         assert hasattr(bus, "_environment")
-        assert hasattr(bus, "_group")
         assert hasattr(bus, "publish")
 
         # publish should be callable

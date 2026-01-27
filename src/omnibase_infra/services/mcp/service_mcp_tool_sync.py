@@ -184,8 +184,9 @@ class ServiceMCPToolSync:
 
         # Subscribe to registration events (OMN-1602: typed node identity)
         # Create identity for this service's consumer group
+        # Environment is derived from the event bus configuration (defaults to "local")
         sync_identity = ModelNodeIdentity(
-            env="default",  # Service-level consumer, not env-specific
+            env=self._bus.environment,
             service="mcp",
             node_name="tool_sync",
             version="v1",

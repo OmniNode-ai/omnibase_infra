@@ -32,7 +32,6 @@ Design Note:
     This mixin assumes the parent class has:
     - self._config: ModelKafkaEventBusConfig with dead_letter_topic
     - self._environment: str for environment context
-    - self._group: str for consumer group context
     - self._producer: AIOKafkaProducer | None
     - self._producer_lock: asyncio.Lock for producer access
     - self._timeout_seconds: int for publish timeout
@@ -75,7 +74,6 @@ class ProtocolKafkaDlqHost(Protocol):
     # Attributes from parent class (EventBusKafka)
     _config: ModelKafkaEventBusConfig
     _environment: str
-    _group: str
     _producer: AIOKafkaProducer | None
     _producer_lock: asyncio.Lock
     _timeout_seconds: int
@@ -298,7 +296,7 @@ class MixinKafkaDlq:
 
         # Create DLQ headers with failure metadata
         dlq_headers = ModelEventHeaders(
-            source=f"{self._environment}.{self._group}",
+            source=self._environment,
             event_type="dlq_message",
             content_type="application/json",
             correlation_id=correlation_id,
@@ -451,7 +449,7 @@ class MixinKafkaDlq:
             dlq_error_message=dlq_error_message,
             timestamp=end_time,
             environment=self._environment,
-            consumer_group=self._group,
+            consumer_group="unknown",  # Consumer group is now derived per-subscription
         )
 
         # Update DLQ metrics (copy-on-write pattern)
@@ -593,7 +591,7 @@ class MixinKafkaDlq:
 
         # Create DLQ headers
         dlq_headers = ModelEventHeaders(
-            source=f"{self._environment}.{self._group}",
+            source=self._environment,
             event_type="dlq_raw_message",
             content_type="application/json",
             correlation_id=correlation_id,
@@ -746,7 +744,7 @@ class MixinKafkaDlq:
             dlq_error_message=dlq_error_message,
             timestamp=end_time,
             environment=self._environment,
-            consumer_group=self._group,
+            consumer_group="unknown",  # Consumer group is now derived per-subscription
         )
 
         # Update DLQ metrics
