@@ -244,7 +244,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Module-level topic aliases (imported at top from canonical source)
+# DEPRECATED: Module-level topic aliases for backward compatibility.
+# New code should import directly from omnibase_infra.topics instead.
+# These aliases may be removed in a future version.
 HEARTBEAT_TOPIC = DEFAULT_HEARTBEAT_TOPIC
 INTROSPECTION_TOPIC = DEFAULT_INTROSPECTION_TOPIC
 REQUEST_INTROSPECTION_TOPIC = DEFAULT_REQUEST_INTROSPECTION_TOPIC

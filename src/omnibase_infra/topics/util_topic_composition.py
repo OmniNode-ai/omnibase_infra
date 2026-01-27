@@ -17,7 +17,7 @@ def build_full_topic(env: str, namespace: str, suffix: str) -> str:
 
     Args:
         env: Environment prefix (e.g., "dev", "staging", "prod", "test", "local")
-        namespace: Namespace/tenant identifier (e.g., "omnibase", "myapp")
+        namespace: Namespace/tenant identifier (e.g., "omnibase", "myapp", "tenant-123")
         suffix: Validated topic suffix (e.g., "onex.evt.platform.node-introspection.v1")
 
     Returns:
@@ -27,6 +27,12 @@ def build_full_topic(env: str, namespace: str, suffix: str) -> str:
         TopicCompositionError: If env is not a valid environment prefix
         TopicCompositionError: If namespace is empty or contains invalid characters
         TopicCompositionError: If suffix doesn't match ONEX topic format
+
+    Namespace Validation Rules:
+        - Must not be empty
+        - Allowed characters: alphanumeric (a-z, A-Z, 0-9), hyphens (-), underscores (_)
+        - Numeric-only namespaces ARE valid (e.g., "12345") to support numeric tenant IDs
+        - Invalid: spaces, dots, special characters
 
     Example:
         >>> build_full_topic("dev", "omnibase", "onex.evt.platform.node-introspection.v1")
@@ -43,6 +49,10 @@ def build_full_topic(env: str, namespace: str, suffix: str) -> str:
         )
 
     # Validate namespace
+    # Allowed characters: alphanumeric (a-z, A-Z, 0-9), hyphens, underscores
+    # Note: Numeric-only namespaces (e.g., "12345") ARE valid because isalnum()
+    # returns True for digit-only strings. This is intentional to support
+    # numeric tenant/organization IDs as namespaces.
     if not namespace:
         raise TopicCompositionError("Namespace cannot be empty")
     if not namespace.replace("-", "").replace("_", "").isalnum():
