@@ -6,7 +6,7 @@ be defined in domain contracts.
 
 Exports:
     Platform topic suffix constants (e.g., SUFFIX_NODE_REGISTRATION)
-    ALL_PLATFORM_SUFFIXES: Complete list of all platform-reserved suffixes
+    ALL_PLATFORM_SUFFIXES: Complete tuple of all platform-reserved suffixes
     build_full_topic: Compose full topic from env, namespace, and suffix
     TopicCompositionError: Error raised when topic composition fails
 """
@@ -35,7 +35,7 @@ __all__: list[str] = [
     "SUFFIX_FSM_STATE_TRANSITIONS",
     "SUFFIX_RUNTIME_TICK",
     "SUFFIX_REGISTRATION_SNAPSHOTS",
-    # Aggregate list
+    # Aggregate tuple
     "ALL_PLATFORM_SUFFIXES",
     # Topic composition utilities
     "build_full_topic",

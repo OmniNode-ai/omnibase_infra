@@ -100,9 +100,9 @@ class TestPlatformTopicSuffixes:
             == "onex.snapshot.platform.registration-snapshots.v1"
         )
 
-    def test_all_platform_suffixes_is_list(self) -> None:
-        """ALL_PLATFORM_SUFFIXES should be a list."""
-        assert isinstance(ALL_PLATFORM_SUFFIXES, list)
+    def test_all_platform_suffixes_is_tuple(self) -> None:
+        """ALL_PLATFORM_SUFFIXES should be an immutable tuple."""
+        assert isinstance(ALL_PLATFORM_SUFFIXES, tuple)
 
     def test_no_duplicate_suffixes(self) -> None:
         """ALL_PLATFORM_SUFFIXES should not contain duplicates."""

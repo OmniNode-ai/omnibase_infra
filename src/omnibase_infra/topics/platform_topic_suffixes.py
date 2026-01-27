@@ -97,10 +97,10 @@ dashboard displays and monitoring systems.
 """
 
 # =============================================================================
-# AGGREGATE LIST
+# AGGREGATE TUPLE
 # =============================================================================
 
-ALL_PLATFORM_SUFFIXES: list[str] = [
+ALL_PLATFORM_SUFFIXES: tuple[str, ...] = (
     SUFFIX_NODE_REGISTRATION,
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_NODE_HEARTBEAT,
@@ -108,10 +108,10 @@ ALL_PLATFORM_SUFFIXES: list[str] = [
     SUFFIX_FSM_STATE_TRANSITIONS,
     SUFFIX_RUNTIME_TICK,
     SUFFIX_REGISTRATION_SNAPSHOTS,
-]
-"""Complete list of all platform-reserved topic suffixes.
+)
+"""Complete tuple of all platform-reserved topic suffixes.
 
-Use this list for:
+Use this tuple for:
     - Validating that domain topics don't conflict with platform topics
     - Iterating over all platform topics for subscription setup
     - Documentation and discovery

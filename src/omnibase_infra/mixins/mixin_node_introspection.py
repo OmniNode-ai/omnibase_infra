@@ -217,6 +217,13 @@ from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
     ModelIntrospectionTaskConfig,
 )
+
+# Event topic constants - imported from canonical source
+from omnibase_infra.models.discovery.model_introspection_config import (
+    DEFAULT_HEARTBEAT_TOPIC,
+    DEFAULT_INTROSPECTION_TOPIC,
+    DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+)
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
     ModelIntrospectionPerformanceMetrics,
 )
@@ -237,16 +244,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Event topic constants - imported from canonical source
-from omnibase_infra.models.discovery.model_introspection_config import (
-    DEFAULT_HEARTBEAT_TOPIC as HEARTBEAT_TOPIC,
-)
-from omnibase_infra.models.discovery.model_introspection_config import (
-    DEFAULT_INTROSPECTION_TOPIC as INTROSPECTION_TOPIC,
-)
-from omnibase_infra.models.discovery.model_introspection_config import (
-    DEFAULT_REQUEST_INTROSPECTION_TOPIC as REQUEST_INTROSPECTION_TOPIC,
-)
+# Module-level topic aliases (imported at top from canonical source)
+HEARTBEAT_TOPIC = DEFAULT_HEARTBEAT_TOPIC
+INTROSPECTION_TOPIC = DEFAULT_INTROSPECTION_TOPIC
+REQUEST_INTROSPECTION_TOPIC = DEFAULT_REQUEST_INTROSPECTION_TOPIC
 
 # Performance threshold constants (in milliseconds)
 PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0

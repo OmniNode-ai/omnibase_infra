@@ -59,6 +59,30 @@ class TestBuildFullTopic:
         with pytest.raises(TopicCompositionError):
             build_full_topic("dev", "my app", SUFFIX_NODE_INTROSPECTION)
 
+    def test_namespace_starting_with_number(self) -> None:
+        """Namespace starting with number is valid.
+
+        Documents current behavior: namespaces like "123app" are accepted
+        because isalnum() returns True for strings containing only letters
+        and digits, regardless of position.
+
+        Note: If this behavior should change (e.g., to require namespaces
+        start with a letter like Python identifiers), update the validation
+        in build_full_topic() and change this test to expect
+        TopicCompositionError.
+        """
+        topic = build_full_topic("dev", "123app", SUFFIX_NODE_INTROSPECTION)
+        assert topic == f"dev.123app.{SUFFIX_NODE_INTROSPECTION}"
+
+    def test_namespace_all_numbers(self) -> None:
+        """Namespace with only numbers is valid.
+
+        Documents current behavior: pure numeric namespaces like "12345"
+        are accepted because isalnum() returns True for digit-only strings.
+        """
+        topic = build_full_topic("dev", "12345", SUFFIX_NODE_INTROSPECTION)
+        assert topic == f"dev.12345.{SUFFIX_NODE_INTROSPECTION}"
+
     def test_build_full_topic_with_different_suffixes(self) -> None:
         """Should work with different valid suffixes."""
         topic1 = build_full_topic("prod", "omnibase", SUFFIX_NODE_INTROSPECTION)
