@@ -37,6 +37,7 @@ import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
+from tests.conftest import make_test_node_identity
 from tests.performance.event_bus.conftest import generate_unique_topic
 
 # -----------------------------------------------------------------------------
@@ -140,7 +141,7 @@ class TestSustainedLoad:
             async with lock:
                 received_count += 1
 
-        await bus.subscribe(topic, "sustained-group", handler)
+        await bus.subscribe(topic, make_test_node_identity("sustained-group"), handler)
 
         # Run for 3 seconds
         duration = 3.0
@@ -241,7 +242,9 @@ class TestMemoryStability:
                 async def handler(msg: ModelEventMessage) -> None:
                     pass
 
-                unsub = await bus.subscribe(topic, f"group-{iteration}-{i}", handler)
+                unsub = await bus.subscribe(
+                    topic, make_test_node_identity(f"group-{iteration}-{i}"), handler
+                )
                 unsubscribes.append(unsub)
 
             # Unsubscribe all
@@ -353,7 +356,7 @@ class TestMultipleSubscriberLoad:
                 return handler
 
             h = make_handler(idx)
-            await bus.subscribe(topic, f"fanout-{idx}", h)
+            await bus.subscribe(topic, make_test_node_identity(f"fanout-{idx}"), h)
 
         # Publish messages
         num_messages = 100
@@ -423,7 +426,7 @@ class TestMultipleSubscriberLoad:
                     return handler
 
                 h = make_handler(topic)
-                await bus.subscribe(topic, f"sub-{i}", h)
+                await bus.subscribe(topic, make_test_node_identity(f"sub-{i}"), h)
 
         # Publish to all topics
         start = time.perf_counter()
@@ -495,8 +498,8 @@ class TestRecoveryResilience:
                 error_count += 1
             raise ValueError("Intentional error")
 
-        await bus.subscribe(topic, "good", good_handler)
-        await bus.subscribe(topic, "bad", bad_handler)
+        await bus.subscribe(topic, make_test_node_identity("good"), good_handler)
+        await bus.subscribe(topic, make_test_node_identity("bad"), bad_handler)
 
         # Publish messages
         num_messages = 100
@@ -544,7 +547,7 @@ class TestRecoveryResilience:
             fail_count += 1
             raise RuntimeError("Always fails")
 
-        await bus.subscribe(topic, "failing", failing_handler)
+        await bus.subscribe(topic, make_test_node_identity("failing"), failing_handler)
 
         # Publish enough to trip circuit breaker
         for i in range(threshold + 10):

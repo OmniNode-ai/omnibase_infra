@@ -69,7 +69,7 @@ from omnibase_infra.nodes.architecture_validator import (
 
 # Import RuntimeHostProcess (should always be available)
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from tests.conftest import seed_mock_handlers
+from tests.conftest import make_runtime_config, seed_mock_handlers
 
 # =============================================================================
 # Quick Reference: Handler Semantics (see module docstring for full details)
@@ -149,7 +149,7 @@ class TestNoRulesConfigured:
     @pytest.mark.asyncio
     async def test_validation_skipped_when_no_rules(self) -> None:
         """Validation is skipped when no rules are configured."""
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Mock the rest of start() to prevent actual startup
         with (
@@ -172,7 +172,9 @@ class TestNoRulesConfigured:
     @pytest.mark.asyncio
     async def test_validation_skipped_with_empty_rules_tuple(self) -> None:
         """Validation is skipped when empty rules tuple is provided."""
-        process = RuntimeHostProcess(architecture_rules=())
+        process = RuntimeHostProcess(
+            architecture_rules=(), config=make_runtime_config()
+        )
 
         with (
             patch.object(process._event_bus, "start", new_callable=AsyncMock),
@@ -228,6 +230,7 @@ class TestErrorSeverityBlocksStartup:
         process = RuntimeHostProcess(
             container=mock_container,
             architecture_rules=(failing_rule,),
+            config=make_runtime_config(),
         )
 
         # Mock the handler registry to return NO handler classes for validation.
@@ -282,6 +285,7 @@ class TestErrorSeverityBlocksStartup:
         process = RuntimeHostProcess(
             container=mock_container,
             architecture_rules=(rule1, rule2),
+            config=make_runtime_config(),
         )
 
         # Mock handler registry to return one handler class
@@ -316,6 +320,7 @@ class TestErrorSeverityBlocksStartup:
 
         process = RuntimeHostProcess(
             architecture_rules=(failing_rule,),
+            config=make_runtime_config(),
         )
 
         event_bus_start = AsyncMock()
@@ -359,6 +364,7 @@ class TestWarningSeverityDoesntBlock:
         process = RuntimeHostProcess(
             container=mock_container,
             architecture_rules=(warning_rule,),
+            config=make_runtime_config(),
         )
 
         with (
@@ -404,6 +410,7 @@ class TestWarningSeverityDoesntBlock:
         process = RuntimeHostProcess(
             container=mock_container,
             architecture_rules=(warning_rule,),
+            config=make_runtime_config(),
         )
 
         with (
@@ -457,6 +464,7 @@ class TestValidationOrder:
 
         process = RuntimeHostProcess(
             architecture_rules=(failing_rule,),
+            config=make_runtime_config(),
         )
 
         # Track call order
@@ -521,6 +529,7 @@ class TestContainerHandling:
         process = RuntimeHostProcess(
             container=mock_container,
             architecture_rules=(passing_rule,),
+            config=make_runtime_config(),
         )
 
         with (
@@ -571,6 +580,7 @@ class TestContainerHandling:
         # No container provided
         process = RuntimeHostProcess(
             architecture_rules=(passing_rule,),
+            config=make_runtime_config(),
         )
 
         with (
@@ -636,6 +646,7 @@ class TestPassingValidation:
         process = RuntimeHostProcess(
             container=mock_container,
             architecture_rules=(passing_rule,),
+            config=make_runtime_config(),
         )
 
         with (
@@ -671,6 +682,7 @@ class TestPassingValidation:
         process = RuntimeHostProcess(
             container=mock_container,
             architecture_rules=(passing_rule,),
+            config=make_runtime_config(),
         )
 
         with (
