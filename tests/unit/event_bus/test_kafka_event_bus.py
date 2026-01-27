@@ -28,29 +28,11 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.models import ModelNodeIdentity
+from tests.conftest import make_test_node_identity
 
 # Test fixture constants - use these for assertions to avoid hardcoded values
 TEST_BOOTSTRAP_SERVERS: str = "localhost:9092"
 TEST_ENVIRONMENT: str = "test"
-
-
-def make_test_identity(suffix: str = "") -> ModelNodeIdentity:
-    """Create a test node identity for subscribe() calls.
-
-    Args:
-        suffix: Optional suffix to differentiate identities for tests
-               that need multiple distinct consumer groups.
-
-    Returns:
-        A ModelNodeIdentity configured for unit testing.
-    """
-    return ModelNodeIdentity(
-        env="test",
-        service="unit-tests",
-        node_name=f"kafka-test{'-' + suffix if suffix else ''}",
-        version="v1",
-    )
 
 
 class TestKafkaEventBusLifecycle:
@@ -409,7 +391,7 @@ class TestKafkaEventBusSubscribe:
                 pass
 
             unsubscribe = await kafka_event_bus.subscribe(
-                "test-topic", make_test_identity("1"), handler
+                "test-topic", make_test_node_identity("1"), handler
             )
 
             # Verify unsubscribe is a callable
@@ -425,7 +407,7 @@ class TestKafkaEventBusSubscribe:
             pass
 
         unsubscribe = await kafka_event_bus.subscribe(
-            "test-topic", make_test_identity("1"), handler
+            "test-topic", make_test_node_identity("1"), handler
         )
 
         # Verify subscription exists
@@ -448,8 +430,12 @@ class TestKafkaEventBusSubscribe:
         async def handler2(msg: ModelEventMessage) -> None:
             pass
 
-        await kafka_event_bus.subscribe("test-topic", make_test_identity("1"), handler1)
-        await kafka_event_bus.subscribe("test-topic", make_test_identity("2"), handler2)
+        await kafka_event_bus.subscribe(
+            "test-topic", make_test_node_identity("1"), handler1
+        )
+        await kafka_event_bus.subscribe(
+            "test-topic", make_test_node_identity("2"), handler2
+        )
 
         # Verify both subscriptions exist
         assert len(kafka_event_bus._subscribers["test-topic"]) == 2
@@ -464,7 +450,7 @@ class TestKafkaEventBusSubscribe:
             pass
 
         unsubscribe = await kafka_event_bus.subscribe(
-            "test-topic", make_test_identity("1"), handler
+            "test-topic", make_test_node_identity("1"), handler
         )
         await unsubscribe()
         await unsubscribe()  # Should not raise
@@ -1275,7 +1261,9 @@ class TestKafkaEventBusConsumerManagement:
             async def handler(msg: ModelEventMessage) -> None:
                 pass
 
-            await event_bus.subscribe("test-topic", make_test_identity("1"), handler)
+            await event_bus.subscribe(
+                "test-topic", make_test_node_identity("1"), handler
+            )
 
             # Consumer should be started for the topic
             mock_consumer.start.assert_called_once()
@@ -1304,7 +1292,9 @@ class TestKafkaEventBusConsumerManagement:
             async def handler(msg: ModelEventMessage) -> None:
                 pass
 
-            await event_bus.subscribe("test-topic", make_test_identity("1"), handler)
+            await event_bus.subscribe(
+                "test-topic", make_test_node_identity("1"), handler
+            )
             await event_bus.close()
 
             # Consumer should be stopped
@@ -1760,7 +1750,7 @@ class TestKafkaEventBusDLQRouting:
                 raise ValueError("Temporary failure")
 
             await event_bus.subscribe(
-                "test-topic", make_test_identity("1"), failing_handler
+                "test-topic", make_test_node_identity("1"), failing_handler
             )
 
             # Wait for handler to be called

@@ -182,9 +182,37 @@ class ServiceMCPToolSync:
             },
         )
 
-        # Subscribe to registration events (OMN-1602: typed node identity)
-        # Create identity for this service's consumer group
-        # Environment is derived from the event bus configuration (defaults to "local")
+        # OMN-1602: Create typed node identity for Kafka consumer group derivation.
+        #
+        # Identity Field Rationale:
+        # -------------------------
+        # env (dynamic):
+        #   Derived from self._bus.environment to follow the deployment context.
+        #   This ensures the consumer group is environment-specific (e.g., "local",
+        #   "dev", "prod"), preventing cross-environment message consumption.
+        #
+        # service="mcp" (hardcoded):
+        #   The MCP (Model Context Protocol) service is a singleton within each
+        #   deployment. There is exactly one MCP service instance per environment,
+        #   so this identifier is fixed by design.
+        #
+        # node_name="tool_sync" (hardcoded):
+        #   Identifies the specific function within the MCP service. The MCP service
+        #   has multiple components (discovery, registry, sync); "tool_sync" uniquely
+        #   identifies this Kafka consumer that handles tool hot-reload events.
+        #
+        # version="v1" (hardcoded):
+        #   This is the consumer group protocol version, NOT the application version.
+        #   It indicates the message processing contract this consumer implements.
+        #   Changing this would create a new consumer group, causing message replay.
+        #   Only increment when the message processing logic changes incompatibly.
+        #
+        # group_id_override (backward compatibility):
+        #   Uses the existing GROUP_ID constant ("mcp-tool-sync") to maintain
+        #   continuity with pre-OMN-1602 consumer groups. Without this override,
+        #   the derived ID would be "local-mcp-tool_sync-v1" (or similar), which
+        #   would orphan the existing consumer group and replay all messages.
+        #   This override can be removed once all environments have migrated.
         sync_identity = ModelNodeIdentity(
             env=self._bus.environment,
             service="mcp",
@@ -195,7 +223,7 @@ class ServiceMCPToolSync:
             topic=self.TOPIC,
             node_identity=sync_identity,
             on_message=self._on_message,
-            group_id_override=self.GROUP_ID,  # Use existing group ID for backward compat
+            group_id_override=self.GROUP_ID,  # Backward compat with existing group
         )
 
         self._started = True

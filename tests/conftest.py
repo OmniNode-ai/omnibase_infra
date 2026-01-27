@@ -81,10 +81,72 @@ if _env_file.exists():
     load_dotenv(_env_file)
     logging.getLogger(__name__).debug(f"Loaded environment from {_env_file}")
 
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.utils import sanitize_error_message
 
 # Module-level logger for test cleanup diagnostics
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Test Node Identity Helper
+# =============================================================================
+
+
+def make_test_node_identity(
+    suffix: str = "",
+    *,
+    env: str = "test",
+    service: str = "test-service",
+    node_name: str = "test-node",
+    version: str = "v1",
+) -> ModelNodeIdentity:
+    """Create a test node identity for subscribe() calls.
+
+    This is the consolidated helper for creating ModelNodeIdentity instances
+    in unit and integration tests. For E2E tests with specialized documentation,
+    use the helper in tests/integration/registration/e2e/conftest.py.
+
+    Args:
+        suffix: Optional suffix to differentiate identities for tests
+               that need multiple distinct consumer groups.
+        env: Environment name (default: "test").
+        service: Service name (default: "test-service").
+        node_name: Node name base (default: "test-node").
+        version: Version string (default: "v1").
+
+    Returns:
+        A ModelNodeIdentity configured for testing.
+
+    Example:
+        >>> identity = make_test_node_identity()
+        >>> identity.node_name
+        'test-node'
+
+        >>> identity = make_test_node_identity("subscriber-1")
+        >>> identity.node_name
+        'test-node-subscriber-1'
+
+        >>> identity = make_test_node_identity(service="kafka-tests")
+        >>> identity.service
+        'kafka-tests'
+
+    Note:
+        When group_id_override is used in subscribe(), the identity is not
+        used for consumer group derivation, but it's still required by the
+        subscribe() signature.
+
+    .. versionadded:: 0.2.7
+        Consolidated from duplicate helpers across test modules (OMN-1602).
+    """
+    actual_node_name = f"{node_name}-{suffix}" if suffix else node_name
+    return ModelNodeIdentity(
+        env=env,
+        service=service,
+        node_name=actual_node_name,
+        version=version,
+    )
+
 
 if TYPE_CHECKING:
     # TYPE_CHECKING imports: These imports are only used for type annotations.

@@ -1079,7 +1079,8 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
             )
             raise ProtocolConfigurationError(
                 f"Consumer group ID is required for topic '{topic}'. "
-                "Use compute_consumer_group_id() to derive from ModelNodeIdentity.",
+                "Use compute_consumer_group_id() to derive from ModelNodeIdentity, "
+                "or pass group_id_override for backwards compatibility or special cases.",
                 context=context,
                 parameter="group_id",
                 value=group_id,
@@ -1257,6 +1258,15 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                     )
                     break
 
+                # Get subscribers snapshot early - needed for consumer group in DLQ
+                async with self._lock:
+                    subscribers = list(self._subscribers.get(topic, []))
+
+                # Extract consumer group for DLQ traceability (all subscribers share the same consumer)
+                effective_consumer_group = (
+                    subscribers[0][0] if subscribers else "unknown"
+                )
+
                 # Convert Kafka message to ModelEventMessage - handle conversion errors
                 try:
                     event_message = self._kafka_msg_to_model(msg, topic)
@@ -1278,12 +1288,9 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                         error=e,
                         correlation_id=correlation_id,
                         failure_type="deserialization_error",
+                        consumer_group=effective_consumer_group,
                     )
                     continue  # Skip this message but continue consuming
-
-                # Get subscribers snapshot
-                async with self._lock:
-                    subscribers = list(self._subscribers.get(topic, []))
 
                 # Dispatch to all subscribers
                 for group_id, subscription_id, callback in subscribers:
@@ -1318,6 +1325,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                                 failed_message=event_message,
                                 error=e,
                                 correlation_id=correlation_id,
+                                consumer_group=group_id,
                             )
                         else:
                             # Message still has retries available - log for potential republish

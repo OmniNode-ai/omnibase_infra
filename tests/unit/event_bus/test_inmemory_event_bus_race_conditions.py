@@ -30,19 +30,7 @@ import pytest
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
-from omnibase_infra.models import ModelNodeIdentity
-
-
-# Test helper: Create a default node identity for tests
-def _test_identity(suffix: str = "") -> ModelNodeIdentity:
-    """Create a test node identity with optional suffix for uniqueness."""
-    return ModelNodeIdentity(
-        env="test",
-        service="test-service",
-        node_name=f"test-node{'-' + suffix if suffix else ''}",
-        version="v1",
-    )
-
+from tests.conftest import make_test_node_identity
 
 # =============================================================================
 # Test Fixtures
@@ -147,7 +135,10 @@ class TestConcurrentPublishOperations:
 
         # Set up subscriber
         await event_bus.subscribe(
-            "concurrent-topic", _test_identity(), handler, group_id_override="group1"
+            "concurrent-topic",
+            make_test_node_identity(),
+            handler,
+            group_id_override="group1",
         )
 
         num_publishers = 5
@@ -227,7 +218,7 @@ class TestConcurrentSubscribeUnsubscribe:
         async def subscribe_task(sub_id: int) -> None:
             unsub = await event_bus.subscribe(
                 topic="shared-topic",
-                node_identity=_test_identity(str(sub_id)),
+                node_identity=make_test_node_identity(str(sub_id)),
                 on_message=handler,
                 group_id_override=f"group-{sub_id}",
             )
@@ -258,7 +249,7 @@ class TestConcurrentSubscribeUnsubscribe:
         for i in range(num_subscribers):
             unsub = await event_bus.subscribe(
                 topic="shared-topic",
-                node_identity=_test_identity(str(i)),
+                node_identity=make_test_node_identity(str(i)),
                 on_message=handler,
                 group_id_override=f"group-{i}",
             )
@@ -293,7 +284,7 @@ class TestConcurrentSubscribeUnsubscribe:
             for _ in range(10):
                 unsub = await event_bus.subscribe(
                     topic="interleaved-topic",
-                    node_identity=_test_identity(str(sub_id)),
+                    node_identity=make_test_node_identity(str(sub_id)),
                     on_message=handler,
                     group_id_override=f"group-{sub_id}",
                 )
@@ -324,7 +315,7 @@ class TestConcurrentSubscribeUnsubscribe:
         test_group = f"double-unsub-group-{id(self)}"
         unsub = await event_bus.subscribe(
             topic=test_topic,
-            node_identity=_test_identity("double-unsub"),
+            node_identity=make_test_node_identity("double-unsub"),
             on_message=handler,
             group_id_override=test_group,
         )
@@ -368,7 +359,7 @@ class TestCircuitBreakerRaceConditions:
 
         await event_bus.subscribe(
             "circuit-topic",
-            _test_identity("fail"),
+            make_test_node_identity("fail"),
             failing_handler,
             group_id_override="fail-group",
         )
@@ -414,7 +405,7 @@ class TestCircuitBreakerRaceConditions:
 
         await event_bus.subscribe(
             "reset-topic",
-            _test_identity("flaky"),
+            make_test_node_identity("flaky"),
             flaky_handler,
             group_id_override="flaky-group",
         )
@@ -452,7 +443,7 @@ class TestCircuitBreakerRaceConditions:
 
         await event_bus.subscribe(
             "reset-test",
-            _test_identity("fail"),
+            make_test_node_identity("fail"),
             failing_handler,
             group_id_override="fail-group",
         )
@@ -664,7 +655,7 @@ class TestLifecycleRaceConditions:
                 try:
                     await event_bus.subscribe(
                         topic=f"topic-{i}",
-                        node_identity=_test_identity(str(i)),
+                        node_identity=make_test_node_identity(str(i)),
                         on_message=handler,
                         group_id_override=test_group,
                     )
@@ -737,7 +728,7 @@ class TestHealthCheckRaceConditions:
             for i in range(50):
                 unsub = await event_bus.subscribe(
                     f"topic-{i}",
-                    _test_identity(str(i)),
+                    make_test_node_identity(str(i)),
                     handler,
                     group_id_override=f"group-{i}",
                 )
@@ -827,7 +818,7 @@ class TestInMemoryEventBusStress:
             try:
                 unsub = await event_bus.subscribe(
                     topic="mixed-topic",
-                    node_identity=_test_identity(str(sub_id)),
+                    node_identity=make_test_node_identity(str(sub_id)),
                     on_message=handler,
                     group_id_override=f"group-{sub_id}",
                 )

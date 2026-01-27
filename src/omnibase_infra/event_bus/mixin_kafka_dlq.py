@@ -210,6 +210,8 @@ class MixinKafkaDlq:
         failed_message: ModelEventMessage,
         error: Exception,
         correlation_id: UUID,
+        *,
+        consumer_group: str = "unknown",
     ) -> None:
         """Publish failed message to dead letter queue with metrics and alerting.
 
@@ -230,6 +232,8 @@ class MixinKafkaDlq:
             failed_message: The message that failed processing
             error: The exception that caused the failure
             correlation_id: Correlation ID for tracking
+            consumer_group: Consumer group ID that processed the message.
+                Defaults to "unknown" for backwards compatibility.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
@@ -449,7 +453,7 @@ class MixinKafkaDlq:
             dlq_error_message=dlq_error_message,
             timestamp=end_time,
             environment=self._environment,
-            consumer_group="unknown",  # Consumer group is now derived per-subscription
+            consumer_group=consumer_group,
         )
 
         # Update DLQ metrics (copy-on-write pattern)
@@ -502,6 +506,8 @@ class MixinKafkaDlq:
         error: Exception,
         correlation_id: UUID,
         failure_type: str,
+        *,
+        consumer_group: str = "unknown",
     ) -> None:
         """Publish raw Kafka message to DLQ when deserialization fails.
 
@@ -516,6 +522,8 @@ class MixinKafkaDlq:
             error: The exception that caused the failure
             correlation_id: Correlation ID for tracking
             failure_type: Type of failure (e.g., "deserialization_error")
+            consumer_group: Consumer group ID that processed the message.
+                Defaults to "unknown" for backwards compatibility.
 
         Note:
             This method logs errors if DLQ publishing fails but does not raise
@@ -744,7 +752,7 @@ class MixinKafkaDlq:
             dlq_error_message=dlq_error_message,
             timestamp=end_time,
             environment=self._environment,
-            consumer_group="unknown",  # Consumer group is now derived per-subscription
+            consumer_group=consumer_group,
         )
 
         # Update DLQ metrics
