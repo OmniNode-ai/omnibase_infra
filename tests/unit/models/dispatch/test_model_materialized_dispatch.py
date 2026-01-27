@@ -10,9 +10,15 @@ Test categories:
 - Aliasing behavior (double-underscore keys)
 - Serialization/deserialization
 - Extra fields rejection
+- JSON safety (all values must be JSON-serializable)
 
 .. versionadded:: 0.2.7
     Added as part of OMN-1518 - Architectural hardening of dispatch contract.
+
+.. versionchanged:: 0.2.8
+    Updated for strict JSON-safe contract:
+    - debug_original_envelope → debug_trace (serialized snapshot)
+    - payload must be JsonType (no arbitrary Python objects)
 """
 
 from __future__ import annotations
@@ -33,19 +39,23 @@ class TestModelMaterializedDispatchSchema:
         envelope = ModelMaterializedDispatch(payload={"key": "value"})
         assert envelope.payload == {"key": "value"}
         assert envelope.bindings == {}
-        assert envelope.debug_original_envelope is None
+        assert envelope.debug_trace is None
 
     def test_full_valid_envelope(self) -> None:
         """Envelope with all fields is valid."""
-        original = {"mock": "envelope"}
+        debug_snapshot = {
+            "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+            "trace_id": "660e8400-e29b-41d4-a716-446655440001",
+            "topic": "dev.user.events.v1",
+        }
         envelope = ModelMaterializedDispatch(
             payload={"user_id": "123"},
             bindings={"user_id": "123", "limit": 100},
-            debug_original_envelope=original,
+            debug_trace=debug_snapshot,
         )
         assert envelope.payload == {"user_id": "123"}
         assert envelope.bindings == {"user_id": "123", "limit": 100}
-        assert envelope.debug_original_envelope is original
+        assert envelope.debug_trace == debug_snapshot
 
     def test_missing_payload_raises(self) -> None:
         """Missing payload field raises ValidationError."""
@@ -78,26 +88,31 @@ class TestModelMaterializedDispatchSchema:
         envelope = ModelMaterializedDispatch(payload=nested_payload)
         assert envelope.payload == nested_payload
 
-    def test_payload_accepts_pydantic_model(self) -> None:
-        """Payload field accepts Pydantic models (common for domain events)."""
-        from pydantic import BaseModel
+    def test_payload_accepts_json_primitives(self) -> None:
+        """Payload field accepts JSON primitive types."""
+        # String payload (wrapped in dict by serialization)
+        envelope = ModelMaterializedDispatch(payload={"_raw": "string_value"})
+        assert envelope.payload == {"_raw": "string_value"}
 
-        class UserEvent(BaseModel):
-            user_id: str
-            action: str
+        # Number payload
+        envelope = ModelMaterializedDispatch(payload={"count": 42})
+        assert envelope.payload == {"count": 42}
 
-        event = UserEvent(user_id="123", action="login")
-        envelope = ModelMaterializedDispatch(payload=event)
-        assert envelope.payload is event
-        assert envelope.payload.user_id == "123"  # type: ignore[union-attr]
+        # Boolean payload
+        envelope = ModelMaterializedDispatch(payload={"active": True})
+        assert envelope.payload == {"active": True}
+
+        # List payload
+        envelope = ModelMaterializedDispatch(payload=[1, 2, 3])
+        assert envelope.payload == [1, 2, 3]
 
 
 class TestModelMaterializedDispatchAliasing:
     """Tests for double-underscore alias behavior.
 
     These tests verify that the model correctly handles aliasing between:
-    - Python attributes: bindings, debug_original_envelope
-    - Dict keys: __bindings, __debug_original_envelope
+    - Python attributes: bindings, debug_trace
+    - Dict keys: __bindings, __debug_trace
     """
 
     def test_model_dump_uses_aliases(self) -> None:
@@ -109,9 +124,7 @@ class TestModelMaterializedDispatchAliasing:
         dumped = envelope.model_dump(by_alias=True)
 
         assert "__bindings" in dumped, "Should have __bindings key"
-        assert "__debug_original_envelope" in dumped, (
-            "Should have __debug_original_envelope key"
-        )
+        assert "__debug_trace" in dumped, "Should have __debug_trace key"
         assert "bindings" not in dumped, "Should NOT have Python attribute name"
         assert dumped["__bindings"] == {"param": "resolved"}
 
@@ -120,20 +133,23 @@ class TestModelMaterializedDispatchAliasing:
         raw_dict = {
             "payload": {"user_id": "123"},
             "__bindings": {"user_id": "123"},
-            "__debug_original_envelope": {"trace": "data"},
+            "__debug_trace": {"correlation_id": "test-id", "topic": "test.topic"},
         }
         envelope = ModelMaterializedDispatch.model_validate(raw_dict)
 
         assert envelope.payload == {"user_id": "123"}
         assert envelope.bindings == {"user_id": "123"}
-        assert envelope.debug_original_envelope == {"trace": "data"}
+        assert envelope.debug_trace == {
+            "correlation_id": "test-id",
+            "topic": "test.topic",
+        }
 
     def test_model_validate_from_python_names(self) -> None:
         """model_validate accepts dict with Python attribute names."""
         raw_dict = {
             "payload": {"key": "value"},
             "bindings": {"param": "resolved"},
-            "debug_original_envelope": None,
+            "debug_trace": None,
         }
         envelope = ModelMaterializedDispatch.model_validate(raw_dict)
 
@@ -149,26 +165,30 @@ class TestModelMaterializedDispatchAliasing:
 
         # Without by_alias, uses Python attribute names
         assert "bindings" in dumped
-        assert "debug_original_envelope" in dumped
+        assert "debug_trace" in dumped
 
 
 class TestModelMaterializedDispatchRepr:
     """Tests for repr/string representation."""
 
-    def test_debug_envelope_excluded_from_repr(self) -> None:
-        """__debug_original_envelope is excluded from repr (repr=False)."""
-        large_envelope = {"large": "data" * 1000}
+    def test_debug_trace_excluded_from_repr(self) -> None:
+        """__debug_trace is excluded from repr (repr=False)."""
+        large_trace = {
+            "correlation_id": "test-id",
+            "topic": "test.topic",
+            "event_type": "LargeEvent" * 100,  # Large value
+        }
         envelope = ModelMaterializedDispatch(
             payload={"small": "data"},
-            debug_original_envelope=large_envelope,
+            debug_trace=large_trace,
         )
 
         repr_str = repr(envelope)
 
-        # The large envelope data should not appear in repr
-        assert "data" * 100 not in repr_str
-        # But the field name might still appear (just without the value)
-        # The key behavior is that the large content is not serialized
+        # The large trace data should not appear in repr
+        assert "LargeEvent" * 50 not in repr_str
+        # payload should appear
+        assert "small" in repr_str
 
     def test_str_representation(self) -> None:
         """String representation is readable."""
@@ -237,3 +257,80 @@ class TestModelMaterializedDispatchRoundTrip:
 
         assert restored.payload == original.payload
         assert restored.bindings == original.bindings
+
+    def test_debug_trace_survives_round_trip(self) -> None:
+        """Debug trace snapshot survives serialization round-trip."""
+        debug_snapshot = {
+            "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+            "trace_id": "660e8400-e29b-41d4-a716-446655440001",
+            "topic": "dev.user.events.v1",
+            "timestamp": "2025-01-27T12:00:00Z",
+        }
+        original = ModelMaterializedDispatch(
+            payload={"event": "data"},
+            debug_trace=debug_snapshot,
+        )
+
+        # JSON round-trip
+        json_str = original.model_dump_json(by_alias=True)
+        restored = ModelMaterializedDispatch.model_validate_json(json_str)
+
+        assert restored.debug_trace == debug_snapshot
+
+
+class TestModelMaterializedDispatchJsonSafety:
+    """Tests verifying JSON-safe contract (no arbitrary Python objects)."""
+
+    def test_payload_is_json_serializable(self) -> None:
+        """Payload must be JSON-serializable."""
+        envelope = ModelMaterializedDispatch(
+            payload={"nested": {"deeply": {"value": 42}}},
+            bindings={"key": "value"},
+        )
+
+        # Should serialize without error
+        json_str = envelope.model_dump_json()
+        assert '"nested"' in json_str
+        assert '"deeply"' in json_str
+        assert "42" in json_str
+
+    def test_bindings_are_json_serializable(self) -> None:
+        """Bindings must be JSON-serializable."""
+        envelope = ModelMaterializedDispatch(
+            payload={"data": "test"},
+            bindings={
+                "string": "value",
+                "number": 42,
+                "float": 3.14,
+                "boolean": True,
+                "null": None,
+                "list": [1, 2, 3],
+                "nested": {"key": "value"},
+            },
+        )
+
+        # Should serialize without error
+        json_str = envelope.model_dump_json()
+        assert '"string"' in json_str
+        assert "42" in json_str
+        assert "3.14" in json_str
+
+    def test_debug_trace_is_string_dict(self) -> None:
+        """Debug trace must be a dict of strings (or None)."""
+        trace = {
+            "correlation_id": "uuid-string",
+            "trace_id": "another-uuid",
+            "topic": "topic.name",
+            "timestamp": None,  # None is allowed
+        }
+        envelope = ModelMaterializedDispatch(
+            payload={"data": "test"},
+            debug_trace=trace,
+        )
+
+        assert envelope.debug_trace == trace
+        # All values should be strings or None
+        assert all(
+            isinstance(v, str) or v is None
+            for v in envelope.debug_trace.values()  # type: ignore[union-attr]
+        )

@@ -920,8 +920,11 @@ class TestUninspectableDispatcherFallback:
         received = received_args[0]
         assert isinstance(received, dict), "Envelope should be materialized to dict"
         assert "__bindings" in received, "Should have __bindings namespace"
-        assert received["__debug_original_envelope"] is envelope, (
-            "Original envelope reference should be preserved (trace-only)"
+        assert "__debug_trace" in received, (
+            "Should have __debug_trace (serialized snapshot)"
+        )
+        assert isinstance(received["__debug_trace"], dict), (
+            "Debug trace should be a dict (serialized snapshot)"
         )
 
     @pytest.mark.asyncio
@@ -1086,8 +1089,11 @@ class TestUninspectableDispatcherFallback:
         # Envelope is always materialized to dict format
         received = received_args[0]
         assert isinstance(received, dict), "Envelope should be materialized to dict"
-        assert received["__debug_original_envelope"] is envelope, (
-            "Original envelope reference should be preserved (trace-only)"
+        assert "__debug_trace" in received, (
+            "Should have __debug_trace (serialized snapshot)"
+        )
+        assert isinstance(received["__debug_trace"], dict), (
+            "Debug trace should be a dict (serialized snapshot)"
         )
         # Context is None because engine didn't pass it (uninspectable fallback)
         assert received_args[1] is None, (

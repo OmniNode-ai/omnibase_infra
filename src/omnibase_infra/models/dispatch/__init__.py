@@ -95,6 +95,9 @@ See Also:
 """
 
 from omnibase_infra.enums import EnumDispatchStatus, EnumTopicStandard
+from omnibase_infra.models.dispatch.model_debug_trace_snapshot import (
+    ModelDebugTraceSnapshot,
+)
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_error import ModelDispatchError
 from omnibase_infra.models.dispatch.model_dispatch_log_context import (
@@ -131,6 +134,7 @@ __all__ = [
     "EnumDispatchStatus",
     "EnumTopicStandard",
     # Models
+    "ModelDebugTraceSnapshot",
     "ModelDispatchContext",
     "ModelDispatchError",
     "ModelDispatchLogContext",

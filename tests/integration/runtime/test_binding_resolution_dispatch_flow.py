@@ -218,9 +218,10 @@ class TestBindingResolutionDispatchFlow:
         assert "__bindings" in received, "Materialized envelope should have __bindings"
 
         # Verify resolved bindings
+        # NOTE: All bindings are JSON-serialized (UUIDs become strings)
         bindings = received["__bindings"]
-        assert bindings["correlation_id"] == correlation_id, (
-            "Global binding should resolve"
+        assert bindings["correlation_id"] == str(correlation_id), (
+            "Global binding should resolve (serialized to string)"
         )
         assert bindings["user_id"] == "user-123", "Operation binding should resolve"
         assert bindings["optional_field"] == "default_value", (
@@ -403,11 +404,12 @@ class TestBindingResolutionDispatchFlow:
         assert received["__bindings"] == {}, (
             "Bindings should be empty dict when no bindings configured"
         )
-        assert "__debug_original_envelope" in received, (
-            "Should have __debug_original_envelope (trace-only)"
+        assert "__debug_trace" in received, (
+            "Should have __debug_trace (serialized trace snapshot)"
         )
-        assert received["__debug_original_envelope"] is test_envelope, (
-            "Should reference original envelope"
+        # Debug trace is a serialized snapshot, not a live object reference
+        assert isinstance(received["__debug_trace"], dict), (
+            "Debug trace should be a dict (serialized snapshot)"
         )
 
     @pytest.mark.asyncio
@@ -416,14 +418,14 @@ class TestBindingResolutionDispatchFlow:
         dispatch_engine: MessageDispatchEngine,
         operation_bindings: ModelOperationBindingsSubcontract,
     ) -> None:
-        """Materialized envelope preserves original envelope reference for trace IDs.
+        """Materialized envelope preserves trace metadata in serialized snapshot.
 
-        The materialized envelope includes a __debug_original_envelope reference that
-        allows downstream handlers to access correlation_id, trace_id, and other
-        envelope metadata for distributed tracing purposes.
+        The materialized envelope includes a __debug_trace snapshot containing
+        serialized trace metadata (correlation_id, trace_id, topic, etc.) for
+        distributed tracing purposes.
 
-        Note: __debug_original_envelope is trace-only and should NOT be used for
-        business logic. It may be removed or changed without notice.
+        Note: __debug_trace is a serialized snapshot for debugging only.
+        It is NOT authoritative and should NOT be used for business logic.
         """
         received_envelopes: list[object] = []
 
@@ -457,18 +459,23 @@ class TestBindingResolutionDispatchFlow:
             envelope=test_envelope,
         )
 
-        # Verify original envelope reference is preserved (trace-only)
+        # Verify trace snapshot is serialized (not a live object reference)
         received = received_envelopes[0]
         assert isinstance(received, dict)
-        assert "__debug_original_envelope" in received, (
-            "Should have __debug_original_envelope (trace-only)"
+        assert "__debug_trace" in received, (
+            "Should have __debug_trace (serialized snapshot)"
         )
-        assert received["__debug_original_envelope"] is test_envelope, (
-            "Reference should be original envelope"
+        debug_trace = received["__debug_trace"]
+        assert isinstance(debug_trace, dict), "Debug trace should be a dict"
+
+        # Verify serialized trace metadata (all strings, not UUIDs)
+        assert debug_trace["correlation_id"] == str(correlation_id), (
+            "correlation_id should be serialized string"
         )
-        # NOTE: Accessing trace metadata is valid use of __debug_original_envelope
-        assert received["__debug_original_envelope"].correlation_id == correlation_id
-        assert received["__debug_original_envelope"].trace_id == trace_id
+        assert debug_trace["trace_id"] == str(trace_id), (
+            "trace_id should be serialized string"
+        )
+        assert debug_trace["topic"] == "dev.test.events.v1", "Topic should be captured"
 
     @pytest.mark.asyncio
     async def test_context_binding_resolution(
@@ -551,8 +558,9 @@ class TestBindingResolutionDispatchFlow:
             "dispatcher_id should match registered dispatcher"
         )
 
-        assert bindings["corr_id"] == correlation_id, (
-            "correlation_id from context should match envelope"
+        # NOTE: correlation_id is serialized to string in JSON-safe bindings
+        assert bindings["corr_id"] == str(correlation_id), (
+            "correlation_id from context should match envelope (serialized)"
         )
 
 
