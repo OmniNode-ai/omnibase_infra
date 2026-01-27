@@ -2345,6 +2345,7 @@ class RuntimeHostProcess:
                     "topic": topic,
                     "error": str(e),
                     "error_type": "InfraConsulError",
+                    "consul_key": getattr(e, "consul_key", None),
                 },
             )
             return []

@@ -176,7 +176,7 @@ class MixinConsulService:
                 if isinstance(entry, dict):
                     raw_topic = entry.get("topic")
                     # Validate topic is a non-empty string BEFORE any coercion
-                    if not isinstance(raw_topic, str) or not raw_topic:
+                    if not isinstance(raw_topic, str) or not raw_topic.strip():
                         ctx = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.CONSUL,
@@ -208,7 +208,7 @@ class MixinConsulService:
                 if isinstance(entry, dict):
                     raw_topic = entry.get("topic")
                     # Validate topic is a non-empty string BEFORE any coercion
-                    if not isinstance(raw_topic, str) or not raw_topic:
+                    if not isinstance(raw_topic, str) or not raw_topic.strip():
                         ctx = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.CONSUL,
