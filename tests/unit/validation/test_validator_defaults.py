@@ -81,11 +81,14 @@ class TestInfraValidatorConstants:
           - ast.FunctionDef | ast.AsyncFunctionDef for AST method type checking
         - 105 (2026-01-21): Contract-driven handler config loading (+4 unions)
           - ModelHandlerContract transport config fields and lifecycle types
+        - 108 (2026-01-27): OMN-1518 declarative operation bindings (+3 unions)
+          - ModelEventEnvelope[object] | dict[str, object] for materialized envelopes
+          - in dispatch engine type aliases (3 occurrences)
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 105, (
-            "INFRA_MAX_UNIONS should be 105 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 108, (
+            "INFRA_MAX_UNIONS should be 108 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
