@@ -41,6 +41,7 @@ import pytest
 
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
     load_event_bus_subcontract,
@@ -286,11 +287,12 @@ class TestMessageDispatchFlow:
         mock_dispatch_engine: AsyncMock,
         subcontract_version: ModelSemVer,
     ) -> None:
-        """Malformed JSON messages should raise JSONDecodeError.
+        """Malformed JSON messages should raise RuntimeHostError.
 
         Verifies:
         1. Invalid JSON causes exception
-        2. Exception is propagated for DLQ handling
+        2. Exception is wrapped as RuntimeHostError (OnexError only)
+        3. Exception is propagated for DLQ handling
         """
         wiring = EventBusSubcontractWiring(
             event_bus=mock_event_bus_with_callback_capture,
@@ -310,10 +312,10 @@ class TestMessageDispatchFlow:
         mock_message = MagicMock()
         mock_message.value = b"not valid json"
 
-        # Get the callback and verify it raises
+        # Get the callback and verify it raises RuntimeHostError
         topic_key = "dev.onex.evt.test-producer.test-event.v1"
         callback = mock_event_bus_with_callback_capture.callbacks[topic_key]
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(RuntimeHostError):
             await callback(mock_message)
 
 
@@ -363,10 +365,10 @@ class TestPublisherContractValidation:
     async def test_publishing_to_forbidden_topic_raises_error(
         self, mock_event_bus: AsyncMock
     ) -> None:
-        """Publishing to a topic not in contract's publish_topics raises ValueError.
+        """Publishing to a topic not in contract's publish_topics raises ProtocolConfigurationError.
 
         Verifies:
-        1. ValueError is raised with descriptive message
+        1. ProtocolConfigurationError is raised with descriptive message
         2. Allowed topics are listed in error message
         3. Event bus publish is NOT called
         """
@@ -376,7 +378,9 @@ class TestPublisherContractValidation:
             environment="dev",
         )
 
-        with pytest.raises(ValueError, match="not in contract's publish_topics"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="not in contract's publish_topics"
+        ):
             await publisher.publish(
                 event_type="output.event",
                 payload={"result": "success"},
@@ -390,7 +394,7 @@ class TestPublisherContractValidation:
     async def test_publishing_with_none_topic_raises_error(
         self, mock_event_bus: AsyncMock
     ) -> None:
-        """Publishing with topic=None raises ValueError.
+        """Publishing with topic=None raises ProtocolConfigurationError.
 
         Verifies that topic is a required parameter.
         """
@@ -400,7 +404,7 @@ class TestPublisherContractValidation:
             environment="dev",
         )
 
-        with pytest.raises(ValueError, match="topic is required"):
+        with pytest.raises(ProtocolConfigurationError, match="topic is required"):
             await publisher.publish(
                 event_type="output.event",
                 payload={"result": "success"},

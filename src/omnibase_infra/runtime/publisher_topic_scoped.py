@@ -42,15 +42,15 @@ Example Usage:
         correlation_id="abc-123",
     )
 
-    # Publish to disallowed topic (raises ValueError)
+    # Publish to disallowed topic (raises ProtocolConfigurationError)
     await publisher.publish(
         event_type="audit.log",
         payload={"action": "login"},
         topic="onex.audit.v1",  # Not in allowed_topics
         correlation_id="xyz-789",
     )
-    # ValueError: Topic 'onex.audit.v1' not in contract's publish_topics.
-    #             Allowed: ['onex.events.v1', 'onex.fsm.state.transitions.v1']
+    # ProtocolConfigurationError: Topic 'onex.audit.v1' not in contract's publish_topics.
+    #                             Allowed: ['onex.events.v1', 'onex.fsm.state.transitions.v1']
     ```
 
 Thread Safety:
@@ -72,8 +72,10 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from omnibase_core.types import JsonType
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 if TYPE_CHECKING:
@@ -147,9 +149,29 @@ class PublisherTopicScoped:
             raise ValueError("environment must be a non-empty string")
 
         self._event_bus = event_bus
-        self._allowed_topics = allowed_topics
+        self._allowed_topics = frozenset(allowed_topics)
         self._environment = environment
         self._logger = logging.getLogger(__name__)
+
+    def _normalize_correlation_id(
+        self,
+        correlation_id: str | UUID | None,
+    ) -> bytes | None:
+        """Normalize correlation ID to bytes for Kafka message key.
+
+        Correlation IDs in ONEX can be either UUID objects (in-memory canonical)
+        or strings (wire canonical). Both serialize deterministically to the
+        same byte representation.
+
+        Args:
+            correlation_id: Correlation ID as string, UUID, or None.
+
+        Returns:
+            UTF-8 encoded bytes for use as Kafka message key, or None.
+        """
+        if correlation_id is None:
+            return None
+        return str(correlation_id).encode("utf-8")
 
     def resolve_topic(self, topic_suffix: str) -> str:
         """Resolve topic suffix to full topic name with environment prefix.
@@ -174,7 +196,7 @@ class PublisherTopicScoped:
         event_type: str,
         payload: JsonType,
         topic: str | None = None,
-        correlation_id: str | None = None,
+        correlation_id: str | UUID | None = None,
         **kwargs: object,
     ) -> bool:
         """Publish to allowed topic. Raises if topic not in contract.
@@ -198,7 +220,7 @@ class PublisherTopicScoped:
             True if publish succeeded.
 
         Raises:
-            ValueError: If topic is None or not in contract's publish_topics.
+            ProtocolConfigurationError: If topic is None or not in contract's publish_topics.
 
         Example:
             >>> await publisher.publish(
@@ -210,10 +232,12 @@ class PublisherTopicScoped:
             True
         """
         if topic is None:
-            raise ValueError("topic is required for PublisherTopicScoped")
+            raise ProtocolConfigurationError(
+                "topic is required for PublisherTopicScoped"
+            )
 
         if topic not in self._allowed_topics:
-            raise ValueError(
+            raise ProtocolConfigurationError(
                 f"Topic '{topic}' not in contract's publish_topics. "
                 f"Allowed: {sorted(self._allowed_topics)}"
             )
@@ -222,7 +246,7 @@ class PublisherTopicScoped:
 
         # Serialize payload to JSON bytes
         value = json.dumps(payload).encode("utf-8")
-        key = correlation_id.encode("utf-8") if correlation_id else None
+        key = self._normalize_correlation_id(correlation_id)
 
         # Publish to event bus
         await self._event_bus.publish(
@@ -242,7 +266,7 @@ class PublisherTopicScoped:
 
     @property
     def allowed_topics(self) -> frozenset[str]:
-        """Return immutable copy of allowed topics.
+        """Return immutable set of allowed topics.
 
         Returns:
             Frozen set of topic suffixes allowed by this publisher.
@@ -251,7 +275,7 @@ class PublisherTopicScoped:
             >>> publisher.allowed_topics
             frozenset({'onex.events.v1', 'onex.commands.v1'})
         """
-        return frozenset(self._allowed_topics)
+        return self._allowed_topics
 
     @property
     def environment(self) -> str:

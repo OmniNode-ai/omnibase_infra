@@ -13,7 +13,7 @@ and IDE support.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -90,7 +90,7 @@ class ModelCoverageMetrics(BaseModel):
         cls,
         total: int,
         registered: int,
-        unmapped: list[str] | set[str],
+        unmapped: Collection[str],
     ) -> ModelCoverageMetrics:
         """Create coverage metrics from raw counts.
 

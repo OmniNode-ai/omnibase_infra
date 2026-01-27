@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.publisher_topic_scoped import PublisherTopicScoped
 
 # =============================================================================
@@ -130,6 +131,37 @@ class TestPublishSuccess:
         call_kwargs = mock_event_bus.publish.call_args.kwargs
         assert call_kwargs["key"] == b"corr-abc-123"
 
+    async def test_publish_with_uuid_correlation_id(
+        self,
+        publisher: PublisherTopicScoped,
+        mock_event_bus: AsyncMock,
+    ) -> None:
+        """Test that UUID correlation_id is properly normalized to bytes.
+
+        Regression test for: UUID objects passed as correlation_id should
+        be converted to string representation before encoding to bytes.
+        """
+        from uuid import uuid4
+
+        test_uuid = uuid4()
+
+        await publisher.publish(
+            event_type="test.event",
+            payload={"key": "value"},
+            topic="onex.evt.allowed.v1",
+            correlation_id=test_uuid,
+        )
+
+        # Verify event bus was called
+        mock_event_bus.publish.assert_called_once()
+
+        # Get the call arguments
+        call_kwargs = mock_event_bus.publish.call_args.kwargs
+
+        # Verify the key is the string representation of the UUID encoded as bytes
+        expected_key = str(test_uuid).encode("utf-8")
+        assert call_kwargs["key"] == expected_key
+
     async def test_publish_without_correlation_id_uses_none_key(
         self,
         publisher: PublisherTopicScoped,
@@ -174,8 +206,10 @@ class TestPublishFailure:
         self,
         publisher: PublisherTopicScoped,
     ) -> None:
-        """Test publishing to topic not in contract raises ValueError."""
-        with pytest.raises(ValueError, match="not in contract's publish_topics"):
+        """Test publishing to topic not in contract raises ProtocolConfigurationError."""
+        with pytest.raises(
+            ProtocolConfigurationError, match="not in contract's publish_topics"
+        ):
             await publisher.publish(
                 event_type="test.event",
                 payload={"key": "value"},
@@ -186,8 +220,8 @@ class TestPublishFailure:
         self,
         publisher: PublisherTopicScoped,
     ) -> None:
-        """Test publishing without topic raises ValueError."""
-        with pytest.raises(ValueError, match="topic is required"):
+        """Test publishing without topic raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError, match="topic is required"):
             await publisher.publish(
                 event_type="test.event",
                 payload={"key": "value"},
@@ -205,8 +239,8 @@ class TestPublishFailure:
                 payload={},
                 topic="onex.evt.forbidden.v1",
             )
-            pytest.fail("Should have raised ValueError")
-        except ValueError as e:
+            pytest.fail("Should have raised ProtocolConfigurationError")
+        except ProtocolConfigurationError as e:
             error_msg = str(e)
             assert "onex.evt.allowed.v1" in error_msg
             assert "onex.evt.another.v1" in error_msg
@@ -217,7 +251,7 @@ class TestPublishFailure:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Test event bus publish is not called when validation fails."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ProtocolConfigurationError):
             await publisher.publish(
                 event_type="test.event",
                 payload={},
@@ -429,7 +463,9 @@ class TestEdgeCases:
             environment="dev",
         )
 
-        with pytest.raises(ValueError, match="not in contract's publish_topics"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="not in contract's publish_topics"
+        ):
             await publisher.publish(
                 event_type="test",
                 payload={},
@@ -453,14 +489,16 @@ class TestEdgeCases:
         assert result is True
         mock_event_bus.publish.assert_called_once()
 
-    async def test_empty_correlation_id_treated_as_none(
+    async def test_empty_correlation_id_produces_empty_bytes(
         self,
         publisher: PublisherTopicScoped,
         mock_event_bus: AsyncMock,
     ) -> None:
-        """Test empty string correlation_id is treated as None (falsy)."""
-        # Implementation: key = correlation_id.encode() if correlation_id else None
-        # Empty string is falsy, so key becomes None
+        """Test empty string correlation_id produces empty bytes key.
+
+        Empty string is normalized consistently via str().encode(), resulting
+        in empty bytes. Only explicit None produces None key.
+        """
         await publisher.publish(
             event_type="test",
             payload={},
@@ -469,8 +507,8 @@ class TestEdgeCases:
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
-        # Empty string is falsy, so key is None
-        assert call_kwargs["key"] is None
+        # Empty string encodes to empty bytes, not None
+        assert call_kwargs["key"] == b""
 
     async def test_unicode_in_payload(
         self,

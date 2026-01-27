@@ -58,6 +58,8 @@ from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
 from omnibase_core.protocols.event_bus.protocol_event_message import (
     ProtocolEventMessage,
 )
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.protocols import ProtocolDispatchEngine
 
 if TYPE_CHECKING:
@@ -280,16 +282,28 @@ class EventBusSubcontractWiring:
                     topic,
                     e,
                 )
-                # Re-raise to trigger DLQ handling in the event bus
-                raise
+                # Wrap in OnexError per CLAUDE.md: "OnexError Only"
+                raise RuntimeHostError(
+                    f"Failed to deserialize message from topic '{topic}'",
+                    context=ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.KAFKA,
+                        operation="event_bus_deserialize",
+                    ),
+                ) from e
             except Exception as e:
                 self._logger.exception(
                     "Failed to dispatch message from topic '%s': %s",
                     topic,
                     e,
                 )
-                # Re-raise to trigger retry/DLQ handling
-                raise
+                # Wrap in OnexError per CLAUDE.md: "OnexError Only"
+                raise RuntimeHostError(
+                    f"Failed to dispatch message from topic '{topic}'",
+                    context=ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.KAFKA,
+                        operation="event_bus_dispatch",
+                    ),
+                ) from e
 
         return callback
 

@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -26,15 +25,12 @@ import pytest
 
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     EventBusSubcontractWiring,
     load_event_bus_subcontract,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
 
 # =============================================================================
 # Fixtures
@@ -309,7 +305,7 @@ class TestDispatchCallback:
         self,
         wiring: EventBusSubcontractWiring,
     ) -> None:
-        """Test callback raises on invalid JSON in message."""
+        """Test callback raises RuntimeHostError on invalid JSON in message."""
         callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
 
         invalid_message = ModelEventMessage(
@@ -323,7 +319,7 @@ class TestDispatchCallback:
             ),
         )
 
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(RuntimeHostError, match="Failed to deserialize"):
             await callback(invalid_message)
 
     @pytest.mark.asyncio
@@ -333,11 +329,11 @@ class TestDispatchCallback:
         mock_dispatch_engine: AsyncMock,
         sample_event_message: ModelEventMessage,
     ) -> None:
-        """Test callback propagates errors from dispatch engine."""
+        """Test callback wraps dispatch engine errors in RuntimeHostError."""
         mock_dispatch_engine.dispatch.side_effect = RuntimeError("Dispatch failed")
         callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
 
-        with pytest.raises(RuntimeError, match="Dispatch failed"):
+        with pytest.raises(RuntimeHostError, match="Failed to dispatch"):
             await callback(sample_event_message)
 
 
