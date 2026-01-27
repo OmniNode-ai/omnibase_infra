@@ -199,6 +199,7 @@ import asyncio
 import inspect
 import json
 import logging
+import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -223,6 +224,10 @@ from omnibase_infra.models.discovery.model_introspection_performance_metrics imp
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeHeartbeatEvent,
+)
+from omnibase_infra.models.registration.model_node_event_bus_config import (
+    ModelEventBusTopicEntry,
+    ModelNodeEventBusConfig,
 )
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
@@ -977,6 +982,87 @@ class MixinNodeIntrospection:
             )
             return None
 
+    def _extract_event_bus_config(
+        self,
+        env_prefix: str,
+    ) -> ModelNodeEventBusConfig | None:
+        """Extract and resolve event_bus config from contract.
+
+        Extracts topic suffixes from the contract's event_bus subcontract and
+        resolves them to full environment-qualified topic strings.
+
+        Topic Resolution:
+            Contract topics are suffixes (e.g., "onex.evt.intent-classified.v1").
+            This method prepends the environment prefix to create full topics
+            (e.g., "dev.onex.evt.intent-classified.v1").
+
+        Args:
+            env_prefix: Environment prefix (e.g., "dev", "prod", "staging").
+                Must be a valid identifier without dots or special characters.
+
+        Returns:
+            Resolved event bus config with full topic strings, or None if:
+            - No contract is configured (_introspection_contract is None)
+            - Contract has no event_bus subcontract
+            - event_bus subcontract has no publish_topics or subscribe_topics
+
+        Raises:
+            ValueError: If topic resolution fails due to unresolved placeholders
+                (e.g., "{env}" or "{namespace}" remaining in the resolved topic).
+                This is a fail-fast mechanism to prevent misconfigured topics
+                from being published to the registry.
+
+        Example:
+            >>> config = self._extract_event_bus_config("dev")
+            >>> config.publish_topic_strings
+            ['dev.onex.evt.node-registered.v1']
+
+        See Also:
+            - ModelEventBusSubcontract: Contract model with topic suffixes
+            - ModelNodeEventBusConfig: Registry storage model with full topics
+        """
+        if self._introspection_contract is None:
+            return None
+
+        # Get event_bus subcontract if present
+        event_bus_sub = getattr(self._introspection_contract, "event_bus", None)
+        if event_bus_sub is None:
+            return None
+
+        # Get topic suffix lists from the subcontract
+        publish_suffixes: list[str] = (
+            getattr(event_bus_sub, "publish_topics", None) or []
+        )
+        subscribe_suffixes: list[str] = (
+            getattr(event_bus_sub, "subscribe_topics", None) or []
+        )
+
+        if not publish_suffixes and not subscribe_suffixes:
+            return None
+
+        def resolve_topic(suffix: str) -> str:
+            """Resolve topic suffix to full topic with env prefix."""
+            # Full topic format: {env}.{suffix}
+            full_topic = f"{env_prefix}.{suffix}"
+
+            # Fail-fast: check for unresolved placeholders
+            if "{" in full_topic or "}" in full_topic:
+                raise ValueError(f"Unresolved placeholder in topic: {full_topic}")
+
+            return full_topic
+
+        def build_entry(suffix: str) -> ModelEventBusTopicEntry:
+            """Build topic entry from suffix."""
+            return ModelEventBusTopicEntry(
+                topic=resolve_topic(suffix),
+                # Metadata fields left as defaults (tooling-only)
+            )
+
+        return ModelNodeEventBusConfig(
+            publish_topics=[build_entry(s) for s in publish_suffixes],
+            subscribe_topics=[build_entry(s) for s in subscribe_suffixes],
+        )
+
     async def get_capabilities(self) -> ModelDiscoveredCapabilities:
         """Extract node capabilities via reflection.
 
@@ -1355,6 +1441,17 @@ class MixinNodeIntrospection:
                 self._introspection_contract
             )
 
+        # Extract event_bus config from contract (OMN-1613)
+        # Resolves topic suffixes to full environment-qualified topics
+        event_bus_config: ModelNodeEventBusConfig | None = None
+        try:
+            env_prefix = os.getenv("ONEX_ENV", "dev")
+            event_bus_config = self._extract_event_bus_config(env_prefix)
+        except ValueError as e:
+            # Fail-fast: topic resolution failure prevents introspection
+            # This is intentional - misconfigured topics should not be published
+            raise ValueError(f"Event bus extraction failed: {e}") from e
+
         # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
             node_id=node_id_uuid,
@@ -1369,6 +1466,7 @@ class MixinNodeIntrospection:
             correlation_id=uuid4(),
             timestamp=datetime.now(UTC),
             performance_metrics=metrics,
+            event_bus=event_bus_config,
         )
 
         # Update cache - cast the model_dump output to our typed dict since we know

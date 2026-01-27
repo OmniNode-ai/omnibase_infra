@@ -8,10 +8,16 @@ for HandlerConsul, extracted to reduce class complexity.
 Operations:
     - consul.register: Register service with Consul agent
     - consul.deregister: Deregister service from Consul agent
+
+Event Bus Integration:
+    When the payload contains an 'event_bus_config' field, this mixin will:
+    1. Store the event bus configuration in Consul KV
+    2. Update the topic -> node_id reverse index for routing
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, TypeVar
 from uuid import UUID
@@ -33,9 +39,15 @@ from omnibase_infra.handlers.models.consul import (
 from omnibase_infra.handlers.models.model_consul_handler_response import (
     ModelConsulHandlerResponse,
 )
+from omnibase_infra.models.registration import (
+    ModelEventBusTopicEntry,
+    ModelNodeEventBusConfig,
+)
 
 if TYPE_CHECKING:
     import consul as consul_lib
+
+logger = logging.getLogger(__name__)
 
 
 class ProtocolConsulServiceDependencies(Protocol):
@@ -63,6 +75,24 @@ class ProtocolConsulServiceDependencies(Protocol):
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Build standardized response."""
+        ...
+
+    async def _store_node_event_bus(
+        self,
+        node_id: str,
+        event_bus: ModelNodeEventBusConfig,
+        correlation_id: UUID,
+    ) -> None:
+        """Store event_bus config in Consul KV - provided by MixinConsulTopicIndex."""
+        ...
+
+    async def _update_topic_index(
+        self,
+        node_id: str,
+        event_bus: ModelNodeEventBusConfig,
+        correlation_id: UUID,
+    ) -> None:
+        """Update topic index - provided by MixinConsulTopicIndex."""
         ...
 
 
@@ -102,6 +132,82 @@ class MixinConsulService:
         """Build standardized response - provided by host class."""
         raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
 
+    async def _store_node_event_bus(
+        self,
+        node_id: str,
+        event_bus: ModelNodeEventBusConfig,
+        correlation_id: UUID,
+    ) -> None:
+        """Store event_bus config - provided by MixinConsulTopicIndex."""
+        raise NotImplementedError("Must be provided by implementing class")
+
+    async def _update_topic_index(
+        self,
+        node_id: str,
+        event_bus: ModelNodeEventBusConfig,
+        correlation_id: UUID,
+    ) -> None:
+        """Update topic index - provided by MixinConsulTopicIndex."""
+        raise NotImplementedError("Must be provided by implementing class")
+
+    def _parse_event_bus_config(
+        self,
+        event_bus_data: dict[str, object],
+    ) -> ModelNodeEventBusConfig:
+        """Parse event_bus_config from payload dict to typed model.
+
+        Args:
+            event_bus_data: Raw event_bus_config dict from payload.
+
+        Returns:
+            Parsed ModelNodeEventBusConfig instance.
+        """
+        subscribe_topics: list[ModelEventBusTopicEntry] = []
+        publish_topics: list[ModelEventBusTopicEntry] = []
+
+        raw_subscribe = event_bus_data.get("subscribe_topics")
+        if isinstance(raw_subscribe, list):
+            for entry in raw_subscribe:
+                if isinstance(entry, dict):
+                    subscribe_topics.append(
+                        ModelEventBusTopicEntry(
+                            topic=str(entry.get("topic", "")),
+                            event_type=entry.get("event_type")
+                            if isinstance(entry.get("event_type"), str)
+                            else None,
+                            message_category=str(
+                                entry.get("message_category", "EVENT")
+                            ),
+                            description=entry.get("description")
+                            if isinstance(entry.get("description"), str)
+                            else None,
+                        )
+                    )
+
+        raw_publish = event_bus_data.get("publish_topics")
+        if isinstance(raw_publish, list):
+            for entry in raw_publish:
+                if isinstance(entry, dict):
+                    publish_topics.append(
+                        ModelEventBusTopicEntry(
+                            topic=str(entry.get("topic", "")),
+                            event_type=entry.get("event_type")
+                            if isinstance(entry.get("event_type"), str)
+                            else None,
+                            message_category=str(
+                                entry.get("message_category", "EVENT")
+                            ),
+                            description=entry.get("description")
+                            if isinstance(entry.get("description"), str)
+                            else None,
+                        )
+                    )
+
+        return ModelNodeEventBusConfig(
+            subscribe_topics=subscribe_topics,
+            publish_topics=publish_topics,
+        )
+
     async def _register_service(
         self,
         payload: dict[str, object],
@@ -118,11 +224,20 @@ class MixinConsulService:
                 - port: Optional service port
                 - tags: Optional list of tags
                 - check: Optional health check configuration dict
+                - node_id: Optional node ID for event bus registration
+                - event_bus_config: Optional event bus configuration dict containing:
+                    - subscribe_topics: List of topic entries to subscribe to
+                    - publish_topics: List of topic entries to publish to
             correlation_id: Correlation ID for tracing
             input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
             ModelHandlerOutput wrapping the registration result with correlation tracking
+
+        Event Bus Integration:
+            When event_bus_config is provided along with node_id, this method will:
+            1. Store the event bus configuration in Consul KV at onex/nodes/{node_id}/event_bus/
+            2. Update the topic -> node_id reverse index at onex/topics/{topic}/subscribers
         """
         name = payload.get("name")
         if not isinstance(name, str) or not name:
@@ -197,6 +312,34 @@ class MixinConsulService:
             register_func,
             correlation_id,
         )
+
+        # Handle event bus configuration if provided
+        event_bus_data = payload.get("event_bus_config")
+        node_id = payload.get("node_id")
+
+        if isinstance(event_bus_data, dict) and isinstance(node_id, str) and node_id:
+            logger.info(
+                "Processing event_bus_config for node %s",
+                node_id,
+                extra={"correlation_id": str(correlation_id), "node_id": node_id},
+            )
+
+            # Parse the event bus config
+            event_bus = self._parse_event_bus_config(event_bus_data)
+
+            # Update topic index FIRST (uses old topics from previous registration)
+            # This computes delta and updates reverse index
+            await self._update_topic_index(node_id, event_bus, correlation_id)
+
+            # Store the new event bus config AFTER index update
+            # Order matters: _update_topic_index reads old topics before we overwrite
+            await self._store_node_event_bus(node_id, event_bus, correlation_id)
+
+            logger.info(
+                "Completed event_bus registration for node %s",
+                node_id,
+                extra={"correlation_id": str(correlation_id), "node_id": node_id},
+            )
 
         typed_payload = ModelConsulRegisterPayload(
             registered=True,

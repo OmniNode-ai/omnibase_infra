@@ -18,11 +18,17 @@ from omnibase_infra.models.registration.events import (
     ModelNodeRegistrationInitiated,
     ModelNodeRegistrationRejected,
 )
+from omnibase_infra.models.registration.model_event_bus_topic_entry import (
+    ModelEventBusTopicEntry,
+)
 from omnibase_infra.models.registration.model_introspection_metrics import (
     ModelIntrospectionMetrics,
 )
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
+)
+from omnibase_infra.models.registration.model_node_event_bus_config import (
+    ModelNodeEventBusConfig,
 )
 from omnibase_infra.models.registration.model_node_heartbeat_event import (
     ModelNodeHeartbeatEvent,
@@ -39,6 +45,9 @@ from omnibase_infra.models.registration.model_node_registration_record import (
 )
 
 __all__ = [
+    # Event bus configuration
+    "ModelEventBusTopicEntry",
+    "ModelNodeEventBusConfig",
     # Metrics
     "ModelIntrospectionMetrics",
     # Decision events (C1 Orchestrator output)
