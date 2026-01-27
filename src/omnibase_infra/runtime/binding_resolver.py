@@ -5,6 +5,7 @@
 This module provides:
 
 - **BindingExpressionParser**: Parses ${source.path} expressions with guardrails
+- **BindingExpressionParseError**: Typed error with error codes for parse failures
 - **OperationBindingResolver**: Resolves bindings from envelope/payload/context
 
 Expression Syntax
@@ -52,7 +53,8 @@ and thread-safe. They can be shared across concurrent requests.
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from enum import Enum
+from typing import Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -74,6 +76,107 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# Error Codes for Expression Parsing
+# =============================================================================
+
+
+class EnumBindingParseErrorCode(str, Enum):
+    """Error codes for binding expression parse failures.
+
+    These error codes are used by BindingExpressionParseError to provide
+    typed error classification. The codes align with the BINDING_LOADER_0xx
+    error codes used by the operation bindings loader.
+
+    .. versionadded:: 0.2.6
+    """
+
+    EXPRESSION_MALFORMED = "BINDING_LOADER_010"
+    """Expression syntax is invalid (missing ${}, wrong delimiters, array access)."""
+
+    INVALID_SOURCE = "BINDING_LOADER_011"
+    """Source is not one of: payload, envelope, context."""
+
+    PATH_TOO_DEEP = "BINDING_LOADER_012"
+    """Path exceeds MAX_PATH_SEGMENTS (20 segments)."""
+
+    EXPRESSION_TOO_LONG = "BINDING_LOADER_013"
+    """Expression exceeds MAX_EXPRESSION_LENGTH (256 characters)."""
+
+    EMPTY_PATH_SEGMENT = "BINDING_LOADER_014"
+    """Path contains empty segment (e.g., ${payload..field})."""
+
+    INVALID_CONTEXT_PATH = "BINDING_LOADER_016"
+    """Context path is not in VALID_CONTEXT_PATHS allowlist."""
+
+
+class BindingExpressionParseError(ValueError):
+    """Error raised when binding expression parsing fails.
+
+    This exception provides typed error codes for different parse failure
+    scenarios, enabling callers to handle errors based on error code rather
+    than parsing error message strings.
+
+    Attributes:
+        error_code: The specific error code identifying the failure type.
+        expression: The expression that failed to parse.
+        message: Human-readable error message.
+
+    Example:
+        >>> try:
+        ...     parser.parse("${invalid.path}")
+        ... except BindingExpressionParseError as e:
+        ...     if e.error_code == EnumBindingParseErrorCode.INVALID_SOURCE:
+        ...         # Handle invalid source
+        ...         pass
+
+    .. versionadded:: 0.2.6
+    """
+
+    def __init__(
+        self,
+        message: str,
+        error_code: EnumBindingParseErrorCode,
+        expression: str,
+    ) -> None:
+        """Initialize the parse error.
+
+        Args:
+            message: Human-readable error description.
+            error_code: Typed error code identifying the failure type.
+            expression: The expression that failed to parse.
+        """
+        super().__init__(message)
+        self.error_code = error_code
+        self.expression = expression
+        self.message = message
+
+    def __str__(self) -> str:
+        """Return the error message."""
+        return self.message
+
+
+# =============================================================================
+# JSON Recursion Depth Limit
+# =============================================================================
+
+_MAX_JSON_RECURSION_DEPTH: Final[int] = 100
+"""Maximum recursion depth for JSON compatibility validation.
+
+This constant limits how deeply nested structures are validated in
+``_is_json_compatible_recursive()``. It prevents stack overflow on
+pathological inputs such as deeply nested dicts/lists or cyclic
+references that somehow bypass Python's normal recursion limit.
+
+The value of 100 is chosen to:
+- Allow normal JSON structures (rarely exceed 10-20 levels)
+- Prevent stack overflow on malicious or malformed inputs
+- Align with common JSON parser depth limits
+
+.. versionadded:: 0.2.6
+"""
+
+
+# =============================================================================
 # JSON Compatibility Validation
 # =============================================================================
 
@@ -89,7 +192,8 @@ def _is_json_compatible(value: object) -> bool:
     - dict with str keys (with recursively JSON-compatible values)
 
     This function performs recursive validation for nested structures.
-    It guards against infinite recursion by limiting depth to 100 levels.
+    It guards against infinite recursion by limiting depth to
+    ``_MAX_JSON_RECURSION_DEPTH`` levels.
 
     Args:
         value: The value to check for JSON compatibility.
@@ -128,7 +232,7 @@ def _is_json_compatible_recursive(value: object, depth: int) -> bool:
         True if the value is JSON-compatible, False otherwise.
     """
     # Depth guard to prevent stack overflow on pathological inputs
-    if depth > 100:
+    if depth > _MAX_JSON_RECURSION_DEPTH:
         return False
 
     # None is JSON-compatible (maps to JSON null)
@@ -206,14 +310,16 @@ class BindingExpressionParser:
             is a tuple of field names.
 
         Raises:
-            ValueError: If expression is malformed or violates any guardrail:
-                - Expression exceeds max length (256 chars)
-                - Expression contains array access (``[``, ``]``)
-                - Expression syntax doesn't match pattern
-                - Source is not valid
-                - Path contains empty segments
-                - Path exceeds max segments (20)
-                - Context path is not in allowlist
+            BindingExpressionParseError: If expression is malformed or violates
+                any guardrail. The exception includes a typed ``error_code`` attribute
+                for programmatic error handling:
+
+                - ``EXPRESSION_TOO_LONG``: Expression exceeds max length (256 chars)
+                - ``EXPRESSION_MALFORMED``: Array access or invalid syntax
+                - ``INVALID_SOURCE``: Source is not valid
+                - ``EMPTY_PATH_SEGMENT``: Path contains empty segments
+                - ``PATH_TOO_DEEP``: Path exceeds max segments (20)
+                - ``INVALID_CONTEXT_PATH``: Context path is not in allowlist
 
         Example:
             >>> parser = BindingExpressionParser()
@@ -223,27 +329,35 @@ class BindingExpressionParser:
             >>> parser.parse("${context.now_iso}")
             ('context', ('now_iso',))
 
-            >>> parser.parse("${payload.items[0]}")  # Raises ValueError
+            >>> parser.parse("${payload.items[0]}")  # Raises BindingExpressionParseError
             Traceback (most recent call last):
                 ...
-            ValueError: Array access not allowed in expressions: ${payload.items[0]}
+            BindingExpressionParseError: Array access not allowed in expressions: ...
         """
         # Guardrail: max length
         if len(expression) > MAX_EXPRESSION_LENGTH:
-            raise ValueError(
-                f"Expression exceeds max length ({len(expression)} > {MAX_EXPRESSION_LENGTH})"
+            raise BindingExpressionParseError(
+                f"Expression exceeds max length ({len(expression)} > {MAX_EXPRESSION_LENGTH})",
+                error_code=EnumBindingParseErrorCode.EXPRESSION_TOO_LONG,
+                expression=expression,
             )
 
         # Guardrail: no array access
         if "[" in expression or "]" in expression:
-            raise ValueError(f"Array access not allowed in expressions: {expression}")
+            raise BindingExpressionParseError(
+                f"Array access not allowed in expressions: {expression}",
+                error_code=EnumBindingParseErrorCode.EXPRESSION_MALFORMED,
+                expression=expression,
+            )
 
         # Parse expression
         match = EXPRESSION_PATTERN.match(expression)
         if not match:
-            raise ValueError(
+            raise BindingExpressionParseError(
                 f"Invalid expression syntax: {expression}. "
-                f"Expected format: ${{source.path.to.field}}"
+                f"Expected format: ${{source.path.to.field}}",
+                error_code=EnumBindingParseErrorCode.EXPRESSION_MALFORMED,
+                expression=expression,
             )
 
         source = match.group(1)
@@ -251,8 +365,10 @@ class BindingExpressionParser:
 
         # Validate source
         if source not in VALID_SOURCES:
-            raise ValueError(
-                f"Invalid source '{source}'. Must be one of: {sorted(VALID_SOURCES)}"
+            raise BindingExpressionParseError(
+                f"Invalid source '{source}'. Must be one of: {sorted(VALID_SOURCES)}",
+                error_code=EnumBindingParseErrorCode.INVALID_SOURCE,
+                expression=expression,
             )
 
         # Parse path segments
@@ -260,20 +376,28 @@ class BindingExpressionParser:
 
         # Guardrail: no empty segments
         if any(segment == "" for segment in path_segments):
-            raise ValueError(f"Empty path segment in expression: {expression}")
+            raise BindingExpressionParseError(
+                f"Empty path segment in expression: {expression}",
+                error_code=EnumBindingParseErrorCode.EMPTY_PATH_SEGMENT,
+                expression=expression,
+            )
 
         # Guardrail: max segments
         if len(path_segments) > MAX_PATH_SEGMENTS:
-            raise ValueError(
-                f"Path exceeds max segments ({len(path_segments)} > {MAX_PATH_SEGMENTS})"
+            raise BindingExpressionParseError(
+                f"Path exceeds max segments ({len(path_segments)} > {MAX_PATH_SEGMENTS})",
+                error_code=EnumBindingParseErrorCode.PATH_TOO_DEEP,
+                expression=expression,
             )
 
         # Validate context paths (exhaustive allowlist)
         if source == "context":
             if path_segments[0] not in VALID_CONTEXT_PATHS:
-                raise ValueError(
+                raise BindingExpressionParseError(
                     f"Invalid context path '{path_segments[0]}'. "
-                    f"Must be one of: {sorted(VALID_CONTEXT_PATHS)}"
+                    f"Must be one of: {sorted(VALID_CONTEXT_PATHS)}",
+                    error_code=EnumBindingParseErrorCode.INVALID_CONTEXT_PATH,
+                    expression=expression,
                 )
 
         # Type narrowing: source is guaranteed to be one of the valid values
@@ -546,6 +670,8 @@ class OperationBindingResolver:
 
 
 __all__: list[str] = [
+    "BindingExpressionParseError",
     "BindingExpressionParser",
+    "EnumBindingParseErrorCode",
     "OperationBindingResolver",
 ]

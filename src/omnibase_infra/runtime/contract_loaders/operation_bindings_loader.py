@@ -66,7 +66,11 @@ from omnibase_infra.models.bindings import (
     ModelOperationBindingsSubcontract,
     ModelParsedBinding,
 )
-from omnibase_infra.runtime.binding_resolver import BindingExpressionParser
+from omnibase_infra.runtime.binding_resolver import (
+    BindingExpressionParseError,
+    BindingExpressionParser,
+    EnumBindingParseErrorCode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +157,8 @@ def _parse_expression(
     """Parse and validate binding expression at load time.
 
     Delegates to BindingExpressionParser.parse() for validation and parsing,
-    then wraps any ValueError with ProtocolConfigurationError and appropriate
-    error codes for loader-level diagnostics.
+    then wraps any BindingExpressionParseError with ProtocolConfigurationError
+    and appropriate error codes for loader-level diagnostics.
 
     Args:
         expression: Expression in ${source.path.to.field} format.
@@ -184,14 +188,14 @@ def _parse_expression(
 
     try:
         return parser.parse(expression)
-    except ValueError as e:
-        error_msg = str(e)
+    except BindingExpressionParseError as e:
+        # Use typed error code from the exception - no string matching needed
+        error_code = e.error_code.value
+        code_name = e.error_code.name
+        error_msg = e.message
 
-        # Map parser errors to loader error codes based on error message content
-        # The parser raises ValueError with descriptive messages that we match against
-        if "exceeds max length" in error_msg:
-            error_code = ERROR_CODE_EXPRESSION_TOO_LONG
-            code_name = "EXPRESSION_TOO_LONG"
+        # Log with appropriate context based on error type
+        if e.error_code == EnumBindingParseErrorCode.EXPRESSION_TOO_LONG:
             logger.exception(
                 "Expression exceeds max length: %s in %s",
                 expression,
@@ -199,38 +203,33 @@ def _parse_expression(
             )
             user_msg = f"{error_msg}. Error code: {code_name} ({error_code})"
 
-        elif "Array access not allowed" in error_msg:
-            error_code = ERROR_CODE_EXPRESSION_MALFORMED
-            code_name = "EXPRESSION_MALFORMED"
-            logger.exception(
-                "Array access not allowed in expressions: %s in %s",
-                expression,
-                contract_path,
-            )
-            user_msg = (
-                f"Array access not allowed in expressions: {expression}. "
-                f"Use path-based access only (e.g., ${{payload.items}} not "
-                f"${{payload.items[0]}}). "
-                f"Error code: {code_name} ({error_code})"
-            )
+        elif e.error_code == EnumBindingParseErrorCode.EXPRESSION_MALFORMED:
+            # Array access or invalid syntax
+            if "Array access" in error_msg:
+                logger.exception(
+                    "Array access not allowed in expressions: %s in %s",
+                    expression,
+                    contract_path,
+                )
+                user_msg = (
+                    f"Array access not allowed in expressions: {expression}. "
+                    f"Use path-based access only (e.g., ${{payload.items}} not "
+                    f"${{payload.items[0]}}). "
+                    f"Error code: {code_name} ({error_code})"
+                )
+            else:
+                logger.exception(
+                    "Invalid expression syntax: %s in %s. Expected ${{source.path.to.field}}",
+                    expression,
+                    contract_path,
+                )
+                user_msg = (
+                    f"Invalid expression syntax: {expression}. "
+                    f"Expected format: ${{source.path.to.field}}. "
+                    f"Error code: {code_name} ({error_code})"
+                )
 
-        elif "Invalid expression syntax" in error_msg:
-            error_code = ERROR_CODE_EXPRESSION_MALFORMED
-            code_name = "EXPRESSION_MALFORMED"
-            logger.exception(
-                "Invalid expression syntax: %s in %s. Expected ${source.path.to.field}",
-                expression,
-                contract_path,
-            )
-            user_msg = (
-                f"Invalid expression syntax: {expression}. "
-                f"Expected format: ${{source.path.to.field}}. "
-                f"Error code: {code_name} ({error_code})"
-            )
-
-        elif "Invalid source" in error_msg:
-            error_code = ERROR_CODE_INVALID_SOURCE
-            code_name = "INVALID_SOURCE"
+        elif e.error_code == EnumBindingParseErrorCode.INVALID_SOURCE:
             logger.exception(
                 "Invalid source in expression %s at %s: %s",
                 expression,
@@ -239,9 +238,7 @@ def _parse_expression(
             )
             user_msg = f"{error_msg}. Error code: {code_name} ({error_code})"
 
-        elif "Empty path segment" in error_msg:
-            error_code = ERROR_CODE_EMPTY_PATH_SEGMENT
-            code_name = "EMPTY_PATH_SEGMENT"
+        elif e.error_code == EnumBindingParseErrorCode.EMPTY_PATH_SEGMENT:
             logger.exception(
                 "Empty path segment in expression: %s at %s",
                 expression,
@@ -253,9 +250,7 @@ def _parse_expression(
                 f"Error code: {code_name} ({error_code})"
             )
 
-        elif "Path exceeds max segments" in error_msg:
-            error_code = ERROR_CODE_PATH_TOO_DEEP
-            code_name = "PATH_TOO_DEEP"
+        elif e.error_code == EnumBindingParseErrorCode.PATH_TOO_DEEP:
             logger.exception(
                 "Path exceeds max segments in expression: %s at %s",
                 expression,
@@ -263,9 +258,7 @@ def _parse_expression(
             )
             user_msg = f"{error_msg}. Error code: {code_name} ({error_code})"
 
-        elif "Invalid context path" in error_msg:
-            error_code = ERROR_CODE_INVALID_CONTEXT_PATH
-            code_name = "INVALID_CONTEXT_PATH"
+        elif e.error_code == EnumBindingParseErrorCode.INVALID_CONTEXT_PATH:
             logger.exception(
                 "Invalid context path in expression %s at %s: %s",
                 expression,
@@ -275,9 +268,7 @@ def _parse_expression(
             user_msg = f"{error_msg}. Error code: {code_name} ({error_code})"
 
         else:
-            # Fallback for any unexpected parser error
-            error_code = ERROR_CODE_EXPRESSION_MALFORMED
-            code_name = "EXPRESSION_MALFORMED"
+            # Fallback for any unhandled error code (should not happen)
             logger.exception(
                 "Expression parsing failed: %s in %s - %s",
                 expression,

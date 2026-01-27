@@ -922,6 +922,40 @@ version: "1.0.0"
         assert "exceeds maximum size" in error_msg.lower()
         assert ERROR_CODE_FILE_SIZE_EXCEEDED in error_msg
 
+    def test_oversized_file_detected_via_mocked_stat(self, tmp_path: Path) -> None:
+        """File size check via mocked Path.stat() detects oversized files.
+
+        This test mocks Path.stat() to simulate an oversized file without
+        actually creating a large file on disk. Validates that _check_file_size()
+        correctly reads st_size and raises ProtocolConfigurationError with
+        the correct error code.
+
+        This is a more efficient alternative to creating actual large files,
+        and directly tests the _check_file_size() security control behavior.
+        """
+        from unittest.mock import MagicMock, patch
+
+        # Create a small valid contract file
+        contract = {"name": "test"}
+        contract_path = _write_contract(contract, tmp_path)
+
+        # Mock stat result with oversized file (1 byte over the limit)
+        mock_stat_result = MagicMock()
+        mock_stat_result.st_size = MAX_CONTRACT_FILE_SIZE_BYTES + 1
+
+        # Patch the stat method on the Path class
+        # exists() also uses stat() internally, but mock returning a result
+        # without raising means exists() returns True
+        with patch.object(Path, "stat", return_value=mock_stat_result):
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        error_msg = str(exc_info.value)
+        # Verify error message contains both human-readable code and machine code
+        assert "FILE_SIZE_EXCEEDED" in error_msg
+        assert ERROR_CODE_FILE_SIZE_EXCEEDED in error_msg
+        assert "exceeds maximum size" in error_msg.lower()
+
 
 # =============================================================================
 # TestYamlSecurityControls
