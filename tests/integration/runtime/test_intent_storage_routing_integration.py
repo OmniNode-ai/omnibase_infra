@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
+from tests.conftest import make_test_node_identity
 
 # Type alias for emit callback signature
 EmitCallback = Callable[[dict[str, object]], Coroutine[object, object, None]]
@@ -388,7 +389,7 @@ class TestIntentStorageRouting:
         # Subscribe to input topic
         unsubscribe = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-intent-routing-group",
+            make_test_node_identity("intent-routing"),
             router.route_message,
         )
 
@@ -433,7 +434,7 @@ class TestIntentStorageRouting:
 
         unsubscribe = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-multi-intent-group",
+            make_test_node_identity("multi-intent"),
             router.route_message,
         )
 
@@ -503,12 +504,12 @@ class TestIntentStoredEventEmission:
         # Subscribe to both input and output topics
         unsub_input = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-stored-input-group",
+            make_test_node_identity("stored-input"),
             router.route_message,
         )
         unsub_output = await event_bus.subscribe(
             OUTPUT_TOPIC,
-            "test-stored-output-group",
+            make_test_node_identity("stored-output"),
             capture_stored_event,
         )
 
@@ -563,12 +564,12 @@ class TestIntentStoredEventEmission:
 
         unsub_input = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-failure-input-group",
+            make_test_node_identity("failure-input"),
             router.route_message,
         )
         unsub_output = await event_bus.subscribe(
             OUTPUT_TOPIC,
-            "test-failure-output-group",
+            make_test_node_identity("failure-output"),
             capture_stored_event,
         )
 
@@ -608,7 +609,7 @@ class TestEnvelopeStructure:
 
         unsubscribe = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-structure-group",
+            make_test_node_identity("structure"),
             router.route_message,
         )
 
@@ -669,12 +670,12 @@ class TestEnvelopeStructure:
 
         unsub_input = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-correlation-input",
+            make_test_node_identity("correlation-input"),
             router.route_message,
         )
         unsub_output = await event_bus.subscribe(
             OUTPUT_TOPIC,
-            "test-correlation-output",
+            make_test_node_identity("correlation-output"),
             capture_stored,
         )
 
@@ -722,12 +723,12 @@ class TestEnvelopeStructure:
 
         unsub_input = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-audit-input",
+            make_test_node_identity("audit-input"),
             router.route_message,
         )
         unsub_output = await event_bus.subscribe(
             OUTPUT_TOPIC,
-            "test-audit-output",
+            make_test_node_identity("audit-output"),
             capture_stored,
         )
 
@@ -780,12 +781,12 @@ class TestEdgeCases:
 
         unsub_input = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-missing-corr-input",
+            make_test_node_identity("missing-corr-input"),
             router.route_message,
         )
         unsub_output = await event_bus.subscribe(
             OUTPUT_TOPIC,
-            "test-missing-corr-output",
+            make_test_node_identity("missing-corr-output"),
             capture_stored,
         )
 
@@ -839,7 +840,7 @@ class TestEdgeCases:
 
         unsubscribe = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-empty-payload-group",
+            make_test_node_identity("empty-payload"),
             router.route_message,
         )
 
@@ -875,7 +876,7 @@ class TestEdgeCases:
 
         unsubscribe = await event_bus.subscribe(
             INPUT_TOPIC,
-            "test-high-volume-group",
+            make_test_node_identity("high-volume"),
             router.route_message,
         )
 

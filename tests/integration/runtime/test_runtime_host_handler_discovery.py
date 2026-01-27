@@ -48,6 +48,15 @@ from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProce
 # Constants for Handler Contract Templates
 # =============================================================================
 
+# Test config required for RuntimeHostProcess (OMN-1602)
+# RuntimeHostProcess now requires service_name and node_name for consumer group derivation
+TEST_RUNTIME_CONFIG: dict[str, object] = {
+    "service_name": "handler-discovery-test",
+    "node_name": "test-node",
+    "env": "test",
+    "version": "v1",
+}
+
 # Real handler class paths from omnibase_infra.handlers
 # Note: HttpRestHandler works without config or external services.
 # Other handlers (DB, Consul, Vault) require external services during initialize().
@@ -241,6 +250,7 @@ class TestRuntimeHostProcessWithContractPaths:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 
@@ -273,6 +283,7 @@ class TestRuntimeHostProcessWithContractPaths:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 
@@ -303,6 +314,7 @@ class TestRuntimeHostProcessWithContractPaths:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(handlers_dir1), str(handlers_dir2)],
         )
 
@@ -330,6 +342,7 @@ class TestRuntimeHostProcessWithContractPaths:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 
@@ -365,6 +378,7 @@ class TestRuntimeHostProcessFallback:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             # No contract_paths - should use wire_default_handlers
         )
 
@@ -395,6 +409,7 @@ class TestRuntimeHostProcessFallback:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[],  # Empty list
         )
 
@@ -439,6 +454,7 @@ class TestRuntimeHostProcessGracefulDegradation:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(mixed_contracts_dir)],
         )
 
@@ -506,6 +522,7 @@ class TestRuntimeHostProcessGracefulDegradation:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_dir), str(nonexistent_path)],
         )
 
@@ -539,6 +556,7 @@ class TestRuntimeHostProcessGracefulDegradation:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(empty_dir)],
         )
 
@@ -587,6 +605,7 @@ class TestRuntimeHostProcessLifecycle:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 
@@ -630,6 +649,7 @@ class TestRuntimeHostProcessLifecycle:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 
@@ -646,6 +666,7 @@ class TestRuntimeHostProcessLifecycle:
         process2 = RuntimeHostProcess(
             event_bus=fresh_event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 
@@ -671,6 +692,7 @@ class TestRuntimeHostProcessLifecycle:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 
@@ -707,6 +729,7 @@ class TestRuntimeHostProcessLifecycle:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 
@@ -749,6 +772,7 @@ class TestRuntimeHostProcessDiscoveryLogging:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config=TEST_RUNTIME_CONFIG,
             contract_paths=[str(valid_handler_contract_dir)],
         )
 

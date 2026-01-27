@@ -54,6 +54,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel
 
 from omnibase_infra.enums import (
+    EnumConsumerGroupPurpose,
     EnumHandlerSourceMode,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
@@ -70,6 +71,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
     validate_envelope,
@@ -78,6 +80,7 @@ from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import ModelDuplicateResponse
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
+from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
@@ -540,16 +543,40 @@ class RuntimeHostProcess:
         # Topic configuration (config overrides constructor args)
         self._input_topic: str = str(config.get("input_topic", input_topic))
         self._output_topic: str = str(config.get("output_topic", output_topic))
-        # Note: ModelRuntimeConfig uses field name "consumer_group" with alias "group_id".
-        # When config.model_dump() is called, it outputs "consumer_group" by default.
-        # We check both keys to support either field name or alias.
-        # Empty strings and whitespace-only strings fall through to the next option.
-        consumer_group = config.get("consumer_group")
-        group_id = config.get("group_id")
-        self._group_id: str = str(
-            (consumer_group if consumer_group and str(consumer_group).strip() else None)
-            or (group_id if group_id and str(group_id).strip() else None)
-            or DEFAULT_GROUP_ID
+
+        # Node identity configuration (required for consumer group derivation)
+        # Extract components from config - fail-fast if required fields are missing
+        _env = config.get("env")
+        env: str = str(_env).strip() if _env else "local"
+
+        _service_name = config.get("service_name")
+        if not _service_name or not str(_service_name).strip():
+            raise ValueError(
+                "RuntimeHostProcess requires 'service_name' in config. "
+                "This is the service name from your node's contract (e.g., 'omniintelligence'). "
+                "Cannot infer service_name - please provide it explicitly."
+            )
+        service_name: str = str(_service_name).strip()
+
+        _node_name = config.get("node_name")
+        if not _node_name or not str(_node_name).strip():
+            raise ValueError(
+                "RuntimeHostProcess requires 'node_name' in config. "
+                "This is the node name from your contract (e.g., 'claude_hook_event_effect'). "
+                "Cannot infer node_name - please provide it explicitly."
+            )
+        node_name: str = str(_node_name).strip()
+
+        _version = config.get("version")
+        version: str = (
+            str(_version).strip() if _version and str(_version).strip() else "v1"
+        )
+
+        self._node_identity: ModelNodeIdentity = ModelNodeIdentity(
+            env=env,
+            service=service_name,
+            node_name=node_name,
+            version=version,
         )
 
         # Health check configuration (from lifecycle subcontract pattern)
@@ -686,7 +713,7 @@ class RuntimeHostProcess:
             extra={
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
-                "group_id": self._group_id,
+                "group_id": self.group_id,
                 "health_check_timeout_seconds": self._health_check_timeout_seconds,
                 "drain_timeout_seconds": self._drain_timeout_seconds,
                 "has_container": self._container is not None,
@@ -745,10 +772,28 @@ class RuntimeHostProcess:
     def group_id(self) -> str:
         """Return the consumer group identifier.
 
+        Computes the consumer group ID from the node identity using the canonical
+        format: ``{env}.{service}.{node_name}.{purpose}.{version}``
+
         Returns:
-            The consumer group ID for this process.
+            The computed consumer group ID for this process.
         """
-        return self._group_id
+        return compute_consumer_group_id(
+            self._node_identity, EnumConsumerGroupPurpose.CONSUME
+        )
+
+    @property
+    def node_identity(self) -> ModelNodeIdentity:
+        """Return the node identity used for consumer group derivation.
+
+        The node identity contains the environment, service name, node name,
+        and version that uniquely identify this runtime host process within
+        the ONEX infrastructure.
+
+        Returns:
+            The immutable node identity for this process.
+        """
+        return self._node_identity
 
     @property
     def is_draining(self) -> bool:
@@ -880,7 +925,7 @@ class RuntimeHostProcess:
             extra={
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
-                "group_id": self._group_id,
+                "group_id": self.group_id,
                 "has_contract_paths": len(self._contract_paths) > 0,
             },
         )
@@ -989,8 +1034,9 @@ class RuntimeHostProcess:
         # Step 5: Subscribe to input topic
         self._subscription = await self._event_bus.subscribe(
             topic=self._input_topic,
-            group_id=self._group_id,
+            node_identity=self._node_identity,
             on_message=self._on_message,
+            purpose=EnumConsumerGroupPurpose.CONSUME,
         )
 
         self._is_running = True
@@ -1000,7 +1046,7 @@ class RuntimeHostProcess:
             extra={
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
-                "group_id": self._group_id,
+                "group_id": self.group_id,
                 "registered_handlers": list(self._handlers.keys()),
             },
         )

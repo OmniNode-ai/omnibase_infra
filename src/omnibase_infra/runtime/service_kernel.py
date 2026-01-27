@@ -65,7 +65,7 @@ import yaml
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
@@ -75,6 +75,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
     DispatcherNodeIntrospected,
 )
@@ -499,7 +500,6 @@ async def bootstrap() -> int:
             kafka_config = ModelKafkaEventBusConfig(
                 bootstrap_servers=kafka_bootstrap_servers,  # type: ignore[arg-type]  # NOTE: control flow narrowing limitation
                 environment=environment,
-                group=config.consumer_group,
                 circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
             )
             event_bus = EventBusKafka(config=kafka_config)
@@ -1033,13 +1033,39 @@ async def bootstrap() -> int:
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to
         # dict[str, object] to avoid implicit Any typing (Pydantic's model_dump()
         # returns dict[str, Any] but all our model fields are strongly typed)
+        #
+        # NOTE: RuntimeHostProcess expects 'service_name' and 'node_name' keys,
+        # but ModelRuntimeConfig uses 'name'. Map 'name' -> 'service_name'/'node_name'
+        # for compatibility. (OMN-1602)
+        #
+        # INVARIANT: In the current runtime model, `ModelRuntimeConfig.name` represents
+        # both `service_name` and `node_name` by design; multi-node services require
+        # schema expansion.
+        #
+        # TRIGGER FOR SPLIT: Split when ServiceKernel supports registering multiple
+        # node contracts under one service runtime.
+        #
+        # Why both fields get the same value:
+        # - For services using simplified config with just 'name', there's no semantic
+        #   distinction between service and node - a single service hosts a single node
+        # - RuntimeHostProcess uses these to construct ModelNodeIdentity for Kafka
+        #   consumer group IDs and event routing
+        # - The introspection consumer group format is:
+        #   {env}.{service_name}.{node_name}.{purpose}.{version}
+        #   e.g., "local.my-service.my-service.introspection.v1"
+        # - When service_name == node_name, the format is intentionally redundant but
+        #   maintains consistency with multi-node deployments where they would differ
         runtime_create_start_time = time.time()
+        runtime_config_dict = cast("dict[str, object]", config.model_dump())
+        if config.name:
+            runtime_config_dict["service_name"] = config.name
+            runtime_config_dict["node_name"] = config.name
         runtime = RuntimeHostProcess(
             container=container,
             event_bus=event_bus,
             input_topic=config.input_topic,
             output_topic=config.output_topic,
-            config=cast("dict[str, object]", config.model_dump()),
+            config=runtime_config_dict,
             handler_registry=handler_registry,
             # Pass contracts directory for handler discovery (OMN-1317)
             # This enables contract-based handler registration instead of
@@ -1197,6 +1223,37 @@ async def bootstrap() -> int:
                 event_bus=event_bus,
             )
 
+            # Create typed node identity for introspection subscription (OMN-1602)
+            # Uses ModelNodeIdentity + EnumConsumerGroupPurpose instead of hardcoded
+            # group_id suffix hack for proper semantic consumer group naming.
+            #
+            # Required fields from config (fail-fast if missing):
+            # - service_name: from config.name (required for node identification)
+            # - node_name: from config.name (required for node identification)
+            # Optional with defaults:
+            # - env: from environment variable or event_bus.environment
+            # - version: from config.contract_version or "v1"
+            if not config.name:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="create_node_identity",
+                    correlation_id=correlation_id,
+                )
+                raise ProtocolConfigurationError(
+                    "Runtime config requires 'name' field for service identification. "
+                    "Add 'name: your-service-name' to runtime_config.yaml. "
+                    "This is required for typed introspection subscription (OMN-1602).",
+                    context=context,
+                    parameter="name",
+                )
+
+            introspection_node_identity = ModelNodeIdentity(
+                env=environment,
+                service=config.name,
+                node_name=config.name,
+                version=config.contract_version or "v1",
+            )
+
             # Subscribe with callback - returns unsubscribe function
             subscribe_start_time = time.time()
             logger.info(
@@ -1204,15 +1261,22 @@ async def bootstrap() -> int:
                 correlation_id,
                 extra={
                     "topic": config.input_topic,
-                    "consumer_group": f"{config.consumer_group}-introspection",
+                    "node_identity": {
+                        "env": introspection_node_identity.env,
+                        "service": introspection_node_identity.service,
+                        "node_name": introspection_node_identity.node_name,
+                        "version": introspection_node_identity.version,
+                    },
+                    "purpose": EnumConsumerGroupPurpose.INTROSPECTION.value,
                     "event_bus_type": event_bus_type,
                 },
             )
 
             introspection_unsubscribe = await event_bus.subscribe(
                 topic=config.input_topic,
-                group_id=f"{config.consumer_group}-introspection",
+                node_identity=introspection_node_identity,
                 on_message=introspection_event_router.handle_message,
+                purpose=EnumConsumerGroupPurpose.INTROSPECTION,
             )
             subscribe_duration = time.time() - subscribe_start_time
 
@@ -1222,7 +1286,13 @@ async def bootstrap() -> int:
                 correlation_id,
                 extra={
                     "topic": config.input_topic,
-                    "consumer_group": f"{config.consumer_group}-introspection",
+                    "node_identity": {
+                        "env": introspection_node_identity.env,
+                        "service": introspection_node_identity.service,
+                        "node_name": introspection_node_identity.node_name,
+                        "version": introspection_node_identity.version,
+                    },
+                    "purpose": EnumConsumerGroupPurpose.INTROSPECTION.value,
                     "subscribe_duration_seconds": subscribe_duration,
                     "event_bus_type": event_bus_type,
                 },

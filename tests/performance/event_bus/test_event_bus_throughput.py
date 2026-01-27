@@ -61,6 +61,7 @@ from omnibase_infra.event_bus.models import ModelEventMessage
 # Uses the shared is_ci_environment() helper from omnibase_infra.testing for consistent
 # CI detection across the codebase.
 from omnibase_infra.testing import is_ci_environment
+from tests.conftest import make_test_node_identity
 from tests.performance.event_bus.conftest import generate_unique_topic
 
 IS_CI = is_ci_environment()
@@ -497,7 +498,11 @@ class TestPublishWithSubscribers:
             async with lock:
                 received_count += 1
 
-        await event_bus.subscribe(topic, "perf-group", handler)
+        await event_bus.subscribe(
+            topic,
+            make_test_node_identity(service="throughput-test", node_name="perf-group"),
+            handler,
+        )
 
         start = time.perf_counter()
         for i in range(1000):
@@ -549,7 +554,15 @@ class TestPublishWithSubscribers:
             return handler
 
         for i in range(5):
-            await event_bus.subscribe(topic, f"group-{i}", make_handler(i))
+            await event_bus.subscribe(
+                topic,
+                make_test_node_identity(
+                    service="throughput-test",
+                    node_name="multi-sub",
+                    suffix=f"group-{i}",
+                ),
+                make_handler(i),
+            )
 
         start = time.perf_counter()
         for i in range(500):
@@ -598,7 +611,13 @@ class TestPublishWithSubscribers:
 
         # Subscribe 10 handlers
         for i in range(10):
-            await event_bus.subscribe(topic, f"fanout-{i}", handler)
+            await event_bus.subscribe(
+                topic,
+                make_test_node_identity(
+                    service="throughput-test", node_name="fanout", suffix=f"sub-{i}"
+                ),
+                handler,
+            )
 
         start = time.perf_counter()
         for i in range(200):

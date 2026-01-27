@@ -30,11 +30,23 @@ import pytest
 from omnibase_infra.errors import EnvelopeValidationError, UnknownHandlerTypeError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.runtime.envelope_validator import (
     PAYLOAD_REQUIRED_OPERATIONS,
     validate_envelope,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
+
+
+def _make_routing_identity(name: str) -> ModelNodeIdentity:
+    """Create test identity for envelope routing tests."""
+    return ModelNodeIdentity(
+        env="test",
+        service="envelope-routing-test",
+        node_name=name,
+        version="v1",
+    )
+
 
 # =============================================================================
 # Test Configuration
@@ -167,7 +179,9 @@ class TestEnvelopeRoutingE2E:
 
         # Subscribe to envelope topic
         topic = "integration-test.envelopes"
-        unsubscribe = await event_bus.subscribe(topic, "test-group", envelope_handler)
+        unsubscribe = await event_bus.subscribe(
+            topic, _make_routing_identity("test-group"), envelope_handler
+        )
 
         # Create and publish envelope
         test_envelope = {
@@ -258,7 +272,7 @@ class TestEnvelopeRoutingE2E:
 
         topic = "integration-test.routing-pipeline"
         unsubscribe = await event_bus.subscribe(
-            topic, "pipeline-group", routing_handler
+            topic, _make_routing_identity("pipeline-group"), routing_handler
         )
 
         # Create envelope with string correlation_id
@@ -337,7 +351,7 @@ class TestEnvelopeRoutingE2E:
 
         topic = "integration-test.multi-type"
         unsubscribe = await event_bus.subscribe(
-            topic, "multi-group", type_sorting_handler
+            topic, _make_routing_identity("multi-group"), type_sorting_handler
         )
 
         # Publish different envelope types
@@ -413,7 +427,7 @@ class TestEnvelopePayloadExtraction:
 
         topic = "integration-test.payload-extraction"
         unsubscribe = await event_bus.subscribe(
-            topic, "payload-group", payload_extractor
+            topic, _make_routing_identity("payload-group"), payload_extractor
         )
 
         # Test various operations with their required payloads
@@ -498,7 +512,7 @@ class TestEnvelopePayloadExtraction:
 
         topic = "integration-test.nested-payload"
         unsubscribe = await event_bus.subscribe(
-            topic, "nested-group", nested_payload_handler
+            topic, _make_routing_identity("nested-group"), nested_payload_handler
         )
 
         # Complex nested payload
@@ -568,7 +582,9 @@ class TestEnvelopePayloadExtraction:
             data_received.set()
 
         topic = "integration-test.binary-payload"
-        unsubscribe = await event_bus.subscribe(topic, "binary-group", binary_handler)
+        unsubscribe = await event_bus.subscribe(
+            topic, _make_routing_identity("binary-group"), binary_handler
+        )
 
         # Binary data encoded as base64
         original_data = b"\x00\x01\x02\x03\xff\xfe\xfd"
@@ -704,7 +720,7 @@ class TestEnvelopeRoutingErrors:
 
         topic = "integration-test.error-handling"
         unsubscribe = await event_bus.subscribe(
-            topic, "error-group", error_handling_router
+            topic, _make_routing_identity("error-group"), error_handling_router
         )
 
         # Mix of valid and invalid envelopes
@@ -837,7 +853,7 @@ class TestCorrelationIdPropagation:
 
         topic = "integration-test.correlation-tracking"
         unsubscribe = await event_bus.subscribe(
-            topic, "corr-group", correlation_tracker
+            topic, _make_routing_identity("corr-group"), correlation_tracker
         )
 
         # Publish envelopes with specific correlation IDs
@@ -886,7 +902,9 @@ class TestCorrelationIdPropagation:
             message_received.set()
 
         topic = "integration-test.header-correlation"
-        unsubscribe = await event_bus.subscribe(topic, "header-group", header_checker)
+        unsubscribe = await event_bus.subscribe(
+            topic, _make_routing_identity("header-group"), header_checker
+        )
 
         # Publish with explicit correlation_id in headers
         correlation_id = uuid4()
@@ -960,10 +978,10 @@ class TestCorrelationIdPropagation:
             final_hop.set()
 
         unsub1 = await event_bus.subscribe(
-            "integration-test.hop1", "hop1-group", hop1_handler
+            "integration-test.hop1", _make_routing_identity("hop1-group"), hop1_handler
         )
         unsub2 = await event_bus.subscribe(
-            "integration-test.hop2", "hop2-group", hop2_handler
+            "integration-test.hop2", _make_routing_identity("hop2-group"), hop2_handler
         )
 
         # Start the chain
@@ -1025,7 +1043,9 @@ class TestEnvelopeRoutingEdgeCases:
                     all_received.set()
 
         topic = "integration-test.high-volume"
-        unsubscribe = await event_bus.subscribe(topic, "volume-group", counter_handler)
+        unsubscribe = await event_bus.subscribe(
+            topic, _make_routing_identity("volume-group"), counter_handler
+        )
 
         # Publish many envelopes concurrently
         async def publish_batch(start: int, count: int) -> None:
@@ -1079,7 +1099,9 @@ class TestEnvelopeRoutingEdgeCases:
             payload_received.set()
 
         topic = "integration-test.none-values"
-        unsubscribe = await event_bus.subscribe(topic, "none-group", none_handler)
+        unsubscribe = await event_bus.subscribe(
+            topic, _make_routing_identity("none-group"), none_handler
+        )
 
         envelope = {
             "operation": "http.post",
@@ -1127,7 +1149,9 @@ class TestEnvelopeRoutingEdgeCases:
             content_received.set()
 
         topic = "integration-test.unicode"
-        unsubscribe = await event_bus.subscribe(topic, "unicode-group", unicode_handler)
+        unsubscribe = await event_bus.subscribe(
+            topic, _make_routing_identity("unicode-group"), unicode_handler
+        )
 
         # Unicode content including various scripts and emoji
         unicode_message = "Hello World! Japanese characters \u65e5\u672c\u8a9e Chinese characters \u4e2d\u6587 Emoji: \U0001f600\U0001f389"
