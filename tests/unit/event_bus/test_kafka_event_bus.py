@@ -1582,6 +1582,7 @@ class TestKafkaEventBusDLQRouting:
                 error=error,
                 correlation_id=correlation_id,
                 failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify DLQ publish was called (using send_and_wait for cleaner timeout handling)
@@ -1659,6 +1660,7 @@ class TestKafkaEventBusDLQRouting:
                 failed_message=failed_message,
                 error=error,
                 correlation_id=correlation_id,
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify DLQ publish was called (using send_and_wait for cleaner timeout handling)
@@ -1821,6 +1823,7 @@ class TestKafkaEventBusDLQRouting:
                 failed_message=failed_message,
                 error=error,
                 correlation_id=correlation_id,
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify no additional send calls were made
@@ -1904,6 +1907,7 @@ class TestKafkaEventBusDLQRouting:
                 failed_message=failed_message,
                 error=error,
                 correlation_id=correlation_id,
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify the bus is still healthy
@@ -1965,6 +1969,7 @@ class TestKafkaEventBusDLQRouting:
                 error=error,
                 correlation_id=correlation_id,
                 failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify DLQ publish was attempted (using send_and_wait for cleaner timeout handling)
