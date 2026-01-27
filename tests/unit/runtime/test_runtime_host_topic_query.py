@@ -396,26 +396,30 @@ class TestGetSubscribersForTopic:
         runtime: RuntimeHostProcess,
         mock_consul_handler: MagicMock,
     ) -> None:
-        """Test that invalid UUIDs in a mixed list cause full failure.
+        """Test that invalid UUIDs are skipped, valid ones returned.
 
-        Note: Current implementation fails on first invalid UUID due to
-        list comprehension. This is intentional - partial results could
-        be misleading and lead to routing bugs.
+        The implementation uses graceful degradation - invalid UUIDs are
+        logged and skipped rather than causing complete failure. This is
+        preferred for distributed systems where one corrupt entry shouldn't
+        break the entire routing mechanism.
         """
         # Setup: Register mock consul handler
         runtime.register_handler("consul", mock_consul_handler)
 
         # Setup: Mix of valid and invalid UUIDs
-        valid_id = uuid4()
-        mixed_list = [str(valid_id), "not-a-uuid", str(uuid4())]
+        valid_id_1 = uuid4()
+        valid_id_2 = uuid4()
+        mixed_list = [str(valid_id_1), "not-a-uuid", str(valid_id_2)]
         mock_response = self._create_kv_found_response(json.dumps(mixed_list))
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
         result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
 
-        # Verify: Empty list (fail-fast on invalid UUID)
-        assert result == []
+        # Verify: Only valid UUIDs returned (invalid skipped with warning)
+        assert len(result) == 2
+        assert valid_id_1 in result
+        assert valid_id_2 in result
 
 
 class TestGetSubscribersForTopicIntegration:
