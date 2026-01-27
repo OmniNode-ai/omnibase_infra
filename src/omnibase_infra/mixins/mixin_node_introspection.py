@@ -199,6 +199,7 @@ import asyncio
 import inspect
 import json
 import logging
+import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -210,6 +211,7 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.capabilities import ContractCapabilityExtractor
+from omnibase_infra.constants_topic_patterns import TOPIC_NAME_PATTERN
 from omnibase_infra.enums import EnumInfraTransportType, EnumIntrospectionReason
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.discovery import (
@@ -223,6 +225,10 @@ from omnibase_infra.models.discovery.model_introspection_performance_metrics imp
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeHeartbeatEvent,
+)
+from omnibase_infra.models.registration.model_node_event_bus_config import (
+    ModelEventBusTopicEntry,
+    ModelNodeEventBusConfig,
 )
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
@@ -972,6 +978,109 @@ class MixinNodeIntrospection:
             )
             return None
 
+    def _extract_event_bus_config(
+        self,
+        env_prefix: str,
+    ) -> ModelNodeEventBusConfig | None:
+        """Extract and resolve event_bus config from contract.
+
+        Extracts topic suffixes from the contract's event_bus subcontract and
+        resolves them to full environment-qualified topic strings.
+
+        Topic Resolution:
+            Contract topics are suffixes (e.g., "onex.evt.intent-classified.v1").
+            This method prepends the environment prefix to create full topics
+            (e.g., "dev.onex.evt.intent-classified.v1").
+
+        Args:
+            env_prefix: Environment prefix (e.g., "dev", "prod", "staging").
+                Must be a valid identifier without dots or special characters.
+
+        Returns:
+            Resolved event bus config with full topic strings, or None if:
+            - No contract is configured (_introspection_contract is None)
+            - Contract has no event_bus subcontract
+            - event_bus subcontract has no publish_topics or subscribe_topics
+
+        Raises:
+            ValueError: If topic resolution fails due to unresolved placeholders
+                (e.g., "{env}" or "{namespace}" remaining in the resolved topic).
+                This is a fail-fast mechanism to prevent misconfigured topics
+                from being published to the registry.
+
+        Example:
+            >>> config = self._extract_event_bus_config("dev")
+            >>> config.publish_topic_strings
+            ['dev.onex.evt.node-registered.v1']
+
+        See Also:
+            - ModelEventBusSubcontract: Contract model with topic suffixes
+            - ModelNodeEventBusConfig: Registry storage model with full topics
+        """
+        if self._introspection_contract is None:
+            return None
+
+        # Get event_bus subcontract if present
+        event_bus_sub = getattr(self._introspection_contract, "event_bus", None)
+        if event_bus_sub is None:
+            return None
+
+        # Get topic suffix lists from the subcontract
+        publish_suffixes: list[str] = (
+            getattr(event_bus_sub, "publish_topics", None) or []
+        )
+        subscribe_suffixes: list[str] = (
+            getattr(event_bus_sub, "subscribe_topics", None) or []
+        )
+
+        if not publish_suffixes and not subscribe_suffixes:
+            return None
+
+        def resolve_topic(suffix: str) -> str:
+            """Resolve topic suffix to full topic with env prefix."""
+            # Full topic format: {env}.{suffix}
+            # Strip whitespace from suffix to handle YAML formatting artifacts
+            suffix = suffix.strip()
+
+            # Fail-fast: check for unresolved placeholders BEFORE format validation
+            # This provides more helpful error messages when placeholders aren't resolved
+            if "{" in suffix or "}" in suffix:
+                raise ValueError(
+                    f"Unresolved placeholder in topic: '{suffix}'. "
+                    "Ensure all placeholders like {env} or {namespace} are resolved "
+                    "before topic validation."
+                )
+
+            # Validate suffix format (alphanumeric, dots, hyphens, underscores)
+            if not TOPIC_NAME_PATTERN.match(suffix):
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="_extract_event_bus_config",
+                    target_name=suffix,
+                )
+                raise ProtocolConfigurationError(
+                    f"Invalid topic suffix format: '{suffix}'. "
+                    "Topics must contain only alphanumeric characters, dots, hyphens, and underscores.",
+                    context=context,
+                    parameter="topic_suffix",
+                )
+
+            full_topic = f"{env_prefix}.{suffix}"
+
+            return full_topic
+
+        def build_entry(suffix: str) -> ModelEventBusTopicEntry:
+            """Build topic entry from suffix."""
+            return ModelEventBusTopicEntry(
+                topic=resolve_topic(suffix),
+                # Metadata fields left as defaults (tooling-only)
+            )
+
+        return ModelNodeEventBusConfig(
+            publish_topics=[build_entry(s) for s in publish_suffixes],
+            subscribe_topics=[build_entry(s) for s in subscribe_suffixes],
+        )
+
     async def get_capabilities(self) -> ModelDiscoveredCapabilities:
         """Extract node capabilities via reflection.
 
@@ -1350,6 +1459,28 @@ class MixinNodeIntrospection:
                 self._introspection_contract
             )
 
+        # Extract event_bus config from contract (OMN-1613)
+        # Resolves topic suffixes to full environment-qualified topics
+        # ValueError from _extract_event_bus_config (unresolved placeholders) is
+        # wrapped in ProtocolConfigurationError for consistent error handling.
+        # ProtocolConfigurationError (invalid format) propagates directly.
+        event_bus_config: ModelNodeEventBusConfig | None = None
+        env_prefix = os.getenv("ONEX_ENV", "dev")
+        try:
+            event_bus_config = self._extract_event_bus_config(env_prefix)
+        except ValueError as e:
+            # Wrap ValueError in ProtocolConfigurationError for fail-fast behavior
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="get_introspection_data",
+                target_name="event_bus",
+            )
+            raise ProtocolConfigurationError(
+                f"Event bus extraction failed: {e}",
+                context=context,
+                parameter="event_bus",
+            ) from e
+
         # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
             node_id=node_id_uuid,
@@ -1364,6 +1495,7 @@ class MixinNodeIntrospection:
             correlation_id=uuid4(),
             timestamp=datetime.now(UTC),
             performance_metrics=metrics,
+            event_bus=event_bus_config,
         )
 
         # Update cache - cast the model_dump output to our typed dict since we know
@@ -1544,6 +1676,7 @@ class MixinNodeIntrospection:
                     extra={
                         "node_id": self._introspection_node_id,
                         "reason": reason_enum.value,
+                        "correlation_id": str(final_correlation_id),
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                     },
@@ -1575,6 +1708,9 @@ class MixinNodeIntrospection:
         if self._introspection_event_bus is None:
             return False
 
+        # Generate correlation_id early for reliable exception logging
+        heartbeat_correlation_id = uuid4()
+
         try:
             # Calculate uptime
             uptime_seconds = 0.0
@@ -1588,7 +1724,10 @@ class MixinNodeIntrospection:
                 logger.warning(
                     "Node ID not initialized, using nil UUID in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
-                    extra={"operation": "_publish_heartbeat"},
+                    extra={
+                        "operation": "_publish_heartbeat",
+                        "correlation_id": str(heartbeat_correlation_id),
+                    },
                 )
                 # Use nil UUID (all zeros) as sentinel for uninitialized node
                 node_id = UUID("00000000-0000-0000-0000-000000000000")
@@ -1600,7 +1739,11 @@ class MixinNodeIntrospection:
                 logger.warning(
                     "Node type not initialized, using EFFECT in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
-                    extra={"node_id": str(node_id), "operation": "_publish_heartbeat"},
+                    extra={
+                        "node_id": str(node_id),
+                        "operation": "_publish_heartbeat",
+                        "correlation_id": str(heartbeat_correlation_id),
+                    },
                 )
                 node_type = EnumNodeKind.EFFECT
 
@@ -1615,7 +1758,7 @@ class MixinNodeIntrospection:
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
                 active_operations_count=active_ops_count,
-                correlation_id=uuid4(),
+                correlation_id=heartbeat_correlation_id,
                 timestamp=now,  # Required: time injection pattern
             )
 
@@ -1648,6 +1791,7 @@ class MixinNodeIntrospection:
                 f"Published heartbeat for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(heartbeat_correlation_id),
                     "uptime_seconds": uptime_seconds,
                     "active_operations": active_ops_count,
                     "topic": topic,
@@ -1662,6 +1806,7 @@ class MixinNodeIntrospection:
                 f"Failed to publish heartbeat for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(heartbeat_correlation_id),
                     "error_type": type(e).__name__,
                     "error_message": str(e),
                 },
@@ -1691,12 +1836,17 @@ class MixinNodeIntrospection:
         )
 
         while not self._introspection_stop_event.is_set():
+            # Generate correlation_id for this loop iteration for traceability
+            loop_correlation_id = uuid4()
             try:
                 await self._publish_heartbeat()
             except asyncio.CancelledError:
                 logger.debug(
                     f"Heartbeat loop cancelled for {self._introspection_node_id}",
-                    extra={"node_id": self._introspection_node_id},
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "correlation_id": str(loop_correlation_id),
+                    },
                 )
                 break
             except Exception as e:
@@ -1706,6 +1856,7 @@ class MixinNodeIntrospection:
                     f"Error in heartbeat loop for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
+                        "correlation_id": str(loop_correlation_id),
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                     },
@@ -1778,9 +1929,17 @@ class MixinNodeIntrospection:
         """
         return consecutive_failures == 1 or consecutive_failures % threshold == 0
 
-    async def _cleanup_registry_subscription(self) -> None:
-        """Clean up the current registry subscription."""
+    async def _cleanup_registry_subscription(
+        self, correlation_id: UUID | None = None
+    ) -> None:
+        """Clean up the current registry subscription.
+
+        Args:
+            correlation_id: Optional correlation ID for traceability in logs.
+                If not provided, a new one will be generated.
+        """
         if self._registry_unsubscribe is not None:
+            cleanup_correlation_id = correlation_id or uuid4()
             try:
                 result = self._registry_unsubscribe()
                 if asyncio.iscoroutine(result):
@@ -1791,6 +1950,7 @@ class MixinNodeIntrospection:
                     f"{self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
+                        "correlation_id": str(cleanup_correlation_id),
                         "error_type": type(cleanup_error).__name__,
                         "error_message": str(cleanup_error),
                     },
@@ -1809,12 +1969,14 @@ class MixinNodeIntrospection:
         Args:
             message: The incoming event message (implements ProtocolEventMessage protocol)
         """
+        # Generate correlation_id for this request for traceability
+        request_correlation_id = uuid4()
         try:
             await self._process_introspection_request(message)
             # Reset failure counter on success
             self._registry_callback_consecutive_failures = 0
         except Exception as e:
-            self._handle_request_error(e)
+            self._handle_request_error(e, request_correlation_id)
 
     async def _process_introspection_request(
         self, message: ProtocolEventMessage
@@ -1854,13 +2016,14 @@ class MixinNodeIntrospection:
             correlation_id=correlation_id,
         )
 
-    def _handle_request_error(self, error: Exception) -> None:
+    def _handle_request_error(self, error: Exception, correlation_id: UUID) -> None:
         """Handle error during introspection request processing.
 
         Tracks consecutive failures and rate-limits error logging.
 
         Args:
             error: The exception that occurred
+            correlation_id: Correlation ID for traceability in logs
         """
         # Track consecutive failures for rate-limited logging
         self._registry_callback_consecutive_failures += 1
@@ -1875,6 +2038,7 @@ class MixinNodeIntrospection:
                 f"Error handling introspection request for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(correlation_id),
                     "error_type": type(error).__name__,
                     "error_message": str(error),
                     "consecutive_failures": self._registry_callback_consecutive_failures,
@@ -1890,6 +2054,7 @@ class MixinNodeIntrospection:
                 f"(failure {self._registry_callback_consecutive_failures})",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(correlation_id),
                     "error_type": type(error).__name__,
                     "consecutive_failures": self._registry_callback_consecutive_failures,
                 },
@@ -2023,6 +2188,8 @@ class MixinNodeIntrospection:
         # Retry loop with exponential backoff for subscription failures
         retry_count = 0
         while not self._introspection_stop_event.is_set():
+            # Generate correlation_id for this subscription attempt for traceability
+            subscription_correlation_id = uuid4()
             try:
                 if await self._attempt_subscription():
                     # Wait for stop signal
@@ -2033,13 +2200,20 @@ class MixinNodeIntrospection:
             except asyncio.CancelledError:
                 logger.debug(
                     f"Registry listener cancelled for {self._introspection_node_id}",
-                    extra={"node_id": self._introspection_node_id},
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "correlation_id": str(subscription_correlation_id),
+                    },
                 )
                 break
             except Exception as e:
                 retry_count += 1
                 if not await self._handle_subscription_error(
-                    e, retry_count, max_retries, base_backoff_seconds
+                    e,
+                    retry_count,
+                    max_retries,
+                    base_backoff_seconds,
+                    subscription_correlation_id,
                 ):
                     break
 
@@ -2057,6 +2231,7 @@ class MixinNodeIntrospection:
         retry_count: int,
         max_retries: int,
         base_backoff_seconds: float,
+        correlation_id: UUID,
     ) -> bool:
         """Handle subscription error with retry logic.
 
@@ -2065,6 +2240,7 @@ class MixinNodeIntrospection:
             retry_count: Current retry attempt number
             max_retries: Maximum retry attempts
             base_backoff_seconds: Base backoff time for exponential retry
+            correlation_id: Correlation ID for traceability in logs
 
         Returns:
             True if should continue retrying, False if should stop
@@ -2073,6 +2249,7 @@ class MixinNodeIntrospection:
             f"Error in registry listener for {self._introspection_node_id}",
             extra={
                 "node_id": self._introspection_node_id,
+                "correlation_id": str(correlation_id),
                 "error_type": type(error).__name__,
                 "error_message": str(error),
                 "retry_count": retry_count,
@@ -2082,7 +2259,7 @@ class MixinNodeIntrospection:
         )
 
         # Clean up any partial subscription before retry
-        await self._cleanup_registry_subscription()
+        await self._cleanup_registry_subscription(correlation_id)
 
         # Check if we should retry
         if retry_count >= max_retries:
@@ -2090,6 +2267,7 @@ class MixinNodeIntrospection:
                 "Registry listener exhausted retries",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(correlation_id),
                     "retry_count": retry_count,
                     "max_retries": max_retries,
                     "error_type": type(error).__name__,

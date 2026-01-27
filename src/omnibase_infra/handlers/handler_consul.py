@@ -52,6 +52,7 @@ from omnibase_infra.handlers.mixins import (
     MixinConsulInitialization,
     MixinConsulKV,
     MixinConsulService,
+    MixinConsulTopicIndex,
 )
 from omnibase_infra.handlers.models import (
     ModelOperationContext,
@@ -111,6 +112,7 @@ class HandlerConsul(
     MixinEnvelopeExtraction,
     MixinConsulInitialization,
     MixinConsulKV,
+    MixinConsulTopicIndex,  # Must come before MixinConsulService (MRO order)
     MixinConsulService,
 ):
     """HashiCorp Consul handler using python-consul client (MVP: KV, service registration).

@@ -3845,10 +3845,10 @@ class TestHelperMethods:
 
         assert node._registry_callback_consecutive_failures == 0
 
-        node._handle_request_error(RuntimeError("Test error"))
+        node._handle_request_error(RuntimeError("Test error"), uuid4())
         assert node._registry_callback_consecutive_failures == 1
 
-        node._handle_request_error(RuntimeError("Test error 2"))
+        node._handle_request_error(RuntimeError("Test error 2"), uuid4())
         assert node._registry_callback_consecutive_failures == 2
 
     async def test_attempt_subscription_no_event_bus(self) -> None:
@@ -3894,6 +3894,7 @@ class TestHelperMethods:
             retry_count=3,
             max_retries=3,
             base_backoff_seconds=0.01,
+            correlation_id=uuid4(),
         )
         assert result is False
 
@@ -3911,6 +3912,7 @@ class TestHelperMethods:
             retry_count=1,
             max_retries=3,
             base_backoff_seconds=0.01,
+            correlation_id=uuid4(),
         )
         assert result is True
 
@@ -3931,5 +3933,6 @@ class TestHelperMethods:
             retry_count=1,
             max_retries=3,
             base_backoff_seconds=10.0,  # Long backoff - should be interrupted
+            correlation_id=uuid4(),
         )
         assert result is False

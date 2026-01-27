@@ -1591,6 +1591,7 @@ class TestEdgeCases:
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
         mock_event.timestamp = TEST_TIMESTAMP
+        mock_event.event_bus = None  # No event bus config for this mock
 
         output = reducer.reduce(initial_state, mock_event)
 
@@ -2953,6 +2954,7 @@ class TestDeterminismProperty:
         mock_event.metadata = ModelNodeMetadata()
         mock_event.correlation_id = None  # Force deterministic derivation
         mock_event.timestamp = TEST_TIMESTAMP
+        mock_event.event_bus = None  # No event bus config for this mock
 
         # Derive event ID multiple times
         derived_id_1 = reducer._derive_deterministic_event_id(mock_event)
@@ -3449,6 +3451,7 @@ class TestEdgeCasesComprehensive:
         mock_event1.metadata = ModelNodeMetadata()
         mock_event1.correlation_id = None
         mock_event1.timestamp = TEST_TIMESTAMP
+        mock_event1.event_bus = None  # No event bus config for this mock
 
         mock_event2 = MagicMock(spec=ModelNodeIntrospectionEvent)
         mock_event2.node_id = node_id2
@@ -3459,6 +3462,7 @@ class TestEdgeCasesComprehensive:
         mock_event2.metadata = ModelNodeMetadata()
         mock_event2.correlation_id = None
         mock_event2.timestamp = TEST_TIMESTAMP
+        mock_event2.event_bus = None  # No event bus config for this mock
 
         output1 = reducer.reduce(initial_state, mock_event1)
         output2 = reducer.reduce(initial_state, mock_event2)
@@ -4101,6 +4105,7 @@ class TestCommandFoldingPrevention:
         mock_command.endpoints = {"health": "http://localhost:8080/health"}
         mock_command.declared_capabilities = ModelNodeCapabilities()
         mock_command.metadata = ModelNodeMetadata()
+        mock_command.event_bus = None  # No event bus config for this mock
 
         # When passed to reduce(), it processes as data
         output = reducer.reduce(initial_state, mock_command)  # type: ignore[arg-type]

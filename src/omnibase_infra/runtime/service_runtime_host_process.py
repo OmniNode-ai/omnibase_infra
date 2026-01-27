@@ -61,6 +61,9 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import (
     EnvelopeValidationError,
+    InfraConsulError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -2287,6 +2290,171 @@ class RuntimeHostProcess:
             Handler instance if registered, None otherwise.
         """
         return self._handlers.get(handler_type)
+
+    async def get_subscribers_for_topic(self, topic: str) -> list[UUID]:
+        """Query Consul for node IDs that subscribe to a topic.
+
+        This method provides dynamic topic-to-subscriber lookup via Consul KV store.
+        Topics are stored at `onex/topics/{topic}/subscribers` and contain a JSON
+        array of node UUID strings.
+
+        Args:
+            topic: Environment-qualified topic string
+                   (e.g., "dev.onex.evt.intent-classified.v1")
+
+        Returns:
+            List of node UUIDs that subscribe to this topic.
+            Empty list if no subscribers registered or Consul unavailable.
+
+        Note:
+            Returns node IDs, not handler names. Node ID is the stable registry key.
+            Handler selection is a separate concern that can change independently.
+
+        Example:
+            >>> runtime = RuntimeHostProcess()
+            >>> await runtime.start()
+            >>> subscribers = await runtime.get_subscribers_for_topic(
+            ...     "dev.onex.evt.intent-classified.v1"
+            ... )
+            >>> print(subscribers)  # [UUID('abc123...'), UUID('def456...')]
+
+        Related:
+            - OMN-1613: Add event bus topic storage to registry for dynamic topic discovery
+            - MixinConsulTopicIndex: Consul mixin that manages topic index storage
+        """
+        consul_handler = self.get_handler("consul")
+        if consul_handler is None:
+            logger.debug(
+                "Consul handler not available for topic subscriber lookup",
+                extra={"topic": topic},
+            )
+            return []
+
+        try:
+            correlation_id = uuid4()
+            envelope: dict[str, object] = {
+                "operation": "consul.kv_get",
+                "payload": {"key": f"onex/topics/{topic}/subscribers"},
+                "correlation_id": str(correlation_id),
+            }
+
+            # Execute the Consul KV get operation
+            # NOTE: MVP adapters use legacy execute(envelope: dict) signature.
+            result = await consul_handler.execute(envelope)  # type: ignore[call-arg]
+
+            # Navigate to the value in the response structure:
+            # ModelHandlerOutput -> result (ModelConsulHandlerResponse)
+            #   -> payload (ModelConsulHandlerPayload) -> data (ConsulPayload)
+            if result is None:
+                return []
+
+            # Check if result has the expected structure
+            if not hasattr(result, "result") or result.result is None:
+                return []
+
+            response = result.result
+            if not hasattr(response, "payload") or response.payload is None:
+                return []
+
+            payload_data = response.payload.data
+            if payload_data is None:
+                return []
+
+            # Check for "not found" response - key doesn't exist
+            if hasattr(payload_data, "found") and payload_data.found is False:
+                return []
+
+            # Get the value field from the payload
+            value = getattr(payload_data, "value", None)
+            if not value:
+                return []
+
+            # Parse JSON array of node ID strings
+            node_ids_raw = json.loads(value)
+            if not isinstance(node_ids_raw, list):
+                logger.warning(
+                    "Topic subscriber value is not a list",
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(correlation_id),
+                        "value_type": type(node_ids_raw).__name__,
+                    },
+                )
+                return []
+
+            # Convert string UUIDs to UUID objects (skip invalid entries)
+            subscribers: list[UUID] = []
+            invalid_ids: list[str] = []
+            for nid in node_ids_raw:
+                if not isinstance(nid, str):
+                    continue
+                try:
+                    subscribers.append(UUID(nid))
+                except ValueError:
+                    invalid_ids.append(nid)
+
+            if invalid_ids:
+                logger.warning(
+                    "Invalid UUIDs in topic subscriber list",
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(correlation_id),
+                        "invalid_count": len(invalid_ids),
+                    },
+                )
+            return subscribers
+
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Failed to parse topic subscriber JSON",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                },
+            )
+            return []
+        except InfraConsulError as e:
+            logger.warning(
+                "Consul error querying topic subscribers",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraConsulError",
+                    "consul_key": getattr(e, "consul_key", None),
+                },
+            )
+            return []
+        except InfraTimeoutError as e:
+            logger.warning(
+                "Timeout querying topic subscribers",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraTimeoutError",
+                },
+            )
+            return []
+        except InfraUnavailableError as e:
+            logger.warning(
+                "Service unavailable for topic subscriber query",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraUnavailableError",
+                },
+            )
+            return []
+        except Exception as e:
+            # Graceful degradation - Consul unavailable is not fatal
+            logger.warning(
+                "Failed to query topic subscribers from Consul",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return []
 
     # =========================================================================
     # Architecture Validation Methods (OMN-1138)

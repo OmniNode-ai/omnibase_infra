@@ -9,6 +9,7 @@ Consul Mixins:
     - MixinConsulInitialization: Configuration parsing and client setup
     - MixinConsulKV: Key-value store operations (get, put)
     - MixinConsulService: Service registration operations (register, deregister)
+    - MixinConsulTopicIndex: Topic index management for event bus routing
 
 Vault Mixins:
     - MixinVaultInitialization: Configuration parsing and client setup
@@ -22,6 +23,9 @@ from omnibase_infra.handlers.mixins.mixin_consul_initialization import (
 )
 from omnibase_infra.handlers.mixins.mixin_consul_kv import MixinConsulKV
 from omnibase_infra.handlers.mixins.mixin_consul_service import MixinConsulService
+from omnibase_infra.handlers.mixins.mixin_consul_topic_index import (
+    MixinConsulTopicIndex,
+)
 from omnibase_infra.handlers.mixins.mixin_vault_initialization import (
     MixinVaultInitialization,
 )
@@ -34,6 +38,7 @@ __all__: list[str] = [
     "MixinConsulInitialization",
     "MixinConsulKV",
     "MixinConsulService",
+    "MixinConsulTopicIndex",
     # Vault mixins
     "MixinVaultInitialization",
     "MixinVaultRetry",
