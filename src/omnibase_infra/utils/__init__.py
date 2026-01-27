@@ -5,6 +5,7 @@
 This package provides common utilities used across the infrastructure:
     - correlation: Correlation ID generation and propagation for distributed tracing
     - util_atomic_file: Atomic file write primitives using temp-file-rename pattern
+    - util_consumer_group: Kafka consumer group ID generation with deterministic hashing
     - util_datetime: Datetime validation and timezone normalization
     - util_db_transaction: Database transaction context manager for asyncpg
     - util_dsn_validation: PostgreSQL DSN validation and sanitization
@@ -25,6 +26,11 @@ from omnibase_infra.utils.correlation import (
 from omnibase_infra.utils.util_atomic_file import (
     write_atomic_bytes,
     write_atomic_bytes_async,
+)
+from omnibase_infra.utils.util_consumer_group import (
+    KAFKA_CONSUMER_GROUP_MAX_LENGTH,
+    compute_consumer_group_id,
+    normalize_kafka_identifier,
 )
 from omnibase_infra.utils.util_datetime import (
     ensure_timezone_aware,
@@ -72,15 +78,18 @@ from omnibase_infra.utils.util_semver import (
 
 __all__: list[str] = [
     "CorrelationContext",
+    "KAFKA_CONSUMER_GROUP_MAX_LENGTH",
     "OptimisticConflictError",
     "SAFE_ERROR_PATTERNS",
     "SEMVER_PATTERN",
     "SENSITIVE_PATTERNS",
     "clear_correlation_id",
+    "compute_consumer_group_id",
     "ensure_timezone_aware",
     "generate_correlation_id",
     "get_correlation_id",
     "is_timezone_aware",
+    "normalize_kafka_identifier",
     "parse_and_validate_dsn",
     "parse_env_float",
     "parse_env_int",

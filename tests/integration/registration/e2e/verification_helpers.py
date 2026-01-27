@@ -30,6 +30,7 @@ from pydantic import ValidationError
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
 )
@@ -462,7 +463,16 @@ async def wait_for_kafka_event(
                     )
 
     group_id = f"e2e-test-{correlation_id.hex[:8]}"
-    unsubscribe = await event_bus.subscribe(topic, group_id, handler)
+    # Create test identity for subscribe() (OMN-1602)
+    test_identity = ModelNodeIdentity(
+        env="test",
+        service="e2e_verification",
+        node_name="kafka_event_waiter",
+        version="v1",
+    )
+    unsubscribe = await event_bus.subscribe(
+        topic=topic, node_identity=test_identity, on_message=handler
+    )
 
     try:
         await asyncio.wait_for(event_found.wait(), timeout=timeout_seconds)
@@ -579,10 +589,19 @@ async def collect_registration_events(
     ]
     unsubscribers: list[Callable[[], Awaitable[None]]] = []
     group_id = f"e2e-collector-{node_id.hex[:8]}"
+    # Create test identity for subscribe() (OMN-1602)
+    test_identity = ModelNodeIdentity(
+        env="test",
+        service="e2e_verification",
+        node_name="event_collector",
+        version="v1",
+    )
 
     for topic in topics:
         try:
-            unsub = await event_bus.subscribe(topic, group_id, handler)
+            unsub = await event_bus.subscribe(
+                topic=topic, node_identity=test_identity, on_message=handler
+            )
             unsubscribers.append(unsub)
         except (TimeoutError, ConnectionError, OSError) as e:
             # Network errors during subscription - skip this topic
@@ -780,8 +799,7 @@ async def verify_state_transition(
 
 
 def assert_registration_state(
-    projection: ModelRegistrationProjection,
-    expected_state: EnumRegistrationState,
+    projection: ModelRegistrationProjection, expected_state: EnumRegistrationState
 ) -> None:
     """Assert registration is in expected state.
 
@@ -804,8 +822,7 @@ def assert_registration_state(
 
 
 def assert_heartbeat_updated(
-    projection: ModelRegistrationProjection,
-    min_heartbeat_time: datetime,
+    projection: ModelRegistrationProjection, min_heartbeat_time: datetime
 ) -> None:
     """Assert last_heartbeat_at is after min_heartbeat_time.
 

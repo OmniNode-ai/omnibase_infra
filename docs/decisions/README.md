@@ -33,6 +33,7 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 |-----|-------|----------|
 | [adr-any-type-pydantic-workaround](adr-any-type-pydantic-workaround.md) | Any Type Pydantic Workaround | Type System |
 | [adr-canonical-publish-interface-policy](adr-canonical-publish-interface-policy.md) | Canonical Publish Interface Policy | Architecture |
+| [adr-consumer-group-naming](adr-consumer-group-naming.md) | Kafka Consumer Group Naming Convention | Event Bus |
 | [adr-cryptography-upgrade-46](adr-cryptography-upgrade-46.md) | Cryptography Upgrade to 46.x | Security |
 | [adr-custom-bool-result-models](adr-custom-bool-result-models.md) | Custom `__bool__` for Result Models | Type System |
 | [adr-dsn-validation-strengthening](adr-dsn-validation-strengthening.md) | DSN Validation Strengthening | Security |
@@ -57,6 +58,7 @@ ADRs are immutable once accepted. Superseded decisions are marked but not delete
 | **Data Layer** | Persistence, projections | 2 |
 | **Configuration** | Environment, settings | 1 |
 | **Performance** | Baselines, thresholds | 1 |
+| **Event Bus** | Kafka, consumer groups, event routing | 1 |
 
 **Note**: Numbered ADRs (001-005) are included in these category counts. ADR-001 and ADR-003 are Architecture, ADR-002 is Type System, ADR-004 is Performance, ADR-005 is Data Layer. The canonical publish interface policy ADR is also Architecture.
 

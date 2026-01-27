@@ -36,9 +36,21 @@ from uuid import UUID, uuid4
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+
+
+def _make_workflow_identity(name: str) -> ModelNodeIdentity:
+    """Create test identity for workflow tests."""
+    return ModelNodeIdentity(
+        env="test",
+        service="workflow-test",
+        node_name=name,
+        version="v1",
+    )
+
 
 if TYPE_CHECKING:
     from tests.integration.registration.effect.test_doubles import (
@@ -547,7 +559,9 @@ class TestA2TwoWayIntrospectionLoop:
 
         # Subscribe to introspection events (node's response)
         response_topic = "node.introspection"
-        await event_bus.subscribe(response_topic, "test-group", capture_response)
+        await event_bus.subscribe(
+            response_topic, _make_workflow_identity("test-group"), capture_response
+        )
 
         # Act - simulate receiving introspection request
         # In real implementation, this would be triggered by receiving the request
@@ -607,8 +621,12 @@ class TestA2TwoWayIntrospectionLoop:
                 response_correlations.append(data["correlation_id"])
 
         # Subscribe to both topics
-        await event_bus.subscribe(request_topic, "request-tracker", track_request)
-        await event_bus.subscribe(response_topic, "response-tracker", track_response)
+        await event_bus.subscribe(
+            request_topic, _make_workflow_identity("request-tracker"), track_request
+        )
+        await event_bus.subscribe(
+            response_topic, _make_workflow_identity("response-tracker"), track_response
+        )
 
         # Act - publish request with specific correlation_id
         request_payload = {

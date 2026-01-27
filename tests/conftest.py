@@ -81,10 +81,68 @@ if _env_file.exists():
     load_dotenv(_env_file)
     logging.getLogger(__name__).debug(f"Loaded environment from {_env_file}")
 
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.utils import sanitize_error_message
 
 # Module-level logger for test cleanup diagnostics
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Test Node Identity Helper
+# =============================================================================
+
+
+def make_test_node_identity(
+    suffix: str = "",
+    *,
+    env: str = "test",
+    service: str = "test-service",
+    node_name: str = "test-node",
+    version: str = "v1",
+) -> ModelNodeIdentity:
+    """Create a test node identity for subscribe() calls.
+
+    This is the consolidated helper for creating ModelNodeIdentity instances
+    in unit and integration tests. For E2E tests with specialized documentation,
+    use the helper in tests/integration/registration/e2e/conftest.py.
+
+    Args:
+        suffix: Optional suffix to differentiate identities for tests
+               that need multiple distinct consumer groups.
+        env: Environment name (default: "test").
+        service: Service name (default: "test-service").
+        node_name: Node name base (default: "test-node").
+        version: Version string (default: "v1").
+
+    Returns:
+        A ModelNodeIdentity configured for testing.
+
+    Example:
+        >>> identity = make_test_node_identity()
+        >>> identity.node_name
+        'test-node'
+
+        >>> identity = make_test_node_identity("subscriber-1")
+        >>> identity.node_name
+        'test-node-subscriber-1'
+
+        >>> identity = make_test_node_identity(service="kafka-tests")
+        >>> identity.service
+        'kafka-tests'
+
+    Note:
+        used for consumer group derivation, but it's still required by the
+        subscribe() signature.
+
+    .. versionadded:: 0.2.7
+        Consolidated from duplicate helpers across test modules (OMN-1602).
+    """
+    actual_node_name = f"{node_name}-{suffix}" if suffix else node_name
+    return ModelNodeIdentity(
+        env=env, service=service, node_name=actual_node_name, version=version
+    )
+
 
 if TYPE_CHECKING:
     # TYPE_CHECKING imports: These imports are only used for type annotations.
@@ -179,10 +237,7 @@ def check_service_registry_available() -> bool:
 
 
 def assert_has_methods(
-    obj: object,
-    required_methods: list[str],
-    *,
-    protocol_name: str | None = None,
+    obj: object, required_methods: list[str], *, protocol_name: str | None = None
 ) -> None:
     """Assert that an object has all required methods (duck typing conformance).
 
@@ -220,10 +275,7 @@ def assert_has_methods(
 
 
 def assert_has_async_methods(
-    obj: object,
-    required_methods: list[str],
-    *,
-    protocol_name: str | None = None,
+    obj: object, required_methods: list[str], *, protocol_name: str | None = None
 ) -> None:
     """Assert that an object has all required async methods.
 
@@ -833,10 +885,7 @@ async def cleanup_consul_test_services(
 
     except Exception as e:
         # Note: exc_info omitted for consistency with other cleanup handlers
-        logger.warning(
-            "Consul test cleanup failed: %s",
-            sanitize_error_message(e),
-        )
+        logger.warning("Consul test cleanup failed: %s", sanitize_error_message(e))
 
 
 @pytest.fixture
@@ -915,7 +964,7 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
                 WHERE metadata::text LIKE '%test%'
                    OR metadata::text LIKE '%integration%'
                    OR status = 'TEST'
-                """,
+                """
             )
         except asyncpg.UndefinedTableError:
             pass  # Table doesn't exist, nothing to cleanup
@@ -934,10 +983,7 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
         # Note: exc_info omitted to prevent credential exposure in tracebacks
         # (DSN contains password and would be visible in exception traceback)
         # Exception is sanitized to prevent DSN/credential leakage
-        logger.warning(
-            "PostgreSQL test cleanup failed: %s",
-            sanitize_error_message(e),
-        )
+        logger.warning("PostgreSQL test cleanup failed: %s", sanitize_error_message(e))
 
 
 @pytest.fixture
@@ -979,9 +1025,7 @@ async def cleanup_kafka_test_consumer_groups() -> AsyncGenerator[None, None]:
         from aiokafka.admin import AIOKafkaAdminClient
         from aiokafka.errors import KafkaError
 
-        admin_client = AIOKafkaAdminClient(
-            bootstrap_servers=bootstrap_servers,
-        )
+        admin_client = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers)
 
         try:
             await admin_client.start()
@@ -1022,10 +1066,7 @@ async def cleanup_kafka_test_consumer_groups() -> AsyncGenerator[None, None]:
 
     except Exception as e:
         # Note: exc_info omitted for consistency with other cleanup handlers
-        logger.warning(
-            "Kafka test cleanup failed: %s",
-            sanitize_error_message(e),
-        )
+        logger.warning("Kafka test cleanup failed: %s", sanitize_error_message(e))
 
 
 @pytest.fixture
@@ -1088,6 +1129,38 @@ async def full_infrastructure_cleanup(
 #      def test_example(mock_runtime_handler):
 #          process._handlers = {"mock": mock_runtime_handler}
 # =============================================================================
+
+
+def make_runtime_config(**overrides: object) -> dict[str, object]:
+    """Create a runtime config dict with default required fields and optional overrides.
+
+    RuntimeHostProcess requires 'service_name' and 'node_name' in config for proper
+    node identity construction (OMN-1602). This helper provides default values for
+    these required fields while allowing specific test cases to override any config.
+
+    Args:
+        **overrides: Config keys to override or add to the default config.
+
+    Returns:
+        A config dict suitable for RuntimeHostProcess initialization.
+
+    Example:
+        >>> config = make_runtime_config()
+        >>> config["service_name"]
+        'test-service'
+
+        >>> config = make_runtime_config(input_topic="custom.input")
+        >>> config["input_topic"]
+        'custom.input'
+    """
+    config: dict[str, object] = {
+        "service_name": "test-service",
+        "node_name": "test-node",
+        "env": "test",
+        "version": "v1",
+    }
+    config.update(overrides)
+    return config
 
 
 def seed_mock_handlers(
@@ -1235,11 +1308,7 @@ async def event_bus() -> AsyncGenerator[object, None]:
     """
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 
-    bus = EventBusInmemory(
-        environment="test",
-        group="test-group",
-        max_history=1000,
-    )
+    bus = EventBusInmemory(environment="test", group="test-group", max_history=1000)
     await bus.start()
     yield bus
     await bus.close()

@@ -516,6 +516,13 @@ shutdown:
         Uses pytest's tmp_path fixture for automatic temporary directory cleanup.
         """
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
+
+        # Create a minimal runtime config with required name field (OMN-1602)
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_file = runtime_dir / "runtime_config.yaml"
+        config_file.write_text("name: test-kernel\n")
+
         with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
@@ -579,6 +586,7 @@ shutdown:
         )
 
         test_config = ModelRuntimeConfig(
+            name="test-kernel",  # Required for introspection subscription (OMN-1602)
             shutdown=ModelShutdownConfig(
                 grace_period_seconds=0
             ),  # 0 second timeout for instant timeout
@@ -629,6 +637,7 @@ shutdown:
         )
 
         test_config = ModelRuntimeConfig(
+            name="test-kernel",  # Required for introspection subscription (OMN-1602)
             shutdown=ModelShutdownConfig(grace_period_seconds=45),  # Custom timeout
         )
 
@@ -825,6 +834,12 @@ class TestIntegration:
         This test uses real components except for the shutdown wait and health server.
         Health server is mocked to avoid port conflicts in parallel tests.
         """
+        # Create a minimal runtime config with required name field (OMN-1602)
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        runtime_config_file = runtime_dir / "runtime_config.yaml"
+        runtime_config_file.write_text("name: test-kernel\n")
+
         # Create a minimal handler contract in tmp_path for discovery
         handlers_dir = tmp_path / "handlers" / "http"
         handlers_dir.mkdir(parents=True)
@@ -869,6 +884,12 @@ class TestIntegration:
         This test uses real components (EventBusInmemory, RuntimeHostProcess)
         but mocks ServiceHealth to verify the container injection.
         """
+        # Create a minimal runtime config with required name field (OMN-1602)
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        runtime_config_file = runtime_dir / "runtime_config.yaml"
+        runtime_config_file.write_text("name: test-kernel\n")
+
         # Create a minimal handler contract in tmp_path for discovery
         handlers_dir = tmp_path / "handlers" / "http"
         handlers_dir.mkdir(parents=True)

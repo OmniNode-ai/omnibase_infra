@@ -22,6 +22,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from tests.conftest import make_test_node_identity
+
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.event_bus.models import ModelEventMessage
@@ -50,8 +52,20 @@ def unique_topic() -> str:
 
 @pytest.fixture
 def unique_group() -> str:
-    """Generate unique consumer group for test isolation."""
+    """Generate unique consumer group suffix for test isolation."""
     return f"corr-group-{uuid4().hex[:8]}"
+
+
+def _make_identity(group_suffix: str) -> ModelNodeIdentity:  # noqa: F821
+    """Create test identity with the given group suffix."""
+    from omnibase_infra.models import ModelNodeIdentity
+
+    return ModelNodeIdentity(
+        env="test",
+        service="correlation-test",
+        node_name=group_suffix,
+        version="v1",
+    )
 
 
 # =============================================================================
@@ -78,7 +92,7 @@ class TestCorrelationIdPropagation:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await event_bus.subscribe(unique_topic, unique_group, handler)
+        await event_bus.subscribe(unique_topic, _make_identity(unique_group), handler)
 
         headers = ModelEventHeaders(
             source="test-publisher",
@@ -104,7 +118,7 @@ class TestCorrelationIdPropagation:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await event_bus.subscribe(unique_topic, unique_group, handler)
+        await event_bus.subscribe(unique_topic, _make_identity(unique_group), handler)
 
         # Publish without explicit headers - EventBusInmemory creates defaults
         await event_bus.publish(unique_topic, None, b"test-value")
@@ -126,7 +140,7 @@ class TestCorrelationIdPropagation:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await event_bus.subscribe(unique_topic, unique_group, handler)
+        await event_bus.subscribe(unique_topic, _make_identity(unique_group), handler)
 
         # Publish multiple messages without explicit correlation IDs
         for i in range(5):
@@ -160,8 +174,8 @@ class TestCorrelationIdPropagation:
         group1 = f"group1-{uuid4().hex[:8]}"
         group2 = f"group2-{uuid4().hex[:8]}"
 
-        await event_bus.subscribe(unique_topic, group1, handler1)
-        await event_bus.subscribe(unique_topic, group2, handler2)
+        await event_bus.subscribe(unique_topic, _make_identity(group1), handler1)
+        await event_bus.subscribe(unique_topic, _make_identity(group2), handler2)
 
         headers = ModelEventHeaders(
             source="test-publisher",
@@ -192,7 +206,7 @@ class TestCorrelationIdPropagation:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await event_bus.subscribe(unique_topic, unique_group, handler)
+        await event_bus.subscribe(unique_topic, _make_identity(unique_group), handler)
 
         headers = ModelEventHeaders(
             source="test",
@@ -259,7 +273,7 @@ class TestCorrelationIdContextManagement:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await event_bus.subscribe(unique_topic, unique_group, handler)
+        await event_bus.subscribe(unique_topic, _make_identity(unique_group), handler)
 
         headers = ModelEventHeaders(
             source="test-publisher",
@@ -292,7 +306,7 @@ class TestCorrelationIdContextManagement:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await event_bus.subscribe(unique_topic, unique_group, handler)
+        await event_bus.subscribe(unique_topic, _make_identity(unique_group), handler)
 
         headers = ModelEventHeaders(
             source="test-publisher",
@@ -350,8 +364,8 @@ class TestMultiHopCorrelationTracking:
         group1 = f"group1-{uuid4().hex[:8]}"
         group2 = f"group2-{uuid4().hex[:8]}"
 
-        await event_bus.subscribe(topic1, group1, hop1_handler)
-        await event_bus.subscribe(topic2, group2, hop2_handler)
+        await event_bus.subscribe(topic1, _make_identity(group1), hop1_handler)
+        await event_bus.subscribe(topic2, _make_identity(group2), hop2_handler)
 
         # Start the chain
         headers = ModelEventHeaders(
@@ -409,9 +423,9 @@ class TestMultiHopCorrelationTracking:
         group2 = f"g2-{uuid4().hex[:6]}"
         group3 = f"g3-{uuid4().hex[:6]}"
 
-        await event_bus.subscribe(topic1, group1, chain1_handler)
-        await event_bus.subscribe(topic2, group2, chain2_handler)
-        await event_bus.subscribe(topic3, group3, chain3_handler)
+        await event_bus.subscribe(topic1, _make_identity(group1), chain1_handler)
+        await event_bus.subscribe(topic2, _make_identity(group2), chain2_handler)
+        await event_bus.subscribe(topic3, _make_identity(group3), chain3_handler)
 
         headers = ModelEventHeaders(
             source="originator",
@@ -464,10 +478,18 @@ class TestMultiHopCorrelationTracking:
         async def target3_handler(msg: ModelEventMessage) -> None:
             target3_messages.append(msg)
 
-        await event_bus.subscribe(source_topic, "source-group", fanout_handler)
-        await event_bus.subscribe(target_topic1, "t1-group", target1_handler)
-        await event_bus.subscribe(target_topic2, "t2-group", target2_handler)
-        await event_bus.subscribe(target_topic3, "t3-group", target3_handler)
+        await event_bus.subscribe(
+            source_topic, _make_identity("source-group"), fanout_handler
+        )
+        await event_bus.subscribe(
+            target_topic1, _make_identity("t1-group"), target1_handler
+        )
+        await event_bus.subscribe(
+            target_topic2, _make_identity("t2-group"), target2_handler
+        )
+        await event_bus.subscribe(
+            target_topic3, _make_identity("t3-group"), target3_handler
+        )
 
         headers = ModelEventHeaders(
             source="originator",
@@ -517,8 +539,12 @@ class TestErrorScenarioCorrelation:
         fail_group = f"fail-{uuid4().hex[:8]}"
         success_group = f"success-{uuid4().hex[:8]}"
 
-        await event_bus.subscribe(unique_topic, fail_group, failing_handler)
-        await event_bus.subscribe(unique_topic, success_group, successful_handler)
+        await event_bus.subscribe(
+            unique_topic, _make_identity(fail_group), failing_handler
+        )
+        await event_bus.subscribe(
+            unique_topic, _make_identity(success_group), successful_handler
+        )
 
         headers = ModelEventHeaders(
             source="test-publisher",
@@ -547,7 +573,7 @@ class TestErrorScenarioCorrelation:
             raise ValueError("Intentional failure")
 
         await event_bus.subscribe(
-            unique_topic, f"fail-{uuid4().hex[:8]}", failing_handler
+            unique_topic, _make_identity(f"fail-{uuid4().hex[:8]}"), failing_handler
         )
 
         headers = ModelEventHeaders(
@@ -585,8 +611,12 @@ class TestErrorScenarioCorrelation:
             successful_messages.append(msg)
             correlation_ids_received.append(msg.headers.correlation_id)
 
-        await event_bus.subscribe(unique_topic, fail_group, always_failing_handler)
-        await event_bus.subscribe(unique_topic, success_group, successful_handler)
+        await event_bus.subscribe(
+            unique_topic, _make_identity(fail_group), always_failing_handler
+        )
+        await event_bus.subscribe(
+            unique_topic, _make_identity(success_group), successful_handler
+        )
 
         # Publish enough messages to trigger circuit breaker (threshold=5)
         for i in range(7):

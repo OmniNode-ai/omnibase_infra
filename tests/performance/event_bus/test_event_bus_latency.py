@@ -54,7 +54,19 @@ import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.models import ModelNodeIdentity
 from tests.performance.event_bus.conftest import generate_unique_topic
+
+
+def _make_perf_identity(name: str) -> ModelNodeIdentity:
+    """Create test identity for performance tests."""
+    return ModelNodeIdentity(
+        env="test",
+        service="perf-test",
+        node_name=name,
+        version="v1",
+    )
+
 
 # Mark all tests in this module as performance tests
 pytestmark = [
@@ -279,7 +291,7 @@ class TestEndToEndLatency:
                 if index in publish_times:
                     e2e_latencies.append(receive_time - publish_times[index])
 
-        await event_bus.subscribe(topic, "e2e-group", handler)
+        await event_bus.subscribe(topic, _make_perf_identity("e2e-group"), handler)
 
         # Publish with timing
         for i in range(1000):
@@ -350,7 +362,9 @@ class TestEndToEndLatency:
             handler = make_handler(
                 sub_idx, locks, publish_times, latencies_by_subscriber
             )
-            await event_bus.subscribe(topic, f"multi-e2e-{sub_idx}", handler)
+            await event_bus.subscribe(
+                topic, _make_perf_identity(f"multi-e2e-{sub_idx}"), handler
+            )
 
         # Publish messages
         for i in range(500):
@@ -583,8 +597,12 @@ class TestLatencyUnderLoad:
         async def slow_handler(msg: ModelEventMessage) -> None:
             await asyncio.sleep(0.001)
 
-        await event_bus.subscribe(topic_fast, "fast-group", fast_handler)
-        await event_bus.subscribe(topic_slow, "slow-group", slow_handler)
+        await event_bus.subscribe(
+            topic_fast, _make_perf_identity("fast-group"), fast_handler
+        )
+        await event_bus.subscribe(
+            topic_slow, _make_perf_identity("slow-group"), slow_handler
+        )
 
         # Measure fast topic latency
         fast_latencies: list[float] = []
