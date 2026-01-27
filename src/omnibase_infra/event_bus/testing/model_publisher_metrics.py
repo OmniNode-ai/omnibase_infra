@@ -59,3 +59,6 @@ class ModelPublisherMetrics(BaseModel):
             "circuit_breaker_status": self.circuit_breaker_status,
             "current_failures": self.current_failures,
         }
+
+
+__all__: list[str] = ["ModelPublisherMetrics"]
