@@ -36,6 +36,8 @@ Design Principles:
 - Validation: Unknown handler types raise clear errors
 - Fail-fast: Missing contracts raise FileNotFoundError immediately
 - Idempotent: Re-wiring the same handler is safe (overwrites previous)
+- Security: Namespace allowlisting is recommended for production deployments
+  (see docs/patterns/handler_plugin_loader.md#optional-security-controls)
 
 Adding New Handlers:
     To add a new handler to the system, follow these steps:
@@ -205,6 +207,39 @@ def _load_handler_from_contract(
     Raises:
         FileNotFoundError: If contract file does not exist.
         ProtocolConfigurationError: If contract is malformed or handler cannot be loaded.
+
+    Security Note:
+        This function uses ``importlib.import_module()`` to dynamically load handler
+        modules specified in contracts. This means contract files are effectively
+        executable code - a compromised contract pointing to a malicious module
+        will execute that module's code during import.
+
+        **Production Security Recommendations:**
+
+        1. **Namespace Allowlisting**: For dynamic handler discovery scenarios,
+           use ``HandlerPluginLoader`` with the ``allowed_namespaces`` parameter
+           to restrict which module namespaces can be loaded::
+
+               from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+
+               loader = HandlerPluginLoader(
+                   allowed_namespaces=["omnibase_infra.", "omnibase_core.", "myapp.handlers."]
+               )
+
+           This prevents loading handlers from untrusted namespaces even if a
+           contract is compromised.
+
+        2. **Write Protection**: Contract directories should be read-only at runtime.
+           Mount contract directories as read-only volumes in containerized deployments.
+
+        3. **Source Validation**: Contracts in ``_HANDLER_CONTRACT_PATHS`` come from
+           the omnibase_infra package. Ensure these are from trusted, version-controlled
+           sources with code review.
+
+        See Also:
+            - ``docs/patterns/handler_plugin_loader.md#optional-security-controls``
+            - ``docs/patterns/security_patterns.md``
+            - ``docs/decisions/adr-handler-plugin-loader-security.md``
     """
     if not contract_path.exists():
         raise FileNotFoundError(

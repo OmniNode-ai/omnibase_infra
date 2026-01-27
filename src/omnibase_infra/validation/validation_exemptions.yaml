@@ -1762,6 +1762,49 @@ pattern_exemptions:
       - CLAUDE.md (Type Annotation Conventions)
       - Consul service discovery documentation
     ticket: OMN-1278
+  # ==========================================================================
+  # Declarative Operation Bindings Exemptions (OMN-1518)
+  # ==========================================================================
+  # OperationBindingResolver.resolve() requires multiple parameters for binding
+  # resolution: operation, bindings_subcontract, envelope, context, correlation_id.
+  # These are distinct inputs required for the resolution process.
+  - file_pattern: 'binding_resolver\.py'
+    method_pattern: "Function 'resolve'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      resolve() requires distinct parameters for binding resolution: operation name, bindings subcontract, envelope data, optional context, and correlation_id for error context. Breaking into multiple calls would require intermediate state or complex configuration objects that reduce API clarity.
+
+    documentation:
+      - docs/decisions/adr-declarative-operation-bindings.md
+    ticket: OMN-1518
+  # parameter_name in binding models is the handler parameter name being bound,
+  # NOT an entity reference. It's a simple string identifier for the target parameter.
+  - file_pattern: 'model_operation_binding\.py'
+    violation_pattern: "Field 'parameter_name' might reference an entity"
+    reason: >
+      parameter_name is the target handler input field name (e.g., "correlation_id", "sql"). This is a Python function parameter name, NOT an entity reference. It maps to the handler's function signature parameter.
+
+    documentation:
+      - docs/decisions/adr-declarative-operation-bindings.md
+    ticket: OMN-1518
+  - file_pattern: 'model_parsed_binding\.py'
+    violation_pattern: "Field 'parameter_name' might reference an entity"
+    reason: >
+      parameter_name is the target handler input field name (e.g., "correlation_id", "sql"). This is a Python function parameter name, NOT an entity reference. It maps to the handler's function signature parameter.
+
+    documentation:
+      - docs/decisions/adr-declarative-operation-bindings.md
+    ticket: OMN-1518
+  # operation_name in ModelBindingResolutionResult is the operation that was
+  # resolved (e.g., "db.query"), NOT an entity reference. It's a dispatch key.
+  - file_pattern: 'model_binding_resolution_result\.py'
+    violation_pattern: "Field 'operation_name' might reference an entity"
+    reason: >
+      operation_name is the dispatch operation key that was resolved (e.g., "db.query", "consul.register"). This is a routing identifier, NOT an entity reference. It identifies which operation's bindings were resolved.
+
+    documentation:
+      - docs/decisions/adr-declarative-operation-bindings.md
+    ticket: OMN-1518
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

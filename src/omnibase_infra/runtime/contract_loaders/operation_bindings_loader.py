@@ -49,7 +49,6 @@ See Also:
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import Literal
 
@@ -59,6 +58,11 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.bindings import (
+    EXPRESSION_PATTERN,
+    MAX_EXPRESSION_LENGTH,
+    MAX_PATH_SEGMENTS,
+    VALID_CONTEXT_PATHS,
+    VALID_SOURCES,
     ModelOperationBinding,
     ModelOperationBindingsSubcontract,
     ModelParsedBinding,
@@ -67,49 +71,13 @@ from omnibase_infra.models.bindings import (
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# Security Constants
+# Security Constants (Loader-specific)
 # =============================================================================
 
 # Maximum allowed file size for contract.yaml files (10MB)
 # Security control to prevent memory exhaustion via large YAML files
 # Error code: FILE_SIZE_EXCEEDED (BINDING_LOADER_050)
 MAX_CONTRACT_FILE_SIZE_BYTES: int = 10 * 1024 * 1024  # 10MB
-
-# =============================================================================
-# Guardrail Constants
-# =============================================================================
-
-# Maximum length for binding expressions
-# Prevents DoS via extremely long expressions
-MAX_EXPRESSION_LENGTH: int = 256
-
-# Maximum number of path segments in an expression
-# Prevents deep nesting attacks and stack overflow
-MAX_PATH_SEGMENTS: int = 20
-
-# =============================================================================
-# Valid Sources and Context Paths
-# =============================================================================
-
-# Valid binding sources
-VALID_SOURCES: frozenset[str] = frozenset({"payload", "envelope", "context"})
-
-# Valid context paths (built-in runtime values)
-VALID_CONTEXT_PATHS: frozenset[str] = frozenset(
-    {
-        "now_iso",
-        "dispatcher_id",
-        "correlation_id",
-    }
-)
-
-# =============================================================================
-# Expression Pattern
-# =============================================================================
-
-# Pattern for binding expressions: ${source.path.to.field}
-# Groups: (1) source, (2) path
-EXPRESSION_PATTERN: re.Pattern[str] = re.compile(r"^\$\{([a-z]+)\.([a-zA-Z0-9_.]+)\}$")
 
 # =============================================================================
 # Error Codes
@@ -600,26 +568,21 @@ def load_operation_bindings_subcontract(
 
 
 __all__ = [
-    # Constants
+    # Loader-specific constants
     "MAX_CONTRACT_FILE_SIZE_BYTES",
-    "MAX_EXPRESSION_LENGTH",
-    "MAX_PATH_SEGMENTS",
-    "VALID_SOURCES",
-    "VALID_CONTEXT_PATHS",
-    "EXPRESSION_PATTERN",
     # Error codes
-    "ERROR_CODE_EXPRESSION_MALFORMED",
-    "ERROR_CODE_INVALID_SOURCE",
-    "ERROR_CODE_PATH_TOO_DEEP",
-    "ERROR_CODE_EXPRESSION_TOO_LONG",
-    "ERROR_CODE_EMPTY_PATH_SEGMENT",
-    "ERROR_CODE_MISSING_PATH_SEGMENT",
-    "ERROR_CODE_INVALID_CONTEXT_PATH",
-    "ERROR_CODE_UNKNOWN_OPERATION",
-    "ERROR_CODE_DUPLICATE_PARAMETER",
     "ERROR_CODE_CONTRACT_NOT_FOUND",
-    "ERROR_CODE_YAML_PARSE_ERROR",
+    "ERROR_CODE_DUPLICATE_PARAMETER",
+    "ERROR_CODE_EMPTY_PATH_SEGMENT",
+    "ERROR_CODE_EXPRESSION_MALFORMED",
+    "ERROR_CODE_EXPRESSION_TOO_LONG",
     "ERROR_CODE_FILE_SIZE_EXCEEDED",
+    "ERROR_CODE_INVALID_CONTEXT_PATH",
+    "ERROR_CODE_INVALID_SOURCE",
+    "ERROR_CODE_MISSING_PATH_SEGMENT",
+    "ERROR_CODE_PATH_TOO_DEEP",
+    "ERROR_CODE_UNKNOWN_OPERATION",
+    "ERROR_CODE_YAML_PARSE_ERROR",
     # Main function
     "load_operation_bindings_subcontract",
 ]

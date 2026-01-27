@@ -1778,13 +1778,73 @@ class MessageDispatchEngine:
         Returns:
             Operation name string, or ``"unknown"`` if not found.
 
+        Fallback Behavior:
+            Returns ``"unknown"`` in the following cases:
+
+            1. **Dict envelope without ``operation`` key**: The envelope is a dict
+               but does not contain an ``"operation"`` key.
+            2. **Model envelope without ``operation`` attribute**: The envelope is
+               a Pydantic model or object but lacks an ``operation`` attribute.
+            3. **Empty/None operation value**: The operation key/attribute exists
+               but has a falsy value (handled by the caller, not here).
+
+            When ``"unknown"`` is returned, the binding resolver will attempt to
+            look up bindings for an operation named ``"unknown"``. Since most
+            binding configurations do not define bindings for ``"unknown"``, this
+            typically results in:
+
+            - **No bindings resolved**: The handler receives the original envelope
+              unmodified, which may be acceptable for handlers that don't require
+              operation-specific bindings.
+            - **Resolution failure**: If the bindings subcontract has ``strict: true``
+              or requires specific operations, resolution will fail with an error.
+
+            This fallback is intentional for backwards compatibility with handlers
+            that predate operation bindings. However, a warning is logged to aid
+            debugging when operation extraction fails unexpectedly.
+
+        Note:
+            If ``entry.operation_bindings`` is ``None`` (no bindings configured),
+            this method is not called at all, avoiding unnecessary extraction.
+
         .. versionadded:: 0.2.6
             Added as part of OMN-1518 - Declarative operation bindings.
         """
+        # Dict-based envelopes (common for Kafka/JSON payloads)
         if isinstance(envelope, dict):
-            return str(envelope.get("operation", "unknown"))
+            operation = envelope.get("operation")
+            if operation is not None:
+                return str(operation)
+            self._logger.warning(
+                "Operation extraction failed: dict envelope missing 'operation' key. "
+                "Returning 'unknown'. Envelope keys: %s. "
+                "Binding resolution will proceed with 'unknown' as the operation name, "
+                "which may result in no bindings being applied.",
+                list(envelope.keys()),
+            )
+            return "unknown"
+
+        # Pydantic model or object with operation attribute
         if hasattr(envelope, "operation"):
-            return str(getattr(envelope, "operation", "unknown"))
+            operation = getattr(envelope, "operation", None)
+            if operation is not None:
+                return str(operation)
+            self._logger.warning(
+                "Operation extraction failed: envelope has 'operation' attribute "
+                "but value is None or falsy. Returning 'unknown'. Envelope type: %s. "
+                "Binding resolution will proceed with 'unknown' as the operation name.",
+                type(envelope).__name__,
+            )
+            return "unknown"
+
+        # No operation attribute at all
+        self._logger.warning(
+            "Operation extraction failed: envelope has no 'operation' attribute. "
+            "Returning 'unknown'. Envelope type: %s. "
+            "Binding resolution will proceed with 'unknown' as the operation name, "
+            "which may result in no bindings being applied.",
+            type(envelope).__name__,
+        )
         return "unknown"
 
     def _extract_correlation_id(self, envelope: object) -> UUID | None:

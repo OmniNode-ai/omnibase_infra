@@ -429,7 +429,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                    ast.FunctionDef | ast.AsyncFunctionDef for AST method type checking
 # - 105 (2026-01-21): Contract-driven handler config loading (+4 unions)
 #                     ModelHandlerContract transport config fields and lifecycle types
-INFRA_MAX_UNIONS = 105
+# - 108 (2026-01-27): OMN-1518 declarative operation bindings (+3 unions)
+#                     ModelEventEnvelope[object] | dict[str, object] for materialized
+#                     envelopes in dispatch engine (3 occurrences in type aliases)
+INFRA_MAX_UNIONS = 108
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

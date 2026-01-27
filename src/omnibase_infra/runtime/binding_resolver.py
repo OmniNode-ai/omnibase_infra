@@ -51,7 +51,7 @@ and thread-safe. They can be shared across concurrent requests.
 
 from __future__ import annotations
 
-import re
+import logging
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
@@ -59,6 +59,11 @@ from pydantic import BaseModel
 from omnibase_core.types import JsonType
 from omnibase_infra.errors import BindingResolutionError
 from omnibase_infra.models.bindings import (
+    EXPRESSION_PATTERN,
+    MAX_EXPRESSION_LENGTH,
+    MAX_PATH_SEGMENTS,
+    VALID_CONTEXT_PATHS,
+    VALID_SOURCES,
     ModelBindingResolutionResult,
     ModelOperationBindingsSubcontract,
     ModelParsedBinding,
@@ -67,39 +72,85 @@ from omnibase_infra.models.bindings import (
 if TYPE_CHECKING:
     from uuid import UUID
 
+logger = logging.getLogger(__name__)
+
 
 # =============================================================================
-# Guardrail Constants
+# JSON Compatibility Validation
 # =============================================================================
 
-MAX_EXPRESSION_LENGTH: int = 256
-"""Maximum allowed length for binding expressions (characters)."""
 
-MAX_PATH_SEGMENTS: int = 20
-"""Maximum allowed path depth (dot-separated segments)."""
+def _is_json_compatible(value: object) -> bool:
+    """Check if a value is JSON-compatible.
 
-VALID_SOURCES: frozenset[str] = frozenset({"payload", "envelope", "context"})
-"""Valid source names for binding expressions."""
+    JSON-compatible values are those that can be serialized to JSON:
+    - None
+    - Primitives: str, int, float, bool
+    - list (with recursively JSON-compatible elements)
+    - dict with str keys (with recursively JSON-compatible values)
 
-VALID_CONTEXT_PATHS: frozenset[str] = frozenset(
-    {
-        "now_iso",
-        "dispatcher_id",
-        "correlation_id",
-    }
-)
-"""Exhaustive list of valid context paths.
+    This function performs recursive validation for nested structures.
+    It guards against infinite recursion by limiting depth to 100 levels.
 
-Context paths are special runtime-provided values that are injected by the
-dispatch infrastructure. Adding new context paths requires updating this
-list AND the dispatch context provider.
-"""
+    Args:
+        value: The value to check for JSON compatibility.
 
-# Expression pattern: ${source.path.to.field}
-# - Group 1: source (lowercase letters only)
-# - Group 2: path (letters, numbers, underscores, dots)
-EXPRESSION_PATTERN: re.Pattern[str] = re.compile(r"^\$\{([a-z]+)\.([a-zA-Z0-9_.]+)\}$")
-"""Compiled regex for parsing binding expressions."""
+    Returns:
+        True if the value is JSON-compatible, False otherwise.
+
+    Examples:
+        >>> _is_json_compatible(None)
+        True
+        >>> _is_json_compatible("hello")
+        True
+        >>> _is_json_compatible({"key": [1, 2, 3]})
+        True
+        >>> _is_json_compatible(object())
+        False
+        >>> _is_json_compatible({"key": lambda x: x})
+        False
+
+    .. versionadded:: 0.2.6
+    """
+    return _is_json_compatible_recursive(value, depth=0)
+
+
+def _is_json_compatible_recursive(value: object, depth: int) -> bool:
+    """Recursive implementation of JSON compatibility check.
+
+    Args:
+        value: The value to check.
+        depth: Current recursion depth for overflow protection.
+
+    Returns:
+        True if the value is JSON-compatible, False otherwise.
+    """
+    # Depth guard to prevent stack overflow on pathological inputs
+    if depth > 100:
+        return False
+
+    # None is JSON-compatible (maps to JSON null)
+    if value is None:
+        return True
+
+    # JSON primitives
+    if isinstance(value, (str, int, float, bool)):
+        # Note: bool must be checked with isinstance since bool is a subclass of int
+        return True
+
+    # List: all elements must be JSON-compatible
+    if isinstance(value, list):
+        return all(_is_json_compatible_recursive(item, depth + 1) for item in value)
+
+    # Dict: keys must be str, values must be JSON-compatible
+    if isinstance(value, dict):
+        return all(
+            isinstance(k, str) and _is_json_compatible_recursive(v, depth + 1)
+            for k, v in value.items()
+        )
+
+    # Anything else (objects, callables, etc.) is not JSON-compatible
+    return False
 
 
 # =============================================================================
@@ -434,12 +485,24 @@ class OperationBindingResolver:
         Uses ``dict.get()`` for dicts and ``getattr()`` for objects.
         Returns None if any segment in the path doesn't exist.
 
+        Runtime Validation:
+            The returned value is validated at runtime to ensure JSON
+            compatibility. If the traversed value is not JSON-compatible
+            (e.g., a callable, custom object, or other non-serializable type),
+            a warning is logged and None is returned for graceful degradation.
+
+            This validation prevents non-JSON values from propagating through
+            the binding resolution pipeline, which would cause serialization
+            failures downstream.
+
         Args:
             obj: Starting object to traverse from.
             path_segments: Tuple of field names to traverse.
 
         Returns:
-            Value at path or None if path doesn't exist.
+            Value at path or None if:
+            - Path doesn't exist
+            - Value at path is not JSON-compatible (logs warning)
         """
         current: object = obj
 
@@ -459,16 +522,24 @@ class OperationBindingResolver:
                 # No way to access the segment
                 return None
 
-        # Return the value - type checker sees 'object' but we know
-        # it's JSON-compatible due to how binding paths work
+        # Runtime validation: ensure value is JSON-compatible
+        # The type checker sees 'object' but binding paths should only
+        # resolve to JSON-compatible values. We validate at runtime to
+        # catch cases where non-JSON values (e.g., callables, custom objects)
+        # are accidentally exposed through the binding path.
+        if not _is_json_compatible(current):
+            logger.warning(
+                "Binding path '%s' resolved to non-JSON-compatible value of type '%s'. "
+                "Returning None for graceful degradation.",
+                ".".join(path_segments),
+                type(current).__name__,
+            )
+            return None
+
         return current  # type: ignore[return-value]
 
 
 __all__: list[str] = [
     "BindingExpressionParser",
-    "MAX_EXPRESSION_LENGTH",
-    "MAX_PATH_SEGMENTS",
     "OperationBindingResolver",
-    "VALID_CONTEXT_PATHS",
-    "VALID_SOURCES",
 ]

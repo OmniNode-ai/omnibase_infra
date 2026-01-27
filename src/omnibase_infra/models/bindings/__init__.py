@@ -10,6 +10,13 @@ handler parameter resolution from contract.yaml.
     as part of OMN-1518 - Declarative operation bindings.
 """
 
+from omnibase_infra.models.bindings.constants import (
+    EXPRESSION_PATTERN,
+    MAX_EXPRESSION_LENGTH,
+    MAX_PATH_SEGMENTS,
+    VALID_CONTEXT_PATHS,
+    VALID_SOURCES,
+)
 from omnibase_infra.models.bindings.model_binding_resolution_result import (
     ModelBindingResolutionResult,
 )
@@ -24,6 +31,13 @@ from omnibase_infra.models.bindings.model_parsed_binding import (
 )
 
 __all__: list[str] = [
+    # Constants
+    "EXPRESSION_PATTERN",
+    "MAX_EXPRESSION_LENGTH",
+    "MAX_PATH_SEGMENTS",
+    "VALID_CONTEXT_PATHS",
+    "VALID_SOURCES",
+    # Models
     "ModelBindingResolutionResult",
     "ModelOperationBinding",
     "ModelOperationBindingsSubcontract",
