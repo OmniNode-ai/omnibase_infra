@@ -62,6 +62,7 @@ from omnibase_infra.event_bus.testing.model_publisher_metrics import (
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+    from omnibase_spi.protocols.types.protocol_core_types import ContextValue
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ class AdapterProtocolEventPublisherInmemory:
         payload: JsonType,
         correlation_id: str | None = None,
         causation_id: str | None = None,
-        metadata: dict[str, object] | None = None,
+        metadata: dict[str, ContextValue] | None = None,
         topic: str | None = None,
         partition_key: str | None = None,
     ) -> bool:

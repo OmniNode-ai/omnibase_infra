@@ -541,10 +541,10 @@ class TestPayloadIntegrity:
     ) -> None:
         """Verify Unicode content in payload is preserved."""
         payload = {
-            "greeting_ja": "hello",
-            "greeting_ar": "hello",
-            "emoji": "test emoji",
-            "special": "special chars",
+            "greeting_ja": "こんにちは",  # Japanese: "hello"
+            "greeting_ar": "مرحبا",  # Arabic: "hello"
+            "emoji": "🎉🚀✨",  # Celebration, rocket, sparkles
+            "special": "café naïve résumé",  # Latin-1 extended characters
         }
 
         success = await adapter.publish(
