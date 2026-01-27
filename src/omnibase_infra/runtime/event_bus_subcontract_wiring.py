@@ -51,7 +51,12 @@ import yaml
 
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.event_bus.models import ModelEventMessage
+from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+    ProtocolEventBusSubscriber,
+)
+from omnibase_core.protocols.event_bus.protocol_event_message import (
+    ProtocolEventMessage,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -117,7 +122,7 @@ class EventBusSubcontractWiring:
 
     def __init__(
         self,
-        event_bus: object,
+        event_bus: ProtocolEventBusSubscriber,
         dispatch_engine: object,
         environment: str,
     ) -> None:
@@ -219,8 +224,7 @@ class EventBusSubcontractWiring:
             callback = self._create_dispatch_callback(full_topic)
 
             # Subscribe and store unsubscribe callable
-            # NOTE: Duck typing - event_bus implements EventBusKafka/EventBusInmemory interface
-            unsubscribe = await self._event_bus.subscribe(  # type: ignore[attr-defined]
+            unsubscribe = await self._event_bus.subscribe(
                 topic=full_topic,
                 group_id=group_id,
                 on_message=callback,
@@ -237,11 +241,11 @@ class EventBusSubcontractWiring:
     def _create_dispatch_callback(
         self,
         topic: str,
-    ) -> Callable[[ModelEventMessage], Awaitable[None]]:
+    ) -> Callable[[ProtocolEventMessage], Awaitable[None]]:
         """Create callback that bridges Kafka consumer to dispatch engine.
 
         Creates an async callback function that:
-        1. Receives ModelEventMessage from the Kafka consumer
+        1. Receives ProtocolEventMessage from the Kafka consumer
         2. Deserializes the message value to ModelEventEnvelope
         3. Dispatches the envelope to the MessageDispatchEngine
 
@@ -256,7 +260,7 @@ class EventBusSubcontractWiring:
             Async callback function compatible with event bus subscribe().
         """
 
-        async def callback(message: ModelEventMessage) -> None:
+        async def callback(message: ProtocolEventMessage) -> None:
             """Process incoming Kafka message and dispatch to engine."""
             try:
                 envelope = self._deserialize_to_envelope(message)
@@ -283,11 +287,11 @@ class EventBusSubcontractWiring:
 
     def _deserialize_to_envelope(
         self,
-        message: ModelEventMessage,
+        message: ProtocolEventMessage,
     ) -> ModelEventEnvelope[object]:
         """Deserialize Kafka message to event envelope.
 
-        Converts the raw bytes in ModelEventMessage.value to a ModelEventEnvelope
+        Converts the raw bytes in ProtocolEventMessage.value to a ModelEventEnvelope
         that can be processed by the dispatch engine.
 
         Deserialization Strategy:
@@ -296,7 +300,7 @@ class EventBusSubcontractWiring:
             3. Validate and construct ModelEventEnvelope
 
         Args:
-            message: ModelEventMessage from Kafka consumer containing raw bytes.
+            message: ProtocolEventMessage from Kafka consumer containing raw bytes.
 
         Returns:
             Deserialized ModelEventEnvelope for dispatch.

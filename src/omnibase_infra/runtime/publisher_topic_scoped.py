@@ -74,6 +74,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from omnibase_core.types import JsonType
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -117,7 +118,7 @@ class PublisherTopicScoped:
 
     def __init__(
         self,
-        event_bus: object,
+        event_bus: ProtocolEventBusLike,
         allowed_topics: set[str],
         environment: str,
     ) -> None:
@@ -218,8 +219,7 @@ class PublisherTopicScoped:
         key = correlation_id.encode("utf-8") if correlation_id else None
 
         # Publish to event bus
-        # NOTE: Duck typing - event_bus implements EventBusKafka/EventBusInmemory interface
-        await self._event_bus.publish(  # type: ignore[attr-defined]
+        await self._event_bus.publish(
             topic=full_topic,
             key=key,
             value=value,

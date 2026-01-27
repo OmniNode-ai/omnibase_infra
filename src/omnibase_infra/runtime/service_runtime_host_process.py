@@ -48,7 +48,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -90,14 +90,14 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
-    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-        EventBusSubcontractWiring,
-    )
     from omnibase_infra.runtime.service_message_dispatch_engine import (
         MessageDispatchEngine,
     )
 
 # Imports for PluginLoaderContractSource adapter class
+from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+    ProtocolEventBusSubscriber,
+)
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
@@ -106,6 +106,7 @@ from omnibase_infra.models.handlers import (
 )
 from omnibase_infra.models.types import JsonDict
 from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+    EventBusSubcontractWiring,
     load_event_bus_subcontract,
 )
 from omnibase_infra.runtime.handler_identity import (
@@ -2468,14 +2469,11 @@ class RuntimeHostProcess:
             # Could be a ModelEventBusConfig or similar
             environment = getattr(event_bus_config, "environment", "local")
 
-        # Deferred import to avoid circular dependencies
-        from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-            EventBusSubcontractWiring,
-        )
-
         # Create wiring instance
+        # Cast to protocol type - both EventBusKafka and EventBusInmemory implement
+        # the ProtocolEventBusSubscriber interface (subscribe method)
         self._event_bus_wiring = EventBusSubcontractWiring(
-            event_bus=self._event_bus,
+            event_bus=cast("ProtocolEventBusSubscriber", self._event_bus),
             dispatch_engine=self._dispatch_engine,
             environment=environment,
         )
