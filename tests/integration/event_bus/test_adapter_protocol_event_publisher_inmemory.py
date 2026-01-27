@@ -790,33 +790,188 @@ class TestDecodeHelper:
 
 
 # =============================================================================
-# Protocol Compliance Test
+# Protocol Compliance Tests
 # =============================================================================
 
 
 class TestProtocolCompliance:
-    """Tests verifying ProtocolEventPublisher interface compliance."""
+    """Tests verifying ProtocolEventPublisher interface compliance.
 
-    def test_adapter_has_publish_method(
+    Protocol Contract:
+        - Must have async publish() method with correct signature
+        - Must have async get_metrics() method returning JsonType
+        - Must have async close() method with timeout_seconds parameter
+        - Must pass isinstance() check against @runtime_checkable protocol
+
+    This follows the ONEX protocol conformance pattern where implementations
+    use duck typing (structural subtyping) rather than explicit inheritance.
+    """
+
+    def test_isinstance_protocol_check(
         self,
         adapter: AdapterProtocolEventPublisherInmemory,
     ) -> None:
-        """Verify adapter has publish method with correct signature."""
-        assert hasattr(adapter, "publish")
-        assert callable(adapter.publish)
+        """Verify adapter passes isinstance check for ProtocolEventPublisher.
 
-    def test_adapter_has_get_metrics_method(
+        This test uses @runtime_checkable to verify structural subtyping.
+        The adapter must implement the same method signatures as the protocol.
+        """
+        from omnibase_spi.protocols.event_bus import ProtocolEventPublisher
+
+        assert isinstance(adapter, ProtocolEventPublisher), (
+            "AdapterProtocolEventPublisherInmemory must implement ProtocolEventPublisher. "
+            "Check that all required methods are present with correct signatures."
+        )
+
+    def test_publish_method_exists_and_is_async(
         self,
         adapter: AdapterProtocolEventPublisherInmemory,
     ) -> None:
-        """Verify adapter has get_metrics method."""
-        assert hasattr(adapter, "get_metrics")
-        assert callable(adapter.get_metrics)
+        """Verify publish method exists and is async."""
+        import asyncio
 
-    def test_adapter_has_close_method(
+        assert hasattr(adapter, "publish"), (
+            "AdapterProtocolEventPublisherInmemory missing required method: publish"
+        )
+        assert asyncio.iscoroutinefunction(adapter.publish), (
+            "publish must be an async method"
+        )
+
+    def test_publish_signature_matches_protocol(
         self,
         adapter: AdapterProtocolEventPublisherInmemory,
     ) -> None:
-        """Verify adapter has close method."""
-        assert hasattr(adapter, "close")
-        assert callable(adapter.close)
+        """Verify publish method signature matches ProtocolEventPublisher.
+
+        Protocol defines:
+            async def publish(
+                self,
+                event_type: str,
+                payload: JsonType,
+                correlation_id: str | None = None,
+                causation_id: str | None = None,
+                metadata: dict[str, ContextValue] | None = None,
+                topic: str | None = None,
+                partition_key: str | None = None,
+            ) -> bool
+        """
+        import inspect
+
+        sig = inspect.signature(adapter.publish)
+        params = list(sig.parameters.keys())
+
+        expected_params = [
+            "event_type",
+            "payload",
+            "correlation_id",
+            "causation_id",
+            "metadata",
+            "topic",
+            "partition_key",
+        ]
+        assert params == expected_params, (
+            f"publish signature mismatch. "
+            f"Expected params: {expected_params}, got: {params}"
+        )
+
+        # Verify optional parameters have None defaults
+        for optional_param in [
+            "correlation_id",
+            "causation_id",
+            "metadata",
+            "topic",
+            "partition_key",
+        ]:
+            param = sig.parameters[optional_param]
+            assert param.default is None, (
+                f"{optional_param} parameter must have default value of None"
+            )
+
+    def test_get_metrics_method_exists_and_is_async(
+        self,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify get_metrics method exists and is async."""
+        import asyncio
+
+        assert hasattr(adapter, "get_metrics"), (
+            "AdapterProtocolEventPublisherInmemory missing required method: get_metrics"
+        )
+        assert asyncio.iscoroutinefunction(adapter.get_metrics), (
+            "get_metrics must be an async method"
+        )
+
+    def test_close_method_exists_and_is_async(
+        self,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify close method exists and is async."""
+        import asyncio
+
+        assert hasattr(adapter, "close"), (
+            "AdapterProtocolEventPublisherInmemory missing required method: close"
+        )
+        assert asyncio.iscoroutinefunction(adapter.close), (
+            "close must be an async method"
+        )
+
+    def test_close_signature_matches_protocol(
+        self,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify close method has timeout_seconds parameter with default.
+
+        Protocol defines:
+            async def close(self, timeout_seconds: float = 30.0) -> None
+        """
+        import inspect
+
+        sig = inspect.signature(adapter.close)
+        params = list(sig.parameters.keys())
+
+        assert "timeout_seconds" in params, "close must have timeout_seconds parameter"
+
+        timeout_param = sig.parameters["timeout_seconds"]
+        assert timeout_param.default == 30.0, (
+            f"timeout_seconds must default to 30.0, got {timeout_param.default}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_publish_returns_bool(
+        self,
+        event_bus: EventBusInmemory,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify publish returns bool as specified by protocol."""
+        result = await adapter.publish(
+            event_type="test.protocol.compliance",
+            payload={"test": "data"},
+        )
+        assert isinstance(result, bool), f"publish must return bool, got {type(result)}"
+
+    @pytest.mark.asyncio
+    async def test_get_metrics_returns_dict(
+        self,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify get_metrics returns dict with expected keys."""
+        metrics = await adapter.get_metrics()
+
+        assert isinstance(metrics, dict), (
+            f"get_metrics must return dict, got {type(metrics)}"
+        )
+
+        # Verify required metric keys per protocol docstring
+        required_keys = [
+            "events_published",
+            "events_failed",
+            "events_sent_to_dlq",
+            "total_publish_time_ms",
+            "avg_publish_time_ms",
+            "circuit_breaker_opens",
+            "retries_attempted",
+            "circuit_breaker_status",
+            "current_failures",
+        ]
+        for key in required_keys:
+            assert key in metrics, f"get_metrics missing required key: {key}"
