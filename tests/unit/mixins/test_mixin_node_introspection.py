@@ -66,6 +66,7 @@ from omnibase_infra.models.registration import (
     ModelNodeHeartbeatEvent,
     ModelNodeIntrospectionEvent,
 )
+from omnibase_infra.topics import SUFFIX_NODE_HEARTBEAT, SUFFIX_NODE_INTROSPECTION
 
 # CI environments may be slower - apply multiplier for performance thresholds
 _CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
@@ -726,7 +727,7 @@ class TestMixinNodeIntrospectionPublishing:
         assert len(event_bus.published_envelopes) == 1
 
         envelope, topic = event_bus.published_envelopes[0]
-        assert topic == "node.introspection"
+        assert topic == SUFFIX_NODE_INTROSPECTION
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
 
     async def test_publish_introspection_with_correlation_id(
@@ -3420,7 +3421,7 @@ class TestHeartbeatEventCounting:
 
             # All events should be on heartbeat topic
             for envelope, topic in event_bus.published_envelopes:
-                assert topic == "node.heartbeat"
+                assert topic == SUFFIX_NODE_HEARTBEAT
                 assert isinstance(envelope, ModelNodeHeartbeatEvent)
         finally:
             await node.stop_introspection_tasks()

@@ -58,6 +58,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.topics import SUFFIX_REGISTRATION_SNAPSHOTS
 
 if TYPE_CHECKING:
     from omnibase_infra.errors.error_infra import ProtocolConfigurationError
@@ -154,7 +155,7 @@ class ModelSnapshotTopicConfig(BaseModel):
 
     # Topic identity
     topic: str = Field(
-        default="onex.registration.snapshots",
+        default=SUFFIX_REGISTRATION_SNAPSHOTS,
         min_length=1,
         max_length=255,
         description="Full Kafka topic name for registration snapshots",
@@ -442,7 +443,7 @@ class ModelSnapshotTopicConfig(BaseModel):
             Default configuration instance with environment overrides
         """
         base_config = cls(
-            topic="onex.registration.snapshots",
+            topic=SUFFIX_REGISTRATION_SNAPSHOTS,
             partition_count=12,
             replication_factor=3,
             cleanup_policy="compact",

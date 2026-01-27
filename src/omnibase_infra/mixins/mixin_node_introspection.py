@@ -237,11 +237,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Event topic constants
-INTROSPECTION_TOPIC = "node.introspection"
-HEARTBEAT_TOPIC = "node.heartbeat"
-REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
-
 # Performance threshold constants (in milliseconds)
 PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
 PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
@@ -2485,13 +2480,10 @@ class MixinNodeIntrospection:
 
 
 __all__ = [
-    "HEARTBEAT_TOPIC",
-    "INTROSPECTION_TOPIC",
     "PERF_THRESHOLD_CACHE_HIT_MS",
     "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
-    "REQUEST_INTROSPECTION_TOPIC",
     "DiscoveredCapabilitiesCacheDict",  # TypedDict for cached discovered capabilities
     "IntrospectionCacheDict",
     "MixinNodeIntrospection",

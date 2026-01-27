@@ -49,7 +49,7 @@ Example Usage:
     # Initialize publisher with event bus
     publisher = TransitionNotificationPublisher(
         event_bus=kafka_event_bus,
-        topic="onex.fsm.state.transitions.v1",
+        topic=SUFFIX_FSM_STATE_TRANSITIONS,
     )
 
     # Publish single notification
@@ -110,6 +110,7 @@ from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.runtime.models.model_transition_notification_publisher_metrics import (
     ModelTransitionNotificationPublisherMetrics,
 )
+from omnibase_infra.topics import SUFFIX_FSM_STATE_TRANSITIONS
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 if TYPE_CHECKING:
@@ -754,7 +755,7 @@ def _verify_protocol_compliance() -> None:  # pragma: no cover
     publisher: ProtocolTransitionNotificationPublisher = (
         TransitionNotificationPublisher(
             event_bus=bus,
-            topic="onex.fsm.state.transitions.v1",
+            topic=SUFFIX_FSM_STATE_TRANSITIONS,
         )
     )
     # Use the variable to silence unused warnings

@@ -28,7 +28,7 @@ Environment Variables:
             Example: "runtime-scheduler-prod-1"
 
         ONEX_RUNTIME_SCHEDULER_TICK_TOPIC: Kafka topic for publishing ticks
-            Default: "runtime.tick.v1"
+            Default: SUFFIX_RUNTIME_TICK from omnibase_infra.topics
             Example: "prod.runtime.tick.v1"
 
     Restart-Safety Settings:
@@ -106,6 +106,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,7 @@ class ModelRuntimeSchedulerConfig(BaseModel):
         max_length=255,
     )
     tick_topic: str = Field(
-        default="runtime.tick.v1",
+        default=SUFFIX_RUNTIME_TICK,
         description="Kafka topic for publishing tick events",
         min_length=1,
         max_length=255,
@@ -604,7 +605,7 @@ class ModelRuntimeSchedulerConfig(BaseModel):
         base_config = cls(
             tick_interval_ms=1000,
             scheduler_id="runtime-scheduler-default",
-            tick_topic="runtime.tick.v1",
+            tick_topic=SUFFIX_RUNTIME_TICK,
             persist_sequence_number=True,
             sequence_number_key="runtime_scheduler_sequence",
             max_tick_jitter_ms=100,

@@ -28,6 +28,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.contracts import ModelContractBase
+from omnibase_infra.topics import (
+    SUFFIX_NODE_HEARTBEAT,
+    SUFFIX_NODE_INTROSPECTION,
+    SUFFIX_REQUEST_INTROSPECTION,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
@@ -42,11 +47,11 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# Default topic constants following ONEX legacy conventions
-# Note: These use the legacy "node." prefix for backward compatibility
-DEFAULT_INTROSPECTION_TOPIC = "node.introspection"
-DEFAULT_HEARTBEAT_TOPIC = "node.heartbeat"
-DEFAULT_REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
+# Default topic constants using ONEX platform suffix constants
+# These are the canonical source for introspection-related topic defaults
+DEFAULT_INTROSPECTION_TOPIC = SUFFIX_NODE_INTROSPECTION
+DEFAULT_HEARTBEAT_TOPIC = SUFFIX_NODE_HEARTBEAT
+DEFAULT_REQUEST_INTROSPECTION_TOPIC = SUFFIX_REQUEST_INTROSPECTION
 
 # Topic validation patterns
 # Matches valid topic characters: lowercase alphanumeric, dots, hyphens, underscores
@@ -79,14 +84,14 @@ class ModelIntrospectionConfig(BaseModel):
             discovery. Methods starting with these prefixes are filtered out.
             If None, uses MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES.
         introspection_topic: Topic for publishing introspection events.
-            Defaults to "node.introspection". ONEX topics (onex.*) require
-            version suffix (.v1, .v2, etc.).
+            Defaults to SUFFIX_NODE_INTROSPECTION (onex.evt.platform.node-introspection.v1).
+            ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         heartbeat_topic: Topic for publishing heartbeat events.
-            Defaults to "node.heartbeat". ONEX topics (onex.*) require
-            version suffix (.v1, .v2, etc.).
+            Defaults to SUFFIX_NODE_HEARTBEAT (onex.evt.platform.node-heartbeat.v1).
+            ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         request_introspection_topic: Topic for receiving introspection requests.
-            Defaults to "node.request_introspection". ONEX topics (onex.*)
-            require version suffix (.v1, .v2, etc.).
+            Defaults to SUFFIX_REQUEST_INTROSPECTION (onex.cmd.platform.request-introspection.v1).
+            ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         contract: Optional typed contract model for capability extraction.
             When provided, MixinNodeIntrospection extracts contract_capabilities
             using ContractCapabilityExtractor. None for legacy nodes.
@@ -282,6 +287,7 @@ class ModelIntrospectionConfig(BaseModel):
         arbitrary_types_allowed=True,  # Allow arbitrary types for event_bus
         json_schema_extra={
             "examples": [
+                # First example: Default topic configuration using suffix constants
                 {
                     "node_id": "550e8400-e29b-41d4-a716-446655440000",
                     "node_type": "EFFECT",
@@ -290,10 +296,12 @@ class ModelIntrospectionConfig(BaseModel):
                     "cache_ttl": 300.0,
                     "operation_keywords": None,
                     "exclude_prefixes": None,
-                    "introspection_topic": "node.introspection",
-                    "heartbeat_topic": "node.heartbeat",
-                    "request_introspection_topic": "node.request_introspection",
+                    "introspection_topic": "onex.evt.platform.node-introspection.v1",
+                    "heartbeat_topic": "onex.evt.platform.node-heartbeat.v1",
+                    "request_introspection_topic": "onex.cmd.platform.request-introspection.v1",
                 },
+                # Second example: Custom prefixed topics for environment isolation
+                # Demonstrates adding env/namespace prefix to suffix constants
                 {
                     "node_id": "550e8400-e29b-41d4-a716-446655440001",
                     "node_type": "COMPUTE",
@@ -302,9 +310,9 @@ class ModelIntrospectionConfig(BaseModel):
                     "cache_ttl": 120.0,
                     "operation_keywords": ["process", "transform", "analyze"],
                     "exclude_prefixes": ["_internal", "_private"],
-                    "introspection_topic": "onex.node.introspection.published.v1",
-                    "heartbeat_topic": "onex.node.heartbeat.published.v1",
-                    "request_introspection_topic": "onex.registry.introspection.requested.v1",
+                    "introspection_topic": "prod.myapp.onex.evt.platform.node-introspection.v1",
+                    "heartbeat_topic": "prod.myapp.onex.evt.platform.node-heartbeat.v1",
+                    "request_introspection_topic": "prod.myapp.onex.cmd.platform.request-introspection.v1",
                 },
             ]
         },
