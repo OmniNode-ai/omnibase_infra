@@ -287,6 +287,7 @@ class ModelIntrospectionConfig(BaseModel):
         arbitrary_types_allowed=True,  # Allow arbitrary types for event_bus
         json_schema_extra={
             "examples": [
+                # First example: Default topic configuration using suffix constants
                 {
                     "node_id": "550e8400-e29b-41d4-a716-446655440000",
                     "node_type": "EFFECT",
@@ -299,6 +300,8 @@ class ModelIntrospectionConfig(BaseModel):
                     "heartbeat_topic": "onex.evt.platform.node-heartbeat.v1",
                     "request_introspection_topic": "onex.cmd.platform.request-introspection.v1",
                 },
+                # Second example: Custom prefixed topics for environment isolation
+                # Demonstrates adding env/namespace prefix to suffix constants
                 {
                     "node_id": "550e8400-e29b-41d4-a716-446655440001",
                     "node_type": "COMPUTE",
@@ -307,9 +310,9 @@ class ModelIntrospectionConfig(BaseModel):
                     "cache_ttl": 120.0,
                     "operation_keywords": ["process", "transform", "analyze"],
                     "exclude_prefixes": ["_internal", "_private"],
-                    "introspection_topic": "onex.evt.platform.node-introspection.v1",
-                    "heartbeat_topic": "onex.evt.platform.node-heartbeat.v1",
-                    "request_introspection_topic": "onex.cmd.platform.request-introspection.v1",
+                    "introspection_topic": "prod.myapp.onex.evt.platform.node-introspection.v1",
+                    "heartbeat_topic": "prod.myapp.onex.evt.platform.node-heartbeat.v1",
+                    "request_introspection_topic": "prod.myapp.onex.cmd.platform.request-introspection.v1",
                 },
             ]
         },

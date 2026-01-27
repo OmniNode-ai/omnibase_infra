@@ -217,13 +217,6 @@ from omnibase_infra.models.discovery import (
     ModelIntrospectionConfig,
     ModelIntrospectionTaskConfig,
 )
-
-# Event topic constants - imported from canonical source
-from omnibase_infra.models.discovery.model_introspection_config import (
-    DEFAULT_HEARTBEAT_TOPIC,
-    DEFAULT_INTROSPECTION_TOPIC,
-    DEFAULT_REQUEST_INTROSPECTION_TOPIC,
-)
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
     ModelIntrospectionPerformanceMetrics,
 )
@@ -243,13 +236,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-# DEPRECATED: Module-level topic aliases for backward compatibility.
-# New code should import directly from omnibase_infra.topics instead.
-# These aliases may be removed in a future version.
-HEARTBEAT_TOPIC = DEFAULT_HEARTBEAT_TOPIC
-INTROSPECTION_TOPIC = DEFAULT_INTROSPECTION_TOPIC
-REQUEST_INTROSPECTION_TOPIC = DEFAULT_REQUEST_INTROSPECTION_TOPIC
 
 # Performance threshold constants (in milliseconds)
 PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
@@ -2494,13 +2480,10 @@ class MixinNodeIntrospection:
 
 
 __all__ = [
-    "HEARTBEAT_TOPIC",
-    "INTROSPECTION_TOPIC",
     "PERF_THRESHOLD_CACHE_HIT_MS",
     "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_CAPABILITIES_MS",
     "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
-    "REQUEST_INTROSPECTION_TOPIC",
     "DiscoveredCapabilitiesCacheDict",  # TypedDict for cached discovered capabilities
     "IntrospectionCacheDict",
     "MixinNodeIntrospection",

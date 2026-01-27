@@ -107,6 +107,41 @@ class TestBuildFullTopic:
         error_message = str(exc_info.value)
         assert "not-a-valid-suffix" in error_message
 
+    def test_env_case_sensitivity(self) -> None:
+        """Environment prefix is case-sensitive - 'Dev' should fail."""
+        with pytest.raises(TopicCompositionError):
+            build_full_topic("Dev", "omnibase", SUFFIX_NODE_INTROSPECTION)
+
+    def test_namespace_with_unicode_is_valid(self) -> None:
+        """Namespace with unicode letters is valid.
+
+        Documents current behavior: Python's str.isalnum() returns True for
+        Unicode letters (not just ASCII), so namespaces like "my-äpp" are
+        accepted. This is intentional as it enables internationalized namespaces.
+
+        Note: If ASCII-only namespaces are required in the future, update
+        the validation in build_full_topic() to use str.isascii() check and
+        change this test to expect TopicCompositionError.
+        """
+        topic = build_full_topic("dev", "my-äpp", SUFFIX_NODE_INTROSPECTION)
+        assert topic == f"dev.my-äpp.{SUFFIX_NODE_INTROSPECTION}"
+
+    def test_very_long_namespace(self) -> None:
+        """Very long namespace should still be valid if characters are valid."""
+        long_namespace = "a" * 100
+        topic = build_full_topic("dev", long_namespace, SUFFIX_NODE_INTROSPECTION)
+        assert f"dev.{long_namespace}." in topic
+
+    def test_namespace_with_consecutive_hyphens(self) -> None:
+        """Namespace with consecutive hyphens should be valid."""
+        topic = build_full_topic("dev", "my--app", SUFFIX_NODE_INTROSPECTION)
+        assert topic == f"dev.my--app.{SUFFIX_NODE_INTROSPECTION}"
+
+    def test_namespace_with_mixed_case(self) -> None:
+        """Namespace with mixed case should be valid."""
+        topic = build_full_topic("dev", "MyApp", SUFFIX_NODE_INTROSPECTION)
+        assert topic == f"dev.MyApp.{SUFFIX_NODE_INTROSPECTION}"
+
 
 class TestTopicCompositionError:
     """Tests for TopicCompositionError exception class."""
