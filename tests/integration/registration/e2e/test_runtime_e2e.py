@@ -65,6 +65,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from tests.integration.registration.e2e.conftest import (
+    make_e2e_test_identity,
     wait_for_consumer_ready,
     wrap_event_in_envelope,
 )
@@ -462,8 +463,9 @@ class TestRuntimeE2EFlow:
         # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         unsub = await real_kafka_event_bus.subscribe(
             topic=output_topic,
-            group_id_override=group_id,
+            node_identity=make_e2e_test_identity("runtime"),
             on_message=on_completion,
+            group_id_override=group_id,
         )
 
         try:

@@ -122,12 +122,44 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Imported from tests.helpers.util_kafka for shared use across test modules.
 # See tests/helpers/util_kafka.py for the canonical implementations.
+from omnibase_infra.models import ModelNodeIdentity
 from tests.helpers.util_kafka import (
     KafkaTopicManager,
     create_topic_factory_function,
     wait_for_consumer_ready,
     wait_for_topic_metadata,
 )
+
+
+def make_e2e_test_identity(suffix: str = "") -> ModelNodeIdentity:
+    """Create a test node identity for E2E tests.
+
+    Provides a consistent identity for subscribe() calls in E2E tests.
+    When group_id_override is used, the identity is not used for consumer
+    group derivation, but it's still required by the subscribe() signature.
+
+    Args:
+        suffix: Optional suffix to differentiate test identities.
+
+    Returns:
+        A ModelNodeIdentity configured for E2E testing.
+
+    Note:
+        For E2E tests using group_id_override, this identity serves as a
+        placeholder since the override takes precedence. For tests without
+        override, this identity derives the consumer group ID.
+
+    .. versionadded:: 0.2.6
+        Added as part of OMN-1602 to support typed node identity in subscribe().
+    """
+    node_name = f"e2e_test_node{suffix}" if suffix else "e2e_test_node"
+    return ModelNodeIdentity(
+        env="test",
+        service="e2e_tests",
+        node_name=node_name,
+        version="v1",
+    )
+
 
 # =============================================================================
 # Envelope Helper

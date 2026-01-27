@@ -60,7 +60,7 @@ from omnibase_infra.models.registration import (
 )
 
 # Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
-from .conftest import wait_for_consumer_ready
+from .conftest import make_e2e_test_identity, wait_for_consumer_ready
 from .performance_utils import (
     PerformanceThresholds,
     assert_heartbeat_interval,
@@ -996,8 +996,9 @@ class TestSuite3ReIntrospection:
         group_id = f"e2e-test-registry-{correlation_id.hex[:8]}"
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=request_topic,
-            group_id_override=group_id,
+            node_identity=make_e2e_test_identity("registry_requests"),
             on_message=on_message,
+            group_id_override=group_id,
         )
 
         try:
@@ -1088,8 +1089,9 @@ class TestSuite3ReIntrospection:
             group_id = f"e2e-test-introspection-{unique_correlation_id.hex[:8]}"
             unsub_introspection = await real_kafka_event_bus.subscribe(
                 topic=introspection_topic,
-                group_id_override=group_id,
+                node_identity=make_e2e_test_identity("introspection"),
                 on_message=on_introspection,
+                group_id_override=group_id,
             )
 
             try:
@@ -1193,8 +1195,9 @@ class TestSuite3ReIntrospection:
             group_id = f"e2e-test-corr-{request_correlation_id.hex[:8]}"
             unsub = await real_kafka_event_bus.subscribe(
                 topic=introspection_topic,
-                group_id_override=group_id,
+                node_identity=make_e2e_test_identity("correlation"),
                 on_message=on_introspection,
+                group_id_override=group_id,
             )
 
             try:
@@ -1301,8 +1304,9 @@ class TestSuite4HeartbeatPublishing:
         group_id = f"e2e-heartbeat-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id_override=group_id,
+            node_identity=make_e2e_test_identity("heartbeat"),
             on_message=on_heartbeat,
+            group_id_override=group_id,
         )
 
         try:
@@ -1387,8 +1391,9 @@ class TestSuite4HeartbeatPublishing:
         group_id = f"e2e-heartbeat-fields-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id_override=group_id,
+            node_identity=make_e2e_test_identity("heartbeat_fields"),
             on_message=on_heartbeat,
+            group_id_override=group_id,
         )
 
         try:
@@ -1597,8 +1602,9 @@ class TestHeartbeatPerformanceExtended:
         group_id = f"e2e-hb-consistency-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id_override=group_id,
+            node_identity=make_e2e_test_identity("hb_consistency"),
             on_message=on_heartbeat,
+            group_id_override=group_id,
         )
 
         try:

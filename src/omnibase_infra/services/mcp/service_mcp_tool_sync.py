@@ -26,6 +26,7 @@ from uuid import uuid4
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.types import JsonType
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.mcp.model_mcp_tool_definition import (
     ModelMCPToolDefinition,
 )
@@ -181,11 +182,19 @@ class ServiceMCPToolSync:
             },
         )
 
-        # Subscribe to registration events
+        # Subscribe to registration events (OMN-1602: typed node identity)
+        # Create identity for this service's consumer group
+        sync_identity = ModelNodeIdentity(
+            env="default",  # Service-level consumer, not env-specific
+            service="mcp",
+            node_name="tool_sync",
+            version="v1",
+        )
         self._unsubscribe = await self._bus.subscribe(
             topic=self.TOPIC,
-            group_id=self.GROUP_ID,
+            node_identity=sync_identity,
             on_message=self._on_message,
+            group_id_override=self.GROUP_ID,  # Use existing group ID for backward compat
         )
 
         self._started = True

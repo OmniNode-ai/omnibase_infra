@@ -65,7 +65,7 @@ from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
 # Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
-from .conftest import wait_for_consumer_ready
+from .conftest import make_e2e_test_identity, wait_for_consumer_ready
 from .verification_helpers import (
     wait_for_postgres_registration,
 )
@@ -1020,8 +1020,9 @@ async def running_orchestrator_consumer(
     # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
     unsubscribe = await real_kafka_event_bus.subscribe(
         topic=validate_test_topic_exists,  # Use the ensured topic name
-        group_id_override=unique_group_id,
+        node_identity=make_e2e_test_identity("orchestrator"),
         on_message=orchestrator_pipeline.pipeline.process_message,
+        group_id_override=unique_group_id,
     )
 
     # Wait for consumer to be ready to receive messages.
@@ -1553,8 +1554,9 @@ class TestPipelineLifecycle:
         # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=validate_test_topic_exists,
-            group_id_override=f"lifecycle-test-{unique_correlation_id.hex[:8]}",
+            node_identity=make_e2e_test_identity("lifecycle"),
             on_message=handler,
+            group_id_override=f"lifecycle-test-{unique_correlation_id.hex[:8]}",
         )
 
         try:
@@ -1610,8 +1612,9 @@ class TestPipelineLifecycle:
         # Use group_id_override for test isolation with dynamic UUIDs (OMN-1602)
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=validate_test_topic_exists,
-            group_id_override=f"shutdown-test-{unique_correlation_id.hex[:8]}",
+            node_identity=make_e2e_test_identity("shutdown"),
             on_message=handler,
+            group_id_override=f"shutdown-test-{unique_correlation_id.hex[:8]}",
         )
 
         # Brief wait before testing shutdown (tests cleanup, not message receipt).
