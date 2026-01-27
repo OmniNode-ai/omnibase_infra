@@ -84,14 +84,14 @@ class ModelIntrospectionConfig(BaseModel):
             discovery. Methods starting with these prefixes are filtered out.
             If None, uses MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES.
         introspection_topic: Topic for publishing introspection events.
-            Defaults to "node.introspection". ONEX topics (onex.*) require
-            version suffix (.v1, .v2, etc.).
+            Defaults to SUFFIX_NODE_INTROSPECTION (onex.evt.platform.node-introspection.v1).
+            ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         heartbeat_topic: Topic for publishing heartbeat events.
-            Defaults to "node.heartbeat". ONEX topics (onex.*) require
-            version suffix (.v1, .v2, etc.).
+            Defaults to SUFFIX_NODE_HEARTBEAT (onex.evt.platform.node-heartbeat.v1).
+            ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         request_introspection_topic: Topic for receiving introspection requests.
-            Defaults to "node.request_introspection". ONEX topics (onex.*)
-            require version suffix (.v1, .v2, etc.).
+            Defaults to SUFFIX_REQUEST_INTROSPECTION (onex.cmd.platform.request-introspection.v1).
+            ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         contract: Optional typed contract model for capability extraction.
             When provided, MixinNodeIntrospection extracts contract_capabilities
             using ContractCapabilityExtractor. None for legacy nodes.

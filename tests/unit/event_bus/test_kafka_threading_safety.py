@@ -121,7 +121,6 @@ class TestKafkaEventBusThreadingSafety:
 
             # Verify final state is consistent
             assert bus.environment == "test-env"
-            assert bus.group == "test-group"
 
             # Cleanup: Close bus within patch context to ensure proper cleanup order
             await bus.close()

@@ -16,6 +16,7 @@ Exports:
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
     EnumConfirmationEventType: Registration confirmation event types
+    EnumConsumerGroupPurpose: Consumer group purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL)
     EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
     EnumDispatchStatus: Dispatch operation status enumeration
     EnumEnvironment: Deployment environment classification (DEVELOPMENT, STAGING, PRODUCTION, CI)
@@ -54,6 +55,7 @@ from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.enums.enum_confirmation_event_type import EnumConfirmationEventType
+from omnibase_infra.enums.enum_consumer_group_purpose import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_contract_type import EnumContractType
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
@@ -97,6 +99,7 @@ __all__: list[str] = [
     "EnumChainViolationType",
     "EnumCircuitState",
     "EnumConfirmationEventType",
+    "EnumConsumerGroupPurpose",
     "EnumContractType",
     "EnumDedupeStrategy",
     "EnumDispatchStatus",

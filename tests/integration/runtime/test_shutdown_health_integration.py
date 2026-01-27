@@ -26,6 +26,15 @@ from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProce
 from omnibase_infra.services.service_health import ServiceHealth
 from tests.conftest import seed_mock_handlers
 
+# Test config required for RuntimeHostProcess (OMN-1602)
+# RuntimeHostProcess now requires service_name and node_name for consumer group derivation
+_SHUTDOWN_TEST_CONFIG: dict[str, object] = {
+    "service_name": "shutdown-health-test",
+    "node_name": "test-node",
+    "env": "test",
+    "version": "v1",
+}
+
 
 class TestShutdownHealthIntegration:
     """Integration tests for shutdown and health check interaction."""
@@ -41,7 +50,7 @@ class TestShutdownHealthIntegration:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
         # failures from the singleton registry affecting the test
@@ -81,7 +90,7 @@ class TestShutdownHealthIntegration:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
 
         async def noop_populate() -> None:
             pass
@@ -125,7 +134,7 @@ class TestShutdownHealthIntegration:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
         # Use port 0 for automatic port assignment to avoid conflicts
         health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
 
@@ -187,7 +196,7 @@ class TestShutdownHealthIntegration:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
         health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
 
         async def noop_populate() -> None:
@@ -244,7 +253,7 @@ class TestShutdownHealthIntegration:
 
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
         health_server = ServiceHealth(runtime=runtime, port=0, version="test-1.0.0")
 
         async def noop_populate() -> None:
@@ -299,7 +308,7 @@ class TestShutdownHealthIntegration:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
 
         async def noop_populate() -> None:
             pass
@@ -331,7 +340,7 @@ class TestShutdownHealthIntegration:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
 
         async def noop_populate() -> None:
             pass
@@ -363,7 +372,7 @@ class TestShutdownHealthIntegration:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
 
         async def noop_populate() -> None:
             pass
@@ -403,7 +412,7 @@ class TestServiceHealthShutdownBehavior:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
         health_server = ServiceHealth(runtime=runtime, port=0)
 
         async def noop_populate() -> None:
@@ -434,7 +443,7 @@ class TestServiceHealthShutdownBehavior:
         """
         # Arrange - runtime never started
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
         health_server = ServiceHealth(runtime=runtime, port=0)
 
         await health_server.start()
@@ -473,7 +482,7 @@ class TestServiceHealthShutdownBehavior:
         """
         # Arrange
         event_bus = EventBusInmemory()
-        runtime = RuntimeHostProcess(event_bus=event_bus)
+        runtime = RuntimeHostProcess(event_bus=event_bus, config=_SHUTDOWN_TEST_CONFIG)
         health_server = ServiceHealth(runtime=runtime, port=0)
 
         async def noop_populate() -> None:

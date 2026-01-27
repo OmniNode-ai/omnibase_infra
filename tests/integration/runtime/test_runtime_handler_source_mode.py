@@ -197,9 +197,11 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "bootstrap",
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -243,9 +245,11 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "bootstrap",
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -316,9 +320,11 @@ class TestContractModeLoadsOnlyContractHandlers:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "contract",
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -361,9 +367,11 @@ class TestContractModeLoadsOnlyContractHandlers:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "contract",
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -416,9 +424,11 @@ class TestHybridModeContractFirstBootstrapFallback:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "hybrid",
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -471,9 +481,11 @@ class TestHybridModeContractFirstBootstrapFallback:
 
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "hybrid",
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -844,10 +856,12 @@ class TestExpiredBootstrapForcesContractMode:
 
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "hybrid",  # Configured as HYBRID
                 "bootstrap_expires_at": past_expiry.isoformat(),  # But expired
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -887,10 +901,12 @@ class TestExpiredBootstrapForcesContractMode:
 
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "hybrid",  # Configured as HYBRID
                 "bootstrap_expires_at": future_expiry.isoformat(),  # Not expired
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -956,9 +972,11 @@ class TestHandlerResolutionLogging:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "hybrid",
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -1020,9 +1038,11 @@ class TestHandlerResolutionLogging:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "bootstrap",
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -1089,11 +1109,14 @@ class TestDefaultConfigUsesHybridMode:
         """
         event_bus = EventBusInmemory()
 
-        # No config - should default to HYBRID
+        # Minimal config with only service_name - should default to HYBRID mode
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
-            # No config parameter
+            config={
+                "service_name": "test-handler-mode-service",
+                "node_name": "test-handler-mode-node",
+            },
         )
 
         with caplog.at_level(logging.INFO):
@@ -1138,6 +1161,8 @@ class TestDefaultConfigUsesHybridMode:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {},  # Empty - should default to HYBRID
         }
 
@@ -1194,9 +1219,11 @@ class TestInvalidConfigurationHandling:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "invalid_mode",  # Invalid value
-            }
+            },
         }
 
         process = RuntimeHostProcess(
@@ -1248,10 +1275,12 @@ class TestInvalidConfigurationHandling:
         """
         event_bus = EventBusInmemory()
         config: dict[str, object] = {
+            "service_name": "test-handler-mode-service",
+            "node_name": "test-handler-mode-node",
             "handler_source": {
                 "mode": "hybrid",
                 "bootstrap_expires_at": "not-a-valid-datetime",  # Invalid
-            }
+            },
         }
 
         process = RuntimeHostProcess(

@@ -29,10 +29,6 @@ Environment Variables:
             Default: "local"
             Example: "dev", "staging", "prod"
 
-        KAFKA_GROUP: Consumer group identifier
-            Default: "default"
-            Example: "my-service-group"
-
     Timeout and Retry Settings:
         KAFKA_TIMEOUT_SECONDS: Timeout for Kafka operations (integer seconds)
             Default: 30
@@ -134,6 +130,7 @@ Usage:
     ```python
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+    from omnibase_infra.models import ModelNodeIdentity
 
     # Option 1: Use defaults with environment variable overrides
     bus = EventBusKafka.default()
@@ -147,10 +144,17 @@ Usage:
     bus = EventBusKafka(config=config)
     await bus.start()
 
-    # Subscribe to a topic
+    # Subscribe to a topic with node identity
+    identity = ModelNodeIdentity(
+        env="dev",
+        service="my-service",
+        node_name="event-processor",
+        version="v1",
+    )
+
     async def handler(msg):
         print(f"Received: {msg.value}")
-    unsubscribe = await bus.subscribe("events", "group1", handler)
+    unsubscribe = await bus.subscribe("events", identity, handler)
 
     # Publish a message
     await bus.publish("events", b"key", b"value")
@@ -180,7 +184,7 @@ from uuid import UUID, uuid4
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaError
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -197,6 +201,8 @@ from omnibase_infra.event_bus.models import (
 )
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.utils import compute_consumer_group_id
 
 logger = logging.getLogger(__name__)
 
@@ -215,29 +221,30 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         - Circuit breaker for connection failure protection
         - Retry with exponential backoff on publish failures
         - Dead letter queue (DLQ) for failed message processing
-        - Environment and group-based message routing
+        - Environment-based message routing
         - Proper async producer/consumer lifecycle management
 
     Attributes:
         environment: Environment identifier (e.g., "local", "dev", "prod")
-        group: Consumer group identifier
         adapter: Returns self (for protocol compatibility)
 
     Architecture:
         This class uses mixin composition to organize functionality:
-        - MixinKafkaBroadcast: Environment/group broadcast messaging, envelope publishing
+        - MixinKafkaBroadcast: Environment broadcast messaging, envelope publishing
         - MixinKafkaDlq: Dead letter queue handling and metrics
         - MixinAsyncCircuitBreaker: Circuit breaker resilience pattern
 
         The core class provides:
         - Factory methods (3): from_config, from_yaml, default
-        - Properties (4): config, adapter, environment, group
+        - Properties (3): config, adapter, environment
         - Lifecycle methods (4): start, initialize, shutdown, close
         - Pub/Sub methods (3): publish, subscribe, start_consuming
         - Health check (1): health_check
 
     Example:
         ```python
+        from omnibase_infra.models import ModelNodeIdentity
+
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="kafka:9092",
             environment="dev",
@@ -245,10 +252,17 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         bus = EventBusKafka(config=config)
         await bus.start()
 
-        # Subscribe
+        # Subscribe with node identity
+        identity = ModelNodeIdentity(
+            env="dev",
+            service="my-service",
+            node_name="event-processor",
+            version="v1",
+        )
+
         async def handler(msg):
             print(f"Received: {msg.value}")
-        unsubscribe = await bus.subscribe("events", "group1", handler)
+        unsubscribe = await bus.subscribe("events", identity, handler)
 
         # Publish
         await bus.publish("events", b"key", b"value")
@@ -296,7 +310,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         # Apply config values
         self._bootstrap_servers = config.bootstrap_servers
         self._environment = config.environment
-        self._group = config.group
         self._timeout_seconds = config.timeout_seconds
         self._max_retry_attempts = config.max_retry_attempts
         self._retry_backoff_base = config.retry_backoff_base
@@ -450,15 +463,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         """
         return self._environment
 
-    @property
-    def group(self) -> str:
-        """Get the consumer group identifier.
-
-        Returns:
-            Consumer group string
-        """
-        return self._group
-
     async def start(self) -> None:
         """Start the event bus and connect to Kafka.
 
@@ -511,7 +515,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                     "EventBusKafka started",
                     extra={
                         "environment": self._environment,
-                        "group": self._group,
                         "bootstrap_servers": self._sanitize_bootstrap_servers(
                             self._bootstrap_servers
                         ),
@@ -612,7 +615,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         Args:
             config: Configuration dictionary with optional keys:
                 - environment: Override environment setting
-                - group: Override group setting
                 - bootstrap_servers: Override bootstrap servers
                 - timeout_seconds: Override timeout setting
         """
@@ -620,8 +622,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         async with self._lock:
             if "environment" in config:
                 self._environment = str(config["environment"])
-            if "group" in config:
-                self._group = str(config["group"])
             if "bootstrap_servers" in config:
                 self._bootstrap_servers = str(config["bootstrap_servers"])
             if "timeout_seconds" in config:
@@ -696,7 +696,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
 
         logger.info(
             "EventBusKafka closed",
-            extra={"environment": self._environment, "group": self._group},
+            extra={"environment": self._environment},
         )
 
     async def publish(
@@ -739,7 +739,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         # Create headers if not provided
         if headers is None:
             headers = ModelEventHeaders(
-                source=f"{self._environment}.{self._group}",
+                source=self._environment,
                 event_type=topic,
                 timestamp=datetime.now(UTC),
             )
@@ -915,13 +915,18 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
     async def subscribe(
         self,
         topic: str,
-        group_id: str,
+        node_identity: ModelNodeIdentity,
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
+        *,
+        purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to topic with callback handler.
 
         Registers a callback to be invoked for each message received on the topic.
         Returns an unsubscribe function to remove the subscription.
+
+        The consumer group ID is derived from the node identity using the canonical
+        format: ``{env}.{service}.{node_name}.{purpose}.{version}``.
 
         Note: Unlike typical Kafka consumer groups, this implementation maintains
         a subscriber registry and fans out messages to all registered callbacks,
@@ -929,18 +934,39 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
 
         Args:
             topic: Topic to subscribe to
-            group_id: Consumer group identifier for this subscription
+            node_identity: Node identity used to derive the consumer group ID.
+                Contains env, service, node_name, and version components.
             on_message: Async callback invoked for each message
+            purpose: Consumer group purpose classification. Defaults to CONSUME.
+                Used in the consumer group ID derivation for disambiguation.
 
         Returns:
             Async unsubscribe function to remove this subscription
 
         Example:
             ```python
+            from omnibase_infra.models import ModelNodeIdentity
+            from omnibase_infra.enums import EnumConsumerGroupPurpose
+
+            identity = ModelNodeIdentity(
+                env="dev",
+                service="my-service",
+                node_name="event-processor",
+                version="v1",
+            )
+
             async def handler(msg):
                 print(f"Received: {msg.value}")
 
-            unsubscribe = await bus.subscribe("events", "group1", handler)
+            # Standard subscription (group_id: dev.my-service.event-processor.consume.v1)
+            unsubscribe = await bus.subscribe("events", identity, handler)
+
+            # With explicit purpose
+            unsubscribe = await bus.subscribe(
+                "events", identity, handler,
+                purpose=EnumConsumerGroupPurpose.INTROSPECTION,
+            )
+
             # ... later ...
             await unsubscribe()
             ```
@@ -948,22 +974,27 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         subscription_id = str(uuid4())
         correlation_id = uuid4()
 
+        # Derive consumer group ID from node identity (no overrides allowed)
+        effective_group_id = compute_consumer_group_id(node_identity, purpose)
+
         # Validate topic name
         self._validate_topic_name(topic, correlation_id)
 
         async with self._lock:
             # Add to subscriber registry
-            self._subscribers[topic].append((group_id, subscription_id, on_message))
+            self._subscribers[topic].append(
+                (effective_group_id, subscription_id, on_message)
+            )
 
             # Start consumer for this topic if not already running
             if topic not in self._consumers and self._started:
-                await self._start_consumer_for_topic(topic, group_id)
+                await self._start_consumer_for_topic(topic, effective_group_id)
 
             logger.debug(
                 "Subscriber added",
                 extra={
                     "topic": topic,
-                    "group_id": group_id,
+                    "group_id": effective_group_id,
                     "subscription_id": subscription_id,
                 },
             )
@@ -983,7 +1014,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                         "Subscriber removed",
                         extra={
                             "topic": topic,
-                            "group_id": group_id,
+                            "group_id": effective_group_id,
                             "subscription_id": subscription_id,
                         },
                     )
@@ -1006,9 +1037,13 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
 
         Args:
             topic: Topic to consume from
-            group_id: Consumer group ID
+            group_id: Fully qualified consumer group ID. This should be derived
+                from ``compute_consumer_group_id()`` or an explicit override.
+                The ID is used directly without any prefix modification.
 
         Raises:
+            ProtocolConfigurationError: If group_id is empty (must be derived from
+                compute_consumer_group_id or provided as explicit override)
             InfraTimeoutError: If consumer startup times out after timeout_seconds
             InfraConnectionError: If consumer fails to connect to Kafka brokers
         """
@@ -1018,15 +1053,29 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         correlation_id = uuid4()
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
-        # Normalize empty string to default group (treats "" same as None)
-        # This ensures consistent behavior when group_id is unset or empty
-        effective_group_id = group_id.strip() if group_id else self._group
+        # Use group_id directly - it's already fully qualified from compute_consumer_group_id()
+        # or an explicit override. Empty group_id indicates a bug in the caller.
+        effective_group_id = group_id.strip()
+        if not effective_group_id:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="start_consumer",
+                target_name=f"kafka.{topic}",
+            )
+            raise ProtocolConfigurationError(
+                f"Consumer group ID is required for topic '{topic}'. "
+                "Internal error: compute_consumer_group_id() should have been called.",
+                context=context,
+                parameter="group_id",
+                value=group_id,
+            )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
             topic,
             bootstrap_servers=self._bootstrap_servers,
-            group_id=f"{self._environment}.{effective_group_id}",
+            group_id=effective_group_id,
             auto_offset_reset=self._config.auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit,
         )
@@ -1194,6 +1243,15 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                     )
                     break
 
+                # Get subscribers snapshot early - needed for consumer group in DLQ
+                async with self._lock:
+                    subscribers = list(self._subscribers.get(topic, []))
+
+                # Extract consumer group for DLQ traceability (all subscribers share the same consumer)
+                effective_consumer_group = (
+                    subscribers[0][0] if subscribers else "unknown"
+                )
+
                 # Convert Kafka message to ModelEventMessage - handle conversion errors
                 try:
                     event_message = self._kafka_msg_to_model(msg, topic)
@@ -1215,12 +1273,9 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                         error=e,
                         correlation_id=correlation_id,
                         failure_type="deserialization_error",
+                        consumer_group=effective_consumer_group,
                     )
                     continue  # Skip this message but continue consuming
-
-                # Get subscribers snapshot
-                async with self._lock:
-                    subscribers = list(self._subscribers.get(topic, []))
 
                 # Dispatch to all subscribers
                 for group_id, subscription_id, callback in subscribers:
@@ -1255,6 +1310,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                                 failed_message=event_message,
                                 error=e,
                                 correlation_id=correlation_id,
+                                consumer_group=group_id,
                             )
                         else:
                             # Message still has retries available - log for potential republish
@@ -1340,7 +1396,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 - healthy: Whether the bus is operational
                 - started: Whether start() has been called
                 - environment: Current environment
-                - group: Current consumer group
                 - bootstrap_servers: Kafka bootstrap servers
                 - circuit_state: Current circuit breaker state
                 - subscriber_count: Total number of active subscriptions
@@ -1371,7 +1426,6 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
             "healthy": started and producer_healthy,
             "started": started,
             "environment": self._environment,
-            "group": self._group,
             "bootstrap_servers": self._sanitize_bootstrap_servers(
                 self._bootstrap_servers
             ),

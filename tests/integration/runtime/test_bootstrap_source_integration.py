@@ -157,6 +157,10 @@ class TestBootstrapSourceRuntimeIntegration:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config={
+                "service_name": "test-bootstrap-service",
+                "node_name": "test-bootstrap-node",
+            },
             # No contract_paths - bootstrap handlers provide core infrastructure
         )
 
@@ -203,6 +207,10 @@ class TestBootstrapSourceRuntimeIntegration:
             process = RuntimeHostProcess(
                 event_bus=event_bus,
                 input_topic="test.input",
+                config={
+                    "service_name": "test-bootstrap-service",
+                    "node_name": "test-bootstrap-node",
+                },
                 contract_paths=[str(contracts_dir)],
             )
 
@@ -292,6 +300,10 @@ class TestBootstrapSourceRuntimeIntegration:
             process = RuntimeHostProcess(
                 event_bus=event_bus,
                 input_topic="test.input",
+                config={
+                    "service_name": "test-bootstrap-service",
+                    "node_name": "test-bootstrap-node",
+                },
             )
 
             try:
@@ -327,6 +339,10 @@ class TestBootstrapSourceRuntimeIntegration:
         process = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic="test.input",
+            config={
+                "service_name": "test-bootstrap-service",
+                "node_name": "test-bootstrap-node",
+            },
         )
 
         with caplog.at_level(logging.INFO):
@@ -379,6 +395,10 @@ class TestBootstrapSourceErrorHandling:
                 process = RuntimeHostProcess(
                     event_bus=event_bus,
                     input_topic="test.input",
+                    config={
+                        "service_name": "test-bootstrap-service",
+                        "node_name": "test-bootstrap-node",
+                    },
                 )
 
                 try:
@@ -431,6 +451,10 @@ class TestBootstrapSourceErrorHandling:
             process = RuntimeHostProcess(
                 event_bus=event_bus,
                 input_topic="test.input",
+                config={
+                    "service_name": "test-bootstrap-service",
+                    "node_name": "test-bootstrap-node",
+                },
             )
 
             try:

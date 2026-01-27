@@ -36,6 +36,7 @@ See Also:
     omnibase_core.validation.compose_full_topic - Topic composition utility
 """
 
+from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
 
 # =============================================================================
@@ -126,15 +127,13 @@ def _validate_all_suffixes() -> None:
     """Validate all suffixes at import time to fail fast on invalid format.
 
     Raises:
-        ValueError: If any suffix fails validation with details about which
+        OnexError: If any suffix fails validation with details about which
             suffix failed and why.
     """
     for suffix in ALL_PLATFORM_SUFFIXES:
         result = validate_topic_suffix(suffix)
         if not result.is_valid:
-            raise ValueError(
-                f"Invalid platform topic suffix '{suffix}': {result.error}"
-            )
+            raise OnexError(f"Invalid platform topic suffix '{suffix}': {result.error}")
 
 
 # Run validation at import time

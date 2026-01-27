@@ -226,7 +226,6 @@ class TestMixinInitializationOrder:
 
         # Verify basic properties work
         assert bus.environment == "local"
-        assert bus.group == "default"
 
     def test_circuit_breaker_initialized(self) -> None:
         """Verify circuit breaker mixin is properly initialized."""
@@ -269,14 +268,12 @@ class TestMixinInitializationOrder:
 
         MixinKafkaBroadcast requires:
         - self._environment
-        - self._group
         - self.publish() method
         """
         bus = EventBusKafka()
 
         # Required attributes should exist
         assert hasattr(bus, "_environment")
-        assert hasattr(bus, "_group")
         assert hasattr(bus, "publish")
 
         # publish should be callable
@@ -287,7 +284,6 @@ class TestMixinInitializationOrder:
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="test:9092",
             environment="staging",
-            group="test-group",
             circuit_breaker_threshold=10,
             circuit_breaker_reset_timeout=120.0,
         )
@@ -295,7 +291,6 @@ class TestMixinInitializationOrder:
 
         # Verify config values propagated
         assert bus.environment == "staging"
-        assert bus.group == "test-group"
 
         # Circuit breaker should use config values
         assert bus.circuit_breaker_threshold == 10
@@ -450,7 +445,6 @@ class TestMixinMethodFunctionality:
             config = ModelKafkaEventBusConfig(
                 bootstrap_servers="localhost:9092",
                 environment="test",
-                group="test-group",
             )
             bus = EventBusKafka(config=config)
             yield bus

@@ -4,6 +4,7 @@ IMPORTANT: build_full_topic() is the ONLY supported way to compose
 Kafka topics in omnibase_infra. Direct string concatenation is prohibited.
 """
 
+from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_core.validation.validator_topic_suffix import ENV_PREFIXES
 
@@ -16,8 +17,11 @@ to ensure total topic length stays within bounds.
 """
 
 
-class TopicCompositionError(ValueError):
-    """Raised when topic composition fails due to invalid components."""
+class TopicCompositionError(OnexError):
+    """Raised when topic composition fails due to invalid components.
+
+    Extends OnexError to follow ONEX error handling conventions.
+    """
 
 
 def build_full_topic(env: str, namespace: str, suffix: str) -> str:
@@ -72,6 +76,14 @@ def build_full_topic(env: str, namespace: str, suffix: str) -> str:
         raise TopicCompositionError(
             f"Invalid namespace '{namespace}'. "
             "Must contain only alphanumeric characters, hyphens, and underscores"
+        )
+
+    # Enforce lowercase to ensure composed topics are valid
+    # (ONEX topic suffixes are lowercase, so namespaces should match)
+    if namespace != namespace.lower():
+        raise TopicCompositionError(
+            f"Namespace must be lowercase: '{namespace}'. "
+            "Use lowercase to ensure consistent topic naming."
         )
 
     # Validate suffix using omnibase_core validation

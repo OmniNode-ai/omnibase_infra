@@ -8,7 +8,7 @@ the MCP tool registry in real-time. It supports:
 - Deregistration: Removed orchestrators are removed from tool registry
 - Idempotency: Duplicate/out-of-order events are handled correctly
 
-Event Topic: node.registration.v1
+Event Topic: Uses SUFFIX_NODE_REGISTRATION (onex.evt.platform.node-registration.v1)
 Event Types:
     - registered: New node registered → upsert tool
     - updated: Node updated → upsert tool
@@ -26,6 +26,7 @@ from uuid import uuid4
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.types import JsonType
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.mcp.model_mcp_tool_definition import (
     ModelMCPToolDefinition,
 )
@@ -77,9 +78,8 @@ class ServiceMCPToolSync:
         >>> await sync.stop()
     """
 
-    # Topic for node registration events
+    # Topic for node registration events (uses platform suffix constant)
     TOPIC = SUFFIX_NODE_REGISTRATION
-    GROUP_ID = "mcp-tool-sync"
 
     # MCP tag constants
     TAG_MCP_ENABLED = "mcp-enabled"
@@ -151,7 +151,6 @@ class ServiceMCPToolSync:
             "ServiceMCPToolSync initialized",
             extra={
                 "topic": self.TOPIC,
-                "group_id": self.GROUP_ID,
             },
         )
 
@@ -173,19 +172,37 @@ class ServiceMCPToolSync:
 
         correlation_id = uuid4()
 
+        # OMN-1602: Typed node identity for consumer group derivation.
+        #
+        # Identity Field Rationale:
+        # - env: From bus.environment for deployment-specific consumer groups
+        # - service="mcp": MCP is a singleton per environment
+        # - node_name="tool_sync": Unique consumer within the MCP service
+        # - version="v1": Consumer protocol version (increment on breaking changes)
+        sync_identity = ModelNodeIdentity(
+            env=self._bus.environment,
+            service="mcp",
+            node_name="tool_sync",
+            version="v1",
+        )
+
         logger.info(
             "Starting MCP tool sync",
             extra={
                 "topic": self.TOPIC,
-                "group_id": self.GROUP_ID,
+                "node_identity": {
+                    "env": sync_identity.env,
+                    "service": sync_identity.service,
+                    "node_name": sync_identity.node_name,
+                    "version": sync_identity.version,
+                },
                 "correlation_id": str(correlation_id),
             },
         )
 
-        # Subscribe to registration events
         self._unsubscribe = await self._bus.subscribe(
             topic=self.TOPIC,
-            group_id=self.GROUP_ID,
+            node_identity=sync_identity,
             on_message=self._on_message,
         )
 
@@ -540,7 +557,7 @@ class ServiceMCPToolSync:
         return {
             "service_name": "ServiceMCPToolSync",
             "topic": self.TOPIC,
-            "group_id": self.GROUP_ID,
+            "group_id_derived": True,  # Group ID derived from ModelNodeIdentity
             "is_running": self._started,
         }
 

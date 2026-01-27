@@ -40,7 +40,7 @@ import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
-from tests.conftest import seed_mock_handlers
+from tests.conftest import make_runtime_config, seed_mock_handlers
 from tests.helpers import DeterministicClock, DeterministicIdGenerator
 
 # =============================================================================
@@ -319,7 +319,7 @@ class TestRuntimeHostProcessInitialization:
         """
         # Import will fail until implementation exists - this is TDD red phase
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         assert process.event_bus is not None
         assert isinstance(process.event_bus, EventBusInmemory)
@@ -328,13 +328,11 @@ class TestRuntimeHostProcessInitialization:
     async def test_initializes_with_default_config(self) -> None:
         """Test that RuntimeHostProcess initializes with default configuration.
 
-        Default config should include:
-        - input_topic: The topic to subscribe to for incoming envelopes
-        - output_topic: The topic to publish responses to
-        - group_id: Consumer group identifier
+        When minimal config is provided (required fields only), should use
+        default values for topics and derive consumer group from node identity.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Should have default configuration values
         assert process.input_topic is not None
@@ -345,17 +343,17 @@ class TestRuntimeHostProcessInitialization:
     async def test_initializes_with_custom_config(self) -> None:
         """Test that RuntimeHostProcess accepts custom configuration."""
 
-        config: dict[str, object] = {
-            "input_topic": "custom.input",
-            "output_topic": "custom.output",
-            "group_id": "custom-group",
-        }
-
-        process = RuntimeHostProcess(config=config)
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                input_topic="custom.input",
+                output_topic="custom.output",
+            )
+        )
 
         assert process.input_topic == "custom.input"
         assert process.output_topic == "custom.output"
-        assert process.group_id == "custom-group"
+        # group_id is now derived from node identity, not passed directly
+        assert process.group_id is not None
 
     @pytest.mark.asyncio
     async def test_not_started_by_default(self) -> None:
@@ -365,7 +363,7 @@ class TestRuntimeHostProcessInitialization:
         requiring explicit start() call to begin processing.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         assert process.is_running is False
         # Event bus should also not be started
@@ -393,7 +391,9 @@ class TestRuntimeHostProcessTimeoutValidation:
         import logging
 
         with caplog.at_level(logging.WARNING):
-            process = RuntimeHostProcess(config={"health_check_timeout_seconds": 0.5})
+            process = RuntimeHostProcess(
+                config=make_runtime_config(health_check_timeout_seconds=0.5)
+            )
 
         # Should be clamped to minimum
         assert process._health_check_timeout_seconds == 1.0
@@ -415,7 +415,9 @@ class TestRuntimeHostProcessTimeoutValidation:
         import logging
 
         with caplog.at_level(logging.WARNING):
-            process = RuntimeHostProcess(config={"health_check_timeout_seconds": 120.0})
+            process = RuntimeHostProcess(
+                config=make_runtime_config(health_check_timeout_seconds=120.0)
+            )
 
         # Should be clamped to maximum
         assert process._health_check_timeout_seconds == 60.0
@@ -432,27 +434,37 @@ class TestRuntimeHostProcessTimeoutValidation:
     async def test_timeout_within_range_is_accepted(self) -> None:
         """Test that timeout values within range are accepted as-is."""
         # Test minimum boundary
-        process_min = RuntimeHostProcess(config={"health_check_timeout_seconds": 1.0})
+        process_min = RuntimeHostProcess(
+            config=make_runtime_config(health_check_timeout_seconds=1.0)
+        )
         assert process_min._health_check_timeout_seconds == 1.0
 
         # Test maximum boundary
-        process_max = RuntimeHostProcess(config={"health_check_timeout_seconds": 60.0})
+        process_max = RuntimeHostProcess(
+            config=make_runtime_config(health_check_timeout_seconds=60.0)
+        )
         assert process_max._health_check_timeout_seconds == 60.0
 
         # Test middle value
-        process_mid = RuntimeHostProcess(config={"health_check_timeout_seconds": 30.0})
+        process_mid = RuntimeHostProcess(
+            config=make_runtime_config(health_check_timeout_seconds=30.0)
+        )
         assert process_mid._health_check_timeout_seconds == 30.0
 
     @pytest.mark.asyncio
     async def test_timeout_integer_within_range_is_accepted(self) -> None:
         """Test that integer timeout values within range are accepted."""
-        process = RuntimeHostProcess(config={"health_check_timeout_seconds": 10})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(health_check_timeout_seconds=10)
+        )
         assert process._health_check_timeout_seconds == 10.0
 
     @pytest.mark.asyncio
     async def test_timeout_string_within_range_is_accepted(self) -> None:
         """Test that valid string timeout values within range are accepted."""
-        process = RuntimeHostProcess(config={"health_check_timeout_seconds": "15.5"})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(health_check_timeout_seconds="15.5")
+        )
         assert process._health_check_timeout_seconds == 15.5
 
     @pytest.mark.asyncio
@@ -465,7 +477,7 @@ class TestRuntimeHostProcessTimeoutValidation:
 
         with caplog.at_level(logging.WARNING):
             process = RuntimeHostProcess(
-                config={"health_check_timeout_seconds": "not-a-number"}
+                config=make_runtime_config(health_check_timeout_seconds="not-a-number")
             )
 
         # Should fall back to default
@@ -487,7 +499,9 @@ class TestRuntimeHostProcessTimeoutValidation:
         import logging
 
         with caplog.at_level(logging.WARNING):
-            process = RuntimeHostProcess(config={"health_check_timeout_seconds": 0})
+            process = RuntimeHostProcess(
+                config=make_runtime_config(health_check_timeout_seconds=0)
+            )
 
         # Should be clamped to minimum
         assert process._health_check_timeout_seconds == 1.0
@@ -501,7 +515,9 @@ class TestRuntimeHostProcessTimeoutValidation:
         import logging
 
         with caplog.at_level(logging.WARNING):
-            process = RuntimeHostProcess(config={"health_check_timeout_seconds": -5.0})
+            process = RuntimeHostProcess(
+                config=make_runtime_config(health_check_timeout_seconds=-5.0)
+            )
 
         # Should be clamped to minimum
         assert process._health_check_timeout_seconds == 1.0
@@ -509,13 +525,15 @@ class TestRuntimeHostProcessTimeoutValidation:
     @pytest.mark.asyncio
     async def test_timeout_default_when_not_specified(self) -> None:
         """Test that default timeout is used when not specified in config."""
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         assert process._health_check_timeout_seconds == 5.0
 
     @pytest.mark.asyncio
     async def test_timeout_default_when_none(self) -> None:
         """Test that default timeout is used when explicitly set to None."""
-        process = RuntimeHostProcess(config={"health_check_timeout_seconds": None})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(health_check_timeout_seconds=None)
+        )
         assert process._health_check_timeout_seconds == 5.0
 
 
@@ -540,7 +558,9 @@ class TestRuntimeHostProcessDrainTimeoutValidation:
         import logging
 
         with caplog.at_level(logging.WARNING):
-            process = RuntimeHostProcess(config={"drain_timeout_seconds": 0.5})
+            process = RuntimeHostProcess(
+                config=make_runtime_config(drain_timeout_seconds=0.5)
+            )
 
         # Should be clamped to minimum
         assert process._drain_timeout_seconds == 1.0
@@ -562,7 +582,9 @@ class TestRuntimeHostProcessDrainTimeoutValidation:
         import logging
 
         with caplog.at_level(logging.WARNING):
-            process = RuntimeHostProcess(config={"drain_timeout_seconds": 600.0})
+            process = RuntimeHostProcess(
+                config=make_runtime_config(drain_timeout_seconds=600.0)
+            )
 
         # Should be clamped to maximum
         assert process._drain_timeout_seconds == 300.0
@@ -579,21 +601,27 @@ class TestRuntimeHostProcessDrainTimeoutValidation:
     async def test_drain_timeout_within_range_is_accepted(self) -> None:
         """Test that drain timeout values within range are accepted as-is."""
         # Test minimum boundary
-        process_min = RuntimeHostProcess(config={"drain_timeout_seconds": 1.0})
+        process_min = RuntimeHostProcess(
+            config=make_runtime_config(drain_timeout_seconds=1.0)
+        )
         assert process_min._drain_timeout_seconds == 1.0
 
         # Test maximum boundary
-        process_max = RuntimeHostProcess(config={"drain_timeout_seconds": 300.0})
+        process_max = RuntimeHostProcess(
+            config=make_runtime_config(drain_timeout_seconds=300.0)
+        )
         assert process_max._drain_timeout_seconds == 300.0
 
         # Test middle value
-        process_mid = RuntimeHostProcess(config={"drain_timeout_seconds": 150.0})
+        process_mid = RuntimeHostProcess(
+            config=make_runtime_config(drain_timeout_seconds=150.0)
+        )
         assert process_mid._drain_timeout_seconds == 150.0
 
     @pytest.mark.asyncio
     async def test_drain_timeout_default_when_not_specified(self) -> None:
         """Test that default drain timeout is used when not specified in config."""
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         assert process._drain_timeout_seconds == 30.0
 
     @pytest.mark.asyncio
@@ -606,7 +634,7 @@ class TestRuntimeHostProcessDrainTimeoutValidation:
 
         with caplog.at_level(logging.WARNING):
             process = RuntimeHostProcess(
-                config={"drain_timeout_seconds": "not-a-number"}
+                config=make_runtime_config(drain_timeout_seconds="not-a-number")
             )
 
         # Should fall back to default
@@ -620,7 +648,9 @@ class TestRuntimeHostProcessDrainTimeoutValidation:
     @pytest.mark.asyncio
     async def test_drain_timeout_integer_within_range_is_accepted(self) -> None:
         """Test that integer drain timeout values within range are accepted."""
-        process = RuntimeHostProcess(config={"drain_timeout_seconds": 60})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(drain_timeout_seconds=60)
+        )
         assert process._drain_timeout_seconds == 60.0
 
 
@@ -636,7 +666,7 @@ class TestRuntimeHostProcessLifecycle:
     async def test_start_starts_event_bus(self) -> None:
         """Test that start() starts the event bus."""
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         await process.start()
 
         try:
@@ -661,7 +691,7 @@ class TestRuntimeHostProcessLifecycle:
             get_handler_registry,
         )
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         await process.start()
 
         try:
@@ -682,7 +712,9 @@ class TestRuntimeHostProcessLifecycle:
         to receive envelopes for processing.
         """
 
-        process = RuntimeHostProcess(config={"input_topic": "test.input"})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(input_topic="test.input")
+        )
         await process.start()
 
         try:
@@ -696,7 +728,7 @@ class TestRuntimeHostProcessLifecycle:
     async def test_stop_closes_event_bus(self) -> None:
         """Test that stop() closes the event bus."""
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         await process.start()
         await process.stop()
 
@@ -712,7 +744,7 @@ class TestRuntimeHostProcessLifecycle:
         to prevent message delivery to a stopped process.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         await process.start()
         await process.stop()
 
@@ -723,7 +755,7 @@ class TestRuntimeHostProcessLifecycle:
     async def test_double_start_is_safe(self) -> None:
         """Test that calling start() twice is safe (idempotent)."""
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         await process.start()
         await process.start()  # Second start should be safe
 
@@ -738,7 +770,7 @@ class TestRuntimeHostProcessLifecycle:
     async def test_double_stop_is_safe(self) -> None:
         """Test that calling stop() twice is safe (idempotent)."""
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         await process.start()
         await process.stop()
         await process.stop()  # Second stop should be safe
@@ -752,7 +784,7 @@ class TestRuntimeHostProcessLifecycle:
         When stopping, the process should call shutdown() on each handler
         to allow them to release resources (DB connections, Kafka connections, etc.).
         """
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Create multiple handlers
         http_handler = MockHandler(handler_type="http")
@@ -790,7 +822,7 @@ class TestRuntimeHostProcessLifecycle:
         """
         import logging
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Create handlers where one will fail during shutdown
         http_handler = MockHandler(handler_type="http")
@@ -836,7 +868,7 @@ class TestRuntimeHostProcessLifecycle:
         Some handlers may not implement a shutdown() method. The process
         should skip shutdown for those handlers without raising an error.
         """
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Create a handler-like object without shutdown method
         class HandlerWithoutShutdown:
@@ -892,7 +924,7 @@ class TestRuntimeHostProcessEnvelopeRouting:
         route it to the appropriate registered handler.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Register mock handler
         with patch.object(process, "_handlers", {"http": mock_handler}):
@@ -913,7 +945,9 @@ class TestRuntimeHostProcessEnvelopeRouting:
     ) -> None:
         """Test that handler responses are published to the output topic."""
 
-        process = RuntimeHostProcess(config={"output_topic": "test.output"})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(output_topic="test.output")
+        )
         mock_handler = MockHandler(handler_type="http")
 
         with patch.object(process, "_handlers", {"http": mock_handler}):
@@ -943,7 +977,7 @@ class TestRuntimeHostProcessEnvelopeRouting:
         not in parallel.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         mock_handler.execute_delay = 0.1  # 100ms delay per execution
 
         envelopes = [
@@ -986,7 +1020,9 @@ class TestRuntimeHostProcessEnvelopeRouting:
         a failure envelope with success=False and error details.
         """
 
-        process = RuntimeHostProcess(config={"output_topic": "test.output"})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(output_topic="test.output")
+        )
         envelope = {
             "operation": "failing.execute",
             "payload": {},
@@ -1039,7 +1075,7 @@ class TestRuntimeHostProcessErrorHandling:
         - correlation_id: Preserved from the original envelope
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         correlation_id = uuid4()
         envelope = {
             "operation": "failing.execute",
@@ -1080,7 +1116,7 @@ class TestRuntimeHostProcessErrorHandling:
         the process should return a failure envelope indicating the error.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         envelope = {
             "operation": "unknown.execute",
             "payload": {},
@@ -1122,7 +1158,7 @@ class TestRuntimeHostProcessErrorHandling:
         result in failure responses rather than exceptions.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         invalid_envelope = {
             # Missing operation and handler_type
             "payload": {},
@@ -1158,7 +1194,7 @@ class TestRuntimeHostProcessErrorHandling:
         request tracking and debugging.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         correlation_id = deterministic_id_gen.next_uuid()
 
         # Invalid envelope with correlation_id
@@ -1204,7 +1240,7 @@ class TestRuntimeHostProcessHealthCheck:
         - is_running: boolean indicating if process is running
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         health = await process.health_check()
 
@@ -1220,7 +1256,7 @@ class TestRuntimeHostProcessHealthCheck:
         into the overall health response.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
         # failures from affecting health status (singleton registry may have
@@ -1256,7 +1292,7 @@ class TestRuntimeHostProcessHealthCheck:
     async def test_health_check_reflects_stopped_state(self) -> None:
         """Test that health_check reflects stopped state accurately."""
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Before starting
         health = await process.health_check()
@@ -1289,7 +1325,7 @@ class TestRuntimeHostProcessHealthCheck:
         - degraded=True: Running with reduced functionality (some handlers failed)
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
         async def noop_populate() -> None:
@@ -1322,7 +1358,7 @@ class TestRuntimeHostProcessHealthCheck:
         should report as degraded (running but with reduced functionality).
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
         async def noop_populate() -> None:
@@ -1360,7 +1396,7 @@ class TestRuntimeHostProcessHealthCheck:
         process with failed handlers is not degraded, just not running.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Simulate failed handlers even though not started
         process._failed_handlers = {"test_handler": "Mock failure"}
@@ -1385,7 +1421,7 @@ class TestRuntimeHostProcessHealthCheck:
         their health_check() method, aggregating results into the response.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         mock_handler.initialized = True  # Mark as healthy
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
@@ -1425,7 +1461,7 @@ class TestRuntimeHostProcessHealthCheck:
         health check should report healthy=False.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
         mock_handler.initialized = False  # Mark as unhealthy
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
@@ -1461,7 +1497,7 @@ class TestRuntimeHostProcessHealthCheck:
         overall health check.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         class ErrorHandler:
             """Handler that raises an error during health check."""
@@ -1506,7 +1542,7 @@ class TestRuntimeHostProcessHealthCheck:
         be assumed healthy with a note indicating no health_check method.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         class SimpleHandler:
             """Handler without health_check method."""
@@ -1550,7 +1586,7 @@ class TestRuntimeHostProcessHealthCheck:
         the overall health should be False if any handler is unhealthy.
         """
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         healthy_handler = MockHandler(handler_type="healthy")
         healthy_handler.initialized = True
@@ -1616,10 +1652,10 @@ class TestRuntimeHostProcessIntegration:
         """
 
         process = RuntimeHostProcess(
-            config={
-                "input_topic": "test.input",
-                "output_topic": "test.output",
-            }
+            config=make_runtime_config(
+                input_topic="test.input",
+                output_topic="test.output",
+            )
         )
 
         with patch.object(process, "_handlers", {"http": mock_handler}):
@@ -1647,7 +1683,7 @@ class TestRuntimeHostProcessIntegration:
     async def test_multiple_handlers_registered(self) -> None:
         """Test that multiple handlers can be registered and used."""
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         http_handler = MockHandler(handler_type="http")
         db_handler = MockHandler(handler_type="db")
@@ -1703,7 +1739,7 @@ class TestRuntimeHostProcessDeterministic:
     ) -> None:
         """Test correlation ID handling with deterministic IDs."""
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Generate predictable correlation IDs
         correlation_ids = [deterministic_id_gen.next_uuid() for _ in range(3)]
@@ -1756,7 +1792,7 @@ class TestRuntimeHostProcessLogWarnings:
 
         from tests.helpers import filter_handler_warnings
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         with caplog.at_level(logging.WARNING):
             # Patch _populate_handlers_from_registry to prevent it from trying to
@@ -1920,7 +1956,7 @@ class TestRuntimeHostProcessShutdownPriority:
     @pytest.mark.asyncio
     async def test_stop_shuts_down_higher_priority_handlers_first(self) -> None:
         """Test that handlers with higher priority are shutdown before lower priority."""
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Track shutdown order globally
         shutdown_order: list[str] = []
@@ -1977,7 +2013,7 @@ class TestRuntimeHostProcessShutdownPriority:
     @pytest.mark.asyncio
     async def test_stop_shuts_down_same_priority_handlers_in_parallel(self) -> None:
         """Test that handlers with same priority are shutdown in parallel."""
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Create multiple handlers with same priority
         handler_a = MockHandlerWithPriority(handler_type="handler_a", priority=50)
@@ -2034,7 +2070,7 @@ class TestRuntimeHostProcessShutdownPriority:
     @pytest.mark.asyncio
     async def test_stop_handles_mixed_priority_handlers(self) -> None:
         """Test stop with handlers that have and don't have shutdown_priority."""
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         shutdown_order: list[str] = []
 
@@ -2081,7 +2117,7 @@ class TestRuntimeHostProcessShutdownPriority:
         """Test that stop logs priority group information."""
         import logging
 
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         handler_a = MockHandlerWithPriority(handler_type="handler_a", priority=100)
         handler_b = MockHandlerWithPriority(handler_type="handler_b", priority=50)
@@ -2109,7 +2145,7 @@ class TestRuntimeHostProcessShutdownPriority:
     @pytest.mark.asyncio
     async def test_stop_continues_with_next_priority_group_on_failure(self) -> None:
         """Test that failure in one priority group doesn't prevent shutdown of next."""
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         shutdown_order: list[str] = []
 
@@ -2179,7 +2215,9 @@ class TestRuntimeHostProcessGracefulDrain:
         import time
 
         # Create process with short drain timeout to make test faster
-        process = RuntimeHostProcess(config={"drain_timeout_seconds": 5.0})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(drain_timeout_seconds=5.0)
+        )
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
         async def noop_populate() -> None:
@@ -2222,7 +2260,9 @@ class TestRuntimeHostProcessGracefulDrain:
         """
         import logging
 
-        process = RuntimeHostProcess(config={"drain_timeout_seconds": 5.0})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(drain_timeout_seconds=5.0)
+        )
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
         async def noop_populate() -> None:
@@ -2255,7 +2295,9 @@ class TestRuntimeHostProcessGracefulDrain:
         """
         import logging
 
-        process = RuntimeHostProcess(config={"drain_timeout_seconds": 5.0})
+        process = RuntimeHostProcess(
+            config=make_runtime_config(drain_timeout_seconds=5.0)
+        )
 
         # Patch _populate_handlers_from_registry to prevent handler instantiation
         async def noop_populate() -> None:
@@ -2331,7 +2373,7 @@ class TestRuntimeHostProcessPendingMessageTracking:
     @pytest.fixture
     def runtime_process(self) -> RuntimeHostProcess:
         """Create a RuntimeHostProcess instance for testing."""
-        return RuntimeHostProcess()
+        return RuntimeHostProcess(config=make_runtime_config())
 
     def test_pending_message_count_starts_at_zero(
         self,
@@ -2422,7 +2464,7 @@ class TestRuntimeHostProcessDrainState:
     @pytest.fixture
     def runtime_process(self) -> RuntimeHostProcess:
         """Create a RuntimeHostProcess instance for testing."""
-        return RuntimeHostProcess(config={"drain_timeout_seconds": 5.0})
+        return RuntimeHostProcess(config=make_runtime_config(drain_timeout_seconds=5.0))
 
     def test_is_draining_starts_false(
         self,
@@ -2595,7 +2637,9 @@ class TestRuntimeHostProcessContainerInjection:
         mock_container.service_registry = None  # Will fall back to singleton
 
         # Create process with container
-        process = RuntimeHostProcess(container=mock_container)
+        process = RuntimeHostProcess(
+            container=mock_container, config=make_runtime_config()
+        )
 
         # Verify container property returns the stored container
         assert process.container is mock_container
@@ -2609,7 +2653,7 @@ class TestRuntimeHostProcessContainerInjection:
         (legacy initialization), the container property should return None.
         """
         # Create process without container (legacy pattern)
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # Verify container property returns None
         assert process.container is None
@@ -2622,7 +2666,7 @@ class TestRuntimeHostProcessContainerInjection:
         the container property should return None.
         """
         # Create process with explicit None container
-        process = RuntimeHostProcess(container=None)
+        process = RuntimeHostProcess(container=None, config=make_runtime_config())
 
         # Verify container property returns None
         assert process.container is None
@@ -2649,7 +2693,9 @@ class TestRuntimeHostProcessContainerInjection:
         mock_container.service_registry = mock_service_registry
 
         # Create process with container
-        process = RuntimeHostProcess(container=mock_container)
+        process = RuntimeHostProcess(
+            container=mock_container, config=make_runtime_config()
+        )
 
         # Call _get_handler_registry
         resolved_registry = await process._get_handler_registry()
@@ -2685,7 +2731,9 @@ class TestRuntimeHostProcessContainerInjection:
         mock_container.service_registry = mock_service_registry
 
         # Create process with container
-        process = RuntimeHostProcess(container=mock_container)
+        process = RuntimeHostProcess(
+            container=mock_container, config=make_runtime_config()
+        )
 
         # Call _get_handler_registry - should fall back to singleton
         # This should not raise an exception
@@ -2711,7 +2759,9 @@ class TestRuntimeHostProcessContainerInjection:
         mock_container.service_registry = None
 
         # Create process with container
-        process = RuntimeHostProcess(container=mock_container)
+        process = RuntimeHostProcess(
+            container=mock_container, config=make_runtime_config()
+        )
 
         # Call _get_handler_registry - should fall back to singleton
         resolved_registry = await process._get_handler_registry()
@@ -2731,12 +2781,13 @@ class TestRuntimeHostProcessContainerInjection:
         mock_container.service_registry = None  # Will fall back to singleton
 
         # Create process with container AND config
-        config = {
-            "input_topic": "custom.input",
-            "output_topic": "custom.output",
-            "group_id": "custom-group",
-        }
-        process = RuntimeHostProcess(container=mock_container, config=config)
+        process = RuntimeHostProcess(
+            container=mock_container,
+            config=make_runtime_config(
+                input_topic="custom.input",
+                output_topic="custom.output",
+            ),
+        )
 
         # Verify container is stored
         assert process.container is mock_container
@@ -2744,29 +2795,34 @@ class TestRuntimeHostProcessContainerInjection:
         # Verify config is also applied
         assert process.input_topic == "custom.input"
         assert process.output_topic == "custom.output"
-        assert process.group_id == "custom-group"
+        # group_id is now derived from node identity, not passed directly
+        assert process.group_id is not None
 
     @pytest.mark.asyncio
     async def test_container_instantiation_without_other_params(self) -> None:
-        """RuntimeHostProcess should work with only container parameter.
+        """RuntimeHostProcess should work with container and minimal config.
 
-        When only container is provided, all other parameters should use
-        their defaults.
+        When container and minimal config (required fields only) are provided,
+        topic parameters should use defaults and group_id is derived from identity.
         """
         # Create mock container
         mock_container = AsyncMock()
         mock_container.service_registry = None
 
-        # Create process with only container
-        process = RuntimeHostProcess(container=mock_container)
+        # Create process with container and minimal required config
+        process = RuntimeHostProcess(
+            container=mock_container, config=make_runtime_config()
+        )
 
         # Verify container is stored
         assert process.container is mock_container
 
-        # Verify defaults are used
+        # Verify defaults are used for topics
         assert process.input_topic == "requests"  # DEFAULT_INPUT_TOPIC
         assert process.output_topic == "responses"  # DEFAULT_OUTPUT_TOPIC
-        assert process.group_id == "runtime-host"  # DEFAULT_GROUP_ID
+        # group_id is derived from node identity (test.test-service.test-node.consume.v1)
+        assert process.group_id is not None
+        assert "test-service" in process.group_id
         assert process.is_running is False
 
     @pytest.mark.asyncio
@@ -2792,6 +2848,7 @@ class TestRuntimeHostProcessContainerInjection:
         process = RuntimeHostProcess(
             container=mock_container,
             handler_registry=explicit_registry,
+            config=make_runtime_config(),
         )
 
         # Call _get_handler_registry
@@ -2824,7 +2881,9 @@ class TestRuntimeHostProcessContainerInjection:
         mock_container.service_registry = mock_service_registry
 
         # Create process with container
-        process = RuntimeHostProcess(container=mock_container)
+        process = RuntimeHostProcess(
+            container=mock_container, config=make_runtime_config()
+        )
 
         # First call - should resolve from container
         resolved_registry_1 = await process._get_handler_registry()
@@ -2852,7 +2911,7 @@ class TestRuntimeHostProcessContainerInjection:
         get_handler_registry().
         """
         # Create process without container (will use singleton fallback)
-        process = RuntimeHostProcess()
+        process = RuntimeHostProcess(config=make_runtime_config())
 
         # First call - should get singleton
         resolved_registry_1 = await process._get_handler_registry()
@@ -2890,7 +2949,9 @@ class TestRuntimeHostProcessContainerInjection:
         mock_container.service_registry = mock_service_registry
 
         # Create process with container
-        process = RuntimeHostProcess(container=mock_container)
+        process = RuntimeHostProcess(
+            container=mock_container, config=make_runtime_config()
+        )
 
         # First call - should fall back to singleton and cache it
         resolved_registry_1 = await process._get_handler_registry()
@@ -2907,6 +2968,223 @@ class TestRuntimeHostProcessContainerInjection:
 
         # resolve_service should only be called once (first call before fallback)
         assert mock_service_registry.resolve_service.call_count == 1
+
+
+# =============================================================================
+# TestRuntimeIdentityMapping
+# =============================================================================
+
+
+class TestRuntimeIdentityMapping:
+    """Tests proving the identity configuration to ModelNodeIdentity mapping (OMN-1602).
+
+    These tests document and verify the intentional relationship between
+    RuntimeHostProcess config parameters (service_name, node_name) and the
+    resulting ModelNodeIdentity fields (service, node_name).
+
+    The current runtime model uses SEPARATE config keys for service_name and
+    node_name, which map directly to ModelNodeIdentity.service and
+    ModelNodeIdentity.node_name respectively. When users provide the SAME value
+    for both keys, the resulting identity will have service == node_name by design.
+
+    This is the expected behavior for single-node deployments where a service
+    consists of exactly one node. Multi-node services (where multiple node types
+    exist within a service) require distinct values for service_name and node_name.
+
+    These tests prevent accidental "cleanup" PRs from changing this behavior by
+    explicitly documenting and testing the mapping.
+
+    Related:
+        - OMN-1602: Derived consumer group IDs from node identity
+        - compute_consumer_group_id(): Uses {env}.{service}.{node_name}.{purpose}.{version}
+        - ModelNodeIdentity: Typed identity model with service and node_name fields
+    """
+
+    @pytest.mark.asyncio
+    async def test_config_maps_service_name_to_identity_service(self) -> None:
+        """Test that config['service_name'] maps to identity.service.
+
+        The RuntimeHostProcess extracts service_name from config and uses it
+        to populate the ModelNodeIdentity.service field.
+        """
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="my-service",
+                node_name="my-node",
+            )
+        )
+
+        # Verify the mapping
+        assert process.node_identity.service == "my-service"
+
+    @pytest.mark.asyncio
+    async def test_config_maps_node_name_to_identity_node_name(self) -> None:
+        """Test that config['node_name'] maps to identity.node_name.
+
+        The RuntimeHostProcess extracts node_name from config and uses it
+        to populate the ModelNodeIdentity.node_name field.
+        """
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="my-service",
+                node_name="my-node",
+            )
+        )
+
+        # Verify the mapping
+        assert process.node_identity.node_name == "my-node"
+
+    @pytest.mark.asyncio
+    async def test_same_value_for_service_and_node_produces_matching_identity(
+        self,
+    ) -> None:
+        """Test that passing the same value for service_name and node_name works.
+
+        This is the expected behavior for single-node deployments where a service
+        consists of exactly one node. The resulting identity has service == node_name.
+        This is intentional, not a bug.
+        """
+        # Single-node deployment pattern: same value for both
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="my-service",
+                node_name="my-service",  # Same value intentionally
+            )
+        )
+
+        # Both should be set to the same value
+        assert process.node_identity.service == "my-service"
+        assert process.node_identity.node_name == "my-service"
+        # And they should be equal
+        assert process.node_identity.service == process.node_identity.node_name
+
+    @pytest.mark.asyncio
+    async def test_derived_group_id_contains_both_service_and_node_slots(self) -> None:
+        """Test that derived consumer group ID includes both service and node slots.
+
+        The consumer group ID format is: {env}.{service}.{node_name}.{purpose}.{version}
+
+        Even when service_name == node_name, both slots are populated in the
+        consumer group ID. This produces a format like:
+            test.my-service.my-service.consume.v1
+
+        This is intentional - it maintains a consistent format and allows
+        future flexibility if multi-node services are implemented.
+        """
+        from omnibase_infra.enums import EnumConsumerGroupPurpose
+        from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
+
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                env="test",
+                service_name="my-service",
+                node_name="my-service",  # Same value intentionally
+                version="v1",
+            )
+        )
+
+        # Compute the group ID
+        group_id = compute_consumer_group_id(
+            process.node_identity,
+            EnumConsumerGroupPurpose.CONSUME,
+        )
+
+        # Verify the format: {env}.{service}.{node_name}.{purpose}.{version}
+        # With same service and node values: test.my-service.my-service.consume.v1
+        assert group_id == "test.my-service.my-service.consume.v1"
+
+        # Verify both slots are populated (service and node_name appear twice)
+        parts = group_id.split(".")
+        assert len(parts) == 5
+        assert parts[0] == "test"  # env
+        assert parts[1] == "my-service"  # service
+        assert parts[2] == "my-service"  # node_name
+        assert parts[3] == "consume"  # purpose
+        assert parts[4] == "v1"  # version
+
+    @pytest.mark.asyncio
+    async def test_distinct_service_and_node_values_produce_distinct_identity(
+        self,
+    ) -> None:
+        """Test that distinct service_name and node_name produce distinct identity fields.
+
+        This is the multi-node deployment pattern where a service contains
+        multiple node types. Each node has the same service but different node_name.
+        """
+        from omnibase_infra.enums import EnumConsumerGroupPurpose
+        from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
+
+        # Multi-node deployment pattern: distinct values
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                env="prod",
+                service_name="omniintelligence",
+                node_name="claude_hook_event_effect",
+                version="v2",
+            )
+        )
+
+        # Verify distinct values
+        assert process.node_identity.service == "omniintelligence"
+        assert process.node_identity.node_name == "claude_hook_event_effect"
+        assert process.node_identity.service != process.node_identity.node_name
+
+        # Verify group ID format
+        group_id = compute_consumer_group_id(
+            process.node_identity,
+            EnumConsumerGroupPurpose.CONSUME,
+        )
+        assert group_id == "prod.omniintelligence.claude_hook_event_effect.consume.v2"
+
+    @pytest.mark.asyncio
+    async def test_process_group_id_uses_identity_based_derivation(self) -> None:
+        """Test that RuntimeHostProcess.group_id is derived from node identity.
+
+        The process.group_id property should return a consumer group ID derived
+        from the node identity, not a hardcoded or user-provided value.
+        """
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                env="staging",
+                service_name="test-service",
+                node_name="test-node",
+                version="v1",
+            )
+        )
+
+        # The group_id should be derived from identity
+        assert process.group_id is not None
+        assert "staging" in process.group_id
+        assert "test-service" in process.group_id
+        assert "test-node" in process.group_id
+
+    @pytest.mark.asyncio
+    async def test_identity_is_accessible_via_node_identity_property(self) -> None:
+        """Test that the full ModelNodeIdentity is accessible via property.
+
+        The RuntimeHostProcess should expose the complete node identity model
+        through the node_identity property for introspection and debugging.
+        """
+        from omnibase_infra.models import ModelNodeIdentity
+
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                env="local",
+                service_name="debug-service",
+                node_name="debug-node",
+                version="v3",
+            )
+        )
+
+        # Access the identity
+        identity = process.node_identity
+
+        # Verify it's the correct type and has all expected fields
+        assert isinstance(identity, ModelNodeIdentity)
+        assert identity.env == "local"
+        assert identity.service == "debug-service"
+        assert identity.node_name == "debug-node"
+        assert identity.version == "v3"
 
 
 # =============================================================================
@@ -2930,6 +3208,7 @@ __all__: list[str] = [
     "TestRuntimeHostProcessPendingMessageTracking",
     "TestRuntimeHostProcessDrainState",
     "TestRuntimeHostProcessContainerInjection",
+    "TestRuntimeIdentityMapping",
     "MockHandler",
     "MockFailingHandler",
     "MockEventBus",

@@ -18,14 +18,23 @@ Features:
 Usage:
     ```python
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+    from omnibase_infra.models import ModelNodeIdentity
 
     bus = EventBusInmemory(environment="dev", group="test")
     await bus.start()
 
+    # Create node identity for consumer group derivation
+    identity = ModelNodeIdentity(
+        env="dev",
+        service="my-service",
+        node_name="event-processor",
+        version="v1",
+    )
+
     # Subscribe to a topic
     async def handler(msg):
         print(f"Received: {msg.value}")
-    unsubscribe = await bus.subscribe("events", "group1", handler)
+    unsubscribe = await bus.subscribe("events", identity, handler)
 
     # Publish a message
     await bus.publish("events", b"key", b"value")
@@ -50,13 +59,15 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.utils import compute_consumer_group_id
 
 logger = logging.getLogger(__name__)
 
@@ -97,13 +108,23 @@ class EventBusInmemory:
 
     Example:
         ```python
+        from omnibase_infra.models import ModelNodeIdentity
+
         bus = EventBusInmemory(environment="dev", group="test")
         await bus.start()
+
+        # Create node identity for consumer group derivation
+        identity = ModelNodeIdentity(
+            env="dev",
+            service="my-service",
+            node_name="event-processor",
+            version="v1",
+        )
 
         # Subscribe
         async def handler(msg):
             print(f"Received: {msg.value}")
-        unsubscribe = await bus.subscribe("events", "group1", handler)
+        unsubscribe = await bus.subscribe("events", identity, handler)
 
         # Publish
         await bus.publish("events", b"key", b"value")
@@ -445,47 +466,80 @@ class EventBusInmemory:
     async def subscribe(
         self,
         topic: str,
-        group_id: str,
+        node_identity: ModelNodeIdentity,
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
+        *,
+        purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to topic with callback handler.
 
         Registers a callback to be invoked for each message published to the topic.
         Returns an unsubscribe function to remove the subscription.
 
+        The consumer group ID is derived from the node identity using the canonical
+        format: ``{env}.{service}.{node_name}.{purpose}.{version}``.
+
+        Note: For the in-memory implementation, the consumer group ID is used for
+        internal tracking and circuit breaker isolation, but does not affect actual
+        message delivery semantics (all subscribers receive all messages).
+
         Args:
             topic: Topic to subscribe to
-            group_id: Consumer group identifier for this subscription
+            node_identity: Node identity used to derive the consumer group ID.
+                Contains env, service, node_name, and version components.
             on_message: Async callback invoked for each message
+            purpose: Consumer group purpose classification. Defaults to CONSUME.
+                Used in the consumer group ID derivation for disambiguation.
 
         Returns:
             Async unsubscribe function to remove this subscription
 
         Example:
             ```python
+            from omnibase_infra.models import ModelNodeIdentity
+            from omnibase_infra.enums import EnumConsumerGroupPurpose
+
+            identity = ModelNodeIdentity(
+                env="dev",
+                service="my-service",
+                node_name="event-processor",
+                version="v1",
+            )
+
             async def handler(msg):
                 print(f"Received: {msg.value}")
 
-            unsubscribe = await bus.subscribe("events", "group1", handler)
+            # Standard subscription (group_id: dev.my-service.event-processor.consume.v1)
+            unsubscribe = await bus.subscribe("events", identity, handler)
+
+            # With explicit purpose
+            unsubscribe = await bus.subscribe(
+                "events", identity, handler,
+                purpose=EnumConsumerGroupPurpose.INTROSPECTION,
+            )
+
             # ... later ...
             await unsubscribe()
             ```
         """
+        # Derive consumer group ID from node identity (no overrides allowed)
+        effective_group_id = compute_consumer_group_id(node_identity, purpose)
+
         async with self._lock:
-            self._subscribers[topic].append((group_id, on_message))
+            self._subscribers[topic].append((effective_group_id, on_message))
             logger.debug(
                 "Subscriber added",
-                extra={"topic": topic, "group_id": group_id},
+                extra={"topic": topic, "group_id": effective_group_id},
             )
 
         async def unsubscribe() -> None:
             """Remove this subscription from the topic."""
             async with self._lock:
                 try:
-                    self._subscribers[topic].remove((group_id, on_message))
+                    self._subscribers[topic].remove((effective_group_id, on_message))
                     logger.debug(
                         "Subscriber removed",
-                        extra={"topic": topic, "group_id": group_id},
+                        extra={"topic": topic, "group_id": effective_group_id},
                     )
                 except ValueError:
                     # Already unsubscribed

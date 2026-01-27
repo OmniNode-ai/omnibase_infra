@@ -2,6 +2,7 @@
 
 import pytest
 
+from omnibase_core.errors import OnexError
 from omnibase_infra.topics import (
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_NODE_REGISTRATION,
@@ -155,18 +156,23 @@ class TestBuildFullTopic:
         topic = build_full_topic("dev", "my--app", SUFFIX_NODE_INTROSPECTION)
         assert topic == f"dev.my--app.{SUFFIX_NODE_INTROSPECTION}"
 
-    def test_namespace_with_mixed_case(self) -> None:
-        """Namespace with mixed case should be valid."""
-        topic = build_full_topic("dev", "MyApp", SUFFIX_NODE_INTROSPECTION)
-        assert topic == f"dev.MyApp.{SUFFIX_NODE_INTROSPECTION}"
+    def test_namespace_with_mixed_case_raises(self) -> None:
+        """Namespace with mixed case should raise TopicCompositionError.
+
+        Namespaces must be lowercase to ensure consistent topic naming
+        since ONEX topic suffixes are lowercase.
+        """
+        with pytest.raises(TopicCompositionError) as exc_info:
+            build_full_topic("dev", "MyApp", SUFFIX_NODE_INTROSPECTION)
+        assert "lowercase" in str(exc_info.value).lower()
 
 
 class TestTopicCompositionError:
     """Tests for TopicCompositionError exception class."""
 
-    def test_is_value_error_subclass(self) -> None:
-        """TopicCompositionError should be a ValueError subclass."""
-        assert issubclass(TopicCompositionError, ValueError)
+    def test_is_onex_error_subclass(self) -> None:
+        """TopicCompositionError should be an OnexError subclass."""
+        assert issubclass(TopicCompositionError, OnexError)
 
     def test_error_can_be_raised_with_message(self) -> None:
         """TopicCompositionError should accept a message."""
@@ -174,11 +180,11 @@ class TestTopicCompositionError:
             raise TopicCompositionError("Custom error message")
         assert "Custom error message" in str(exc_info.value)
 
-    def test_error_can_be_caught_as_value_error(self) -> None:
-        """TopicCompositionError should be catchable as ValueError."""
+    def test_error_can_be_caught_as_onex_error(self) -> None:
+        """TopicCompositionError should be catchable as OnexError."""
         try:
             build_full_topic("invalid", "omnibase", SUFFIX_NODE_INTROSPECTION)
-        except ValueError:
+        except OnexError:
             pass  # Should be caught
         else:
-            pytest.fail("Expected ValueError to be raised")
+            pytest.fail("Expected OnexError to be raised")
