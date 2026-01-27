@@ -1071,11 +1071,11 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         # or an explicit override. Empty group_id indicates a bug in the caller.
         effective_group_id = group_id.strip()
         if not effective_group_id:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="start_consumer",
                 target_name=f"kafka.{topic}",
-                correlation_id=correlation_id,
             )
             raise ProtocolConfigurationError(
                 f"Consumer group ID is required for topic '{topic}'. "
