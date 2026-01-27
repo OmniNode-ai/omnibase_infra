@@ -1529,7 +1529,7 @@ class MessageDispatchEngine:
         # =================================================================
         # ALWAYS materialize envelope to dict format for consistent dispatcher API.
         # INVARIANT: Original envelope is NEVER mutated.
-        resolved_bindings: dict[str, object] = {}
+        resolved_bindings: dict[str, JsonType] = {}
 
         if entry.operation_bindings is not None:
             # Extract correlation_id FIRST for error context and tracing
@@ -1564,7 +1564,7 @@ class MessageDispatchEngine:
                     correlation_id=correlation_id,
                 )
 
-            # dict() creates a copy, also fixes type covariance (JsonType -> object)
+            # dict() creates a shallow copy to avoid mutating the resolution result
             resolved_bindings = dict(resolution.resolved_parameters)
 
         # ALWAYS materialize envelope with bindings (never mutate original)
@@ -1837,9 +1837,10 @@ class MessageDispatchEngine:
             operation = envelope.get("operation")
             if operation is not None:
                 return str(operation)
+            # NOTE: Do not log envelope.keys() - may contain sensitive field names
             raise BindingResolutionError(
                 "Operation extraction failed: dict envelope missing 'operation' key. "
-                f"Available keys: {list(envelope.keys())}",
+                f"Ensure envelope contains 'operation' key (found {len(envelope)} keys).",
                 operation_name="extraction_failed",
                 parameter_name="operation",
                 expression="envelope['operation']",
@@ -1906,7 +1907,7 @@ class MessageDispatchEngine:
     def _materialize_envelope_with_bindings(
         self,
         original_envelope: object,
-        resolved_bindings: dict[str, object],
+        resolved_bindings: dict[str, JsonType],
         topic: str,
     ) -> dict[str, JsonType]:
         """Create new JSON-safe envelope with __bindings namespace.
@@ -1936,7 +1937,7 @@ class MessageDispatchEngine:
 
         Args:
             original_envelope: Original event envelope (dict or model).
-            resolved_bindings: Dict of resolved binding parameters (may be empty).
+            resolved_bindings: JSON-safe resolved binding parameters (may be empty).
             topic: The topic this message was received on.
 
         Returns:
@@ -2029,13 +2030,14 @@ class MessageDispatchEngine:
             # Unknown type - attempt string conversion
             return {"_raw": str(original_payload)}
 
-    def _serialize_bindings(self, bindings: dict[str, object]) -> dict[str, JsonType]:
-        """Serialize binding values to JSON-safe types.
+    def _serialize_bindings(self, bindings: dict[str, JsonType]) -> dict[str, JsonType]:
+        """Ensure binding values are JSON-safe (idempotent serialization).
 
-        Converts UUIDs, datetimes, and other non-JSON types to strings.
+        When bindings are already JSON-safe (from OperationBindingResolver),
+        this method is effectively a no-op but provides defensive serialization.
 
         Args:
-            bindings: Dict of resolved binding parameters.
+            bindings: Dict of resolved binding parameters (already JSON-safe).
 
         Returns:
             Dict with JSON-safe values.
