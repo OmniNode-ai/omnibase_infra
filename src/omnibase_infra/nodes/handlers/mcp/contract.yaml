@@ -39,6 +39,7 @@ operation_bindings:
       expression: "${envelope.correlation_id}"
       required: true
   bindings:
+    # No payload bindings required - returns all registered tools
     "mcp.list_tools": []
     "mcp.call_tool":
       - parameter_name: "tool_name"
@@ -47,6 +48,7 @@ operation_bindings:
       - parameter_name: "arguments"
         expression: "${payload.arguments}"
         required: false
+    # No payload bindings required - returns MCP server capabilities
     "mcp.describe": []
 metadata:
   handler_id: "mcp-handler"

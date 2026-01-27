@@ -72,6 +72,7 @@ operation_bindings:
       - parameter_name: "mount_point"
         expression: "${payload.mount_point}"
         required: false
+    # No payload bindings required - renews the current auth token from connection config
     "vault.renew_token": []
 metadata:
   handler_id: "vault-handler"

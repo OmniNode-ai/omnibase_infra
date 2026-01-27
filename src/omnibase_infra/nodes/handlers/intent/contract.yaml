@@ -50,6 +50,7 @@ operation_bindings:
       - parameter_name: "session_id"
         expression: "${payload.session_id}"
         required: true
+    # No payload bindings required - aggregates all intents by type (read-only)
     "intent.query_distribution": []
 metadata:
   handler_id: "intent-handler"

@@ -9,8 +9,8 @@ The model serves dual purposes:
 1. **Schema validation**: Ensures consistent message structure at dispatch time
 2. **Documentation**: Explicitly defines the dispatch contract invariants
 
-.. versionadded:: 0.2.7
-    Added as part of OMN-1518 - Architectural hardening of dispatch contract.
+.. versionadded:: 0.2.6
+    Added as part of OMN-1518 - Declarative operation bindings.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ class ModelMaterializedDispatch(BaseModel):
             Used ONLY for accessing trace metadata (correlation_id, trace_id).
             Excluded from repr() to prevent log bloat.
 
-    .. versionadded:: 0.2.7
+    .. versionadded:: 0.2.6
     """
 
     model_config = ConfigDict(

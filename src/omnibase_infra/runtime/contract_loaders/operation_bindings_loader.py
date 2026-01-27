@@ -58,7 +58,6 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.bindings import (
-    EXPRESSION_PATTERN,
     MAX_EXPRESSION_LENGTH,
     MAX_PATH_SEGMENTS,
     VALID_CONTEXT_PATHS,
@@ -67,6 +66,7 @@ from omnibase_infra.models.bindings import (
     ModelOperationBindingsSubcontract,
     ModelParsedBinding,
 )
+from omnibase_infra.runtime.binding_resolver import BindingExpressionParser
 
 logger = logging.getLogger(__name__)
 
@@ -152,9 +152,9 @@ def _parse_expression(
 ) -> tuple[Literal["payload", "envelope", "context"], tuple[str, ...]]:
     """Parse and validate binding expression at load time.
 
-    Converts a binding expression (e.g., "${payload.user.id}") into its
-    component parts for fast resolution at runtime. All validation happens
-    here at load time, not at resolution time.
+    Delegates to BindingExpressionParser.parse() for validation and parsing,
+    then wraps any ValueError with ProtocolConfigurationError and appropriate
+    error codes for loader-level diagnostics.
 
     Args:
         expression: Expression in ${source.path.to.field} format.
@@ -172,7 +172,6 @@ def _parse_expression(
         - BINDING_LOADER_012: Path too deep
         - BINDING_LOADER_013: Expression too long
         - BINDING_LOADER_014: Empty path segment
-        - BINDING_LOADER_015: Missing path segment
         - BINDING_LOADER_016: Invalid context path
     """
     ctx = ModelInfraErrorContext.with_correlation(
@@ -181,134 +180,116 @@ def _parse_expression(
         target_name=str(contract_path),
     )
 
-    # Check length first (before parsing)
-    if len(expression) > MAX_EXPRESSION_LENGTH:
-        logger.error(
-            "Expression exceeds max length (%d > %d): %s in %s",
-            len(expression),
-            MAX_EXPRESSION_LENGTH,
-            expression,
-            contract_path,
-        )
-        raise ProtocolConfigurationError(
-            f"Expression exceeds max length ({len(expression)} > {MAX_EXPRESSION_LENGTH}): "
-            f"{expression}. "
-            f"Error code: EXPRESSION_TOO_LONG ({ERROR_CODE_EXPRESSION_TOO_LONG})",
-            context=ctx,
-        )
+    parser = BindingExpressionParser()
 
-    # Check for array access (not supported)
-    if "[" in expression or "]" in expression:
-        logger.error(
-            "Array access not allowed in expressions: %s in %s",
-            expression,
-            contract_path,
-        )
-        raise ProtocolConfigurationError(
-            f"Array access not allowed in expressions: {expression}. "
-            f"Use path-based access only (e.g., ${{payload.items}} not ${{payload.items[0]}}). "
-            f"Error code: EXPRESSION_MALFORMED ({ERROR_CODE_EXPRESSION_MALFORMED})",
-            context=ctx,
-        )
+    try:
+        return parser.parse(expression)
+    except ValueError as e:
+        error_msg = str(e)
 
-    # Parse expression using regex
-    match = EXPRESSION_PATTERN.match(expression)
-    if not match:
-        logger.error(
-            "Invalid expression syntax: %s in %s. Expected ${{source.path.to.field}}",
-            expression,
-            contract_path,
-        )
-        raise ProtocolConfigurationError(
-            f"Invalid expression syntax: {expression}. "
-            f"Expected format: ${{source.path.to.field}}. "
-            f"Error code: EXPRESSION_MALFORMED ({ERROR_CODE_EXPRESSION_MALFORMED})",
-            context=ctx,
-        )
+        # Map parser errors to loader error codes based on error message content
+        # The parser raises ValueError with descriptive messages that we match against
+        if "exceeds max length" in error_msg:
+            error_code = ERROR_CODE_EXPRESSION_TOO_LONG
+            code_name = "EXPRESSION_TOO_LONG"
+            logger.exception(
+                "Expression exceeds max length: %s in %s",
+                expression,
+                contract_path,
+            )
+            user_msg = f"{error_msg}. Error code: {code_name} ({error_code})"
 
-    source = match.group(1)
-    path_str = match.group(2)
+        elif "Array access not allowed" in error_msg:
+            error_code = ERROR_CODE_EXPRESSION_MALFORMED
+            code_name = "EXPRESSION_MALFORMED"
+            logger.exception(
+                "Array access not allowed in expressions: %s in %s",
+                expression,
+                contract_path,
+            )
+            user_msg = (
+                f"Array access not allowed in expressions: {expression}. "
+                f"Use path-based access only (e.g., ${{payload.items}} not "
+                f"${{payload.items[0]}}). "
+                f"Error code: {code_name} ({error_code})"
+            )
 
-    # Validate source is one of the allowed values
-    if source not in VALID_SOURCES:
-        logger.error(
-            "Invalid source '%s' in expression %s at %s. Must be one of: %s",
-            source,
-            expression,
-            contract_path,
-            sorted(VALID_SOURCES),
-        )
-        raise ProtocolConfigurationError(
-            f"Invalid source '{source}' in expression: {expression}. "
-            f"Must be one of: {sorted(VALID_SOURCES)}. "
-            f"Error code: INVALID_SOURCE ({ERROR_CODE_INVALID_SOURCE})",
-            context=ctx,
-        )
+        elif "Invalid expression syntax" in error_msg:
+            error_code = ERROR_CODE_EXPRESSION_MALFORMED
+            code_name = "EXPRESSION_MALFORMED"
+            logger.exception(
+                "Invalid expression syntax: %s in %s. Expected ${source.path.to.field}",
+                expression,
+                contract_path,
+            )
+            user_msg = (
+                f"Invalid expression syntax: {expression}. "
+                f"Expected format: ${{source.path.to.field}}. "
+                f"Error code: {code_name} ({error_code})"
+            )
 
-    # Parse path segments
-    path_segments = tuple(path_str.split("."))
+        elif "Invalid source" in error_msg:
+            error_code = ERROR_CODE_INVALID_SOURCE
+            code_name = "INVALID_SOURCE"
+            logger.exception(
+                "Invalid source in expression %s at %s: %s",
+                expression,
+                contract_path,
+                error_msg,
+            )
+            user_msg = f"{error_msg}. Error code: {code_name} ({error_code})"
 
-    # Check for empty segments (e.g., "payload..id" or "payload.")
-    if any(segment == "" for segment in path_segments):
-        logger.error(
-            "Empty path segment in expression: %s at %s",
-            expression,
-            contract_path,
-        )
-        raise ProtocolConfigurationError(
-            f"Empty path segment in expression: {expression}. "
-            f"Path segments cannot be empty. "
-            f"Error code: EMPTY_PATH_SEGMENT ({ERROR_CODE_EMPTY_PATH_SEGMENT})",
-            context=ctx,
-        )
+        elif "Empty path segment" in error_msg:
+            error_code = ERROR_CODE_EMPTY_PATH_SEGMENT
+            code_name = "EMPTY_PATH_SEGMENT"
+            logger.exception(
+                "Empty path segment in expression: %s at %s",
+                expression,
+                contract_path,
+            )
+            user_msg = (
+                f"Empty path segment in expression: {expression}. "
+                f"Path segments cannot be empty. "
+                f"Error code: {code_name} ({error_code})"
+            )
 
-    # Check minimum path (must have at least one segment)
-    if len(path_segments) == 0:
-        logger.error(
-            "Expression must have at least one path segment: %s at %s",
-            expression,
-            contract_path,
-        )
-        raise ProtocolConfigurationError(
-            f"Expression must have at least one path segment: {expression}. "
-            f"Error code: MISSING_PATH_SEGMENT ({ERROR_CODE_MISSING_PATH_SEGMENT})",
-            context=ctx,
-        )
+        elif "Path exceeds max segments" in error_msg:
+            error_code = ERROR_CODE_PATH_TOO_DEEP
+            code_name = "PATH_TOO_DEEP"
+            logger.exception(
+                "Path exceeds max segments in expression: %s at %s",
+                expression,
+                contract_path,
+            )
+            user_msg = f"{error_msg}. Error code: {code_name} ({error_code})"
 
-    # Check max segments (prevent deep nesting attacks)
-    if len(path_segments) > MAX_PATH_SEGMENTS:
-        logger.error(
-            "Path exceeds max segments (%d > %d) in expression: %s at %s",
-            len(path_segments),
-            MAX_PATH_SEGMENTS,
-            expression,
-            contract_path,
-        )
-        raise ProtocolConfigurationError(
-            f"Path exceeds max segments ({len(path_segments)} > {MAX_PATH_SEGMENTS}): "
-            f"{expression}. "
-            f"Error code: PATH_TOO_DEEP ({ERROR_CODE_PATH_TOO_DEEP})",
-            context=ctx,
-        )
+        elif "Invalid context path" in error_msg:
+            error_code = ERROR_CODE_INVALID_CONTEXT_PATH
+            code_name = "INVALID_CONTEXT_PATH"
+            logger.exception(
+                "Invalid context path in expression %s at %s: %s",
+                expression,
+                contract_path,
+                error_msg,
+            )
+            user_msg = f"{error_msg}. Error code: {code_name} ({error_code})"
 
-    # Validate context paths (only certain values are allowed)
-    if source == "context" and path_segments[0] not in VALID_CONTEXT_PATHS:
-        logger.error(
-            "Invalid context path '%s' in expression %s at %s. Must be one of: %s",
-            path_segments[0],
-            expression,
-            contract_path,
-            sorted(VALID_CONTEXT_PATHS),
-        )
-        raise ProtocolConfigurationError(
-            f"Invalid context path '{path_segments[0]}' in expression: {expression}. "
-            f"Must be one of: {sorted(VALID_CONTEXT_PATHS)}. "
-            f"Error code: INVALID_CONTEXT_PATH ({ERROR_CODE_INVALID_CONTEXT_PATH})",
-            context=ctx,
-        )
+        else:
+            # Fallback for any unexpected parser error
+            error_code = ERROR_CODE_EXPRESSION_MALFORMED
+            code_name = "EXPRESSION_MALFORMED"
+            logger.exception(
+                "Expression parsing failed: %s in %s - %s",
+                expression,
+                contract_path,
+                error_msg,
+            )
+            user_msg = (
+                f"Expression parsing failed: {expression}. {error_msg}. "
+                f"Error code: {code_name} ({error_code})"
+            )
 
-    # Type assertion for mypy - source is guaranteed to be one of the valid values
-    return source, path_segments  # type: ignore[return-value]
+        raise ProtocolConfigurationError(user_msg, context=ctx) from e
 
 
 def _parse_binding_entry(
@@ -570,6 +551,11 @@ def load_operation_bindings_subcontract(
 __all__ = [
     # Loader-specific constants
     "MAX_CONTRACT_FILE_SIZE_BYTES",
+    # Re-exported binding constants (canonical source: omnibase_infra.models.bindings)
+    "MAX_EXPRESSION_LENGTH",
+    "MAX_PATH_SEGMENTS",
+    "VALID_CONTEXT_PATHS",
+    "VALID_SOURCES",
     # Error codes
     "ERROR_CODE_CONTRACT_NOT_FOUND",
     "ERROR_CODE_DUPLICATE_PARAMETER",
