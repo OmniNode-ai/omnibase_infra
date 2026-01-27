@@ -359,14 +359,15 @@ class TestBindingResolutionDispatchFlow:
         )
 
     @pytest.mark.asyncio
-    async def test_dispatcher_without_bindings_receives_original(
+    async def test_dispatcher_without_bindings_receives_materialized_dict(
         self,
         dispatch_engine: MessageDispatchEngine,
     ) -> None:
-        """Dispatcher without operation_bindings receives original envelope.
+        """Dispatcher without operation_bindings receives materialized dict.
 
-        When no bindings are configured for a dispatcher, the handler should
-        receive the original envelope without modification (no __bindings namespace).
+        When no bindings are configured for a dispatcher, the handler still
+        receives a materialized dict with empty __bindings namespace for
+        consistent API across all dispatchers.
         """
         received_envelopes: list[object] = []
 
@@ -395,10 +396,19 @@ class TestBindingResolutionDispatchFlow:
             envelope=test_envelope,
         )
 
-        # Handler receives original envelope (no __bindings)
+        # Handler receives materialized dict (always dict format now)
         received = received_envelopes[0]
-        # When no bindings, the original envelope is passed through
-        assert received is test_envelope, "Original envelope should be passed through"
+        assert isinstance(received, dict), "Materialized envelope should be a dict"
+        assert "__bindings" in received, "Should have __bindings namespace"
+        assert received["__bindings"] == {}, (
+            "Bindings should be empty dict when no bindings configured"
+        )
+        assert "__debug_original_envelope" in received, (
+            "Should have __debug_original_envelope (trace-only)"
+        )
+        assert received["__debug_original_envelope"] is test_envelope, (
+            "Should reference original envelope"
+        )
 
     @pytest.mark.asyncio
     async def test_trace_ids_preserved_in_materialized_envelope(
@@ -408,9 +418,12 @@ class TestBindingResolutionDispatchFlow:
     ) -> None:
         """Materialized envelope preserves original envelope reference for trace IDs.
 
-        The materialized envelope includes a _original_envelope reference that
+        The materialized envelope includes a __debug_original_envelope reference that
         allows downstream handlers to access correlation_id, trace_id, and other
         envelope metadata for distributed tracing purposes.
+
+        Note: __debug_original_envelope is trace-only and should NOT be used for
+        business logic. It may be removed or changed without notice.
         """
         received_envelopes: list[object] = []
 
@@ -444,17 +457,18 @@ class TestBindingResolutionDispatchFlow:
             envelope=test_envelope,
         )
 
-        # Verify original envelope reference is preserved
+        # Verify original envelope reference is preserved (trace-only)
         received = received_envelopes[0]
         assert isinstance(received, dict)
-        assert "_original_envelope" in received, (
-            "Should have _original_envelope reference"
+        assert "__debug_original_envelope" in received, (
+            "Should have __debug_original_envelope (trace-only)"
         )
-        assert received["_original_envelope"] is test_envelope, (
+        assert received["__debug_original_envelope"] is test_envelope, (
             "Reference should be original envelope"
         )
-        assert received["_original_envelope"].correlation_id == correlation_id
-        assert received["_original_envelope"].trace_id == trace_id
+        # NOTE: Accessing trace metadata is valid use of __debug_original_envelope
+        assert received["__debug_original_envelope"].correlation_id == correlation_id
+        assert received["__debug_original_envelope"].trace_id == trace_id
 
 
 class TestBindingResolutionEdgeCases:

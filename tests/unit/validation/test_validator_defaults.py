@@ -84,11 +84,14 @@ class TestInfraValidatorConstants:
         - 108 (2026-01-27): OMN-1518 declarative operation bindings (+3 unions)
           - ModelEventEnvelope[object] | dict[str, object] for materialized envelopes
           - in dispatch engine type aliases (3 occurrences)
+        - 105 (2026-01-27): OMN-1518 simplify to always-dict envelope format (-3 unions)
+          - Removed hybrid union types by always materializing to dict format
+          - Dispatchers now receive consistent dict[str, object] with __bindings
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 108, (
-            "INFRA_MAX_UNIONS should be 108 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 105, (
+            "INFRA_MAX_UNIONS should be 105 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

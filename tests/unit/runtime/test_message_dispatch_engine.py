@@ -1557,8 +1557,9 @@ class TestPureRouting:
         """Test that routing is based on topic/category, not payload content."""
         handler_calls: list[str] = []
 
-        async def handler(envelope: ModelEventEnvelope[object]) -> None:
-            handler_calls.append(type(envelope.payload).__name__)
+        async def handler(envelope: dict[str, object]) -> None:
+            # Materialized envelope: access payload via dict key
+            handler_calls.append(type(envelope["payload"]).__name__)
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="generic-handler",
@@ -1941,10 +1942,11 @@ class TestMessageDispatchEngineConcurrency:
         results: list[str] = []
         results_lock = threading.Lock()  # Protect the results list
 
-        async def handler(envelope: ModelEventEnvelope[object]) -> str:
-            # Thread-safe append to results
+        async def handler(envelope: dict[str, object]) -> str:
+            # Thread-safe append to results - materialized envelope is a dict
+            payload = envelope["payload"]
             with results_lock:
-                results.append(f"handled-{envelope.payload.user_id}")
+                results.append(f"handled-{payload.user_id}")  # type: ignore[union-attr]
             return "output.topic.v1"
 
         dispatch_engine.register_dispatcher(
@@ -2019,14 +2021,16 @@ class TestMessageDispatchEngineConcurrency:
         handler2_results: list[str] = []
         lock = threading.Lock()
 
-        async def handler1(envelope: ModelEventEnvelope[object]) -> str:
+        async def handler1(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
             with lock:
-                handler1_results.append(f"h1-{envelope.payload.user_id}")
+                handler1_results.append(f"h1-{payload.user_id}")  # type: ignore[union-attr]
             return "output1.v1"
 
-        async def handler2(envelope: ModelEventEnvelope[object]) -> str:
+        async def handler2(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
             with lock:
-                handler2_results.append(f"h2-{envelope.payload.user_id}")
+                handler2_results.append(f"h2-{payload.user_id}")  # type: ignore[union-attr]
             return "output2.v1"
 
         # Register two handlers
@@ -2115,14 +2119,16 @@ class TestMessageDispatchEngineConcurrency:
         failure_results: list[str] = []
         lock = threading.Lock()
 
-        async def success_handler(envelope: ModelEventEnvelope[object]) -> str:
+        async def success_handler(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
             with lock:
-                success_results.append(f"success-{envelope.payload.user_id}")
+                success_results.append(f"success-{payload.user_id}")  # type: ignore[union-attr]
             return "success.output.v1"
 
-        async def failing_handler(envelope: ModelEventEnvelope[object]) -> str:
+        async def failing_handler(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
             with lock:
-                failure_results.append(f"failed-{envelope.payload.user_id}")
+                failure_results.append(f"failed-{payload.user_id}")  # type: ignore[union-attr]
             raise RuntimeError("Simulated handler failure")
 
         # Register both handlers
@@ -2308,9 +2314,10 @@ class TestConcurrentDispatchAdvanced:
         execution_order: list[str] = []
         lock = threading.Lock()
 
-        async def variable_delay_handler(envelope: ModelEventEnvelope[object]) -> str:
+        async def variable_delay_handler(envelope: dict[str, object]) -> str:
             """Handler with random delay to simulate varying workloads."""
-            user_id = envelope.payload.user_id
+            payload = envelope["payload"]
+            user_id = payload.user_id  # type: ignore[union-attr]
             # Random delay between 1-50ms
             delay = random.uniform(0.001, 0.05)
             await asyncio.sleep(delay)
@@ -2452,14 +2459,16 @@ class TestConcurrentDispatchAdvanced:
         updated_results: list[str] = []
         lock = threading.Lock()
 
-        async def created_handler(envelope: ModelEventEnvelope[object]) -> str:
+        async def created_handler(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
             with lock:
-                created_results.append(f"created-{envelope.payload.user_id}")
+                created_results.append(f"created-{payload.user_id}")  # type: ignore[union-attr]
             return "created.output"
 
-        async def updated_handler(envelope: ModelEventEnvelope[object]) -> str:
+        async def updated_handler(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
             with lock:
-                updated_results.append(f"updated-{envelope.payload.data}")
+                updated_results.append(f"updated-{payload.data}")  # type: ignore[union-attr]
             return "updated.output"
 
         # Register handlers with specific message type filters
@@ -2638,16 +2647,18 @@ class TestConcurrentDispatchAdvanced:
         lock = threading.Lock()
 
         # Sync handler (will be run in executor)
-        def sync_handler(envelope: ModelEventEnvelope[object]) -> str:
+        def sync_handler(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
             with lock:
-                sync_results.append(f"sync-{envelope.payload.user_id}")
+                sync_results.append(f"sync-{payload.user_id}")  # type: ignore[union-attr]
             return "sync.output"
 
         # Async handler
-        async def async_handler(envelope: ModelEventEnvelope[object]) -> str:
+        async def async_handler(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
             await asyncio.sleep(0.001)  # Small delay
             with lock:
-                async_results.append(f"async-{envelope.payload.user_id}")
+                async_results.append(f"async-{payload.user_id}")  # type: ignore[union-attr]
             return "async.output"
 
         dispatch_engine.register_dispatcher(
@@ -2724,10 +2735,13 @@ class TestConcurrentDispatchAdvanced:
         received_correlation_ids: list[tuple[str, UUID]] = []
         lock = threading.Lock()
 
-        async def tracking_handler(envelope: ModelEventEnvelope[object]) -> str:
+        async def tracking_handler(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
+            # NOTE: __debug_original_envelope is trace-only, used here for test verification
+            debug_envelope = envelope["__debug_original_envelope"]
             with lock:
                 received_correlation_ids.append(
-                    (envelope.payload.user_id, envelope.correlation_id)
+                    (payload.user_id, debug_envelope.correlation_id)  # type: ignore[union-attr]
                 )
             return "test.output.v1"
 
@@ -2800,9 +2814,10 @@ class TestConcurrentDispatchAdvanced:
         received_payloads: list[tuple[str, str]] = []
         lock = threading.Lock()
 
-        async def verifying_handler(envelope: ModelEventEnvelope[object]) -> str:
-            user_id = envelope.payload.user_id
-            name = envelope.payload.name
+        async def verifying_handler(envelope: dict[str, object]) -> str:
+            payload = envelope["payload"]
+            user_id = payload.user_id  # type: ignore[union-attr]
+            name = payload.name  # type: ignore[union-attr]
             with lock:
                 received_payloads.append((user_id, name))
             return "test.output.v1"

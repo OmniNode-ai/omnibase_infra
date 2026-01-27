@@ -173,6 +173,9 @@ from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRou
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
 )
+from omnibase_infra.models.dispatch.model_materialized_dispatch import (
+    ModelMaterializedDispatch,
+)
 from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.utils import sanitize_error_message
@@ -263,15 +266,13 @@ ContextAwareDispatcherFunc = Callable[
 
 # Sync-only dispatcher type for use with run_in_executor
 # Used internally after runtime type narrowing via inspect.iscoroutinefunction
-# Union with dict supports materialized envelopes with __bindings namespace
-_SyncDispatcherFunc = Callable[
-    [ModelEventEnvelope[object] | dict[str, object]], DispatcherOutput
-]
+# All envelopes are materialized to dict format with __bindings namespace
+_SyncDispatcherFunc = Callable[[dict[str, object]], DispatcherOutput]
 
 # Sync-only context-aware dispatcher type for use with run_in_executor
-# Union with dict supports materialized envelopes with __bindings namespace
+# All envelopes are materialized to dict format with __bindings namespace
 _SyncContextAwareDispatcherFunc = Callable[
-    [ModelEventEnvelope[object] | dict[str, object], ModelDispatchContext],
+    [dict[str, object], ModelDispatchContext],
     DispatcherOutput,
 ]
 
@@ -1520,15 +1521,16 @@ class MessageDispatchEngine:
         # =================================================================
         # Binding Resolution Phase (OMN-1518)
         # =================================================================
-        # Resolve bindings BEFORE handler execution.
+        # ALWAYS materialize envelope to dict format for consistent dispatcher API.
         # INVARIANT: Original envelope is NEVER mutated.
-        envelope_for_handler: ModelEventEnvelope[object] | dict[str, object] = envelope
-        if entry.operation_bindings is not None:
-            # Extract operation name from envelope for binding lookup
-            operation = self._extract_operation_from_envelope(envelope)
+        resolved_bindings: dict[str, object] = {}
 
-            # Extract correlation_id for error context and tracing
+        if entry.operation_bindings is not None:
+            # Extract correlation_id FIRST for error context and tracing
             correlation_id = self._extract_correlation_id(envelope)
+
+            # Extract operation name from envelope for binding lookup (fail-fast)
+            operation = self._extract_operation_from_envelope(envelope, correlation_id)
 
             # Resolve all bindings for this operation
             resolution = self._binding_resolver.resolve(
@@ -1549,10 +1551,14 @@ class MessageDispatchEngine:
                     correlation_id=correlation_id,
                 )
 
-            # Materialize envelope with bindings (never mutate original)
-            envelope_for_handler = self._materialize_envelope_with_bindings(
-                envelope, resolution
-            )
+            # dict() creates a copy, also fixes type covariance (JsonType -> object)
+            resolved_bindings = dict(resolution.resolved_parameters)
+
+        # ALWAYS materialize envelope with bindings (never mutate original)
+        # Empty dict for __bindings if no bindings configured
+        envelope_for_handler: dict[str, object] = (
+            self._materialize_envelope_with_bindings(envelope, resolved_bindings)
+        )
 
         # =================================================================
         # Context Creation Phase
@@ -1766,7 +1772,9 @@ class MessageDispatchEngine:
             )
             return False
 
-    def _extract_operation_from_envelope(self, envelope: object) -> str:
+    def _extract_operation_from_envelope(
+        self, envelope: object, correlation_id: UUID | None = None
+    ) -> str:
         """Extract operation name from envelope.
 
         Supports both dict-based envelopes and Pydantic model envelopes
@@ -1774,34 +1782,30 @@ class MessageDispatchEngine:
 
         Args:
             envelope: Event envelope (dict or Pydantic model).
+            correlation_id: Optional correlation ID for error context.
 
         Returns:
-            Operation name string, or ``"unknown"`` if not found.
+            Operation name string.
 
-        Fallback Behavior:
-            Returns ``"unknown"`` in the following cases:
+        Raises:
+            BindingResolutionError: When operation cannot be extracted. This
+                error is raised in the following cases:
 
-            1. **Dict envelope without ``operation`` key**: The envelope is a dict
-               but does not contain an ``"operation"`` key.
-            2. **Model envelope without ``operation`` attribute**: The envelope is
-               a Pydantic model or object but lacks an ``operation`` attribute.
-            3. **Empty/None operation value**: The operation key/attribute exists
-               but has a falsy value (handled by the caller, not here).
+                1. **Dict envelope without ``operation`` key**: The envelope is a dict
+                   but does not contain an ``"operation"`` key.
+                2. **Model envelope without ``operation`` attribute**: The envelope is
+                   a Pydantic model or object but lacks an ``operation`` attribute.
+                3. **Empty/None operation value**: The operation key/attribute exists
+                   but has a None or falsy value.
 
-            When ``"unknown"`` is returned, the binding resolver will attempt to
-            look up bindings for an operation named ``"unknown"``. Since most
-            binding configurations do not define bindings for ``"unknown"``, this
-            typically results in:
+        Fail-Fast Behavior:
+            This method implements fail-fast semantics. If an operation cannot be
+            extracted, it raises ``BindingResolutionError`` immediately rather than
+            returning a fallback value. This ensures:
 
-            - **No bindings resolved**: The handler receives the original envelope
-              unmodified, which may be acceptable for handlers that don't require
-              operation-specific bindings.
-            - **Resolution failure**: If the bindings subcontract has ``strict: true``
-              or requires specific operations, resolution will fail with an error.
-
-            This fallback is intentional for backwards compatibility with handlers
-            that predate operation bindings. However, a warning is logged to aid
-            debugging when operation extraction fails unexpectedly.
+            - Early detection of misconfigured envelopes
+            - Clear error messages with diagnostic context
+            - No silent failures from attempting to resolve bindings for "unknown" operation
 
         Note:
             If ``entry.operation_bindings`` is ``None`` (no bindings configured),
@@ -1809,43 +1813,50 @@ class MessageDispatchEngine:
 
         .. versionadded:: 0.2.6
             Added as part of OMN-1518 - Declarative operation bindings.
+
+        .. versionchanged:: 0.2.7
+            Changed from fallback-to-unknown to fail-fast behavior.
         """
         # Dict-based envelopes (common for Kafka/JSON payloads)
         if isinstance(envelope, dict):
             operation = envelope.get("operation")
             if operation is not None:
                 return str(operation)
-            self._logger.warning(
+            raise BindingResolutionError(
                 "Operation extraction failed: dict envelope missing 'operation' key. "
-                "Returning 'unknown'. Envelope keys: %s. "
-                "Binding resolution will proceed with 'unknown' as the operation name, "
-                "which may result in no bindings being applied.",
-                list(envelope.keys()),
+                f"Available keys: {list(envelope.keys())}",
+                operation_name="extraction_failed",
+                parameter_name="operation",
+                expression="envelope['operation']",
+                missing_segment="operation",
+                correlation_id=correlation_id,
             )
-            return "unknown"
 
         # Pydantic model or object with operation attribute
         if hasattr(envelope, "operation"):
             operation = getattr(envelope, "operation", None)
             if operation is not None:
                 return str(operation)
-            self._logger.warning(
+            raise BindingResolutionError(
                 "Operation extraction failed: envelope has 'operation' attribute "
-                "but value is None or falsy. Returning 'unknown'. Envelope type: %s. "
-                "Binding resolution will proceed with 'unknown' as the operation name.",
-                type(envelope).__name__,
+                f"but value is None or falsy. Envelope type: {type(envelope).__name__}",
+                operation_name="extraction_failed",
+                parameter_name="operation",
+                expression="envelope.operation",
+                missing_segment="operation",
+                correlation_id=correlation_id,
             )
-            return "unknown"
 
         # No operation attribute at all
-        self._logger.warning(
+        raise BindingResolutionError(
             "Operation extraction failed: envelope has no 'operation' attribute. "
-            "Returning 'unknown'. Envelope type: %s. "
-            "Binding resolution will proceed with 'unknown' as the operation name, "
-            "which may result in no bindings being applied.",
-            type(envelope).__name__,
+            f"Envelope type: {type(envelope).__name__}",
+            operation_name="extraction_failed",
+            parameter_name="operation",
+            expression="envelope.operation or envelope['operation']",
+            missing_segment="operation",
+            correlation_id=correlation_id,
         )
-        return "unknown"
 
     def _extract_correlation_id(self, envelope: object) -> UUID | None:
         """Extract correlation_id from envelope.
@@ -1880,37 +1891,54 @@ class MessageDispatchEngine:
     def _materialize_envelope_with_bindings(
         self,
         original_envelope: object,
-        resolution: ModelBindingResolutionResult,
+        resolved_bindings: dict[str, object],
     ) -> dict[str, object]:
         """Create new envelope with __bindings namespace.
 
         INVARIANT: original_envelope is NEVER mutated.
 
-        This method creates a new dict containing:
+        This method ALWAYS creates a new dict containing:
         - ``payload``: Extracted from original envelope
-        - ``__bindings``: Resolved binding parameters
-        - ``_original_envelope``: Reference to original for metadata access
+        - ``__bindings``: Resolved binding parameters (empty dict if no bindings)
+        - ``__debug_original_envelope``: Trace-only reference for metadata access
 
         The ``__bindings`` namespace allows handlers to access resolved
         parameters without needing to parse expressions themselves.
 
+        Warning:
+            ``__debug_original_envelope`` is provided ONLY for distributed tracing
+            (accessing correlation_id, trace_id). It is NOT part of the handler's
+            business contract. The double-underscore prefix signals internal use.
+
+            **DO NOT**:
+            - Branch business logic on ``__debug_original_envelope`` type
+            - Access payload data through ``__debug_original_envelope``
+            - Assume ``__debug_original_envelope`` will always be present
+
         Args:
             original_envelope: Original event envelope (dict or model).
-            resolution: Binding resolution result with resolved_parameters.
+            resolved_bindings: Dict of resolved binding parameters (may be empty).
 
         Returns:
-            New dict with payload, __bindings, and original envelope reference.
+            New dict conforming to ModelMaterializedDispatch schema with
+            payload, __bindings, and __debug_original_envelope.
 
         Example:
             >>> materialized = engine._materialize_envelope_with_bindings(
             ...     original_envelope={"payload": {"sql": "SELECT 1"}},
-            ...     resolution=resolution,
+            ...     resolved_bindings={"sql": "SELECT 1", "limit": 100},
             ... )
             >>> materialized["__bindings"]
             {'sql': 'SELECT 1', 'limit': 100}
 
         .. versionadded:: 0.2.6
             Added as part of OMN-1518 - Declarative operation bindings.
+
+        .. versionchanged:: 0.2.7
+            Changed to accept dict directly instead of ModelBindingResolutionResult.
+            Now always materializes envelope even when no bindings configured.
+            Renamed _original_envelope to __debug_original_envelope to discourage
+            business logic dependency. Added ModelMaterializedDispatch validation.
         """
         # Extract original payload
         original_payload: object
@@ -1921,14 +1949,19 @@ class MessageDispatchEngine:
         else:
             original_payload = original_envelope
 
-        # Create new envelope with bindings namespace
-        # INVARIANT: Never mutate original
-        return {
+        # Build materialized dict conforming to ModelMaterializedDispatch schema
+        materialized = {
             "payload": original_payload,
-            "__bindings": resolution.resolved_parameters,
-            # Preserve envelope metadata for downstream access
-            "_original_envelope": original_envelope,
+            "__bindings": resolved_bindings,
+            # Trace-only reference - DO NOT use for business logic
+            "__debug_original_envelope": original_envelope,
         }
+
+        # Validate against schema to enforce contract invariants
+        # This catches shape drift and provides clear error messages
+        ModelMaterializedDispatch.model_validate(materialized)
+
+        return materialized
 
     def get_structured_metrics(self) -> ModelDispatchMetrics:
         """

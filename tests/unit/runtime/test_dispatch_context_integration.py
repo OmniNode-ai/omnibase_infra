@@ -916,7 +916,13 @@ class TestUninspectableDispatcherFallback:
             f"Expected dispatcher to receive 1 argument (envelope only), "
             f"but received {len(received_args)} arguments"
         )
-        assert received_args[0] is envelope, "Dispatcher should receive the envelope"
+        # Envelope is always materialized to dict format
+        received = received_args[0]
+        assert isinstance(received, dict), "Envelope should be materialized to dict"
+        assert "__bindings" in received, "Should have __bindings namespace"
+        assert received["__debug_original_envelope"] is envelope, (
+            "Original envelope reference should be preserved (trace-only)"
+        )
 
     @pytest.mark.asyncio
     async def test_uninspectable_dispatcher_registration_succeeds(self) -> None:
@@ -1077,7 +1083,12 @@ class TestUninspectableDispatcherFallback:
         assert len(received_args) == 2, (
             "Dispatcher should record 2 args (envelope, context default)"
         )
-        assert received_args[0] is envelope
+        # Envelope is always materialized to dict format
+        received = received_args[0]
+        assert isinstance(received, dict), "Envelope should be materialized to dict"
+        assert received["__debug_original_envelope"] is envelope, (
+            "Original envelope reference should be preserved (trace-only)"
+        )
         # Context is None because engine didn't pass it (uninspectable fallback)
         assert received_args[1] is None, (
             "Uninspectable dispatcher should not receive context from engine"

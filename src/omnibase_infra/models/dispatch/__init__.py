@@ -112,6 +112,9 @@ from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
 from omnibase_infra.models.dispatch.model_dispatcher_registration import (
     ModelDispatcherRegistration,
 )
+from omnibase_infra.models.dispatch.model_materialized_dispatch import (
+    ModelMaterializedDispatch,
+)
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 from omnibase_infra.models.dispatch.model_topic_parser import (
     ModelTopicParser,
@@ -131,6 +134,7 @@ __all__ = [
     "ModelDispatchContext",
     "ModelDispatchError",
     "ModelDispatchLogContext",
+    "ModelMaterializedDispatch",
     "ModelDispatchMetadata",
     "ModelDispatchMetrics",
     "ModelDispatchOutcome",
