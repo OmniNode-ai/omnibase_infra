@@ -21,6 +21,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.conftest import make_test_node_identity
+
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.event_bus.models import ModelEventMessage
@@ -72,7 +74,8 @@ class TestEndToEndDispatchFlow:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe(topic, f"group-{uuid4().hex[:6]}", handler)
+        identity = make_test_node_identity(uuid4().hex[:6])
+        await event_bus.subscribe(topic, identity, handler)
 
         headers = ModelEventHeaders(
             source="test-publisher",
@@ -101,7 +104,8 @@ class TestEndToEndDispatchFlow:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe(topic, f"group-{uuid4().hex[:6]}", handler)
+        identity = make_test_node_identity(uuid4().hex[:6])
+        await event_bus.subscribe(topic, identity, handler)
 
         headers = ModelEventHeaders(
             source="test-publisher",
@@ -128,7 +132,8 @@ class TestEndToEndDispatchFlow:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe(topic, f"group-{uuid4().hex[:6]}", handler)
+        identity = make_test_node_identity(uuid4().hex[:6])
+        await event_bus.subscribe(topic, identity, handler)
 
         headers = ModelEventHeaders(
             source="test-publisher",
@@ -153,7 +158,8 @@ class TestEndToEndDispatchFlow:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe(topic, f"group-{uuid4().hex[:6]}", handler)
+        identity = make_test_node_identity(uuid4().hex[:6])
+        await event_bus.subscribe(topic, identity, handler)
 
         # Publish 10 messages
         for i in range(10):
@@ -177,7 +183,8 @@ class TestEndToEndDispatchFlow:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe(topic, f"group-{uuid4().hex[:6]}", handler)
+        identity = make_test_node_identity(uuid4().hex[:6])
+        await event_bus.subscribe(topic, identity, handler)
 
         envelope = {
             "event_type": "order.created",
@@ -324,8 +331,10 @@ class TestMessageCategoryRouting:
             assert category == EnumMessageCategory.COMMAND
             command_messages.append(msg)
 
-        await event_bus.subscribe(event_topic, "event-group", event_handler)
-        await event_bus.subscribe(command_topic, "command-group", command_handler)
+        event_identity = make_test_node_identity("event-group")
+        command_identity = make_test_node_identity("command-group")
+        await event_bus.subscribe(event_topic, event_identity, event_handler)
+        await event_bus.subscribe(command_topic, command_identity, command_handler)
 
         # Publish to both topics
         await event_bus.publish(
@@ -496,9 +505,12 @@ class TestFanOutMultipleSubscribers:
         async def handler3(msg: ModelEventMessage) -> None:
             group3_messages.append(msg)
 
-        await event_bus.subscribe(topic, "group1", handler1)
-        await event_bus.subscribe(topic, "group2", handler2)
-        await event_bus.subscribe(topic, "group3", handler3)
+        identity1 = make_test_node_identity("group1")
+        identity2 = make_test_node_identity("group2")
+        identity3 = make_test_node_identity("group3")
+        await event_bus.subscribe(topic, identity1, handler1)
+        await event_bus.subscribe(topic, identity2, handler2)
+        await event_bus.subscribe(topic, identity3, handler3)
 
         await event_bus.publish(topic, None, b"fanout-message")
 
@@ -516,7 +528,7 @@ class TestFanOutMultipleSubscribers:
     ) -> None:
         """Verify multiple handlers in same group all receive message."""
         topic = f"test.samegroup.{uuid4().hex[:8]}"
-        group = f"shared-group-{uuid4().hex[:6]}"
+        shared_identity = make_test_node_identity(f"shared-group-{uuid4().hex[:6]}")
 
         handler1_messages: list[ModelEventMessage] = []
         handler2_messages: list[ModelEventMessage] = []
@@ -528,8 +540,8 @@ class TestFanOutMultipleSubscribers:
             handler2_messages.append(msg)
 
         # Both handlers use same group
-        await event_bus.subscribe(topic, group, handler1)
-        await event_bus.subscribe(topic, group, handler2)
+        await event_bus.subscribe(topic, shared_identity, handler1)
+        await event_bus.subscribe(topic, shared_identity, handler2)
 
         await event_bus.publish(topic, None, b"shared-group-message")
 
@@ -560,9 +572,12 @@ class TestFanOutMultipleSubscribers:
         async def handler3(msg: ModelEventMessage) -> None:
             topic3_messages.append(msg)
 
-        await event_bus.subscribe(topic1, "group1", handler1)
-        await event_bus.subscribe(topic2, "group2", handler2)
-        await event_bus.subscribe(topic3, "group3", handler3)
+        identity1 = make_test_node_identity("group1")
+        identity2 = make_test_node_identity("group2")
+        identity3 = make_test_node_identity("group3")
+        await event_bus.subscribe(topic1, identity1, handler1)
+        await event_bus.subscribe(topic2, identity2, handler2)
+        await event_bus.subscribe(topic3, identity3, handler3)
 
         # Publish only to topic2
         await event_bus.publish(topic2, None, b"topic2-only")
@@ -586,7 +601,8 @@ class TestFanOutMultipleSubscribers:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe(broadcast_topic, f"group-{uuid4().hex[:6]}", handler)
+        identity = make_test_node_identity(uuid4().hex[:6])
+        await event_bus.subscribe(broadcast_topic, identity, handler)
 
         await event_bus.broadcast_to_environment(
             "reload_config",
@@ -614,7 +630,8 @@ class TestFanOutMultipleSubscribers:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe(group_topic, f"consumer-{uuid4().hex[:6]}", handler)
+        identity = make_test_node_identity(f"consumer-{uuid4().hex[:6]}")
+        await event_bus.subscribe(group_topic, identity, handler)
 
         await event_bus.send_to_group(
             "process_batch",
@@ -653,7 +670,8 @@ class TestFanOutMultipleSubscribers:
         # Subscribe multiple handlers
         for i in range(subscriber_count):
             handler = create_handler(i)
-            await event_bus.subscribe(topic, f"group-{i}", handler)
+            identity = make_test_node_identity(f"group-{i}")
+            await event_bus.subscribe(topic, identity, handler)
 
         # Publish many messages
         for i in range(message_count):
@@ -675,9 +693,8 @@ class TestFanOutMultipleSubscribers:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        unsubscribe = await event_bus.subscribe(
-            topic, f"group-{uuid4().hex[:6]}", handler
-        )
+        identity = make_test_node_identity(uuid4().hex[:6])
+        unsubscribe = await event_bus.subscribe(topic, identity, handler)
 
         # First message should be received
         await event_bus.publish(topic, None, b"message-1")
