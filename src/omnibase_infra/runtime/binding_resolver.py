@@ -52,7 +52,8 @@ and thread-safe. They can be shared across concurrent requests.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -69,9 +70,6 @@ from omnibase_infra.models.bindings import (
     ModelParsedBinding,
 )
 
-if TYPE_CHECKING:
-    from uuid import UUID
-
 logger = logging.getLogger(__name__)
 
 
@@ -86,6 +84,7 @@ def _is_json_compatible(value: object) -> bool:
     JSON-compatible values are those that can be serialized to JSON:
     - None
     - Primitives: str, int, float, bool
+    - UUID (serializes to string)
     - list (with recursively JSON-compatible elements)
     - dict with str keys (with recursively JSON-compatible values)
 
@@ -104,6 +103,9 @@ def _is_json_compatible(value: object) -> bool:
         >>> _is_json_compatible("hello")
         True
         >>> _is_json_compatible({"key": [1, 2, 3]})
+        True
+        >>> from uuid import UUID
+        >>> _is_json_compatible(UUID("12345678-1234-5678-1234-567812345678"))
         True
         >>> _is_json_compatible(object())
         False
@@ -136,6 +138,10 @@ def _is_json_compatible_recursive(value: object, depth: int) -> bool:
     # JSON primitives
     if isinstance(value, (str, int, float, bool)):
         # Note: bool must be checked with isinstance since bool is a subclass of int
+        return True
+
+    # UUID is JSON-compatible (serializes to string)
+    if isinstance(value, UUID):
         return True
 
     # List: all elements must be JSON-compatible
