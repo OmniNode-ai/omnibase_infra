@@ -126,11 +126,29 @@ class TestBuildFullTopic:
         topic = build_full_topic("dev", "my-äpp", SUFFIX_NODE_INTROSPECTION)
         assert topic == f"dev.my-äpp.{SUFFIX_NODE_INTROSPECTION}"
 
-    def test_very_long_namespace(self) -> None:
-        """Very long namespace should still be valid if characters are valid."""
-        long_namespace = "a" * 100
-        topic = build_full_topic("dev", long_namespace, SUFFIX_NODE_INTROSPECTION)
-        assert f"dev.{long_namespace}." in topic
+    def test_namespace_at_max_length(self) -> None:
+        """Namespace at exactly MAX_NAMESPACE_LENGTH should be valid."""
+        from omnibase_infra.topics.util_topic_composition import MAX_NAMESPACE_LENGTH
+
+        max_namespace = "a" * MAX_NAMESPACE_LENGTH
+        topic = build_full_topic("dev", max_namespace, SUFFIX_NODE_INTROSPECTION)
+        assert f"dev.{max_namespace}." in topic
+
+    def test_namespace_exceeds_max_length_raises(self) -> None:
+        """Namespace exceeding MAX_NAMESPACE_LENGTH should raise TopicCompositionError."""
+        from omnibase_infra.topics.util_topic_composition import MAX_NAMESPACE_LENGTH
+
+        too_long_namespace = "a" * (MAX_NAMESPACE_LENGTH + 1)
+        with pytest.raises(TopicCompositionError) as exc_info:
+            build_full_topic("dev", too_long_namespace, SUFFIX_NODE_INTROSPECTION)
+        assert "maximum length" in str(exc_info.value).lower()
+        assert str(MAX_NAMESPACE_LENGTH) in str(exc_info.value)
+
+    def test_very_long_namespace_raises(self) -> None:
+        """Very long namespace (100+ chars) should raise TopicCompositionError."""
+        long_namespace = "a" * 150
+        with pytest.raises(TopicCompositionError):
+            build_full_topic("dev", long_namespace, SUFFIX_NODE_INTROSPECTION)
 
     def test_namespace_with_consecutive_hyphens(self) -> None:
         """Namespace with consecutive hyphens should be valid."""

@@ -114,3 +114,20 @@ class TestPlatformTopicSuffixes:
             parts = suffix.split(".")
             producer = parts[2]
             assert producer == "platform", f"Expected 'platform' producer in: {suffix}"
+
+    def test_all_suffix_constants_exported(self) -> None:
+        """All SUFFIX_* constants should be exported from topics package."""
+        from omnibase_infra import topics
+        from omnibase_infra.topics import platform_topic_suffixes
+
+        # Find all SUFFIX_* constants in the module
+        suffix_constants = [
+            name for name in dir(platform_topic_suffixes) if name.startswith("SUFFIX_")
+        ]
+
+        # Verify each is exported from the package
+        for name in suffix_constants:
+            assert hasattr(topics, name), (
+                f"SUFFIX constant '{name}' not exported from omnibase_infra.topics. "
+                f"Add it to __all__ in topics/__init__.py"
+            )

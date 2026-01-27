@@ -22,6 +22,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_RUNTIME_TICK,
 )
 from omnibase_infra.topics.util_topic_composition import (
+    MAX_NAMESPACE_LENGTH,
     TopicCompositionError,
     build_full_topic,
 )
@@ -40,4 +41,5 @@ __all__: list[str] = [
     # Topic composition utilities
     "build_full_topic",
     "TopicCompositionError",
+    "MAX_NAMESPACE_LENGTH",
 ]

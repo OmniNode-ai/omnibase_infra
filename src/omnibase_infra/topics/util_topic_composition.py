@@ -7,6 +7,14 @@ Kafka topics in omnibase_infra. Direct string concatenation is prohibited.
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_core.validation.validator_topic_suffix import ENV_PREFIXES
 
+MAX_NAMESPACE_LENGTH = 100
+"""Maximum allowed namespace length.
+
+Kafka topics have a 249 character limit. With env prefix (~10 chars),
+separators (2 dots), and suffix (~50 chars), namespace should be limited
+to ensure total topic length stays within bounds.
+"""
+
 
 class TopicCompositionError(ValueError):
     """Raised when topic composition fails due to invalid components."""
@@ -55,6 +63,11 @@ def build_full_topic(env: str, namespace: str, suffix: str) -> str:
     # numeric tenant/organization IDs as namespaces.
     if not namespace:
         raise TopicCompositionError("Namespace cannot be empty")
+    if len(namespace) > MAX_NAMESPACE_LENGTH:
+        raise TopicCompositionError(
+            f"Namespace exceeds maximum length of {MAX_NAMESPACE_LENGTH} characters. "
+            f"Got {len(namespace)} characters."
+        )
     if not namespace.replace("-", "").replace("_", "").isalnum():
         raise TopicCompositionError(
             f"Invalid namespace '{namespace}'. "
