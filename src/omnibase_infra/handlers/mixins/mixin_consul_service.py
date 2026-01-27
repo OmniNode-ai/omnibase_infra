@@ -25,11 +25,15 @@ from uuid import UUID
 T = TypeVar("T")
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumMessageCategory
 from omnibase_infra.errors import (
     InfraConsulError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
+)
+from omnibase_infra.handlers.mixins.mixin_consul_topic_index import (
+    CONSUL_TOPIC_PATTERN,
 )
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
@@ -150,6 +154,92 @@ class MixinConsulService:
         """Update topic index - provided by MixinConsulTopicIndex."""
         raise NotImplementedError("Must be provided by implementing class")
 
+    def _validate_topic_entry(
+        self,
+        entry: dict[str, object],
+        location: str,
+        correlation_id: UUID,
+    ) -> tuple[str, str]:
+        """Validate a single topic entry and return sanitized values.
+
+        Validates:
+        1. Topic is a non-empty string after stripping whitespace
+        2. Topic format matches CONSUL_TOPIC_PATTERN (alphanumeric, dots, underscores, hyphens)
+        3. message_category is a valid EnumMessageCategory value
+
+        Args:
+            entry: The full topic entry dict containing 'topic' and optional 'message_category'.
+            location: Location string for error messages (e.g., "subscribe_topics[0]").
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Tuple of (stripped_topic, validated_message_category).
+
+        Raises:
+            ProtocolConfigurationError: If validation fails.
+        """
+        raw_topic = entry.get("topic")
+
+        # Validate topic is a non-empty string BEFORE any coercion
+        if not isinstance(raw_topic, str) or not raw_topic.strip():
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="parse_event_bus_config",
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid or missing 'topic' in {location}: "
+                f"expected non-empty string, got {type(raw_topic).__name__}",
+                context=ctx,
+                parameter=f"{location}.topic",
+                value=str(raw_topic) if raw_topic is not None else "None",
+            )
+
+        stripped_topic = raw_topic.strip()
+
+        # Validate topic format (fail fast before storage/indexing)
+        if not CONSUL_TOPIC_PATTERN.match(stripped_topic):
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="parse_event_bus_config",
+            )
+            raise ProtocolConfigurationError(
+                f"Topic '{stripped_topic}' in {location} "
+                "contains invalid characters. Only alphanumeric characters, periods (.), "
+                "underscores (_), and hyphens (-) are allowed.",
+                context=ctx,
+                parameter=f"{location}.topic",
+                value=stripped_topic,
+            )
+
+        # Validate message_category if provided
+        raw_category = entry.get("message_category", "EVENT")
+        if isinstance(raw_category, str):
+            category_upper = raw_category.upper()
+        else:
+            category_upper = str(raw_category).upper()
+
+        # Valid categories: EVENT, COMMAND, INTENT (case-insensitive)
+        valid_categories = {
+            cat.value.upper(): cat.value.upper() for cat in EnumMessageCategory
+        }
+        if category_upper not in valid_categories:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="parse_event_bus_config",
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid 'message_category' in {location}: "
+                f"'{raw_category}'. Valid values are: {', '.join(sorted(valid_categories.keys()))}",
+                context=ctx,
+                parameter=f"{location}.message_category",
+                value=str(raw_category),
+            )
+
+        return stripped_topic, category_upper
+
     def _parse_event_bus_config(
         self,
         event_bus_data: dict[str, object],
@@ -165,7 +255,8 @@ class MixinConsulService:
             Parsed ModelNodeEventBusConfig instance.
 
         Raises:
-            RuntimeHostError: If any topic entry has an invalid or missing topic.
+            ProtocolConfigurationError: If any topic entry has an invalid topic,
+                invalid format, or invalid message_category.
         """
         subscribe_topics: list[ModelEventBusTopicEntry] = []
         publish_topics: list[ModelEventBusTopicEntry] = []
@@ -174,28 +265,18 @@ class MixinConsulService:
         if isinstance(raw_subscribe, list):
             for idx, entry in enumerate(raw_subscribe):
                 if isinstance(entry, dict):
-                    raw_topic = entry.get("topic")
-                    # Validate topic is a non-empty string BEFORE any coercion
-                    if not isinstance(raw_topic, str) or not raw_topic.strip():
-                        ctx = ModelInfraErrorContext.with_correlation(
-                            correlation_id=correlation_id,
-                            transport_type=EnumInfraTransportType.CONSUL,
-                            operation="parse_event_bus_config",
-                        )
-                        raise RuntimeHostError(
-                            f"Invalid or missing 'topic' in subscribe_topics entry at index {idx}: "
-                            f"expected non-empty string, got {type(raw_topic).__name__}",
-                            context=ctx,
-                        )
+                    stripped_topic, message_category = self._validate_topic_entry(
+                        entry=entry,
+                        location=f"subscribe_topics[{idx}]",
+                        correlation_id=correlation_id,
+                    )
                     subscribe_topics.append(
                         ModelEventBusTopicEntry(
-                            topic=raw_topic.strip(),
+                            topic=stripped_topic,
                             event_type=entry.get("event_type")
                             if isinstance(entry.get("event_type"), str)
                             else None,
-                            message_category=str(
-                                entry.get("message_category", "EVENT")
-                            ),
+                            message_category=message_category,
                             description=entry.get("description")
                             if isinstance(entry.get("description"), str)
                             else None,
@@ -206,28 +287,18 @@ class MixinConsulService:
         if isinstance(raw_publish, list):
             for idx, entry in enumerate(raw_publish):
                 if isinstance(entry, dict):
-                    raw_topic = entry.get("topic")
-                    # Validate topic is a non-empty string BEFORE any coercion
-                    if not isinstance(raw_topic, str) or not raw_topic.strip():
-                        ctx = ModelInfraErrorContext.with_correlation(
-                            correlation_id=correlation_id,
-                            transport_type=EnumInfraTransportType.CONSUL,
-                            operation="parse_event_bus_config",
-                        )
-                        raise RuntimeHostError(
-                            f"Invalid or missing 'topic' in publish_topics entry at index {idx}: "
-                            f"expected non-empty string, got {type(raw_topic).__name__}",
-                            context=ctx,
-                        )
+                    stripped_topic, message_category = self._validate_topic_entry(
+                        entry=entry,
+                        location=f"publish_topics[{idx}]",
+                        correlation_id=correlation_id,
+                    )
                     publish_topics.append(
                         ModelEventBusTopicEntry(
-                            topic=raw_topic.strip(),
+                            topic=stripped_topic,
                             event_type=entry.get("event_type")
                             if isinstance(entry.get("event_type"), str)
                             else None,
-                            message_category=str(
-                                entry.get("message_category", "EVENT")
-                            ),
+                            message_category=message_category,
                             description=entry.get("description")
                             if isinstance(entry.get("description"), str)
                             else None,
@@ -272,15 +343,18 @@ class MixinConsulService:
         """
         name = payload.get("name")
         if not isinstance(name, str) or not name:
-            ctx = ModelInfraErrorContext(
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.CONSUL,
                 operation="consul.register",
                 target_name="consul_handler",
-                correlation_id=correlation_id,
             )
-            raise RuntimeHostError(
-                "Missing or invalid 'name' in payload",
+            raise ProtocolConfigurationError(
+                "Missing or invalid 'name' in payload: "
+                f"expected non-empty string, got {type(name).__name__}",
                 context=ctx,
+                parameter="name",
+                value=str(name) if name is not None else "None",
             )
 
         service_id = payload.get("service_id")
@@ -350,16 +424,18 @@ class MixinConsulService:
 
         # Fail fast: if event_bus_config is present, node_id is REQUIRED
         if isinstance(event_bus_data, dict):
-            if not isinstance(node_id, str) or not node_id:
+            if not isinstance(node_id, str) or not node_id.strip():
                 ctx = ModelInfraErrorContext.with_correlation(
                     correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.CONSUL,
                     operation="consul.register",
                 )
-                raise RuntimeHostError(
+                raise ProtocolConfigurationError(
                     "event_bus_config requires a valid 'node_id': "
                     f"expected non-empty string, got {type(node_id).__name__}",
                     context=ctx,
+                    parameter="node_id",
+                    value=str(node_id) if node_id is not None else "None",
                 )
 
             logger.info(
@@ -410,16 +486,19 @@ class MixinConsulService:
             ModelHandlerOutput wrapping the deregistration result with correlation tracking
         """
         service_id = payload.get("service_id")
-        if not isinstance(service_id, str) or not service_id:
-            ctx = ModelInfraErrorContext(
+        if not isinstance(service_id, str) or not service_id.strip():
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.CONSUL,
                 operation="consul.deregister",
                 target_name="consul_handler",
-                correlation_id=correlation_id,
             )
-            raise RuntimeHostError(
-                "Missing or invalid 'service_id' in payload",
+            raise ProtocolConfigurationError(
+                "Missing or invalid 'service_id' in payload: "
+                f"expected non-empty string, got {type(service_id).__name__}",
                 context=ctx,
+                parameter="service_id",
+                value=str(service_id) if service_id is not None else "None",
             )
 
         if self._client is None:

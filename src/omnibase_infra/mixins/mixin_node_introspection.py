@@ -1043,11 +1043,40 @@ class MixinNodeIntrospection:
         def resolve_topic(suffix: str) -> str:
             """Resolve topic suffix to full topic with env prefix."""
             # Full topic format: {env}.{suffix}
+            # Strip whitespace from suffix to handle YAML formatting artifacts
+            suffix = suffix.strip()
+
+            # Validate suffix format (alphanumeric, dots, hyphens, underscores)
+            import re
+
+            if not re.match(r"^[a-zA-Z0-9._-]+$", suffix):
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="_extract_event_bus_config",
+                    target_name=suffix,
+                )
+                raise ProtocolConfigurationError(
+                    f"Invalid topic suffix format: '{suffix}'. "
+                    "Topics must contain only alphanumeric characters, dots, hyphens, and underscores.",
+                    context=context,
+                    parameter="topic_suffix",
+                )
+
             full_topic = f"{env_prefix}.{suffix}"
 
             # Fail-fast: check for unresolved placeholders
             if "{" in full_topic or "}" in full_topic:
-                raise ValueError(f"Unresolved placeholder in topic: {full_topic}")
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="_extract_event_bus_config",
+                    target_name=full_topic,
+                )
+                raise ProtocolConfigurationError(
+                    f"Unresolved placeholder in topic: '{full_topic}'. "
+                    "Ensure all placeholders like {{env}} or {{namespace}} are resolved.",
+                    context=context,
+                    parameter="topic",
+                )
 
             return full_topic
 
@@ -1443,23 +1472,12 @@ class MixinNodeIntrospection:
 
         # Extract event_bus config from contract (OMN-1613)
         # Resolves topic suffixes to full environment-qualified topics
+        # Note: _extract_event_bus_config raises ProtocolConfigurationError directly
+        # for misconfigured topics (unresolved placeholders, invalid format).
+        # We let this propagate as fail-fast behavior is intentional.
         event_bus_config: ModelNodeEventBusConfig | None = None
-        try:
-            env_prefix = os.getenv("ONEX_ENV", "dev")
-            event_bus_config = self._extract_event_bus_config(env_prefix)
-        except ValueError as e:
-            # Fail-fast: topic resolution failure prevents introspection
-            # This is intentional - misconfigured topics should not be published
-            context = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="get_introspection_data",
-                target_name=str(node_id_uuid),
-            )
-            raise ProtocolConfigurationError(
-                f"Event bus extraction failed: {e}",
-                context=context,
-                parameter="event_bus",
-            ) from e
+        env_prefix = os.getenv("ONEX_ENV", "dev")
+        event_bus_config = self._extract_event_bus_config(env_prefix)
 
         # Create event with performance metrics (metrics is already Pydantic model)
         event = ModelNodeIntrospectionEvent(
@@ -1656,6 +1674,7 @@ class MixinNodeIntrospection:
                     extra={
                         "node_id": self._introspection_node_id,
                         "reason": reason_enum.value,
+                        "correlation_id": str(final_correlation_id),
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                     },
@@ -1687,6 +1706,9 @@ class MixinNodeIntrospection:
         if self._introspection_event_bus is None:
             return False
 
+        # Generate correlation_id early for reliable exception logging
+        heartbeat_correlation_id = uuid4()
+
         try:
             # Calculate uptime
             uptime_seconds = 0.0
@@ -1700,7 +1722,10 @@ class MixinNodeIntrospection:
                 logger.warning(
                     "Node ID not initialized, using nil UUID in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
-                    extra={"operation": "_publish_heartbeat"},
+                    extra={
+                        "operation": "_publish_heartbeat",
+                        "correlation_id": str(heartbeat_correlation_id),
+                    },
                 )
                 # Use nil UUID (all zeros) as sentinel for uninitialized node
                 node_id = UUID("00000000-0000-0000-0000-000000000000")
@@ -1712,7 +1737,11 @@ class MixinNodeIntrospection:
                 logger.warning(
                     "Node type not initialized, using EFFECT in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
-                    extra={"node_id": str(node_id), "operation": "_publish_heartbeat"},
+                    extra={
+                        "node_id": str(node_id),
+                        "operation": "_publish_heartbeat",
+                        "correlation_id": str(heartbeat_correlation_id),
+                    },
                 )
                 node_type = EnumNodeKind.EFFECT
 
@@ -1727,7 +1756,7 @@ class MixinNodeIntrospection:
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
                 active_operations_count=active_ops_count,
-                correlation_id=uuid4(),
+                correlation_id=heartbeat_correlation_id,
                 timestamp=now,  # Required: time injection pattern
             )
 
@@ -1760,6 +1789,7 @@ class MixinNodeIntrospection:
                 f"Published heartbeat for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(heartbeat_correlation_id),
                     "uptime_seconds": uptime_seconds,
                     "active_operations": active_ops_count,
                     "topic": topic,
@@ -1774,6 +1804,7 @@ class MixinNodeIntrospection:
                 f"Failed to publish heartbeat for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(heartbeat_correlation_id),
                     "error_type": type(e).__name__,
                     "error_message": str(e),
                 },
@@ -1803,12 +1834,17 @@ class MixinNodeIntrospection:
         )
 
         while not self._introspection_stop_event.is_set():
+            # Generate correlation_id for this loop iteration for traceability
+            loop_correlation_id = uuid4()
             try:
                 await self._publish_heartbeat()
             except asyncio.CancelledError:
                 logger.debug(
                     f"Heartbeat loop cancelled for {self._introspection_node_id}",
-                    extra={"node_id": self._introspection_node_id},
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "correlation_id": str(loop_correlation_id),
+                    },
                 )
                 break
             except Exception as e:
@@ -1818,6 +1854,7 @@ class MixinNodeIntrospection:
                     f"Error in heartbeat loop for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
+                        "correlation_id": str(loop_correlation_id),
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                     },
@@ -1890,9 +1927,17 @@ class MixinNodeIntrospection:
         """
         return consecutive_failures == 1 or consecutive_failures % threshold == 0
 
-    async def _cleanup_registry_subscription(self) -> None:
-        """Clean up the current registry subscription."""
+    async def _cleanup_registry_subscription(
+        self, correlation_id: UUID | None = None
+    ) -> None:
+        """Clean up the current registry subscription.
+
+        Args:
+            correlation_id: Optional correlation ID for traceability in logs.
+                If not provided, a new one will be generated.
+        """
         if self._registry_unsubscribe is not None:
+            cleanup_correlation_id = correlation_id or uuid4()
             try:
                 result = self._registry_unsubscribe()
                 if asyncio.iscoroutine(result):
@@ -1903,6 +1948,7 @@ class MixinNodeIntrospection:
                     f"{self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
+                        "correlation_id": str(cleanup_correlation_id),
                         "error_type": type(cleanup_error).__name__,
                         "error_message": str(cleanup_error),
                     },
@@ -1921,12 +1967,14 @@ class MixinNodeIntrospection:
         Args:
             message: The incoming event message (implements ProtocolEventMessage protocol)
         """
+        # Generate correlation_id for this request for traceability
+        request_correlation_id = uuid4()
         try:
             await self._process_introspection_request(message)
             # Reset failure counter on success
             self._registry_callback_consecutive_failures = 0
         except Exception as e:
-            self._handle_request_error(e)
+            self._handle_request_error(e, request_correlation_id)
 
     async def _process_introspection_request(
         self, message: ProtocolEventMessage
@@ -1966,13 +2014,14 @@ class MixinNodeIntrospection:
             correlation_id=correlation_id,
         )
 
-    def _handle_request_error(self, error: Exception) -> None:
+    def _handle_request_error(self, error: Exception, correlation_id: UUID) -> None:
         """Handle error during introspection request processing.
 
         Tracks consecutive failures and rate-limits error logging.
 
         Args:
             error: The exception that occurred
+            correlation_id: Correlation ID for traceability in logs
         """
         # Track consecutive failures for rate-limited logging
         self._registry_callback_consecutive_failures += 1
@@ -1987,6 +2036,7 @@ class MixinNodeIntrospection:
                 f"Error handling introspection request for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(correlation_id),
                     "error_type": type(error).__name__,
                     "error_message": str(error),
                     "consecutive_failures": self._registry_callback_consecutive_failures,
@@ -2002,6 +2052,7 @@ class MixinNodeIntrospection:
                 f"(failure {self._registry_callback_consecutive_failures})",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(correlation_id),
                     "error_type": type(error).__name__,
                     "consecutive_failures": self._registry_callback_consecutive_failures,
                 },
@@ -2135,6 +2186,8 @@ class MixinNodeIntrospection:
         # Retry loop with exponential backoff for subscription failures
         retry_count = 0
         while not self._introspection_stop_event.is_set():
+            # Generate correlation_id for this subscription attempt for traceability
+            subscription_correlation_id = uuid4()
             try:
                 if await self._attempt_subscription():
                     # Wait for stop signal
@@ -2145,13 +2198,20 @@ class MixinNodeIntrospection:
             except asyncio.CancelledError:
                 logger.debug(
                     f"Registry listener cancelled for {self._introspection_node_id}",
-                    extra={"node_id": self._introspection_node_id},
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "correlation_id": str(subscription_correlation_id),
+                    },
                 )
                 break
             except Exception as e:
                 retry_count += 1
                 if not await self._handle_subscription_error(
-                    e, retry_count, max_retries, base_backoff_seconds
+                    e,
+                    retry_count,
+                    max_retries,
+                    base_backoff_seconds,
+                    subscription_correlation_id,
                 ):
                     break
 
@@ -2169,6 +2229,7 @@ class MixinNodeIntrospection:
         retry_count: int,
         max_retries: int,
         base_backoff_seconds: float,
+        correlation_id: UUID,
     ) -> bool:
         """Handle subscription error with retry logic.
 
@@ -2177,6 +2238,7 @@ class MixinNodeIntrospection:
             retry_count: Current retry attempt number
             max_retries: Maximum retry attempts
             base_backoff_seconds: Base backoff time for exponential retry
+            correlation_id: Correlation ID for traceability in logs
 
         Returns:
             True if should continue retrying, False if should stop
@@ -2185,6 +2247,7 @@ class MixinNodeIntrospection:
             f"Error in registry listener for {self._introspection_node_id}",
             extra={
                 "node_id": self._introspection_node_id,
+                "correlation_id": str(correlation_id),
                 "error_type": type(error).__name__,
                 "error_message": str(error),
                 "retry_count": retry_count,
@@ -2194,7 +2257,7 @@ class MixinNodeIntrospection:
         )
 
         # Clean up any partial subscription before retry
-        await self._cleanup_registry_subscription()
+        await self._cleanup_registry_subscription(correlation_id)
 
         # Check if we should retry
         if retry_count >= max_retries:
@@ -2202,6 +2265,7 @@ class MixinNodeIntrospection:
                 "Registry listener exhausted retries",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "correlation_id": str(correlation_id),
                     "retry_count": retry_count,
                     "max_retries": max_retries,
                     "error_type": type(error).__name__,

@@ -691,7 +691,8 @@ class TestIdempotencyE2E:
                 correlation_id=correlation_id,
             )
 
-            # Update to v2 config
+            # Update to v2 config - same order: update index FIRST, then store
+            # Order matters: _update_topic_index reads old topics before we overwrite
             await handler._update_topic_index(
                 node_id=unique_node_id,
                 event_bus=config_v2,
