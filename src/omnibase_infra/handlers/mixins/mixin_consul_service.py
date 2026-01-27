@@ -189,7 +189,7 @@ class MixinConsulService:
                         )
                     subscribe_topics.append(
                         ModelEventBusTopicEntry(
-                            topic=raw_topic,
+                            topic=raw_topic.strip(),
                             event_type=entry.get("event_type")
                             if isinstance(entry.get("event_type"), str)
                             else None,
@@ -221,7 +221,7 @@ class MixinConsulService:
                         )
                     publish_topics.append(
                         ModelEventBusTopicEntry(
-                            topic=raw_topic,
+                            topic=raw_topic.strip(),
                             event_type=entry.get("event_type")
                             if isinstance(entry.get("event_type"), str)
                             else None,

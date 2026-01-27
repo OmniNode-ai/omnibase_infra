@@ -29,12 +29,17 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Final, Protocol, TypeVar, cast
 from uuid import UUID
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraConsulError, ModelInfraErrorContext
+from omnibase_infra.errors import (
+    InfraConsulError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.models.registration import ModelNodeEventBusConfig
 
 if TYPE_CHECKING:
@@ -43,6 +48,12 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
+
+# Topic name pattern: alphanumeric, underscores, hyphens, and periods only.
+# This matches Kafka/Redpanda topic naming conventions and ensures safe
+# interpolation into Consul KV paths (prevents path traversal via slashes).
+# Pattern: ^[a-zA-Z0-9._-]+$
+CONSUL_TOPIC_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class ProtocolConsulTopicIndexDependencies(Protocol):
@@ -100,6 +111,39 @@ class MixinConsulTopicIndex:
         """Execute operation with retry logic - provided by host class."""
         raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
 
+    def _validate_topic_format(self, topic: str, correlation_id: UUID) -> None:
+        """Validate topic format for safe use in Consul KV paths.
+
+        Topics are interpolated into Consul KV paths like `onex/topics/{topic}/subscribers`.
+        Invalid characters (especially slashes) could create unexpected key hierarchies
+        or bypass ACL prefix matching.
+
+        Args:
+            topic: The topic string to validate.
+            correlation_id: Correlation ID for error context.
+
+        Raises:
+            ProtocolConfigurationError: If topic contains invalid characters.
+                Valid characters: alphanumeric (a-zA-Z0-9), periods (.), underscores (_),
+                and hyphens (-).
+        """
+        if not CONSUL_TOPIC_PATTERN.match(topic):
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="validate_topic_format",
+                target_name="consul_handler",
+            )
+            raise ProtocolConfigurationError(
+                f"Topic name '{topic}' contains invalid characters. "
+                "Only alphanumeric characters, periods (.), underscores (_), "
+                "and hyphens (-) are allowed. Slashes and other special "
+                "characters are prohibited to prevent Consul KV path traversal.",
+                context=context,
+                parameter="topic",
+                value=topic,
+            )
+
     async def _kv_get_raw(
         self,
         key: str,
@@ -122,11 +166,11 @@ class MixinConsulTopicIndex:
         """
         # Early validation - fail fast before entering retry machinery
         if self._client is None:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.CONSUL,
                 operation="consul.kv_get_raw",
                 target_name="consul_handler",
-                correlation_id=correlation_id,
             )
             raise InfraConsulError(
                 "Consul client not initialized",
@@ -142,11 +186,11 @@ class MixinConsulTopicIndex:
             # 2. Race protection: Between outer check and thread pool execution
             #    (via run_in_executor), _client could become None during cleanup.
             if self._client is None:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.CONSUL,
                     operation="consul.kv_get_raw",
                     target_name="consul_handler",
-                    correlation_id=correlation_id,
                 )
                 raise InfraConsulError(
                     "Consul client not initialized",
@@ -198,11 +242,11 @@ class MixinConsulTopicIndex:
         """
         # Early validation - fail fast before entering retry machinery
         if self._client is None:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.CONSUL,
                 operation="consul.kv_put_raw",
                 target_name="consul_handler",
-                correlation_id=correlation_id,
             )
             raise InfraConsulError(
                 "Consul client not initialized",
@@ -218,11 +262,11 @@ class MixinConsulTopicIndex:
             # 2. Race protection: Between outer check and thread pool execution
             #    (via run_in_executor), _client could become None during cleanup.
             if self._client is None:
-                ctx = ModelInfraErrorContext(
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.CONSUL,
                     operation="consul.kv_put_raw",
                     target_name="consul_handler",
-                    correlation_id=correlation_id,
                 )
                 raise InfraConsulError(
                     "Consul client not initialized",
@@ -404,11 +448,15 @@ class MixinConsulTopicIndex:
 
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
+            ProtocolConfigurationError: If topic contains invalid characters.
 
         Note:
             Non-atomic read-modify-write. See _update_topic_index docstring for
             concurrency notes. Accepted MVP limitation.
         """
+        # Validate topic format before KV path interpolation to prevent path traversal
+        self._validate_topic_format(topic, correlation_id)
+
         # NOTE: Non-atomic read-modify-write. See _update_topic_index for details.
         key = f"onex/topics/{topic}/subscribers"
         existing = await self._kv_get_raw(key, correlation_id)
@@ -458,11 +506,15 @@ class MixinConsulTopicIndex:
 
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
+            ProtocolConfigurationError: If topic contains invalid characters.
 
         Note:
             Non-atomic read-modify-write. See _update_topic_index docstring for
             concurrency notes. Accepted MVP limitation.
         """
+        # Validate topic format before KV path interpolation to prevent path traversal
+        self._validate_topic_format(topic, correlation_id)
+
         # NOTE: Non-atomic read-modify-write. See _update_topic_index for details.
         key = f"onex/topics/{topic}/subscribers"
         existing = await self._kv_get_raw(key, correlation_id)
@@ -511,7 +563,11 @@ class MixinConsulTopicIndex:
 
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
+            ProtocolConfigurationError: If topic contains invalid characters.
         """
+        # Validate topic format before KV path interpolation to prevent path traversal
+        self._validate_topic_format(topic, correlation_id)
+
         key = f"onex/topics/{topic}/subscribers"
         existing = await self._kv_get_raw(key, correlation_id)
         if existing:
