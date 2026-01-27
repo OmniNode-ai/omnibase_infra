@@ -120,6 +120,7 @@ class MixinConsulTopicIndex:
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
         """
+        # Early validation - fail fast before entering retry machinery
         if self._client is None:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.CONSUL,
@@ -134,6 +135,12 @@ class MixinConsulTopicIndex:
             )
 
         def get_func() -> tuple[int, dict[str, object] | None]:
+            # NOTE: This inner check is NOT redundant. It's required because:
+            # 1. Type narrowing: Outer check narrows self._client in method scope,
+            #    but closures capture `self`, not the narrowed type. Without this
+            #    check, mypy would error on self._client.kv access.
+            # 2. Race protection: Between outer check and thread pool execution
+            #    (via run_in_executor), _client could become None during cleanup.
             if self._client is None:
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.CONSUL,
@@ -189,6 +196,7 @@ class MixinConsulTopicIndex:
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
         """
+        # Early validation - fail fast before entering retry machinery
         if self._client is None:
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.CONSUL,
@@ -203,6 +211,12 @@ class MixinConsulTopicIndex:
             )
 
         def put_func() -> bool:
+            # NOTE: This inner check is NOT redundant. It's required because:
+            # 1. Type narrowing: Outer check narrows self._client in method scope,
+            #    but closures capture `self`, not the narrowed type. Without this
+            #    check, mypy would error on self._client.kv access.
+            # 2. Race protection: Between outer check and thread pool execution
+            #    (via run_in_executor), _client could become None during cleanup.
             if self._client is None:
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.CONSUL,

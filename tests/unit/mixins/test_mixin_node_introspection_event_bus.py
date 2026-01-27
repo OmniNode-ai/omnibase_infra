@@ -20,6 +20,7 @@ from uuid import UUID
 import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelIntrospectionConfig
 from omnibase_infra.models.registration.model_node_event_bus_config import (
@@ -362,14 +363,18 @@ class TestEventBusInGetIntrospectionData:
 
     @pytest.mark.asyncio
     async def test_raises_on_unresolved_placeholder(self) -> None:
-        """get_introspection_data() raises on unresolved placeholder in topic."""
+        """get_introspection_data() raises ProtocolConfigurationError on unresolved placeholder.
+
+        The internal ValueError is wrapped in ProtocolConfigurationError because
+        configuration issues should use the proper error type from the error hierarchy.
+        """
         event_bus = MockEventBusSubcontract(
             publish_topics=["{env}.onex.evt.test.v1"],
         )
         contract = MockContract(event_bus=event_bus)
         self._initialize_node(contract)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await self.node.get_introspection_data()
 
         assert "Event bus extraction failed" in str(exc_info.value)
